@@ -70,6 +70,22 @@ impl PublicClientTransport {
         true
     }
 
+    /// A "server full" answer to a probe (LR-09): `None` for any other
+    /// datagram; `Some(true)` when it answers this transport's own probe
+    /// before any challenge, `Some(false)` for one to drop (another nonce,
+    /// or the path is already proven).
+    pub(super) fn server_full(&self, bytes: &[u8]) -> Option<bool> {
+        let Ok(PublicServerDatagram::ServerFull { client_nonce }) = serde_json::from_slice(bytes)
+        else {
+            return None;
+        };
+        Some(
+            !self.client_nonce.is_empty()
+                && client_nonce == self.client_nonce
+                && self.challenge.is_none(),
+        )
+    }
+
     pub(super) fn send(
         &mut self,
         socket: &UdpSocket,
@@ -217,7 +233,25 @@ mod tests {
             lobby: false,
         })
         .unwrap();
+        // LR-09: a full server's answer to this probe; another nonce is dropped.
+        let full = |nonce: &str| {
+            serde_json::to_vec(&PublicServerDatagram::ServerFull {
+                client_nonce: nonce.to_owned(),
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            transport.server_full(&full(&transport.client_nonce.clone())),
+            Some(true)
+        );
+        assert_eq!(transport.server_full(&full(&"f".repeat(32))), Some(false));
+        assert_eq!(transport.server_full(&challenge), None);
         assert!(transport.handle_challenge(&sender, &challenge));
+        assert_eq!(
+            transport.server_full(&full(&transport.client_nonce.clone())),
+            Some(false),
+            "a proven path is not full"
+        );
         let (len, _) = receiver.recv_from(&mut buf).unwrap();
         assert!(matches!(
             serde_json::from_slice::<PublicClientDatagram>(&buf[..len]).unwrap(),

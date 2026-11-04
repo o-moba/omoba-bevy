@@ -175,6 +175,18 @@ class AssetCatalogTests(unittest.TestCase):
         self.assertNotIn("url", trap["baseline"])
         self.assertFalse(any("avatar" in str(row["baseline"]) for row in rows.values()))
         self.assertTrue(any(row["role"] == "animation_reference" for row in rows.values()))
+        # Both Q guns are contributed together as one set GLB; each brief names
+        # that contract and its authoring guide, and none calls sets future work.
+        for rid in ("wildspark.handheld.repeater", "wildspark.handheld.launcher"):
+            with self.subTest(rid=rid):
+                brief = rows[rid]["brief"]
+                for term in ("contributed together as one Wildspark set GLB",
+                             "wildspark.handheld.set", "WildsparkSetLauncher",
+                             "docs/wildspark-skin-sets.md"):
+                    self.assertIn(term, brief)
+                for stale in ("two-gun", "Two independently", "Mode-specific"):
+                    self.assertNotIn(stale, brief)
+        self.assertTrue((ROOT / "docs/wildspark-skin-sets.md").is_file())
 
     def test_rocket_precedence_cannot_silently_drift(self):
         root = self.fixture()
@@ -223,6 +235,16 @@ class AssetCatalogTests(unittest.TestCase):
         source = root / "shared/src/handheld.rs"
         source.write_text(source.read_text().replace('Some("wild-repeater")', 'Some("wild-launcher")'))
         with self.assertRaisesRegex(CatalogError, "Authored source evidence changed"):
+            Exporter(root).build(COMMIT)
+
+    def test_held_weapon_override_drift_requires_authored_review(self):
+        root = self.fixture()
+        source = root / "client/src/held_weapons.rs"
+        text = source.read_text()
+        self.assertIn('"weapons/wildspark-repeater.glb".to_owned()', text)
+        source.write_text(text.replace('"weapons/wildspark-repeater.glb".to_owned()',
+                                       '"weapons/wild-repeater.glb".to_owned()'))
+        with self.assertRaisesRegex(CatalogError, "Authored source evidence changed: client/src/held_weapons.rs"):
             Exporter(root).build(COMMIT)
 
     def test_semantic_icon_binding_rejects_dangling_and_duplicate_ids(self):

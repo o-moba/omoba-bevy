@@ -180,12 +180,14 @@ fn sample_gamepad(
     let pad = snapshot::desktop_snapshot(&pads, controls.ownership.identity());
     #[cfg(target_os = "ios")]
     let pad = snapshot::ios_snapshot();
-    let other = keys
+    // A held skill key also keeps input: a pad waking up mid-hold (a drifting stick, a
+    // Linux joystick-class device) must not take the aim off the mouse.
+    let other = keys.as_ref().is_some_and(|keys| {
+        keys.get_just_pressed().next().is_some()
+            || keys.any_pressed(crate::input_bindings::SKILL_CAST_KEYS)
+    }) || mouse
         .as_ref()
-        .is_some_and(|keys| keys.get_just_pressed().next().is_some())
-        || mouse
-            .as_ref()
-            .is_some_and(|mouse| mouse.get_just_pressed().next().is_some())
+        .is_some_and(|mouse| mouse.get_just_pressed().next().is_some())
         || touches
             .as_ref()
             .is_some_and(|touches| touches.any_just_pressed());

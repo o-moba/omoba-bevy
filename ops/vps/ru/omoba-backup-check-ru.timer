@@ -1,0 +1,10 @@
+# Every hour, and 15 minutes after a boot. LR-03.
+[Unit]
+Description=Hourly OMOBA RU backup health check
+
+[Timer]
+OnCalendar=*-*-* *:20:00
+OnBootSec=15min
+
+[Install]
+WantedBy=timers.target

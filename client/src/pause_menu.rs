@@ -23,7 +23,6 @@ use crate::persistence::{
     ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
 };
 use crate::render_settings::RenderSettings;
-use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::TeamSelection;
 use crate::ui::living_background::{
     self, LivingBackground, LivingBands, LivingScene, MotionSettings,
@@ -159,6 +158,10 @@ pub(crate) enum SettingsTab {
     Camera,
     Hud,
     Language,
+    /// The build, the age sign, the legal documents and the source of the
+    /// region's release (LR-06); only where the region has any
+    /// (`legal::about_shown`).
+    About,
 }
 
 // Bevy resources are unique entity components. The selected value must use a
@@ -278,6 +281,8 @@ struct SettingsServerAddrLabel;
 /// The Language row's value (the active language's native name).
 #[derive(Component)]
 struct LanguageValue;
+#[derive(Component)]
+pub(crate) struct AccountRegionValue;
 
 #[derive(Component)]
 struct PauseMenuPanel;
@@ -324,6 +329,7 @@ pub(crate) enum PauseAction {
     OpenPractice,
     /// Switch to the next shipped language.
     CycleLanguage,
+    AccountRegion,
     ToggleReduceMotion,
     ToggleBeginnerTips,
     ToggleFpsReadout,
@@ -991,6 +997,19 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                 );
                                 rail.commands().entity(button).insert(SettingsRailItem);
                             }
+                            if crate::legal::about_shown() {
+                                let about = widgets::controls::tab(
+                                    rail,
+                                    Localized::new("legal.about.title"),
+                                    Some(Icon::NavInfo),
+                                    widgets::controls::TabPlacement::Rail,
+                                    form,
+                                    false,
+                                    PauseAction::SettingsTab(SettingsTab::About),
+                                    "SettingsTabAbout",
+                                );
+                                rail.commands().entity(about).insert(SettingsRailItem);
+                            }
                             rail.spawn((
                                 Node {
                                     height: Val::Px(1.0),
@@ -1154,6 +1173,24 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     PauseAction::CycleLanguage,
                                     "PauseMenuLanguage",
                                 );
+                                if crate::account_region::selectable() {
+                                    widgets::toggle_row(
+                                        settings,
+                                        Localized::new("region.title"),
+                                        crate::i18n::tr(
+                                            if shared::region::market()
+                                                == shared::market::Market::Ru
+                                            {
+                                                "region.ru"
+                                            } else {
+                                                "region.global"
+                                            },
+                                        ),
+                                        AccountRegionValue,
+                                        PauseAction::AccountRegion,
+                                        "PauseMenuAccountRegionRow",
+                                    );
+                                }
                             });
                             settings_group(settings, SettingsTab::Sound, |settings| {
                                 section_title(
@@ -1287,6 +1324,16 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     Name::new("PauseMenuCredits"),
                                 ));
                             });
+                            if crate::legal::about_shown() {
+                                settings_group(settings, SettingsTab::About, |settings| {
+                                    section_title(
+                                        settings,
+                                        "legal.about.title",
+                                        "PauseMenuAboutTitle",
+                                    );
+                                    crate::legal::spawn_about(settings);
+                                });
+                            }
                             settings_group(settings, SettingsTab::Graphics, |settings| {
                                 section_title(
                                     settings,
@@ -2051,7 +2098,7 @@ fn update_setting_labels(
 fn server_addr_for_prefs(resolved: &ResolvedServerAddressForPrefs) -> &str {
     let s = resolved.0.as_str().trim();
     if s.is_empty() {
-        DEFAULT_GAME_SERVER_ADDR
+        crate::session_config::default_server_addr()
     } else {
         s
     }
@@ -2073,6 +2120,10 @@ fn sync_settings_server_addr_label(
         {
             next.push('\n');
             next.push_str(&detail);
+        }
+        if let Some(reason) = crate::net::compatibility_reason(&session) {
+            next.push('\n');
+            next.push_str(reason);
         }
     }
     if let Ok(mut text) = label_q.single_mut() {
@@ -2592,10 +2643,11 @@ mod tests {
             .iter(app.world())
             .map(|(tab, _)| *tab as u8)
             .collect();
+        // Five tabs, and About where the region has legal links (LR-06).
         assert_eq!(
             present.len(),
-            5,
-            "all five tab markers must survive spawning"
+            5 + usize::from(crate::legal::about_shown()),
+            "every tab marker must survive spawning"
         );
         assert_eq!(
             app.world().resource::<SelectedSettingsTab>().0,
@@ -2949,6 +3001,30 @@ mod tests {
             .write_message(event(3, TouchPhase::Ended, center));
         app.update();
         assert!(app.world().resource::<AudioSettings>().muted);
+    }
+
+    /// LR-06: Settings has an About tab and page exactly where the region
+    /// has legal links (RU); a global build's Settings are unchanged.
+    #[test]
+    fn about_is_in_settings_only_where_the_region_has_legal_links() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_pause_menu_ui);
+        app.update();
+        let shown = crate::legal::about_shown();
+        assert_eq!(
+            shown,
+            matches!(shared::region::market(), shared::market::Market::Ru)
+        );
+        assert_eq!(
+            harness::find(app.world_mut(), "SettingsTabAbout").is_some(),
+            shown
+        );
+        let group = app
+            .world_mut()
+            .query::<&SettingsTab>()
+            .iter(app.world())
+            .any(|tab| *tab == SettingsTab::About);
+        assert_eq!(group, shown);
     }
 
     #[test]

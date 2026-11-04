@@ -22,8 +22,9 @@ refreshes stop. Lists refresh on opening or Refresh; no push chat is implied.
 
 Since `0.19.0-rc.7`, [match/team chat, reactions and bot practice](bot-practice-and-social.md)
 are also available. Standalone practice receipts stay local and give no permanent
-career credit. Approved bot games allocated by the public lobby save history and
-50/25 win/loss XP, while leaving competitive rating unchanged.
+career credit. Casual PvP and vs Bots games allocated by the public lobby save
+history and 50/25 win/loss XP, while leaving competitive rating unchanged; only
+Ranked changes rating (see [Queues](#queues-ranked-casual-pvp-and-vs-bots)).
 Party invitations, coordinated group matchmaking and voice are future work. Friends do not
 bypass roster capacity, account reservations or matchmaking rules.
 
@@ -132,13 +133,55 @@ interrupt another worker before its local outbox replays. An outage before a ter
 reaches durable storage can still leave an interrupted match rather than a win;
 a periodic checkpoint is not a replay or a zero-loss record of every simulation tick.
 
+## Queues: Ranked, Casual PvP and vs Bots
+
+The public lobby offers three queues (LR-08). Home and the party lobby show all
+three; the searching, draft and loading screens name the queue with a
+Rated/Unrated badge.
+
+| Queue | Who plays | Bots | Rating | Progression XP |
+| --- | --- | --- | --- | --- |
+| **Ranked** | ten humans of one rated cohort | never | rated when the match is eligible | 150 win / 100 loss |
+| **Casual PvP** | every human in the queue, whatever their rating or newcomer cohort | fill the empty seats once anyone has waited 30 s | never | 50 win / 25 loss (`public-casual-v1`, reason `casual_queue`) |
+| **vs Bots** | one player or one party, at once | every other seat | never | 50 win / 25 loss (`public-casual-v1`, reason `allocated_bots`) |
+
+`rated == (queue == Ranked) && eligibility`: ten humans in Casual PvP are unrated,
+and the head count alone never makes a match rated. A rated cohort is one
+newcomer bracket with at most 300 points between its lowest and highest rating.
+The lobby's Ranked search, the career queue and the store's rated-start check use
+the same policy (`career-store/src/matchmaking.rs`: `fits_cohort`, `same_cohort`),
+so the lobby never forms a Ranked roster the store rejects. A Ranked party whose
+members are not one cohort (for example a 1000 newcomer with a 1400 veteran) is
+never seated in Ranked; its members are told to play Casual PvP together.
+
+### Low-population Ranked policy
+
+Owner defaults O-1 to O-3 (`docs/plans/launch-readiness.md` §7), each one setting:
+
+- **Ranked is available at launch** as humans-only 5v5: rated, never bot-filled,
+  with the existing newcomer and rating cohorts. Bots are never rated.
+- **The searching screen shows how many players search the queue**, every cohort
+  included (`Waiting.searching`), next to the compatible count.
+- **After 5 minutes** (`RANKED_CASUAL_OFFER`, `server/src/match_service.rs`) a
+  Ranked search offers **Also search Casual PvP**. Taking it keeps the place in
+  Ranked: a full Ranked roster still takes the player first. Otherwise the player
+  joins Casual PvP, whose 30 s bot fill counts from the moment the offer was
+  taken. A party searches Casual only once every member took the offer.
+- **Casual PvP** (O-2) groups every human in the queue before bots fill the empty
+  seats after 30 s (`CASUAL_BOT_FILL`). vs Bots stays a separate choice.
+- **No Ranked entry gate** (O-3) beyond the newcomer and eligibility rules; an
+  entry gate (career level, match count, VK ID in RU) is LR-37.
+- Later steps, not in M0: a widening Ranked window over time (LR-35) and humans
+  replacing bots in Casual (LR-36).
+
 ## Rating and matchmaking
 
 The implemented authenticated queue holds at most 128 waiting/reserved players per
 arena. The first 20 rated matches form a separate newcomer cohort; compatible
 rosters have at most 300 MMR spread. Equal teams are selected with balanced rating,
 and the default full release roster is 5v5. An empty/insufficient population waits
-honestly; it is not filled with mismatched veterans.
+honestly; it is not filled with mismatched veterans. On the public lobby these
+cohorts apply to Ranked only; Casual PvP groups every cohort.
 
 Rating starts at 1000, uses outcome-based team Elo with K = 32, and stays within 0–5000.
 An eligible rated completion gives 150 permanent XP for a win and 100 for a loss;
@@ -146,12 +189,16 @@ profile level is 1 + XP / 1000. These are initial beta values, not a calibrated
 competitive ranking model. Damage farming never directly increases MMR.
 
 Only authenticated full release rosters on the approved actual default map/ruleset
-are eligible. Development, QA, custom tuning, guests, abandoned and interrupted
-rounds are explicitly unranked. Approved public `public-casual-v1` bot games award
-50 XP for a win and 25 for a loss, with unchanged rating and rated-match count.
+are eligible; on the public lobby only a Ranked allocation runs release rules.
+Development, QA, custom tuning, guests, abandoned and interrupted
+rounds are explicitly unranked. Approved public `public-casual-v1` games (Casual
+PvP and vs Bots) award 50 XP for a win and 25 for a loss, with unchanged rating
+and rated-match count.
 Only authenticated humans receive that progression; bots never own career profiles.
 Development, custom-map, standalone practice and interrupted/abandoned games grant
-no public progression XP. Other saved unrated results can retain history and
+no public progression XP. The server itself ends a running match as interrupted when
+no human has been connected for the 180 s reclaim window plus 30 s, or at the hard
+duration cap (`OMOBA_MATCH_MAX_DURATION_SECS`, default 45 minutes). Other saved unrated results can retain history and
 participation counters without ranked rewards. The system does not claim bot
 detection or smurf prevention.
 

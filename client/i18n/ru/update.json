@@ -1,0 +1,15 @@
+{
+  "update.required.title": "Требуется обновление",
+  "update.required.detail": "Требуется обновление: версия {version} больше не подходит для игры по сети.",
+  "update.required.body": "Версия {version} больше не подходит для игры по сети. Скачайте новую версию, чтобы продолжить.",
+  "update.required.body_store": "Версия {version} больше не подходит для игры по сети. Обновите игру в App Store или TestFlight.",
+  "update.required.body_site": "Версия {version} больше не подходит для игры по сети. Скачайте новую версию на официальном сайте.",
+  "update.required.latest": "Новая версия: {version}",
+  "update.servers_updating": "Серверы переходят на вашу версию {version}. Подключение произойдёт автоматически.",
+  "update.available": "Доступно обновление: версия {version}",
+  "update.button.download": "Скачать обновление",
+  "update.button.get": "Скачать",
+  "update.button.later": "Позже",
+  "update.pill.required": "Требуется обновление",
+  "update.pill.servers_updating": "Серверы обновляются"
+}

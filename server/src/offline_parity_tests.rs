@@ -241,3 +241,105 @@ fn online_and_offline_projectiles_match_for_minions_structures_and_neutrals() {
         );
     }
 }
+
+#[test]
+fn every_bot_level_plays_the_same_online_and_offline() {
+    use common::bots::{BotKind, BotProfile};
+    use shared::bot_profile::BotDifficulty;
+    // The practising Ranger and one bot at the level, 6 m apart, with both
+    // in the round ledger so the bot's threat response sees the human's hits.
+    fn with_bot(now: Instant, level: BotDifficulty) -> (PracticeSession, std::net::SocketAddr) {
+        let mut p = fixture(HeroClass::Ranger, now);
+        p.world.players.retain(|a, _| *a == LOCAL_ADDR);
+        p.set_bot_difficulty(level);
+        let bot = p
+            .host()
+            .spawn_bot(
+                Team::Blue,
+                Some(HeroClass::Edgeweaver),
+                BotKind::Duelist,
+                now,
+            )
+            .expect("a free bot slot");
+        let player = p.world.players.get_mut(&bot).unwrap();
+        player.hero.x = 16.0;
+        player.hero.z = 0.0;
+        player.hero.max_hp = 2000.0;
+        player.hero.hp = 2000.0;
+        let row = shared::career::ParticipantResult {
+            is_bot: true,
+            player_id: player.hero.identity.id,
+            profile_id: None,
+            nickname: format!("Bot {}", player.hero.identity.id),
+            team: Team::Blue,
+            hero_class: HeroClass::Edgeweaver,
+            character: "ipfs".into(),
+            avatar: None,
+            sprite_character: None,
+            stats: Default::default(),
+            disconnected: false,
+            rating: None,
+            progression_xp_gained: 0,
+        };
+        assert_eq!(p.combat_log.ledger.register(row), Ok(true));
+        (p, bot)
+    }
+    for level in BotDifficulty::ALL {
+        let now = Instant::now();
+        let clock = ManualClock::new(now);
+        let mut online = ServerRuntime::for_test(
+            MemoryTransport::new("127.0.0.1:4100".parse().unwrap()),
+            clock.clone(),
+            crate::career_backend::MemoryCareer::disabled(55000),
+            MatchConfig::dev(),
+        );
+        let (mut offline, bot) = with_bot(now, level);
+        let twin = with_bot(now, level).0;
+        online.world = twin.world;
+        online.bots = twin.bots;
+        online.combat_log = twin.combat_log;
+        online.server_epoch = EPOCH;
+        online.match_id = 1;
+        online.match_started_at = Some(now);
+        assert_eq!(
+            offline.bots.profile(bot),
+            Some(BotProfile::for_level(level))
+        );
+        assert_eq!(online.bots.profile(bot), Some(BotProfile::for_level(level)));
+        let target = TargetId {
+            kind: TargetKind::Player,
+            id: offline.world.players[&bot].hero.identity.id,
+        };
+        for step in 0..100 {
+            if step % 15 == 0 {
+                let packet = ClientPacket::BasicAttack {
+                    target,
+                    server_epoch: EPOCH,
+                    match_id: 1,
+                    request_id: step + 1,
+                };
+                online.handle_packet_authorized(LOCAL_ADDR, packet.clone(), offline.now);
+                offline.command(packet);
+            }
+            clock.advance(Duration::from_millis(50));
+            offline.advance(0.05);
+            for p in online.world.players.values_mut() {
+                p.last_seen = offline.now;
+            }
+            online.tick(offline.now, 0.05);
+            assert_eq!(
+                state(&online.world, offline.now),
+                state(&offline.world, offline.now),
+                "{level:?} step {step}"
+            );
+        }
+        assert!(
+            offline.world.players[&LOCAL_ADDR].hero.hp < 2000.0,
+            "{level:?}: the bot fought"
+        );
+        assert!(
+            offline.world.players[&bot].hero.hp < 2000.0,
+            "{level:?}: the human hit the bot"
+        );
+    }
+}

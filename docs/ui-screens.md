@@ -21,7 +21,6 @@ Harness: `client/src/qa/frontend_qa.rs`; server: dev; env: `OMOBA_FRONTEND_QA_OU
 | Game menu | `08-menu.png` | desktop, phone | Escape / MENU | `client/src/pause_menu.rs` |  |
 | Settings · sound | `09-settings-sound.png` | desktop, phone | Game menu → Settings | `client/src/pause_menu.rs` |  |
 | Settings · graphics (bottom) | `10-settings-graphics.png` | desktop, phone | Game menu → Settings, scrolled down | `client/src/pause_menu.rs` |  |
-| Server entry | `11-server.png` | phone | Home → SERVER (phone) | `client/src/frontend/server_field.rs` |  |
 | Home help | `12-home-help.png` | phone | Home → ? (phone) | `client/src/help_overlay.rs` |  |
 | Home after help | `13-home-help-closed.png` | phone | Home → ? → close (phone) | `client/src/frontend/home.rs` |  |
 | Party lobby (solo) | `14-party-lobby.png` | desktop, phone | Home → Party & friends | `client/src/frontend/lobby.rs` |  |
@@ -91,18 +90,19 @@ Harness: `client/src/qa/career_visual_qa.rs`; server: none; env: `OMOBA_CAREER_Q
 | Career · website account | `07-website-account.png` | desktop, phone | Profile → Player website | `client/src/career_web.rs` | fixture data, labelled |
 | Career · devices | `08-devices.png` | desktop, phone | Profile → Link or recover account | `client/src/career_devices.rs` | fixture data, labelled |
 | Career · match detail (bottom) | `09-result-bottom.png` | desktop, phone | Match detail, scrolled | `client/src/career.rs` | fixture data, labelled |
+| Career · protect progress | `10-protect.png` | desktop, phone | Profile → Protect progress, or the Home card after the first match | `client/src/career_protection.rs` | fixture data, labelled |
 
 ## 06-supporter · `supporter`
 
-Supporter aura panel; the harness uses its own fixed viewport sizes.
+Hero cosmetic preview only; all palettes use the requested viewport (default 1280x720). No account entitlement or paid world session.
 
 Harness: `client/src/qa/supporter.rs`; server: none; env: `OMOBA_SUPPORTER_QA_DIR={out}`
 
 | Screen | Frame | Profiles | How a player gets there | Code | Note |
 | --- | --- | --- | --- | --- | --- |
-| Supporter · Solar aura | `solar-desktop.png` | desktop, phone | Profile → Support OMOBA | `client/src/supporter.rs` |  |
-| Supporter · Lunar aura | `lunar-phone.png` | desktop, phone | Supporter → Lunar | `client/src/supporter.rs` |  |
-| Supporter · Verdant aura | `verdant-phone.png` | desktop, phone | Supporter → Verdant | `client/src/supporter.rs` |  |
+| Hero · Solar aura preview | `hero-solar-preview.png` | desktop, phone | Profile → Support OMOBA | `client/src/supporter.rs` |  |
+| Hero · Lunar aura preview | `hero-lunar-preview.png` | desktop, phone | Supporter → Lunar | `client/src/supporter.rs` |  |
+| Hero · Verdant aura preview | `hero-verdant-preview.png` | desktop, phone | Supporter → Verdant | `client/src/supporter.rs` |  |
 
 ## 07-offline-practice · `offline`
 
@@ -159,12 +159,14 @@ Harness: `client/src/qa/frontend_qa/party.rs`; server: none; env: `OMOBA_PARTY_Q
 
 ## Other QA harnesses (not UI screens)
 
+- `client/src/qa/supporter_world.rs`: server-backed Hero aura movement and revocation proof; loopback seeded entitlement required, not UI screens
 - `client/src/qa/wildspark_demo.rs`: Opt-in live Wildspark demo director (OMOBA_WILDSPARK_DEMO=1), nested under standard_kits_qa: six combat chapters with real mana, moving targets and per-frame receipts. English 960x1280 native capture; social edit is not a phone certification.
 - `client/src/qa/frontend_qa/avatar.rs`: avatar collection with a Studio registry (gap avatar-studio)
 - `client/src/sandbox/ui/qa.rs`: Combat Test panel (gap combat-test)
 - `client/src/qa/audio_qa.rs`: audio settings duplicate of settings-sound; needs OMOBA_AUTOJOIN
 - `client/src/qa/visual_qa.rs`: world render checks (Verdant, jungle, forest VFX), not UI
 - `client/src/qa/map_qa.rs`: map prop swaps, not UI
+- `client/src/qa/sponsorship_qa.rs`: Opt-in local sculpture art scene (OMOBA_SPONSOR_QA_DIR): normal Registry authorization/download at the fixed opposite-dragon slot; five cat/card/scroll captures, low-level pointer open/close and Escape, full 1,000-scalar description scroll, measured paw rotation while reading and input-policy leak checks. English 1280x720 native viewport; no played match or mobile certification.
 - `client/src/qa/team_vision_qa.rs`: brush visibility, not UI
 - `client/src/qa/targeting_qa.rs`: targeting proof (in-world markers), not UI screens
 - `client/src/qa/combat_qa.rs`: projectile/impact proof, not UI
@@ -179,7 +181,9 @@ Harness: `client/src/qa/frontend_qa/party.rs`; server: none; env: `OMOBA_PARTY_Q
 - `client/src/qa/standard_kits_qa.rs`: Focused standard-kit selection, effects and held-aim proof from a live local sandbox (OMOBA_STANDARD_QA_DIR, OMOBA_STANDARD_QA_CLASS); OMOBA_STANDARD_QA_PHASES=1 takes an idle baseline and three state-gated stills per skill (windup, release, impact or settled) for any of the 17 classes, OMOBA_STANDARD_QA_OFFSCREEN=1 hides the window and renders the main camera to an image; for a look at motion clips a phase run takes OMOBA_STANDARD_QA_AVATAR (the hero's rig) and OMOBA_STANDARD_QA_RELEASE_AT (release still at the clip's contact time or a fixed time); for a look at projectile bodies OMOBA_STANDARD_QA_FLIGHT=1 casts unit-target abilities from lane distance and adds the basic attack: a still of its projectile in flight (not for a melee core) and one of its hit, and for a repeater the same two of its rocket round after its weapon switch. OMOBA_STANDARD_QA_AIM=1 adds a still of the aim preview of every modular skill with its key held before the cast, and one more while the slot offers a recast. OMOBA_STANDARD_QA_RECIPE gives the hero four named skills on the core of its class. A skill whose area or hit the closest view does not hold is captured from farther away with an idle still of that view; every still carries the evidence the launcher judges it by (clip, bodies, budgets, impact recipe, registry fingerprint). One English desktop viewport, scripted input, no device matrix.
 - `client/src/qa/roster_qa.rs`: Focused remaining roster selection and live skill states (OMOBA_ROSTER_QA_DIR); OMOBA_ROSTER_QA_INSPECTION adds short/long/released skill holds. English 1280x720, scripted input; no device matrix.
 - `client/src/qa/sdk_pack_qa.rs`: Focused local SDK collection proof (OMOBA_SDK_PACK_QA_OUTPUT): 20 live avatar previews plus representative server-admitted running avatars and hand mounts. English 1280x720, scripted selection; not public Studio publication or a device matrix.
+- `client/src/qa/creator_loop_qa.rs`: File-driven creator-loop acceptance (OMOBA_CREATOR_LOOP_QA=<dir>): a coordinator appends JSON commands (press a TestId, key, practice attack/cast, camera, screenshot, state-gated still) and reads qa-state.json/results.jsonl; gated stills check the shown Wildspark set variant, the muzzle flash tip and rotor/slide motion of a held SDK weapon. English 1280x720, one desktop viewport, no device matrix.
 - `client/src/qa/combat_polish_qa.rs`: Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820 by default; OMOBA_IPHONE_UX_QA=1 selects focused 852x393 iPhone gameplay, empty attack, concealment, dash aim, recall and FPS/HUD settings with checked UI readback. Not physical-device or multiplayer proof.
 - `client/src/qa/dagger_qa.rs`: Focused Adventurer class preview and normal offline Q/W/E/R casts, plus clearly labelled synthetic rare-hit receipt presentation (OMOBA_DAGGER_QA_DIR). English852x393 only; optional synthetic focus, no raw-touch/device/RNG claims.
 - `client/src/qa/equipped_skills_qa.rs`: Focused synthetic accepted hybrid HUD and held-skill card (OMOBA_EQUIPPED_SKILLS_QA_DIR). English 852x393 only; actual input and UI readback, separate real-server harness proof. Not physical-device or multiplayer proof.
 - `client/src/qa/boot_qa.rs`: boot splash and the Home it reveals (OMOBA_BOOT_SPLASH_SHOTS); a transient overlay, not an AppScreen
+- `client/src/qa/account_region_qa.rs`: Focused native RU account-region confirmation and cold-switch proof (OMOBA_ACCOUNT_REGION_QA), one ru 852x393 desktop phone preview; isolated dev settings and offline game transport. Not a physical-device certification.

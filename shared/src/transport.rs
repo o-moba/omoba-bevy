@@ -1,11 +1,12 @@
 //! Opt-in UDP snapshot framing. Datagrams fit a conservative 1200-byte
 //! application budget; incomplete snapshots expire and never reach gameplay.
 
+use crate::clock::Instant;
 pub use crate::protocol::PROTOCOL_VERSION;
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub const MAX_DATAGRAM_BYTES: usize = 1200;

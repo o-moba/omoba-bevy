@@ -95,6 +95,13 @@ pub struct CombatEvent {
     /// An accepted rear dagger hit reduced a surviving hero to exactly 1 HP.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub near_lethal: bool,
+    /// A beam's primary hit landed inside its full-damage core.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub core_hit: bool,
+    /// The extra damage of a detonated Radiance mark, separate from the hit that
+    /// detonated it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub radiance_burst: bool,
 }
 
 #[cfg(test)]
@@ -152,6 +159,26 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<CombatEvent>(wire).unwrap(),
             triggered
+        );
+    }
+
+    #[test]
+    fn beam_core_and_radiance_burst_flags_default_off_and_round_trip() {
+        let wire = serde_json::to_value(CombatEvent::default()).unwrap();
+        assert!(wire.get("core_hit").is_none() && wire.get("radiance_burst").is_none());
+        let flagged = CombatEvent {
+            core_hit: true,
+            radiance_burst: true,
+            ..Default::default()
+        };
+        let wire = serde_json::to_value(&flagged).unwrap();
+        assert_eq!(
+            (wire["core_hit"].clone(), wire["radiance_burst"].clone()),
+            (true.into(), true.into())
+        );
+        assert_eq!(
+            serde_json::from_value::<CombatEvent>(wire).unwrap(),
+            flagged
         );
     }
 

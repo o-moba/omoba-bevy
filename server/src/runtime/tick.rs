@@ -49,6 +49,13 @@ impl ServerRuntime {
         } else {
             now
         });
+        self.enforce_match_lifecycle(now);
+        if self.match_service.worker().is_some_and(|w| w.aborted) {
+            // A retired worker stops simulating at once; its players get the
+            // terminal receipt through their career views.
+            self.send_career_views(now);
+            return;
+        }
         self.refresh_takeover_controllers(now);
         self.fill_practice_bots(now);
         // Formation's final interval belongs to the countdown, not earned income.

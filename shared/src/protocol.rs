@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 // Version 10 adds practice commands, public respawn timers and distinct bullet/rocket styles.
 // The release handshake also gates the compact map and revised combat catalogue.
-pub const PROTOCOL_VERSION: u16 = 11;
+// Version 12 adds the seven Hero tier aura styles (`AuraStyle`, a strict enum) and
+// the tier fields of `SupporterStatus` (LR-67); client and server ship together.
+pub const PROTOCOL_VERSION: u16 = 12;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -49,10 +51,10 @@ impl JoinRejection {
                 "This session is active in another client. Close it, then retry."
             }
             Self::ProtocolMismatch => {
-                "Client and server network protocols differ. Update the game or choose a compatible server."
+                "Client and server network protocols differ. Update the game."
             }
             Self::MapGeometryMismatch => {
-                "This server uses a different map geometry. Install the matching map release."
+                "This server uses a different map version. Update the game."
             }
             Self::AvatarNotAuthorized => {
                 "Avatar or weapon approval failed. Refresh Studio, select approved equipment and retry."

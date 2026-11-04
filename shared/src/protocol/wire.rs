@@ -1139,6 +1139,68 @@ mod tests {
         assert_eq!(serde_json::to_string(&decoded).unwrap(), GOLDEN_SNAPSHOT);
     }
 
+    /// Protocol 12 (LR-67): the tier aura ids and the tier fields of
+    /// `SupporterStatus`, as sent. Changing these bytes needs a protocol bump.
+    const GOLDEN_TIER_EQUIP: &str = r#"{"type":"career","request":{"action":"equip_supporter_aura","request_id":5,"aura":"prism_iii"}}"#;
+    const GOLDEN_TIER_STATUS: &str = r#"{"active":true,"equipped_aura":"crimson","active_until":1790000000,"grants":[{"provider":"yookassa","valid_from":1787408000,"valid_until":1790000000,"revoked":false,"renewal_enabled":false,"tier_points":1000}],"tier_points":1000,"tier_until":1790000000}"#;
+
+    #[test]
+    fn protocol_12_carries_tier_auras_and_tier_status() {
+        use crate::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
+        assert_eq!(crate::protocol::PROTOCOL_VERSION, 12);
+        let equip = ClientPacket::Career {
+            request: crate::career::CareerRequest::EquipSupporterAura {
+                request_id: 5,
+                aura: Some(AuraStyle::PrismIII),
+            },
+        };
+        assert_eq!(serde_json::to_string(&equip).unwrap(), GOLDEN_TIER_EQUIP);
+        let status = SupporterStatus {
+            active: true,
+            equipped_aura: Some(AuraStyle::Crimson),
+            active_until: Some(1_790_000_000),
+            grants: vec![SupporterGrantSummary {
+                provider: "yookassa".into(),
+                valid_from: 1_787_408_000,
+                valid_until: 1_790_000_000,
+                revoked: false,
+                renewal_enabled: Some(false),
+                tier_points: 1000,
+            }],
+            tier_points: 1000,
+            tier_until: Some(1_790_000_000),
+        };
+        assert_eq!(serde_json::to_string(&status).unwrap(), GOLDEN_TIER_STATUS);
+        assert_eq!(
+            serde_json::from_str::<SupporterStatus>(GOLDEN_TIER_STATUS).unwrap(),
+            status
+        );
+        let career = ServerPacket::Career {
+            server_epoch: 7,
+            sequence: 2,
+            career: crate::career::CareerView {
+                supporter: Some(status.clone()),
+                ..Default::default()
+            },
+        };
+        let encoded = serde_json::to_string(&career).unwrap();
+        assert!(encoded.contains(&format!(r#""supporter":{GOLDEN_TIER_STATUS}"#)));
+        // Every style replicates on a player by its id; an unknown id (a newer
+        // peer's style) fails the whole datagram, which is why 12 is a bump.
+        let mut value: Value = serde_json::from_str(GOLDEN_SNAPSHOT).unwrap();
+        for style in AuraStyle::ALL {
+            value["players"][0]["supporter_aura"] = json!(style.id());
+            let ServerPacket::Snapshot { players, .. } =
+                serde_json::from_value::<ServerPacket>(value.clone()).unwrap()
+            else {
+                panic!("snapshot")
+            };
+            assert_eq!(players[0].supporter_aura, Some(style));
+        }
+        value["players"][0]["supporter_aura"] = json!("prism_iv");
+        assert!(serde_json::from_value::<ServerPacket>(value).is_err());
+    }
+
     /// Step 11f: `debug_access` is additive. With a value it round-trips and
     /// sits after `sandbox`; `None` leaves the golden bytes untouched (checked
     /// above), and a snapshot from a server that predates it decodes to

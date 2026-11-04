@@ -1,0 +1,12 @@
+# On the 2nd of every month at 02:30 UTC (05:30 Moscow), away from the nightly backup;
+# a missed date runs at the next boot (Persistent=true). LR-03.
+[Unit]
+Description=Monthly OMOBA RU restore drill
+
+[Timer]
+OnCalendar=*-*-02 02:30:00 UTC
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

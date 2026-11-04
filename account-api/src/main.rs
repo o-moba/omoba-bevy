@@ -1,4 +1,5 @@
-use omoba_account_api::{App, Config, crypto, migrate, router};
+use omoba_account_api::{App, Config, crypto, migrate, moderation, router};
+use omoba_career_store::career_store::CareerStore;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -14,6 +15,23 @@ async fn run() -> Result<(), String> {
         migrate(&url).await?;
         println!("Career and Account API migrations ready.");
         return Ok(());
+    }
+    // Operator commands (LR-15): player lookup, sanctions, chat switch.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args
+        .first()
+        .is_some_and(|first| moderation::COMMANDS.contains(&first.as_str()))
+    {
+        let command = moderation::parse(&args)?;
+        let store = CareerStore::connect_runtime(&url).await?;
+        print!("{}", moderation::run(&store, command).await?);
+        return Ok(());
+    }
+    if let Some(unknown) = args.first() {
+        return Err(format!(
+            "Unknown command {unknown:?}.\n{}",
+            moderation::USAGE
+        ));
     }
     let origin =
         std::env::var("OMOBA_PORTAL_ORIGIN").map_err(|_| "Set the trusted OMOBA_PORTAL_ORIGIN")?;
@@ -63,6 +81,24 @@ async fn run() -> Result<(), String> {
             if let Err(error) = omoba_account_api::supporter::reconcile_apple(&billing_worker).await
             {
                 eprintln!("supporter reconciliation: {}", error.1);
+            }
+        }
+    });
+    // YooKassa (LR-67): re-read open attempts, replay lost creates inside the
+    // 23-hour window and scan refunds. Does nothing without shop settings.
+    let yookassa_worker = app.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            match omoba_account_api::supporter::yookassa::reconcile(&yookassa_worker).await {
+                Ok(report) if report.eventful() => eprintln!(
+                    "{}",
+                    serde_json::json!({"event": "yookassa_reconciliation", "report": report})
+                ),
+                Ok(_) => {}
+                Err(error) => eprintln!("yookassa reconciliation: {}", error.1),
             }
         }
     });

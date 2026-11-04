@@ -5,6 +5,8 @@ Uses an explicitly labeled, local development placement/ambient-world fixture.
 Combat input and damage always go through production client/server systems.
 No browser, image generator, additional dependency or physical-device claim.
 """
+from qa_account_fixture import prepare_capture_account
+
 import argparse
 import json
 import math
@@ -205,6 +207,7 @@ def main():
     children, peers, observer = [], [], None
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-targeting-qa-") as isolated:
+        prepare_capture_account(isolated)
         env = dict(os.environ, SERVER_ADDR=f"{address[0]}:{address[1]}",
                    GAME_SERVER_ADDR=f"{address[0]}:{address[1]}", OMOBA_MATCH_MODE="dev",
                    OMOBA_TEAM_SIZE="5", OMOBA_TARGETING_QA="1", OMOBA_QA_TEAM="green",

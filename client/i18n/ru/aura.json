@@ -1,5 +1,12 @@
 {
   "aura.solar": "Солнечная",
   "aura.lunar": "Лунная",
-  "aura.verdant": "Изумрудная"
+  "aura.verdant": "Изумрудная",
+  "aura.rose": "Роза",
+  "aura.jade": "Нефрит",
+  "aura.azure": "Лазурь",
+  "aura.crimson": "Багрянец",
+  "aura.prism_i": "Призма I",
+  "aura.prism_ii": "Призма II",
+  "aura.prism_iii": "Призма III"
 }

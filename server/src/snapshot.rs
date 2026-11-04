@@ -168,32 +168,32 @@ impl ServerRuntime {
 
         // Recipients are fixed before sending: the combat log is drained per
         // recipient below, which needs it mutably. A standalone server sends
-        // the world only to verified endpoints (joined, or career-authenticated).
-        let recipients =
-            world
-                .players
-                .iter()
-                .filter(|(addr, player)| {
-                    !player.hero.identity.is_bot
-                        && (!self.match_service.is_public() && self.endpoint_verified(**addr)
-                            || self.match_service.is_public()
-                                && self.public_transport.validated(**addr, now)
-                                && self.career.backend.gameplay_principal(**addr).is_some_and(
-                                    |p| {
-                                        self.match_service.can_observe(
-                                            &p.session_id,
-                                            self.career
-                                                .backend
-                                                .profile(**addr)
-                                                .as_ref()
-                                                .map(|p| p.profile_id.as_str())
-                                                .unwrap_or(""),
-                                        )
-                                    },
-                                ))
-                })
-                .map(|(addr, _)| *addr)
-                .collect::<Vec<_>>();
+        // the world only to verified endpoints (joined, or career-authenticated);
+        // no role ever addresses an internal bot/detached-seat actor.
+        let recipients = world
+            .players
+            .keys()
+            .filter(|addr| {
+                self.live_match_endpoint(**addr, now)
+                    && (!self.match_service.is_public()
+                        || self
+                            .career
+                            .backend
+                            .gameplay_principal(**addr)
+                            .is_some_and(|p| {
+                                self.match_service.can_observe(
+                                    &p.session_id,
+                                    self.career
+                                        .backend
+                                        .profile(**addr)
+                                        .as_ref()
+                                        .map(|p| p.profile_id.as_str())
+                                        .unwrap_or(""),
+                                )
+                            }))
+            })
+            .copied()
+            .collect::<Vec<_>>();
 
         // Step 11f: the same for every recipient of this match, but only a
         // joined player gets it (see `snapshot_debug_access`).

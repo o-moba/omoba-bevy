@@ -50,8 +50,12 @@ docs/*
 !docs/controller.md
 !docs/party.md
 !docs/RELEASING.md
+!docs/connection-profiles.md
+!docs/markets.md
+!docs/community-sculptures.md
 !docs/release-compatibility.md
 !docs/bot-practice-and-social.md
+!docs/browser-practice.md
 !docs/game-audio.md
 !docs/economy.md
 !docs/adventurer.md
@@ -65,6 +69,8 @@ docs/*
 !docs/ekza-production-avatars.md
 !docs/bug-report-template.md
 !docs/mvp-scope-and-limitations.md
+!docs/account-recovery.md
+!docs/registration.md
 !docs/progress/
 !docs/progress/**
 !docs/support/
@@ -120,6 +126,8 @@ docs/profiles/*
 !docs/ARCHITECTURE_REPORT.md
 !docs/plans/
 !docs/plans/**
+!docs/architecture/
+!docs/architecture/**
 
 # Local career receipts and device identity are runtime data, never source.
 .omoba/

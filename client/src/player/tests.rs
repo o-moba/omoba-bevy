@@ -771,3 +771,132 @@ fn phone_stick_reversal_at_visible_limit_keeps_full_world_speed() {
         }
     }
 }
+
+/// The windup of the hero's own beam replicates as `movement_multiplier` 0 with no root.
+fn beam_windup_loadout(movement_multiplier: f32) -> crate::net::PlayerLoadout {
+    crate::net::PlayerLoadout(Some(shared::loadout::LoadoutState {
+        movement_multiplier,
+        ..default()
+    }))
+}
+
+/// A click (or minimap) order given during the windup of the hero's own beam neither moves
+/// the hero nor turns it toward its waypoint. The order and its route are kept, and the
+/// hero walks them once the ray has fired.
+#[test]
+fn a_click_order_waits_out_the_beam_windup_and_then_walks() {
+    let (mut app, player) = navigation_input_app();
+    app.world_mut()
+        .entity_mut(player)
+        .insert(beam_windup_loadout(0.0));
+    let start = *app.world().get::<Transform>(player).unwrap();
+    minimap_order(&mut app, Vec3::new(8.0, 0.0, 6.0));
+    app.update();
+    app.world_mut()
+        .resource_mut::<MinimapNavigationState>()
+        .movement_target = None;
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .reset_all();
+    for frame in 0..16 {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(50));
+        app.update();
+        let pose = *app.world().get::<Transform>(player).unwrap();
+        assert_eq!(pose.translation, start.translation, "frame {frame}");
+        assert_eq!(pose.rotation, start.rotation, "frame {frame}");
+        assert!(app.world().entity(player).contains::<MovementTarget>());
+        assert!(app.world().entity(player).contains::<MovementRoute>());
+    }
+    // The ray fired: the kept route moves the hero at full speed and turns it.
+    app.world_mut()
+        .entity_mut(player)
+        .insert(beam_windup_loadout(1.0));
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(50));
+    app.update();
+    let pose = *app.world().get::<Transform>(player).unwrap();
+    let step = pose.translation.xz().distance(start.translation.xz());
+    assert!((step - PLAYER_SPEED * 0.05).abs() < 0.001, "{step}");
+    assert!(pose.rotation.angle_between(start.rotation) > 0.01);
+}
+
+/// A stick held during the windup of the hero's own beam, on a controller or on the phone,
+/// neither moves nor turns the hero; still held when the ray fires, it moves the hero on.
+#[test]
+fn a_held_stick_waits_out_the_beam_windup_on_a_controller_and_a_phone() {
+    use super::input::move_player_analog;
+    use crate::camera::MainCamera;
+    use crate::gamepad::GamepadControls;
+    use crate::input_context::GameplayInputContext;
+    use crate::mobile_controls::MobileControls;
+    for phone in [false, true] {
+        let mut app = App::new();
+        if phone {
+            let mut mobile = MobileControls::default();
+            mobile.enabled = true;
+            mobile.focused = true;
+            mobile.landscape = true;
+            mobile.movement = Vec2::X;
+            app.insert_resource(mobile);
+        } else {
+            let mut pad = GamepadControls::default();
+            pad.connected = true;
+            pad.active = true;
+            pad.movement = Vec2::X;
+            app.insert_resource(pad);
+        }
+        app.init_resource::<Time>()
+            .init_resource::<GameplayInputContext>()
+            .init_resource::<crate::debug::DebugToggles>()
+            .init_resource::<PendingCast>()
+            .init_resource::<BasicAttackState>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .add_systems(Update, move_player_analog);
+        app.world_mut().spawn((
+            MainCamera,
+            GlobalTransform::from(
+                Transform::from_translation(crate::camera::locked_camera_offset(1.0))
+                    .looking_at(Vec3::ZERO, Vec3::Y),
+            ),
+        ));
+        let hero = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                CombatStats::default(),
+                beam_windup_loadout(0.0),
+            ))
+            .id();
+        for frame in 0..16 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+            assert_eq!(
+                *app.world().get::<Transform>(hero).unwrap(),
+                Transform::default(),
+                "phone {phone} frame {frame}"
+            );
+        }
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(beam_windup_loadout(1.0));
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(50));
+        app.update();
+        let pose = *app.world().get::<Transform>(hero).unwrap();
+        assert!(
+            (pose.translation.length() - PLAYER_SPEED * 0.05).abs() < 0.001,
+            "phone {phone}: {pose:?}"
+        );
+        assert!(
+            pose.rotation.angle_between(Quat::IDENTITY) > 0.01,
+            "phone {phone}"
+        );
+    }
+}

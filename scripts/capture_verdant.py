@@ -9,6 +9,8 @@ The beta result is a labeled synthetic snapshot, never complete-match evidence.
 No source working directory, user configuration, CUA, or additional dependency is required.
 This is a bounded automated renderer scenario, not an interactive gameplay certification.
 """
+from qa_account_fixture import prepare_capture_account
+
 import argparse
 import hashlib
 import json
@@ -426,6 +428,7 @@ def main():
                   scripted_peers=args.bots, server_mode="dev; production commands; no cheats")
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-verdant-capture-") as isolated:
+        prepare_capture_account(isolated)
         result["isolated_cwd"] = isolated
         env = dict(os.environ, SERVER_ADDR=f"{address[0]}:{address[1]}",
                    GAME_SERVER_ADDR=f"{address[0]}:{address[1]}",

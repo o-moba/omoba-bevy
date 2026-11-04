@@ -12,6 +12,7 @@ use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
+mod account_region_qa;
 pub(crate) mod animation_qa;
 mod audio_qa;
 mod beta_ui_qa;
@@ -19,6 +20,7 @@ mod boot_qa;
 mod career_visual_qa;
 mod combat_polish_qa;
 mod combat_qa;
+mod creator_loop_qa;
 mod dagger_qa;
 mod demo_qa;
 mod equipped_skills_qa;
@@ -34,8 +36,10 @@ mod result_qa;
 mod roster_qa;
 mod sdk_pack_qa;
 mod social_qa;
+pub(crate) mod sponsorship_qa;
 mod standard_kits_qa;
 mod supporter;
+mod supporter_world;
 mod targeting_qa;
 mod team_vision_qa;
 mod ui_gallery;
@@ -43,17 +47,21 @@ mod visual_qa;
 
 /// The env-triggered QA plugins, in the order `main` added them before the
 /// groups. `VisualQaPlugin` nests `BetaUiQaPlugin` and `NavigationQaPlugin`,
-/// `FrontendQaPlugin` nests `AvatarQaPlugin` and `FrontendFlowQaPlugin`.
+/// `FrontendQaPlugin` nests `AvatarQaPlugin` and `FrontendFlowQaPlugin`. The
+/// Supporter harnesses drive `SupporterPlugin`'s resources, so a build without
+/// Supporter (which has no such plugin) disables them too.
 pub(crate) struct QaPlugins;
 
 impl PluginGroup for QaPlugins {
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::start::<Self>()
+        let group = PluginGroupBuilder::start::<Self>()
             .add(frontend_qa::FrontendQaPlugin)
             .add(visual_qa::VisualQaPlugin)
             .add(social_qa::SocialQaPlugin)
             .add(sdk_pack_qa::SdkPackQaPlugin)
+            .add(creator_loop_qa::CreatorLoopQaPlugin)
             .add(supporter::SupporterQaPlugin)
+            .add(supporter_world::SupporterWorldQaPlugin)
             .add(team_vision_qa::TeamVisionQaPlugin)
             .add(audio_qa::AudioQaPlugin)
             .add(offline_qa::OfflineQaPlugin)
@@ -73,6 +81,14 @@ impl PluginGroup for QaPlugins {
             .add(ui_gallery::UiGalleryPlugin)
             .add(help_qa::HelpQaPlugin)
             .add(boot_qa::BootQaPlugin)
+            .add(account_region_qa::AccountRegionQaPlugin);
+        if crate::account_region::features().supporter {
+            group
+        } else {
+            group
+                .disable::<supporter::SupporterQaPlugin>()
+                .disable::<supporter_world::SupporterWorldQaPlugin>()
+        }
     }
 }
 

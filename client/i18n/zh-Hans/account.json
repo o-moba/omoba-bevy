@@ -25,7 +25,7 @@
   "account.wallet.status.connected": "钱包已连接 · 你的 Ekza 形象列在默认形象下方",
   "account.wallet.unavailable": "钱包连接不可用：{error}",
   "account.source.default": "内置",
-  "account.source.library": "我的收藏",
+  "account.source.library": "我的 Ekza 收藏",
   "account.source.purchased": "已拥有",
   "account.source.community": "免费 · 工作室",
   "account.avatar.default": "默认形象"

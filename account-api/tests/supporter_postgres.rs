@@ -56,6 +56,8 @@ fn event(period: &str, version: i64) -> VerifiedEvent {
         revoked_at: None,
         event_version: version,
         renewal_enabled: Some(true),
+        amount_minor: None,
+        refunded_minor: None,
     }
 }
 fn proof(key: &SigningKey, action: NativeSupporterAction) -> Vec<u8> {
@@ -221,6 +223,7 @@ async fn solana_checkout_fetches_rpc_and_settles_exactly_once() {
             amount: 4_990_000,
             decimals: 6,
         }),
+        yookassa: None,
     });
     // Historic auto-renew=true periods do not override the latest expired,
     // cancelled period of the same original subscription.
@@ -351,6 +354,7 @@ async fn apple_private_verifier_binds_accounts_preserves_cancellation_and_reconc
             environment: "Sandbox".into(),
         }),
         solana: None,
+        yookassa: None,
     });
     let prepared = supporter::apple_prepare(&app, &a).await.unwrap();
     assert_eq!(prepared, supporter::apple_prepare(&app, &a).await.unwrap());
@@ -418,5 +422,8 @@ async fn future_or_revoked_history_cannot_hide_current_entitlement() {
     let status = supporter::status(&app, &profile).await.unwrap();
     assert!(status.active);
     assert_eq!(status.active_until, Some(e.valid_until));
-    assert_eq!(status.grants.len(), 100);
+    assert_eq!(
+        status.grants.len(),
+        shared::supporter::STATUS_GRANT_LIMIT as usize
+    );
 }

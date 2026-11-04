@@ -264,6 +264,8 @@ of `client/assets/animations/humanoid-motion-v1.json` (see `docs/humanoid-motion
 | `caster` | the caster bolt sample |
 | `tower` | the tower shot sample |
 | `bluff` | the bluff sample; `dagger_bluff` only |
+| `radiant_charge` | the Horizon Ray charge: a short ignition in `tick`, and in `tail` a swell that is loudest when the ray fires, one `dawn_ray` windup after it starts |
+| `radiant_beam` | a ray firing: a warm low thump, a bright bell cluster and a burst of air |
 
 ## Audio slices
 

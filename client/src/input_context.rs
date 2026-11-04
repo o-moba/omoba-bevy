@@ -111,6 +111,7 @@ fn resolve_input_context(
     social: Option<Res<crate::social::SocialClient>>,
     sandbox: Option<Res<crate::sandbox::SandboxClient>>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    sculpture: Option<Res<crate::sponsorship::info::SculptureInfo>>,
 ) {
     context.running = game
         .as_ref()
@@ -123,7 +124,8 @@ fn resolve_input_context(
     let front_end_open = screen
         .as_ref()
         .is_some_and(|screen| *screen.get() != crate::frontend::AppScreen::InMatch);
-    context.modal_open = modals.as_ref().is_some_and(|modals| modals.is_open())
+    context.modal_open = sculpture.as_ref().is_some_and(|info| info.blocks_world())
+        || modals.as_ref().is_some_and(|modals| modals.is_open())
         || sandbox.as_ref().is_some_and(|s| s.blocks_world())
         || front_end_open
         || mobile

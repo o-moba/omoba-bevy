@@ -2,7 +2,7 @@
 
 `career_store.rs` uses these PostgreSQL migrations with SQLx dynamic queries. It
 does not use the older SQLite prototype. `connect` applies career schema versions
-1–3 transactionally under a migration advisory lock, upgrades supported earlier
+1–5 transactionally under a migration advisory lock, upgrades supported earlier
 versions, and rejects unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
 explicitly as the migration owner. The game worker uses `connect_runtime` and
 requires no DDL permissions; startup rejects missing/unknown versions. See
@@ -45,6 +45,51 @@ assignment both exist; an expired presence is Offline. A restart does not fabric
 Online status from stored friendships. The worker uses `touch_presences` for
 up to 512 refreshes in one atomic SQL statement. Duplicate account refreshes are
 coalesced; a missing profile or foreign allocation rejects the whole batch.
+
+## Admission limits and retention (schema 4, LR-16)
+
+`authenticate_from(public_key, nickname, source, limits)` is the game's sign-in: a
+known key signs in as with `authenticate`; an unknown key gets a profile only while
+`source` (the server passes one IP: an IPv4 address or an IPv6 /64) created fewer than
+`limits.per_source` profiles in the last 24 hours and everyone fewer than
+`limits.total`. The check and its counter row (`career_profile_admissions`) are written
+in the sign-in transaction under `pg_advisory_xact_lock(721946004)`, so concurrent new
+keys never both take the last place. A refusal returns `NEW_PROFILE_LIMIT_ERROR` or
+`NEW_PROFILES_PAUSED_ERROR` and creates nothing. Rows hold
+`sha256(salt || source)` with the random salt of `career_admission_salt`, never the
+address. `authenticate` (Account API, tests, fixtures) has no limit.
+
+`prune_unplayed_profiles(min_age_days, max_profiles)` deletes admission rows older
+than 48 hours and calls `career_prune_unplayed_profiles`. That SECURITY DEFINER
+function (owner rights, `search_path` pinned to the migration's schemas plus
+`pg_temp`, no PUBLIC execute) deletes at most `max_profiles` (1–500) profiles whose
+only key is unrevoked and older than `min_age_days` (≥ 7), with no match, XP, friend
+or live presence, under the key's sign-in lock. A profile that any other row still
+references (portal sessions, settings, sign-in links, Supporter grants) fails its
+foreign key and is kept. The key row goes with the profile, so the device signs in to
+a fresh profile. The game role may execute it but still cannot delete a key itself.
+
+## Moderation (schema 5, LR-15)
+
+`career_sanctions` holds one row per sanction: `profile_id`, `kind` (`chat_mute`,
+`matchmaking_ban`, `ranked_ban`, `account_ban`, `name_reset`), `reason`, `created_at`,
+`created_by`, `expires_at` (NULL: until lifted) and, once lifted early, `lifted_at`,
+`lifted_by` and `lift_reason`. A sanction is active while it is neither lifted nor
+expired. `CareerStore::add_sanction` and `lift_sanction` write one
+`career_moderation_events` row in the same transaction (actor, action, profile,
+sanction, JSON detail with kind, reason, end and, for a name reset, the old and the
+new name). That audit table has no foreign key (the record outlives the profile); its
+trigger refuses every UPDATE and deleting a row younger than a year. A `name_reset`
+renames the profile to `Player#NNNN` with a free tag in the same transaction, and
+`rename` refuses with `NAME_LOCKED_ERROR` while it is active. `career_chat_switch` is
+one row, the database-wide chat switch (`set_chat`, audited as `chat_switched`).
+
+Game servers read with `access(public_key, profile_id)` (key active, current name and
+active sanctions in one query, at every 10-second access refresh),
+`active_sanctions` (sign-in) and `chat_enabled` (polled every 5 s). A sanction's
+foreign key keeps its profile from `career_prune_unplayed_profiles`. Operators use the
+`omoba-account-api sanction|rename|player|chat` commands (`RUNBOOK.md` › Moderation),
+which also run with the portal role.
 
 ## Allocation and result lifecycle
 

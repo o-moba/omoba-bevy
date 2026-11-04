@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "arena-sync"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "base64",
  "reqwest",
@@ -2074,7 +2074,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "client"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "bevy",
  "common",
@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "shared",
 ]
@@ -2597,7 +2597,7 @@ dependencies = [
 [[package]]
 name = "ekza-bevy-sdk"
 version = "0.9.0"
-source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=a9a253cba110bcb308a7f81f6dfb5a4b2243f545#a9a253cba110bcb308a7f81f6dfb5a4b2243f545"
+source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=d18ec7227a8c72c4dedfb8aca825bd656bf6d02c#d18ec7227a8c72c4dedfb8aca825bd656bf6d02c"
 dependencies = [
  "bevy",
  "reqwest",
@@ -3191,8 +3191,9 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
+ "ed25519-dalek",
  "serde",
  "serde_json",
  "shared",
@@ -4674,7 +4675,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-account-api"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "axum",
  "ed25519-dalek",
@@ -4691,8 +4692,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "omoba-browser"
+version = "0.45.0"
+dependencies = [
+ "bevy",
+ "common",
+ "serde_json",
+ "shared",
+]
+
+[[package]]
 name = "omoba-career-store"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "getrandom 0.3.4",
  "serde_json",
@@ -4703,7 +4714,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-passport"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "ekza-bevy-sdk",
  "reqwest",
@@ -5634,7 +5645,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "common",
  "ed25519-dalek",
@@ -5682,8 +5693,9 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
+ "bevy",
  "serde",
  "serde_json",
 ]

@@ -185,28 +185,29 @@
     "dawn_field": {
       "home": "dawnweaver", "release": "kneel_plant", "color": [1.0, 0.66, 0.5], "hdr_gain": 3.0,
       "motion": { "rate": 1.6, "start": 0.25, "recast": "draw_in", "recast_rate": 1.8 },
-      "cast": { "pattern": "ground_ring", "shape": "star", "count": 5, "scale": 1.0, "lifetime": 0.4, "slots": ["primary", "accent"], "recast": "none", "recast_marker": "ring_pips", "link": "streak" },
+      "cast": { "pattern": "ground_ring", "shape": "star", "count": 5, "scale": 1.0, "lifetime": 0.4, "slots": ["primary", "accent"], "recast": "none", "recast_marker": "ring_pips" },
       "body": { "archetype": "zone", "altitude": "ground", "fill": true, "marker": "remaining_ring", "expire": "detonate",
         "core": { "mesh": "star", "slot": "primary", "size": [1.8, 0.9, 1.8], "behave": "spin" },
         "satellites": { "mesh": "diamond", "layout": "rim", "count": 8, "size": [0.2, 0.2, 0.2], "slot": "accent", "behave": "blink_last" } },
       "impact": { "kind": "ring_burst", "shape": "star", "count": 12, "scale": 1.1, "lifetime": 0.7, "slots": ["primary", "secondary"] },
       "sound": {
         "cast": { "base": "holy", "speed": 1.2, "gain": 0.8 },
-        "recast": { "base": "holy", "speed": 0.8, "slice": "body", "notes": [{ "delay_ms": 60, "speed": 1.2, "gain": 0.8 }] },
+        "recast": { "base": "radiant_beam", "speed": 0.85, "slice": "body", "gain": 0.8, "notes": [{ "delay_ms": 60, "speed": 1.2, "gain": 0.7 }] },
         "impact": { "base": "holy", "speed": 1.2, "slice": "tick", "gain": 0.8 } }
     },
     "dawn_ray": {
-      "home": "dawnweaver", "windup": "spell_prepare", "release": "cast", "color": [1.0, 0.82, 0.32], "hdr_gain": 4.2,
-      "motion": { "phase": "warn_fire", "fit_windup": true, "rate": 0.8 },
+      "home": "dawnweaver", "windup": "spell_charge", "release": "ray_release", "color": [1.0, 0.82, 0.32], "hdr_gain": 4.2,
+      "motion": { "phase": "warn_fire", "fit_windup": true },
       "cast": { "pattern": "inward_gather", "shape": "streak", "count": 8, "scale": 1.0, "lifetime": 0.5, "slots": ["primary", "white"] },
       "body": { "archetype": "lane", "altitude": "ground", "fill": true, "marker": "fill_to_edge", "expire": "fade",
-        "core": { "mesh": "block", "slot": "white", "size": [0.3, 0.4, 1.0], "behave": "hide_in_telegraph" },
-        "shell": { "mesh": "block", "slot": "primary", "size": [0.85, 0.22, 1.0], "behave": "hide_in_telegraph" },
-        "satellites": { "mesh": "block", "layout": "stagger", "count": 8, "size": [0.7, 0.08, 0.3], "slot": "primary", "behave": "only_in_telegraph" } },
-      "impact": { "kind": "pierce_through", "shape": "streak", "count": 12, "scale": 1.4, "lifetime": 0.9, "slots": ["secondary", "accent"] },
+        "core": { "mesh": "block", "slot": "white", "size": [0.875, 0.15, 1.0], "behave": "hide_in_telegraph" },
+        "shell": { "mesh": "block", "slot": "primary", "size": [1.0, 0.08, 1.0], "behave": "hide_in_telegraph" },
+        "satellites": { "mesh": "block", "layout": "stagger", "count": 8, "size": [0.4, 0.08, 0.3], "slot": "primary", "behave": "only_in_telegraph" } },
+      "impact": { "kind": "pierce_through", "shape": "streak", "count": 12, "scale": 1.0, "lifetime": 0.9, "slots": ["primary", "accent"] },
       "sound": {
-        "cast": { "base": "holy", "speed": 1.25, "gain": 0.8, "notes": [{ "delay_ms": 110, "speed": 1.35, "gain": 0.7 }, { "delay_ms": 220, "speed": 1.4, "gain": 0.7 }] },
-        "release": { "base": "holy", "speed": 0.7, "notes": [{ "delay_ms": 0, "speed": 1.05, "gain": 0.85 }, { "delay_ms": 40, "speed": 1.4, "gain": 0.7 }] },
+        "cast": { "base": "radiant_charge", "slice": "tick", "gain": 0.8 },
+        "telegraph": { "base": "radiant_charge", "slice": "tail", "gain": 0.9 },
+        "release": { "base": "radiant_beam" },
         "impact": { "base": "holy", "speed": 1.4, "slice": "tail", "gain": 0.8 } }
     },
     "wild_switch": {

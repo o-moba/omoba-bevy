@@ -379,7 +379,10 @@ fn signed_roster_dash_and_haste_dispatch_to_authority_and_replicate() {
         panic!("missing path challenge");
     };
     let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-        serde_json::from_slice(&reply).unwrap();
+        serde_json::from_slice(&reply).unwrap()
+    else {
+        panic!("a transport challenge is expected")
+    };
     let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
         server_epoch: rt.server_epoch,
         path_nonce: path_nonce.clone(),

@@ -1951,3 +1951,65 @@ fn empty_roster_preserves_unsettled_victory_in_career_result() {
     assert_eq!(result.outcome, shared::career::MatchOutcome::Completed);
     assert_eq!(result.winner, Some(Team::Green));
 }
+
+#[test]
+fn practice_bot_level_applies_to_both_teams_survives_rounds_and_public_hosts_stay_elite() {
+    use shared::bot_profile::BotDifficulty;
+    let never = || -> Option<String> { panic!("a public host never reads OMOBA_BOT_DIFFICULTY") };
+    assert_eq!(bots::boot_bot_difficulty(true, true, never), Ok(None));
+    assert_eq!(bots::boot_bot_difficulty(true, false, never), Ok(None));
+    assert_eq!(
+        bots::boot_bot_difficulty(false, false, || Some("recruit".into())),
+        Ok(None),
+        "a host without bots ignores the level"
+    );
+    assert_eq!(bots::boot_bot_difficulty(false, true, || None), Ok(None));
+    assert_eq!(
+        bots::boot_bot_difficulty(false, true, || Some(" Regular ".into())),
+        Ok(Some(BotDifficulty::Regular))
+    );
+    assert!(bots::boot_bot_difficulty(false, true, || Some("hard".into())).is_err());
+
+    let bot_profiles = |rt: &ServerRuntime| -> Vec<_> {
+        rt.world
+            .players
+            .iter()
+            .filter(|(_, p)| p.hero.identity.is_bot)
+            .map(|(addr, _)| rt.bots.profile(*addr))
+            .collect()
+    };
+    let mut rt = runtime(2);
+    let now = Instant::now();
+    rt.set_bot_difficulty(BotDifficulty::Recruit);
+    rt.handle_packet(addr(1), join("solo"), now);
+    let profiles = bot_profiles(&rt);
+    assert_eq!(profiles.len(), 3, "one teammate and two opponents");
+    assert!(
+        profiles
+            .iter()
+            .all(|p| *p == Some(bots::BotProfile::RECRUIT)),
+        "{profiles:?}"
+    );
+
+    rt.restart_round(now + Duration::from_secs(1));
+    rt.fill_practice_bots(now + Duration::from_secs(1));
+    let profiles = bot_profiles(&rt);
+    assert_eq!(profiles.len(), 3);
+    assert!(
+        profiles
+            .iter()
+            .all(|p| *p == Some(bots::BotProfile::RECRUIT))
+    );
+
+    // Takeover of a retained human always plays Elite.
+    let class = rt.world.players[&addr(1)].hero.identity.hero_class;
+    rt.bots.attach_existing(addr(1), class, now);
+    assert_eq!(rt.bots.profile(addr(1)), Some(bots::BotProfile::ELITE));
+    rt.set_bot_difficulty(BotDifficulty::Veteran);
+    assert_eq!(rt.bots.profile(addr(1)), Some(bots::BotProfile::ELITE));
+    assert!(
+        bot_profiles(&rt)
+            .iter()
+            .all(|p| *p == Some(bots::BotProfile::VETERAN))
+    );
+}

@@ -1,8 +1,10 @@
+mod admission;
 mod balance;
 #[cfg(test)]
 mod balance_probe;
 mod basic_attack;
 mod bots;
+mod capacity;
 mod career_backend;
 mod career_port;
 mod career_runtime;
@@ -20,12 +22,14 @@ mod hero_timers;
 #[cfg(test)]
 mod map_config_tests;
 mod match_allocation;
+mod match_lifecycle;
 mod match_pool;
 mod match_rules;
 mod match_service;
 mod match_stats;
 #[cfg(test)]
 mod minion_path_tests;
+mod moderation;
 #[cfg(test)]
 mod navigation_tests;
 mod neutrals;

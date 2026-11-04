@@ -1,7 +1,7 @@
 # Game audio
 
-The client includes an instrumental background loop and twenty sound cues, and
-builds a voice for every skill from six of them (see "Skill voices").
+The client includes an instrumental background loop and twenty-four sound cues,
+and builds a voice for every skill from nine of them (see "Skill voices").
 Start normally with `make practice` or join a running server. Audio requires no
 separate service, network requests or installation. The existing Bevy audio stack
 decodes the bundled Ogg Vorbis assets on desktop and mobile builds.
@@ -35,6 +35,9 @@ their own acceptance checks.
 | `trap_trigger` | Authoritative trap activation damage receipt; owner/victim or nearby visible combat |
 | `bluff` | The cast voice of Bluff (`dagger_bluff`), by distance like every other cast voice |
 | `vital_break` | A confirmed `near_lethal` receipt of the Adventurer's Backstab |
+| `radiant_charge`, `radiant_beam` | The Dawnweaver's Horizon Ray: its cast and warning, and the beam firing (see "Horizon Ray") |
+| `radiant_core` | A confirmed `core_hit` receipt: a beam hit inside the core of the ray; once a frame |
+| `radiance_burst` | A confirmed `radiance_burst` receipt: a detonated Radiance mark, in place of the voice of a hit; once a frame |
 | `respawn`, `level_up` | Local authoritative alive/level changes |
 | `match_start`, `victory`, `defeat` | Observed match transitions and local team outcome |
 | `ui_click`, `ui_confirm` | Interface interaction and explicit presentation confirmation |
@@ -46,8 +49,12 @@ notifications have priority over ordinary nearby impacts; minion kills do not
 trigger the hero-kill notification.
 
 Distance gain uses simulation X/Z coordinates in both 2D and 3D: full gain within
-6 world units, squared falloff to silence at 36. This is distance attenuation,
-not stereo positional/HRTF audio or a separate spectator camera listener.
+6 world units, squared falloff to silence at 36. A warning lane or a beam is
+heard from its point nearest the listener, so a 45-unit ray is as loud at its far
+end as at its caster. The local hero's own hits, and hits on the local hero, are
+heard in full however far away they land, as the trap and vital cues are. This is
+distance attenuation, not stereo positional/HRTF audio or a separate spectator
+camera listener.
 The mixer caps effects at twelve voices, four admissions per frame and eight per
 second, with additional per-cue cooldowns. Missing or late assets are dropped,
 not queued. An effect without a sink expires after 300 ms; four seconds is the
@@ -55,26 +62,33 @@ maximum effect lifetime. Machines without an audio device can still play the gam
 
 ## Skill voices
 
-No sample was added for the class visual identity pass: `client/assets/audio`
-is unchanged. A skill row of `config/skills.skillfx` gives a voice to up to
-four moments of its skill, and each voice is one of the existing samples
-played differently:
+The class visual identity pass added no sample; the Dawnweaver reference pass
+added `radiant_charge` and `radiant_beam` for the Horizon Ray. A skill row of
+`config/skills.skillfx` gives a voice to up to five moments of its skill, and
+each voice is one of these samples played differently:
 
 | Field | Meaning |
 | --- | --- |
-| `base` | the sample: `melee`, `arrow`, `arcane`, `holy`, `caster`, `tower`, or `bluff` (Bluff only) |
+| `base` | the sample: `melee`, `arrow`, `arcane`, `holy`, `caster`, `tower`, `radiant_charge`, `radiant_beam`, or `bluff` (Bluff only) |
 | `speed` | playback speed, 0.70 to 1.40 in steps of 0.05 (15 steps) |
 | `slice` | the part that sounds: `full`, `tick` (the first 0.12 s), `body` (0.06 to 0.40 s), `tail` (from 0.20 s on) |
 | `gain` | 0.2 to 1, multiplied with the gain the moment is heard at (the distance gain for other heroes) |
 | `notes` | up to two later notes of the same sample and slice, each with a delay of at most 240 ms, a speed and a gain |
 
 The moments are `sound.cast` (required for every row: the accepted cast),
+`sound.telegraph` (a timed telegraph seen for the first time at most 0.15 s
+after its cast; only a skill with a timed telegraph may have one),
 `sound.recast` (a second press of a row that has one), `sound.release` (a
 telegraph that fired) and `sound.impact` (a confirmed hit by a hero the client
 sees). A basic-attack row has one voice, heard on its confirmed hit and, for an
 enemy, on its accepted attack. The Wildspark has a voice for each of its two
 rounds. The 68 cast voices are pairwise different (`base`, `speed`, `slice` and
-notes), which the identity test checks.
+notes), which the identity test checks. Every voice of every row at every
+moment, basic attacks included, is a variant of its own as well, apart from
+twelve shares between rows of other heroes that predate that check; the test
+lists them, and the list may only shrink. They are recorded debt: a variant of
+its own changes how each of those heroes sounds, which belongs to their own
+pass.
 
 Rules of the mixer for these voices:
 
@@ -90,26 +104,53 @@ Rules of the mixer for these voices:
   that follows from the action, receipt or effect behind it, so a skill that
   hits many times does not repeat one identical sound.
 - Row voices come after the existing cues in the admission order: they never
-  displace a hit, kill or trap cue.
+  displace a hit, kill or trap cue. The core note and the Radiance burst add
+  to a hit that has a voice already, so they come after every other voice and
+  are the first to go when the frame is full.
+- A telegraph and its release are heard whether or not the hero who cast it is
+  seen: the telegraph itself is on screen, so its voice tells nothing hidden.
 - A receipt whose source is a hero the client does not see keeps the cue of
   its wire style; the trap cue, the hit cue and a death are still heard, a
   kill cue is not claimed for an unnamed attacker.
 - A block of Northwall has no sound.
 
+### Horizon Ray
+
+The Dawnweaver's ultimate warns for 0.8 s and then fires a 45-unit ray. Its
+row and the receipts give it these voices:
+
+| Moment | Voice | Who hears it, from where |
+| --- | --- | --- |
+| cast | `radiant_charge` `tick`: a short ignition | a hero the client sees cast it, where the hero stands |
+| telegraph | `radiant_charge` `tail`: a swell that is loudest when the ray fires, one windup after it starts | everyone who sees the warning, from the point of the lane nearest them |
+| release | `radiant_beam`: a warm low thump, a bright bell cluster and a burst of air | everyone in earshot of the lane, from its nearest point |
+| impact | `holy` 1.40 `tail`, per hit | as every hit |
+| core hit | `radiant_core`, once a frame | as every hit; in full for the caster and the victim |
+| Radiance burst | `radiance_burst`, once a frame, in place of the voice of the hit | as every hit; in full for the caster and the victim |
+
+The cast and the telegraph play disjoint parts of one sample, so a visible
+caster's ignition and the warning's swell never double. A ray cancelled by
+the caster's death still swells to its end: the stage tracker cannot tell a
+cancel from fog, and a one-shot voice is not stopped. The Luminous Field recast
+uses `radiant_beam` at 0.85 `body`, so no Dawnweaver voice shares a variant
+with another hero.
+
 Nobody has listened to these voices in this pass. The evidence is the voice
 that was resolved, the values handed to the playback settings in a headless
 app and the decoded slice lengths; whether the sink honours speed, start and
 length on every platform, and how the 68 voices sound together, needs a
-listening pass.
+listening pass. The four Dawnweaver samples were checked by their loudness
+over time (the charge rises through the windup and is loudest when the ray
+fires), not by ear.
 
 ## Art, rights and size
 
-The complete twenty-one-file palette is approximately **1.89 MB**. Music is stereo;
+The complete twenty-five-file palette is approximately **1.93 MB**. Music is stereo;
 effects are mono. All clips use Vorbis at 44.1 kHz.
 
 - **Exploration Theme**, Cleyton Kauffman — [original author page](https://opengameart.org/content/exploration-theme), CC0. The author marks the 134.4-second composition as seamless. The packaged version is encoded from the lossless source with its duration and loop boundaries retained.
 - Two adapted foley clips from **Kenney RPG Audio** — [original source](https://kenney.nl/assets/rpg-audio), CC0.
-- Eighteen original effects synthesized from mathematical tones and filtered noise, with short authored musical motifs and echoes. No imported instrument samples, voices or commercial-game melodies are used.
+- Twenty-two original effects synthesized from mathematical tones and filtered noise, with short authored musical motifs and echoes. No imported instrument samples, voices or commercial-game melodies are used.
 
 `client/assets/audio/LICENSE.md`, both provenance JSON files and the `licenses/`
 directory record terms, credits, exact source/member/output hashes and adaptations.
@@ -130,8 +171,8 @@ separately. Download archives and temporary PCM output are development materials
 }
 ```
 
-This excerpt shows the shape; the real file must contain all twenty known cue
-IDs. Gains must be finite in 0–1. Music paths must be `audio/music/<name>.ogg`;
+This excerpt shows the shape; the real file must contain all twenty-four known
+cue IDs. Gains must be finite in 0–1. Music paths must be `audio/music/<name>.ogg`;
 effect paths must be `audio/sfx/<name>.ogg`, using letters, digits, hyphens or
 underscores. URLs, traversal, nested paths and unknown/missing cues are rejected.
 An invalid catalog falls back to the built-in bundled names. Missing files fail
@@ -143,16 +184,34 @@ different sounds by individual avatar/NFT ownership; such a future adapter can
 resolve trusted cue assets without granting gameplay authority or accepting
 arbitrary remote URLs.
 
-To regenerate the eighteen original sounds and two normalized foley adaptations:
+To regenerate the twenty-two original sounds and two normalized foley adaptations:
 
 ```sh
 python3 scripts/build_audio_palette.py --kenney-archive /path/to/kenney-rpg-audio.zip
 ```
 
+Without `--kenney-archive` only the synthesized sounds are rebuilt, and the
+recorded adaptations and their provenance are kept. `--only CUE [CUE ...]`
+rebuilds the named cues and leaves every other file and provenance record as
+it is; a new cue is appended to `sfx-provenance.json`, and its entry in
+`manifest.json` is written by hand. The four Dawnweaver cues were added with:
+
+```sh
+python3 scripts/build_audio_palette.py --only radiant_charge radiant_beam radiant_core radiance_burst \
+  --ffmpeg /opt/homebrew/opt/ffmpeg-full/bin/ffmpeg
+```
+
 Use `--ffmpeg /path/to/ffmpeg` if the default executable lacks `libvorbis` (for
 example an existing `ffmpeg-full` installation). Python uses only its standard
-library; FFmpeg is an offline authoring tool, not a new game dependency. Exact
-encoded bytes may depend on encoder version; packaged hashes identify the release.
+library; FFmpeg is an offline authoring tool, not a new game dependency. One
+encoder build writes the same bytes on every run (`+bitexact` on the output also
+fixes the Ogg stream serial), but bytes may differ between encoder versions;
+packaged hashes identify the release. `scripts/test_build_audio_palette.py`
+checks that every packaged synthesized cue still follows what the script makes.
+The charge reads the windup of `dawn_ray` from
+`shared/assets/catalog/skills.json`, and its arpeggio and air enter at shares
+of it. If that windup changes, the script test and the client test of the
+decoded charge fail until the charge is rebuilt with `--only radiant_charge`.
 
 ## Verification and remaining scope
 

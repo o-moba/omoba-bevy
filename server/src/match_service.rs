@@ -1,17 +1,52 @@
 //! One public lobby schedules independent, immutable game workers.
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use omoba_career_store::matchmaking::{fits_cohort, same_cohort};
 use shared::career::ProfileSummary;
-use shared::match_service::{MatchAllocation, MatchPreference, MatchServiceView};
+use shared::match_service::{
+    CapacityLine, InMatch, MatchAllocation, MatchPreference, MatchServiceView,
+};
 use shared::wire::{GameState, ServerPacket};
 
+use crate::admission::{Limits, PRACTICE_ABANDON_WINDOW, SourceIp};
 use crate::match_allocation::{AllocatedHuman, Manifest, Phase, Status, Worker, unix_ms};
 use crate::runtime::ServerRuntime;
 
 const MAX_WAITING: usize = 128;
-const QUICK_WAIT: Duration = Duration::from_secs(30);
+/// Casual PvP waits this long for more humans, then bots fill the empty seats
+/// (owner default O-2).
+const CASUAL_BOT_FILL: Duration = Duration::from_secs(30);
+/// After this long a Ranked search may also search Casual PvP, keeping its
+/// place in Ranked (owner default O-1).
+const RANKED_CASUAL_OFFER: Duration = Duration::from_secs(300);
+/// A Ranked party whose members are not one rated cohort (LR-08).
+const RANKED_PARTY_COHORT: &str = "ranked_party_cohort";
+/// A roster whose every human comes from one IP that already holds
+/// `arenas_per_ip` arenas alone (LR-16).
+const ARENA_LIMIT: &str = "arena_limit";
+/// vs Bots from an IP that left too many vs Bots allocations unplayed (LR-16).
+const PRACTICE_COOLDOWN: &str = "practice_cooldown";
+
+/// What one `FindMatch` asks for (LR-08).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Search {
+    pub preference: MatchPreference,
+    /// A Ranked search that also searches Casual PvP. Honoured once the
+    /// offer is due; a retry without it withdraws it.
+    pub also_casual: bool,
+}
+
+impl From<MatchPreference> for Search {
+    fn from(preference: MatchPreference) -> Self {
+        Self {
+            preference,
+            also_casual: false,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Waiting {
     profile: ProfileSummary,
@@ -22,6 +57,25 @@ struct Waiting {
     order: u64,
     /// (party id, members the party waits for). Refreshed on every retry.
     party: Option<(u64, usize)>,
+    /// Since when this entry searches Casual PvP: a Casual entry from the
+    /// start, a Ranked entry once it took the Casual offer. The Casual bot
+    /// fill counts from here.
+    casual_since: Option<Instant>,
+}
+
+impl Waiting {
+    /// Mirrors a Ranked entry's request to also search Casual PvP, once the
+    /// offer is due. A Casual entry always searches Casual.
+    fn also_casual(&mut self, also_casual: bool, now: Instant) {
+        if self.preference != MatchPreference::Ranked {
+            return;
+        }
+        if !also_casual {
+            self.casual_since = None;
+        } else if now.saturating_duration_since(self.queued) >= RANKED_CASUAL_OFFER {
+            self.casual_since.get_or_insert(now);
+        }
+    }
 }
 pub(crate) struct Lobby {
     pool: crate::match_pool::Pool,
@@ -31,6 +85,180 @@ pub(crate) struct Lobby {
     requests: HashMap<String, (String, u64, Instant)>,
     order: u64,
     last_poll: Option<Instant>,
+    /// Per-source limits (LR-16), and what they track in memory only: the IP
+    /// of each profile's latest FindMatch, the IPs of each live allocation
+    /// this lobby made, and when each IP left a vs Bots allocation unplayed.
+    limits: Limits,
+    sources: HashMap<String, SourceIp>,
+    arena_sources: HashMap<String, Vec<SourceIp>>,
+    abandons: HashMap<SourceIp, VecDeque<Instant>>,
+    /// While every arena is busy: each queued profile whose roster is ready,
+    /// with its place in the line for the next free arena (LR-09).
+    line: HashMap<String, u32>,
+    turnover: crate::capacity::Turnover,
+    capacity: crate::capacity::CapacityMetric,
+}
+
+impl Lobby {
+    fn new(pool: crate::match_pool::Pool, limits: Limits) -> Self {
+        Self {
+            pool,
+            waiting: Vec::new(),
+            assignments: HashMap::new(),
+            errors: HashMap::new(),
+            requests: HashMap::new(),
+            order: 0,
+            last_poll: None,
+            limits,
+            sources: HashMap::new(),
+            arena_sources: HashMap::new(),
+            abandons: HashMap::new(),
+            line: HashMap::new(),
+            turnover: Default::default(),
+            capacity: Default::default(),
+        }
+    }
+
+    /// Recomputes the line for a free arena (LR-09), empty unless every
+    /// arena is busy: the rosters ready to start, in the order they get an
+    /// arena (`select`'s: vs Bots, then Ranked, then Casual PvP), each of
+    /// their profiles with its 1-based place. A roster the per-source limits
+    /// would refuse takes no place.
+    fn refresh_line(&mut self, now: Instant) {
+        self.line.clear();
+        if !self.pool.full() {
+            return;
+        }
+        let mut remaining: Vec<usize> = (0..self.waiting.len()).collect();
+        let mut position = 0_u32;
+        loop {
+            let rest: Vec<Waiting> = remaining.iter().map(|&i| self.waiting[i].clone()).collect();
+            let Some((members, queue)) = select(&rest, now) else {
+                break;
+            };
+            let members: Vec<usize> = members.iter().map(|&i| remaining[i]).collect();
+            if self.refusal(&members, queue, now).is_none() {
+                position += 1;
+                for &i in &members {
+                    self.line
+                        .insert(self.waiting[i].profile.profile_id.clone(), position);
+                }
+            }
+            remaining.retain(|i| !members.contains(i));
+        }
+    }
+
+    /// The capacity-busy metric after a scheduling pass (LR-09): the journal
+    /// line and `<match root>/capacity.json`.
+    fn report_capacity(&mut self, now: Instant) {
+        let update = self.capacity.update(
+            crate::capacity::Sample {
+                capacity: self.pool.capacity(),
+                occupied: self.pool.occupied(),
+                searching: self.waiting.len(),
+                line: &self.line,
+            },
+            now,
+            unix_ms(),
+        );
+        if let Some(line) = &update.log {
+            println!("{line}");
+        }
+        if update.write {
+            let _ = crate::match_allocation::atomic_json(
+                &self.pool.root().join(crate::capacity::REPORT_FILE),
+                &update.report,
+            );
+        }
+    }
+
+    /// Live arenas `ip` holds alone: every human of the allocation came from it.
+    fn arenas_held(&self, ip: SourceIp) -> usize {
+        self.arena_sources
+            .iter()
+            .filter(|(id, ips)| {
+                ips.as_slice() == [ip]
+                    && self
+                        .pool
+                        .slots
+                        .get(*id)
+                        .is_some_and(|slot| !slot.terminal())
+            })
+            .count()
+    }
+
+    /// Whether `ip` cools down after leaving too many vs Bots allocations
+    /// unplayed within [`PRACTICE_ABANDON_WINDOW`].
+    fn cooling(&self, ip: SourceIp, now: Instant) -> bool {
+        self.abandons.get(&ip).is_some_and(|times| {
+            let recent = times
+                .iter()
+                .filter(|at| now.saturating_duration_since(**at) < PRACTICE_ABANDON_WINDOW)
+                .count();
+            recent >= self.limits.practice_abandons
+                && times.back().is_some_and(|last| {
+                    now.saturating_duration_since(*last) < self.limits.practice_cooldown
+                })
+        })
+    }
+
+    /// Why a roster of `members` (indices into `waiting`) for `queue` may not
+    /// get an arena now, as a lobby failure code.
+    fn refusal(
+        &self,
+        members: &[usize],
+        queue: MatchPreference,
+        now: Instant,
+    ) -> Option<&'static str> {
+        let mut ips: Vec<SourceIp> = members
+            .iter()
+            .filter_map(|&i| {
+                self.sources
+                    .get(&self.waiting[i].profile.profile_id)
+                    .copied()
+            })
+            .collect();
+        ips.sort();
+        ips.dedup();
+        if queue == MatchPreference::BotPractice && ips.iter().any(|ip| self.cooling(*ip, now)) {
+            return Some(PRACTICE_COOLDOWN);
+        }
+        match ips.as_slice() {
+            [ip] if self.arenas_held(*ip) >= self.limits.arenas_per_ip => Some(ARENA_LIMIT),
+            _ => None,
+        }
+    }
+
+    /// Records the vs Bots allocations that ended without their match ever
+    /// running, and forgets the IPs of every ended allocation.
+    fn track_abandons(&mut self, now: Instant) {
+        let pool = &self.pool;
+        let abandons = &mut self.abandons;
+        self.arena_sources.retain(|id, ips| {
+            let Some(slot) = pool.slots.get(id) else {
+                return false;
+            };
+            if !slot.terminal() {
+                return true;
+            }
+            if slot.manifest.preference == MatchPreference::BotPractice && !slot.ran() {
+                for ip in ips.iter() {
+                    abandons.entry(*ip).or_default().push_back(now);
+                }
+            }
+            false
+        });
+        let keep = PRACTICE_ABANDON_WINDOW.max(self.limits.practice_cooldown);
+        abandons.retain(|_, times| {
+            while times
+                .front()
+                .is_some_and(|at| now.saturating_duration_since(*at) >= keep)
+            {
+                times.pop_front();
+            }
+            !times.is_empty()
+        });
+    }
 }
 #[derive(Default)]
 pub(crate) enum MatchService {
@@ -57,11 +285,12 @@ impl MatchService {
             None
         }
     }
-    pub fn from_env() -> Result<Self, String> {
+    /// `bound` is this process's bound UDP address (`SERVER_ADDR`).
+    pub fn from_env(bound: std::net::SocketAddr, limits: Limits) -> Result<Self, String> {
         match std::env::var("OMOBA_SERVER_ROLE").ok().as_deref() {
             None | Some("") | Some("standalone") => Ok(Self::Standalone),
             Some("lobby") => {
-                let pool = crate::match_pool::Pool::from_env()?;
+                let pool = crate::match_pool::Pool::from_env(bound)?;
                 let assignments = pool
                     .slots
                     .iter()
@@ -73,13 +302,8 @@ impl MatchService {
                     })
                     .collect();
                 Ok(Self::Lobby(Lobby {
-                    pool,
-                    waiting: Vec::new(),
                     assignments,
-                    errors: HashMap::new(),
-                    requests: HashMap::new(),
-                    order: 0,
-                    last_poll: None,
+                    ..Lobby::new(pool, limits)
                 }))
             }
             Some("match") => {
@@ -114,15 +338,19 @@ impl MatchService {
             Some(_) => Err("Invalid OMOBA_SERVER_ROLE".into()),
         }
     }
+    /// `source` is the IP the signed FindMatch came from (LR-16).
+    #[allow(clippy::too_many_arguments)]
     pub fn enqueue(
         &mut self,
         profile: ProfileSummary,
         session: String,
         request_id: u64,
-        preference: MatchPreference,
+        search: Search,
         party: Option<(u64, usize)>,
+        source: SourceIp,
         now: Instant,
     ) {
+        let preference = search.preference;
         let Self::Lobby(lobby) = self else {
             return;
         };
@@ -134,6 +362,7 @@ impl MatchService {
             (session.clone(), request_id, now),
         );
         lobby.errors.remove(&profile.profile_id);
+        lobby.sources.insert(profile.profile_id.clone(), source);
         // A new request can arrive between worker settlement and the lobby's
         // periodic pruning. Never bind it to the completed allocation.
         if let Some(slot) = lobby
@@ -150,6 +379,9 @@ impl MatchService {
         {
             lobby.assignments.remove(&profile.profile_id);
         }
+        // A live allocation is either still being handed off or, once its
+        // match runs, a seat this profile left: the view offers Resume and
+        // the next FindMatch after the match ends queues (LR-13).
         if lobby.assignments.contains_key(&profile.profile_id) {
             return;
         }
@@ -161,6 +393,7 @@ impl MatchService {
             if existing.session == session && existing.preference == preference {
                 existing.touched = now;
                 existing.party = party;
+                existing.also_casual(search.also_casual, now);
             } else {
                 lobby
                     .errors
@@ -172,6 +405,18 @@ impl MatchService {
             lobby.errors.insert(profile.profile_id, "queue_full".into());
             return;
         }
+        // vs Bots allocates at once: refuse it here rather than after queueing.
+        if preference == MatchPreference::BotPractice && party.is_none() {
+            let refusal = if lobby.cooling(source, now) {
+                Some(PRACTICE_COOLDOWN)
+            } else {
+                (lobby.arenas_held(source) >= lobby.limits.arenas_per_ip).then_some(ARENA_LIMIT)
+            };
+            if let Some(code) = refusal {
+                lobby.errors.insert(profile.profile_id, code.into());
+                return;
+            }
+        }
         lobby.order = lobby.order.saturating_add(1);
         lobby.waiting.push(Waiting {
             profile,
@@ -181,7 +426,35 @@ impl MatchService {
             touched: now,
             order: lobby.order,
             party,
+            casual_since: (preference == MatchPreference::Casual).then_some(now),
         });
+        // A newcomer to a full lobby learns its place at once.
+        if lobby.pool.full() {
+            lobby.refresh_line(now);
+        }
+    }
+    /// Answers a `FindMatch` with a refusal `code` instead of queueing it (a
+    /// moderation sanction, LR-15): the profile leaves the queue, and its view
+    /// is `Failed { code }` until a later `FindMatch` is accepted.
+    pub fn refuse(
+        &mut self,
+        profile: &str,
+        session: String,
+        request_id: u64,
+        code: &str,
+        now: Instant,
+    ) {
+        let Self::Lobby(lobby) = self else {
+            return;
+        };
+        if lobby.requests.len() >= 512 && !lobby.requests.contains_key(profile) {
+            return;
+        }
+        lobby
+            .requests
+            .insert(profile.to_owned(), (session, request_id, now));
+        lobby.waiting.retain(|w| w.profile.profile_id != profile);
+        lobby.errors.insert(profile.to_owned(), code.to_owned());
     }
     pub fn cancel(&mut self, profile: &str) {
         let Self::Lobby(lobby) = self else {
@@ -215,21 +488,31 @@ impl MatchService {
                     .iter()
                     .find(|h| h.profile_id == profile && h.session_id == session)
                 {
-                    return Some(if slot.ready() {
-                        MatchServiceView::Assigned {
-                            allocation: MatchAllocation {
-                                allocation_id: id.clone(),
-                                endpoint: slot.manifest.endpoint.clone(),
-                                preference: slot.manifest.preference,
-                                team: h.team,
-                                human_count: slot.manifest.humans.len() as u32,
-                                bot_count: 10 - slot.manifest.humans.len() as u32,
-                                rated: slot.manifest.humans.len() == 10,
-                                join_deadline_ms: slot.manifest.join_deadline_ms,
-                            },
-                        }
-                    } else {
-                        MatchServiceView::Allocating
+                    let Some(status) = slot.ready_status() else {
+                        return Some(MatchServiceView::Allocating);
+                    };
+                    // Every allocated human joins before a worker's match
+                    // starts, so a running match on the lobby view is one this
+                    // profile left: it can resume the seat, not be handed a
+                    // fresh match (LR-13).
+                    let in_match = (status.phase == Phase::Running).then(|| InMatch {
+                        ends_within_secs: status
+                            .ends_by_ms
+                            .map(|end| end.saturating_sub(unix_ms()).div_ceil(1000)),
+                    });
+                    return Some(MatchServiceView::Assigned {
+                        allocation: MatchAllocation {
+                            allocation_id: id.clone(),
+                            endpoint: slot.manifest.endpoint.clone(),
+                            preference: slot.manifest.preference,
+                            team: h.team,
+                            human_count: slot.manifest.humans.len() as u32,
+                            bot_count: 10 - slot.manifest.humans.len() as u32,
+                            // Only Ranked is rated, when the match is eligible.
+                            rated: slot.manifest.preference.rated(),
+                            join_deadline_ms: slot.manifest.join_deadline_ms,
+                        },
+                        in_match,
                     });
                 }
                 return Some(MatchServiceView::Failed {
@@ -240,30 +523,16 @@ impl MatchService {
         if let Some(code) = lobby.errors.get(profile) {
             return Some(MatchServiceView::Failed { code: code.clone() });
         }
-        if let Some(w) = lobby
+        if let Some(index) = lobby
             .waiting
             .iter()
-            .find(|w| w.profile.profile_id == profile)
+            .position(|w| w.profile.profile_id == profile)
         {
-            let humans = lobby
-                .waiting
-                .iter()
-                .filter(|other| compatible(w, other))
-                .count()
-                .min(10) as u32;
-            return Some(MatchServiceView::Waiting {
-                preference: w.preference,
-                humans,
-                needed: if w.preference == MatchPreference::BotPractice {
-                    w.party.map_or(1, |(_, size)| size as u32)
-                } else {
-                    10
-                },
-                elapsed_secs: now.saturating_duration_since(w.queued).as_secs(),
-                bot_fill_after_secs: (w.preference == MatchPreference::Quick)
-                    .then_some(QUICK_WAIT.as_secs()),
-                capacity_wait: lobby.pool.full(),
+            let line = lobby.line.get(profile).map(|&position| CapacityLine {
+                position,
+                eta_secs: lobby.turnover.eta_secs(position, now),
             });
+            return Some(waiting_view(&lobby.waiting, index, line, now));
         }
         Some(MatchServiceView::Idle)
     }
@@ -279,15 +548,19 @@ impl MatchService {
         }
         lobby.last_poll = Some(now);
         lobby.pool.poll();
+        lobby.turnover.observe(lobby.pool.occupied(), now);
         lobby.assignments.retain(|profile, id| {
             if let Some(slot) = lobby.pool.slots.get(id) {
                 if !slot.terminal() {
                     return true;
                 }
-                if slot
-                    .status
-                    .as_ref()
-                    .is_some_and(|s| s.phase == Phase::Failed)
+                // A played match that ended (finished, capped or reaped) frees
+                // its seat silently; the next FindMatch queues (LR-13).
+                if !slot.ran()
+                    && slot
+                        .status
+                        .as_ref()
+                        .is_some_and(|s| s.phase == Phase::Failed)
                 {
                     lobby
                         .errors
@@ -297,6 +570,7 @@ impl MatchService {
             false
         });
         expire_waiting(&mut lobby.waiting, now);
+        lobby.track_abandons(now);
         lobby.requests.retain(|profile, (_, _, touched)| {
             now.saturating_duration_since(*touched) < Duration::from_secs(120)
                 || lobby.assignments.contains_key(profile)
@@ -308,14 +582,30 @@ impl MatchService {
         lobby
             .errors
             .retain(|profile, _| lobby.requests.contains_key(profile));
+        lobby
+            .sources
+            .retain(|profile, _| lobby.requests.contains_key(profile));
         // At most four OS process launches per scheduling pass.
         for _ in 0..4 {
             if lobby.pool.full() {
                 break;
             }
-            let Some(indices) = select(&lobby.waiting, now) else {
+            let Some((indices, queue)) = select(&lobby.waiting, now) else {
                 break;
             };
+            if let Some(code) = lobby.refusal(&indices, queue, now) {
+                let refused: HashSet<_> = indices
+                    .iter()
+                    .map(|&i| lobby.waiting[i].profile.profile_id.clone())
+                    .collect();
+                for profile in &refused {
+                    lobby.errors.insert(profile.clone(), code.into());
+                }
+                lobby
+                    .waiting
+                    .retain(|w| !refused.contains(&w.profile.profile_id));
+                continue;
+            }
             let selected: Vec<_> = indices.iter().map(|&i| lobby.waiting[i].clone()).collect();
             let teams = split_teams(&selected);
             let humans = selected
@@ -337,12 +627,19 @@ impl MatchService {
                 allocation_id: id,
                 endpoint: String::new(),
                 bind: String::new(),
-                preference: selected[0].preference,
+                preference: queue,
                 humans,
                 join_deadline_ms: unix_ms() + 180_000,
             };
             match lobby.pool.allocate(manifest) {
                 Ok(id) => {
+                    let mut ips: Vec<SourceIp> = selected
+                        .iter()
+                        .filter_map(|w| lobby.sources.get(&w.profile.profile_id).copied())
+                        .collect();
+                    ips.sort();
+                    ips.dedup();
+                    lobby.arena_sources.insert(id.clone(), ips);
                     for w in &selected {
                         lobby
                             .assignments
@@ -363,16 +660,95 @@ impl MatchService {
                 }
             }
         }
+        lobby.turnover.settle(lobby.pool.occupied());
+        lobby.refresh_line(now);
+        lobby.report_capacity(now);
     }
 }
 fn expire_waiting(waiting: &mut Vec<Waiting>, now: Instant) {
     waiting.retain(|w| now.saturating_duration_since(w.touched) < Duration::from_secs(15));
 }
 
-fn compatible(a: &Waiting, b: &Waiting) -> bool {
-    a.preference == b.preference
-        && a.profile.newcomer() == b.profile.newcomer()
-        && (i64::from(a.profile.rating) - i64::from(b.profile.rating)).abs() <= 300
+/// This unit searches `queue`: its own queue, and Casual PvP too for a Ranked
+/// unit whose every member took the Casual offer.
+fn searches(waiting: &[Waiting], unit: &[usize], queue: MatchPreference) -> bool {
+    match queue {
+        MatchPreference::Casual => unit.iter().all(|&i| waiting[i].casual_since.is_some()),
+        _ => unit.iter().all(|&i| waiting[i].preference == queue),
+    }
+}
+
+/// The searching screen's view of one queued entry. `line` is its place in
+/// the line for a free arena, while every arena is busy (LR-09).
+fn waiting_view(
+    waiting: &[Waiting],
+    index: usize,
+    line: Option<CapacityLine>,
+    now: Instant,
+) -> MatchServiceView {
+    let w = &waiting[index];
+    let units = units(waiting);
+    let own = units.iter().find(|unit| unit.contains(&index));
+    let ranked = w.preference == MatchPreference::Ranked;
+    // The lobby never seats a mixed party in Ranked: say so instead of
+    // waiting forever (LR-08).
+    if ranked && own.is_some_and(|unit| !same_cohort(unit.iter().map(|&i| &waiting[i].profile))) {
+        return MatchServiceView::Failed {
+            code: RANKED_PARTY_COHORT.into(),
+        };
+    }
+    let count = |queue| {
+        waiting
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| searches(waiting, &[*i], queue))
+            .count()
+    };
+    let (humans, needed, searching) = match w.preference {
+        MatchPreference::BotPractice => {
+            let size = w.party.map_or(1, |(_, size)| size);
+            (own.map_or(1, Vec::len), size, None)
+        }
+        // The largest rated cohort this player can be seated in.
+        MatchPreference::Ranked => {
+            let peers = waiting
+                .iter()
+                .filter(|low| {
+                    low.preference == w.preference && fits_cohort(&low.profile, &w.profile)
+                })
+                .map(|low| {
+                    waiting
+                        .iter()
+                        .filter(|other| {
+                            other.preference == w.preference
+                                && fits_cohort(&low.profile, &other.profile)
+                        })
+                        .count()
+                })
+                .max()
+                .unwrap_or(1);
+            (peers, 10, Some(count(MatchPreference::Ranked)))
+        }
+        MatchPreference::Casual => {
+            let all = count(MatchPreference::Casual);
+            (all, 10, Some(all))
+        }
+    };
+    MatchServiceView::Waiting {
+        preference: w.preference,
+        humans: humans.min(10) as u32,
+        needed: needed as u32,
+        elapsed_secs: now.saturating_duration_since(w.queued).as_secs(),
+        bot_fill_after_secs: (w.preference == MatchPreference::Casual)
+            .then_some(CASUAL_BOT_FILL.as_secs()),
+        capacity_wait: line.is_some(),
+        searching: searching.map(|n| n as u32),
+        casual_offer_after_secs: ranked.then_some(RANKED_CASUAL_OFFER.as_secs()),
+        // For a party, only once every member took the offer.
+        also_casual: ranked
+            && own.is_some_and(|unit| searches(waiting, unit, MatchPreference::Casual)),
+        capacity_line: line,
+    }
 }
 /// Queue units: a party's queued members travel together, everyone else
 /// alone. A party is a unit only once every member it waits for has queued
@@ -478,54 +854,80 @@ fn split_teams(selected: &[Waiting]) -> Vec<shared::map::Team> {
     teams
 }
 
-fn select(waiting: &[Waiting], now: Instant) -> Option<Vec<usize>> {
+/// The next allocation and its queue (LR-08), or `None`.
+///
+/// - vs Bots: the oldest practice unit, at once.
+/// - Ranked: ten humans of one rated cohort (the career store's policy, so
+///   the store never rejects the roster), never filled with bots. A Ranked
+///   roster goes before a Casual one, which keeps a Ranked player's place
+///   while it also searches Casual.
+/// - Casual PvP: every unit that searches Casual, whatever its rating or
+///   newcomer cohort; once anyone has searched Casual for
+///   [`CASUAL_BOT_FILL`], bots fill the empty seats.
+///
+/// Among rosters of one queue the oldest wins.
+fn select(waiting: &[Waiting], now: Instant) -> Option<(Vec<usize>, MatchPreference)> {
     let units = units(waiting);
-    let mut best: Option<Vec<usize>> = None;
-    for anchor in &units {
-        let low = anchor
-            .iter()
-            .map(|&i| &waiting[i])
-            .min_by_key(|w| w.profile.rating)
-            .expect("units are never empty");
-        if low.preference == MatchPreference::BotPractice {
-            return Some(anchor.clone());
-        }
-        let mut cohort: Vec<&Vec<usize>> = vec![anchor];
-        for unit in &units {
-            if std::ptr::eq(unit, anchor)
-                || !unit.iter().all(|&i| {
-                    compatible(low, &waiting[i]) && waiting[i].profile.rating >= low.profile.rating
-                })
-            {
+    if let Some(unit) = units
+        .iter()
+        .find(|unit| searches(waiting, unit, MatchPreference::BotPractice))
+    {
+        return Some((unit.clone(), MatchPreference::BotPractice));
+    }
+    let older = |a: &Vec<usize>, b: &Vec<usize>| {
+        a.iter()
+            .map(|&i| waiting[i].order)
+            .cmp(b.iter().map(|&i| waiting[i].order))
+            .is_lt()
+    };
+    for queue in [MatchPreference::Ranked, MatchPreference::Casual] {
+        let mut best: Option<Vec<usize>> = None;
+        for anchor in units.iter().filter(|unit| searches(waiting, unit, queue)) {
+            let low = anchor
+                .iter()
+                .map(|&i| &waiting[i])
+                .min_by_key(|w| w.profile.rating)
+                .expect("units are never empty");
+            // Ranked admits a unit only when its every member fits the
+            // cohort that starts at the anchor's lowest rating.
+            let fits = |unit: &Vec<usize>| {
+                queue != MatchPreference::Ranked
+                    || unit
+                        .iter()
+                        .all(|&i| fits_cohort(&low.profile, &waiting[i].profile))
+            };
+            if !fits(anchor) {
                 continue;
             }
-            let mut sizes: Vec<usize> = cohort.iter().map(|u| u.len()).collect();
-            sizes.push(unit.len());
-            if splits(&sizes) {
-                cohort.push(unit);
+            let mut cohort: Vec<&Vec<usize>> = vec![anchor];
+            for unit in &units {
+                if std::ptr::eq(unit, anchor) || !searches(waiting, unit, queue) || !fits(unit) {
+                    continue;
+                }
+                let mut sizes: Vec<usize> = cohort.iter().map(|u| u.len()).collect();
+                sizes.push(unit.len());
+                if splits(&sizes) {
+                    cohort.push(unit);
+                }
+            }
+            let mut members: Vec<usize> = cohort.iter().flat_map(|u| u.iter().copied()).collect();
+            members.sort_by_key(|&i| waiting[i].order);
+            let ready = members.len() == 10
+                || (queue == MatchPreference::Casual
+                    && members.iter().any(|&i| {
+                        waiting[i].casual_since.is_some_and(|since| {
+                            now.saturating_duration_since(since) >= CASUAL_BOT_FILL
+                        })
+                    }));
+            if ready && best.as_ref().is_none_or(|b| older(&members, b)) {
+                best = Some(members);
             }
         }
-        let mut members: Vec<usize> = cohort.iter().flat_map(|u| u.iter().copied()).collect();
-        members.sort_by_key(|&i| waiting[i].order);
-        if members.len() < 10
-            && (low.preference == MatchPreference::HumansOnly
-                || members
-                    .iter()
-                    .all(|&i| now.saturating_duration_since(waiting[i].queued) < QUICK_WAIT))
-        {
-            continue;
-        }
-        if best.as_ref().is_none_or(|b| {
-            members
-                .iter()
-                .map(|&i| waiting[i].order)
-                .cmp(b.iter().map(|&i| waiting[i].order))
-                .is_lt()
-        }) {
-            best = Some(members);
+        if let Some(members) = best {
+            return Some((members, queue));
         }
     }
-    best
+    None
 }
 impl ServerRuntime {
     pub(crate) fn send_lobby_snapshots(&mut self, now: Instant) {
@@ -617,6 +1019,14 @@ impl ServerRuntime {
         } else {
             Phase::Ready
         };
+        // A player who left sees this on the lobby (LR-13).
+        let ends_by_ms = (phase == Phase::Running)
+            .then(|| self.latest_match_end(now))
+            .flatten()
+            .map(|end| {
+                let left = end.saturating_duration_since(now).as_millis();
+                unix_ms().saturating_add(u64::try_from(left).unwrap_or(u64::MAX))
+            });
         let MatchService::Worker(worker) = &mut self.match_service else {
             return;
         };
@@ -644,6 +1054,7 @@ impl ServerRuntime {
                     heartbeat_ms: unix_ms(),
                     phase: Phase::Failed,
                     result_id,
+                    ends_by_ms: None,
                 };
                 if crate::match_allocation::atomic_json(
                     &worker.directory.join("status.json"),
@@ -670,6 +1081,7 @@ impl ServerRuntime {
                 heartbeat_ms: unix_ms(),
                 phase: phase.clone(),
                 result_id,
+                ends_by_ms,
             };
             if crate::match_allocation::atomic_json(&worker.directory.join("status.json"), &status)
                 .is_ok()
@@ -691,6 +1103,10 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+    /// One player's own IP.
+    fn home() -> SourceIp {
+        SourceIp::of(std::net::SocketAddr::from(([203, 0, 113, 1], 40000)))
+    }
     fn w(id: u64, p: MatchPreference, now: Instant) -> Waiting {
         Waiting {
             profile: ProfileSummary::new(format!("{id:064x}"), "Player".into()),
@@ -700,43 +1116,302 @@ mod tests {
             touched: now,
             order: id,
             party: None,
+            casual_since: (p == MatchPreference::Casual).then_some(now),
         }
+    }
+    /// The indices `select` picks, for a queue that must form.
+    fn picked(waiting: &[Waiting], now: Instant, queue: MatchPreference) -> Vec<usize> {
+        let (members, picked) = select(waiting, now).expect("a roster forms");
+        assert_eq!(picked, queue);
+        members
     }
     #[test]
     fn abandoned_queue_expires_without_explicit_find_match_retry() {
         let now = Instant::now();
-        let mut waiting = vec![w(1, MatchPreference::HumansOnly, now)];
+        let mut waiting = vec![w(1, MatchPreference::Ranked, now)];
         expire_waiting(&mut waiting, now + Duration::from_secs(14));
         assert_eq!(waiting.len(), 1);
         // Runtime heartbeats do not touch queue intent. Only enqueue/retry does.
         expire_waiting(&mut waiting, now + Duration::from_secs(15));
         assert!(waiting.is_empty());
-        waiting.push(w(2, MatchPreference::HumansOnly, now));
+        waiting.push(w(2, MatchPreference::Ranked, now));
         waiting[0].touched = now + Duration::from_secs(14);
         expire_waiting(&mut waiting, now + Duration::from_secs(15));
         assert_eq!(waiting.len(), 1);
     }
 
+    /// LR-08: Casual bot-fills after 30 s; Ranked never bot-fills, however
+    /// long it waits and however many humans short it is.
     #[test]
-    fn quick_waits_thirty_seconds_and_humans_never_fill() {
+    fn casual_waits_thirty_seconds_and_ranked_never_bot_fills() {
         let now = Instant::now();
-        let mut q = vec![w(1, MatchPreference::Quick, now)];
+        let q = vec![w(1, MatchPreference::Casual, now)];
         assert!(select(&q, now + Duration::from_secs(29)).is_none());
-        assert_eq!(select(&q, now + QUICK_WAIT), Some(vec![0]));
-        q[0].preference = MatchPreference::HumansOnly;
-        assert!(select(&q, now + Duration::from_secs(999)).is_none());
+        assert_eq!(
+            picked(&q, now + CASUAL_BOT_FILL, MatchPreference::Casual),
+            vec![0]
+        );
+        let ranked: Vec<_> = (1..=9)
+            .map(|i| w(i, MatchPreference::Ranked, now))
+            .collect();
+        assert!(select(&ranked, now + Duration::from_secs(99_999)).is_none());
     }
     #[test]
-    fn full_humans_and_practice_allocate_immediately() {
+    fn full_queues_and_practice_allocate_immediately() {
         let now = Instant::now();
-        let q: Vec<_> = (1..=10)
-            .map(|i| w(i, MatchPreference::HumansOnly, now))
-            .collect();
-        assert_eq!(select(&q, now).unwrap().len(), 10);
+        for queue in [MatchPreference::Ranked, MatchPreference::Casual] {
+            let q: Vec<_> = (1..=10).map(|i| w(i, queue, now)).collect();
+            assert_eq!(picked(&q, now, queue).len(), 10);
+        }
         assert_eq!(
-            select(&[w(1, MatchPreference::BotPractice, now)], now),
-            Some(vec![0])
+            picked(
+                &[w(1, MatchPreference::BotPractice, now)],
+                now,
+                MatchPreference::BotPractice
+            ),
+            vec![0]
         );
+    }
+
+    /// LR-08 acceptance: one newcomer and one veteran in Casual get one
+    /// allocation with both after 30 s; their cohorts no longer split them
+    /// into two bot games.
+    #[test]
+    fn casual_groups_a_newcomer_and_a_veteran_before_bots_fill() {
+        let now = Instant::now();
+        let mut veteran = w(2, MatchPreference::Casual, now + Duration::from_secs(5));
+        veteran.profile.rating = 1400;
+        veteran.profile.rated_matches = 40;
+        let q = vec![w(1, MatchPreference::Casual, now), veteran];
+        assert!(q[0].profile.newcomer() && !q[1].profile.newcomer());
+        assert!(select(&q, now + Duration::from_secs(29)).is_none());
+        let both = picked(&q, now + CASUAL_BOT_FILL, MatchPreference::Casual);
+        assert_eq!(both, vec![0, 1]);
+        let chosen: Vec<_> = both.iter().map(|&i| q[i].clone()).collect();
+        let manifest = manifest_for(&chosen, MatchPreference::Casual);
+        assert_eq!(manifest.humans.len(), 2);
+        assert_eq!(manifest.validate(), Ok(()));
+    }
+
+    /// LR-08 acceptance: a party {1000 newcomer, 1400 veteran} with 8 solo
+    /// players never yields a rated roster the store would reject, whichever
+    /// cohort the solos are in. Ranked tells the party why; Casual seats all
+    /// ten unrated.
+    #[test]
+    fn a_mixed_party_never_yields_a_rated_roster_the_store_rejects() {
+        let now = Instant::now();
+        for solos_rating in [1000, 1400] {
+            for solos_veterans in [false, true] {
+                let party = |id, rating, rated_matches| {
+                    let mut entry = in_party(w(id, MatchPreference::Ranked, now), 9, 2);
+                    entry.profile.rating = rating;
+                    entry.profile.rated_matches = rated_matches;
+                    entry
+                };
+                let mut q = vec![party(1, 1000, 0), party(2, 1400, 40)];
+                for id in 3..=10 {
+                    let mut solo = w(id, MatchPreference::Ranked, now);
+                    solo.profile.rating = solos_rating;
+                    solo.profile.rated_matches = if solos_veterans { 40 } else { 0 };
+                    q.push(solo);
+                }
+                let later = now + Duration::from_secs(99_999);
+                assert!(
+                    select(&q, later).is_none(),
+                    "{solos_rating} {solos_veterans}"
+                );
+                assert_eq!(
+                    waiting_view(&q, 0, None, now),
+                    MatchServiceView::Failed {
+                        code: RANKED_PARTY_COHORT.into()
+                    }
+                );
+                // Every Ranked roster the lobby can still form passes the
+                // store's own check.
+                for id in 11..=12 {
+                    let mut solo = w(id, MatchPreference::Ranked, now);
+                    solo.profile.rating = solos_rating;
+                    solo.profile.rated_matches = if solos_veterans { 40 } else { 0 };
+                    q.push(solo);
+                }
+                let (members, queue) = select(&q, later).expect("ten solos form Ranked");
+                assert_eq!(queue, MatchPreference::Ranked);
+                assert!(!members.contains(&0) && !members.contains(&1));
+                assert!(same_cohort(members.iter().map(|&i| &q[i].profile)));
+
+                // The same ten in Casual PvP: one unrated roster.
+                q.truncate(10);
+                for entry in &mut q {
+                    entry.preference = MatchPreference::Casual;
+                    entry.casual_since = Some(now);
+                }
+                let all = picked(&q, now, MatchPreference::Casual);
+                assert_eq!(all.len(), 10);
+                let chosen: Vec<_> = all.iter().map(|&i| q[i].clone()).collect();
+                let teams = split_teams(&chosen);
+                assert_eq!(teams[0], teams[1], "the party plays together");
+                assert!(
+                    !manifest_for(&chosen, MatchPreference::Casual)
+                        .preference
+                        .rated()
+                );
+            }
+        }
+    }
+
+    /// O-1: after five minutes a Ranked search may also search Casual PvP.
+    /// It keeps its place in Ranked: a full Ranked roster still takes it,
+    /// and otherwise Casual bot-fills 30 s after the offer was taken.
+    #[test]
+    fn ranked_offers_casual_after_five_minutes_and_keeps_its_place() {
+        let now = Instant::now();
+        let mut service = lobby_with(crate::match_pool::Pool::for_test(), &[]);
+        let directory = match &service {
+            MatchService::Lobby(lobby) => lobby.pool.test_directory().to_path_buf(),
+            _ => unreachable!(),
+        };
+        let ranked = w(1, MatchPreference::Ranked, now);
+        let (profile, session) = (&ranked.profile.profile_id, &ranked.session);
+        let find = |service: &mut MatchService, also_casual, at| {
+            service.enqueue(
+                ranked.profile.clone(),
+                session.clone(),
+                1,
+                Search {
+                    preference: MatchPreference::Ranked,
+                    also_casual,
+                },
+                None,
+                home(),
+                at,
+            );
+        };
+        let view = |service: &MatchService, at| match service.view(profile, session, at) {
+            Some(MatchServiceView::Waiting {
+                searching,
+                casual_offer_after_secs,
+                also_casual,
+                bot_fill_after_secs,
+                ..
+            }) => (
+                searching,
+                casual_offer_after_secs,
+                also_casual,
+                bot_fill_after_secs,
+            ),
+            other => panic!("expected a wait, got {other:?}"),
+        };
+        find(&mut service, false, now);
+        assert_eq!(view(&service, now), (Some(1), Some(300), false, None));
+        // Too early: the lobby ignores the request.
+        let early = now + Duration::from_secs(299);
+        find(&mut service, true, early);
+        assert!(!view(&service, early).2);
+        let offered = now + RANKED_CASUAL_OFFER;
+        find(&mut service, true, offered);
+        assert!(view(&service, offered).2);
+        let MatchService::Lobby(lobby) = &mut service else {
+            unreachable!()
+        };
+        assert!(select(&lobby.waiting, offered + Duration::from_secs(29)).is_none());
+        // A full Ranked roster goes first and keeps this player's place.
+        let mut q = lobby.waiting.clone();
+        q.extend((2..=10).map(|i| w(i, MatchPreference::Ranked, offered)));
+        let ranked_roster = picked(&q, offered + CASUAL_BOT_FILL, MatchPreference::Ranked);
+        assert!(ranked_roster.contains(&0));
+        // A Casual player meets it in Casual PvP.
+        lobby.waiting.push(w(11, MatchPreference::Casual, offered));
+        assert_eq!(
+            picked(
+                &lobby.waiting,
+                offered + CASUAL_BOT_FILL,
+                MatchPreference::Casual
+            ),
+            vec![0, 1]
+        );
+        // Casual counts it among its searchers; withdrawing ends that.
+        let casual_count = |lobby: &Lobby| match waiting_view(&lobby.waiting, 1, None, offered) {
+            MatchServiceView::Waiting { searching, .. } => searching,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(casual_count(lobby), Some(2));
+        find(&mut service, false, offered);
+        let MatchService::Lobby(lobby) = &service else {
+            unreachable!()
+        };
+        assert_eq!(casual_count(lobby), Some(1));
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// A Ranked party searches Casual only once every member took the offer.
+    #[test]
+    fn a_ranked_party_also_searches_casual_only_together() {
+        let now = Instant::now();
+        let mut q = vec![
+            in_party(w(1, MatchPreference::Ranked, now), 4, 2),
+            in_party(w(2, MatchPreference::Ranked, now), 4, 2),
+        ];
+        let offered = now + RANKED_CASUAL_OFFER;
+        q[0].also_casual(true, offered);
+        let late = offered + Duration::from_secs(999);
+        assert!(select(&q, late).is_none());
+        let also = |q: &[Waiting]| match waiting_view(q, 0, None, late) {
+            MatchServiceView::Waiting { also_casual, .. } => also_casual,
+            other => panic!("{other:?}"),
+        };
+        assert!(!also(&q), "one member alone does not move the party");
+        q[1].also_casual(true, offered);
+        assert!(also(&q));
+        assert_eq!(picked(&q, late, MatchPreference::Casual), vec![0, 1]);
+    }
+
+    /// LR-08: the lobby reports `rated` from the queue, not the head count.
+    #[test]
+    fn ten_humans_are_rated_only_in_ranked() {
+        let now = Instant::now();
+        for queue in [MatchPreference::Casual, MatchPreference::Ranked] {
+            let pool = crate::match_pool::Pool::for_test();
+            let directory = pool.test_directory().to_path_buf();
+            let mut service = lobby_with(pool, &[]);
+            let entries: Vec<_> = (1..=10).map(|i| w(i, queue, now)).collect();
+            for entry in &entries {
+                service.enqueue(
+                    entry.profile.clone(),
+                    entry.session.clone(),
+                    1,
+                    queue.into(),
+                    None,
+                    home(),
+                    now,
+                );
+            }
+            service.tick(now);
+            let MatchService::Lobby(lobby) = &service else {
+                unreachable!()
+            };
+            assert!(lobby.waiting.is_empty(), "{queue:?}");
+            let (id, slot) = lobby.pool.slots.iter().next().unwrap();
+            assert_eq!(slot.manifest.preference, queue);
+            assert_eq!(slot.manifest.humans.len(), 10);
+            let receipt = Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms(),
+                phase: Phase::Ready,
+                result_id: None,
+                ends_by_ms: None,
+            };
+            lobby.pool.write_status_for_test(id, &receipt);
+            let Some(MatchServiceView::Assigned { allocation, .. }) =
+                service.view(&entries[0].profile.profile_id, &entries[0].session, now)
+            else {
+                panic!("expected a handoff");
+            };
+            assert_eq!(allocation.preference, queue);
+            assert_eq!((allocation.human_count, allocation.bot_count), (10, 0));
+            assert_eq!(allocation.rated, queue == MatchPreference::Ranked);
+            let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+        }
     }
     fn in_party(mut entry: Waiting, party: u64, size: usize) -> Waiting {
         entry.party = Some((party, size));
@@ -750,24 +1425,24 @@ mod tests {
         assert!(select(&q, now).is_none(), "the friend has not queued yet");
         q.push(w(2, MatchPreference::BotPractice, now));
         // A stranger's practice is its own allocation.
-        assert_eq!(select(&q, now), Some(vec![1]));
+        assert_eq!(picked(&q, now, MatchPreference::BotPractice), vec![1]);
         q.remove(1);
         q.push(in_party(w(3, MatchPreference::BotPractice, now), 7, 2));
-        let picked = select(&q, now).unwrap();
-        assert_eq!(picked, vec![0, 1]);
-        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let together = picked(&q, now, MatchPreference::BotPractice);
+        assert_eq!(together, vec![0, 1]);
+        let chosen: Vec<_> = together.iter().map(|&i| q[i].clone()).collect();
         let teams = split_teams(&chosen);
         assert_eq!(teams, vec![shared::map::Team::Green; 2]);
     }
 
-    fn manifest_for(chosen: &[Waiting]) -> Manifest {
+    fn manifest_for(chosen: &[Waiting], queue: MatchPreference) -> Manifest {
         let teams = split_teams(chosen);
         Manifest {
             version: 1,
             allocation_id: "a".repeat(32),
             endpoint: "127.0.0.1:41000".into(),
             bind: "127.0.0.1:41000".into(),
-            preference: chosen[0].preference,
+            preference: queue,
             humans: chosen
                 .iter()
                 .zip(teams)
@@ -789,7 +1464,10 @@ mod tests {
         let pool = crate::match_pool::Pool::for_test();
         let directory = pool.test_directory().to_path_buf();
         let worker = Worker {
-            manifest: manifest_for(&[w(1, MatchPreference::BotPractice, now)]),
+            manifest: manifest_for(
+                &[w(1, MatchPreference::BotPractice, now)],
+                MatchPreference::BotPractice,
+            ),
             directory: directory.clone(),
             recovery: false,
             origin_epoch: 0,
@@ -798,15 +1476,7 @@ mod tests {
             last_status: None,
             terminal_at: None,
         };
-        let lobby = Lobby {
-            pool,
-            waiting: vec![],
-            assignments: HashMap::new(),
-            errors: HashMap::new(),
-            requests: HashMap::new(),
-            order: 0,
-            last_poll: None,
-        };
+        let lobby = Lobby::new(pool, Limits::default());
         for role in [
             MatchService::Standalone,
             MatchService::Lobby(lobby),
@@ -834,12 +1504,111 @@ mod tests {
     }
 
     #[test]
+    fn sanctions_refuse_find_match_with_their_code_until_lifted() {
+        use crate::runtime::ports::{ManualClock, MemoryTransport};
+        use ed25519_dalek::Signer;
+        use shared::career::{CareerAction, CareerRequest};
+        use shared::moderation::{Sanction, SanctionKind, code};
+        let now = Instant::now();
+        let (lobby, directory) = practice_lobby();
+        let mut rt = ServerRuntime::for_test(
+            MemoryTransport::new("127.0.0.1:4000".parse().unwrap()),
+            ManualClock::new(now),
+            crate::career_backend::MemoryCareer::test_backend(7),
+            crate::match_rules::MatchConfig::dev(),
+        );
+        rt.match_service = lobby;
+        let player: std::net::SocketAddr = "127.0.0.1:60200".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            player,
+            ProfileSummary::new("c".repeat(64), "Rude#0001".into()),
+            "rude",
+        );
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let mut sequence = 0;
+        let mut find = |rt: &mut ServerRuntime, preference| {
+            // One account request per 100 ms per endpoint.
+            std::thread::sleep(Duration::from_millis(110));
+            sequence += 1;
+            let action = CareerAction::FindMatch {
+                request_id: sequence,
+                preference,
+                also_casual: false,
+            };
+            let nonce = "b".repeat(64);
+            let signature = key
+                .sign(&shared::career::authorized_signing_bytes(
+                    7, &nonce, sequence, &action,
+                ))
+                .to_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            rt.career.backend.handle(
+                player,
+                CareerRequest::Authorized {
+                    session_nonce: nonce,
+                    sequence,
+                    action,
+                    signature,
+                },
+            );
+            rt.poll_career(now);
+            rt.career_view(player, now).match_service.unwrap()
+        };
+        let failed = |code: &str| MatchServiceView::Failed { code: code.into() };
+        let hour = crate::moderation::unix_now() + 3600;
+        rt.career.backend.test_set_sanctions(
+            player,
+            vec![Sanction {
+                kind: SanctionKind::RankedBan,
+                until: Some(hour),
+            }],
+        );
+        assert_eq!(
+            find(&mut rt, MatchPreference::Ranked),
+            failed(code::RANKED_BAN)
+        );
+        assert!(matches!(
+            find(&mut rt, MatchPreference::Casual),
+            MatchServiceView::Waiting { .. }
+        ));
+        // A matchmaking ban applied while searching takes the player out.
+        rt.career.backend.test_set_sanctions(
+            player,
+            vec![Sanction {
+                kind: SanctionKind::MatchmakingBan,
+                until: None,
+            }],
+        );
+        assert_eq!(
+            find(&mut rt, MatchPreference::Casual),
+            failed(code::MATCHMAKING_BAN)
+        );
+        assert_eq!(
+            find(&mut rt, MatchPreference::BotPractice),
+            failed(code::MATCHMAKING_BAN)
+        );
+        let MatchService::Lobby(lobby) = &rt.match_service else {
+            unreachable!()
+        };
+        assert!(lobby.waiting.is_empty());
+        // Lifted: the next search queues, with no restart.
+        rt.career.backend.test_set_sanctions(player, Vec::new());
+        assert!(matches!(
+            find(&mut rt, MatchPreference::Ranked),
+            MatchServiceView::Waiting { .. }
+        ));
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    #[test]
     fn fresh_queue_request_cannot_reuse_settling_or_terminal_allocation() {
         let now = Instant::now();
         let entry = w(1, MatchPreference::BotPractice, now);
         let mut pool = crate::match_pool::Pool::for_test();
         let id = pool
-            .allocate(manifest_for(std::slice::from_ref(&entry)))
+            .allocate(manifest_for(std::slice::from_ref(&entry), entry.preference))
             .unwrap();
         let mut receipt = Status {
             allocation_id: id.clone(),
@@ -847,19 +1616,17 @@ mod tests {
             heartbeat_ms: unix_ms(),
             phase: Phase::Running,
             result_id: Some("finished-round".into()),
+            ends_by_ms: None,
         };
         pool.slots.get_mut(&id).unwrap().status = Some(receipt.clone());
         // Worker writes between lobby polls. Its cache deliberately stays Running.
         receipt.phase = Phase::Settling;
         pool.write_status_for_test(&id, &receipt);
         let mut service = MatchService::Lobby(Lobby {
-            pool,
-            waiting: vec![],
             assignments: HashMap::from([(entry.profile.profile_id.clone(), id.clone())]),
-            errors: HashMap::new(),
-            requests: HashMap::new(),
             order: 1,
             last_poll: Some(now),
+            ..Lobby::new(pool, Limits::default())
         });
         assert!(
             matches!(
@@ -881,8 +1648,9 @@ mod tests {
             entry.profile.clone(),
             entry.session.clone(),
             2,
-            entry.preference,
+            entry.preference.into(),
             None,
+            home(),
             now,
         );
         assert_eq!(
@@ -899,6 +1667,151 @@ mod tests {
         }
     }
 
+    fn lobby_with(pool: crate::match_pool::Pool, assignments: &[(&Waiting, &str)]) -> MatchService {
+        MatchService::Lobby(Lobby {
+            assignments: assignments
+                .iter()
+                .map(|(w, id)| (w.profile.profile_id.clone(), (*id).to_owned()))
+                .collect(),
+            order: 1,
+            ..Lobby::new(pool, Limits::default())
+        })
+    }
+
+    /// LR-13: Play after leaving a running match shows the in-match state
+    /// with its latest end at once (no lobby tick needed) and queues nobody.
+    /// Once the worker ends the match (LR-11 reaping), the seat frees without
+    /// an error and the next FindMatch queues.
+    #[test]
+    fn a_player_who_left_a_running_match_sees_it_and_queues_once_it_ends() {
+        let now = Instant::now();
+        let entry = w(1, MatchPreference::BotPractice, now);
+        let (profile, session) = (&entry.profile.profile_id, &entry.session);
+        let mut pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_path_buf();
+        let id = pool
+            .allocate(manifest_for(std::slice::from_ref(&entry), entry.preference))
+            .unwrap();
+        let mut receipt = Status {
+            allocation_id: id.clone(),
+            server_epoch: 7,
+            heartbeat_ms: unix_ms(),
+            phase: Phase::Running,
+            result_id: Some("r".repeat(32)),
+            ends_by_ms: Some(unix_ms() + 200_000),
+        };
+        pool.write_status_for_test(&id, &receipt);
+        // A live worker (the stand-in child exits at once and would be
+        // relaunched in recovery).
+        pool.adopt_for_test(&id);
+        let mut service = lobby_with(pool, &[(&entry, &id)]);
+        let find_match = |service: &mut MatchService, request_id| {
+            service.enqueue(
+                entry.profile.clone(),
+                session.clone(),
+                request_id,
+                entry.preference.into(),
+                None,
+                home(),
+                now,
+            );
+        };
+        let in_match = |service: &MatchService| match service.view(profile, session, now) {
+            Some(MatchServiceView::Assigned {
+                allocation,
+                in_match: Some(state),
+            }) => {
+                assert_eq!(allocation.allocation_id, id);
+                assert_eq!(allocation.endpoint, "127.0.0.1:45000");
+                state
+            }
+            other => panic!("expected the in-match state, got {other:?}"),
+        };
+        find_match(&mut service, 2);
+        assert_eq!(service.request_id(profile, session), Some(2));
+        let secs = in_match(&service).ends_within_secs.unwrap();
+        assert!((195..=200).contains(&secs), "{secs}");
+        // Retries and lobby ticks keep the seat and add no queue entry.
+        service.tick(now + Duration::from_secs(1));
+        find_match(&mut service, 2);
+        in_match(&service);
+        let MatchService::Lobby(lobby) = &service else {
+            unreachable!()
+        };
+        assert!(lobby.waiting.is_empty());
+        assert!(lobby.errors.is_empty());
+
+        // The worker reaped the unattended match and retired.
+        receipt.phase = Phase::Failed;
+        receipt.ends_by_ms = None;
+        receipt.heartbeat_ms = unix_ms();
+        if let MatchService::Lobby(lobby) = &service {
+            lobby.pool.write_status_for_test(&id, &receipt);
+        }
+        service.tick(now + Duration::from_secs(2));
+        assert_eq!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Idle),
+            "a played match that ended is not a failed allocation"
+        );
+        find_match(&mut service, 2);
+        assert!(matches!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Waiting { .. })
+        ));
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// The handoff itself is unchanged: a worker that has not started its
+    /// match is handed out without the in-match state, and an allocation
+    /// that fails before it ran still reports why.
+    #[test]
+    fn an_unstarted_worker_is_a_plain_handoff_and_its_failure_is_reported() {
+        let now = Instant::now();
+        let entry = w(1, MatchPreference::BotPractice, now);
+        let (profile, session) = (&entry.profile.profile_id, &entry.session);
+        let mut pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_path_buf();
+        let id = pool
+            .allocate(manifest_for(std::slice::from_ref(&entry), entry.preference))
+            .unwrap();
+        let mut receipt = Status {
+            allocation_id: id.clone(),
+            server_epoch: 7,
+            heartbeat_ms: unix_ms(),
+            phase: Phase::Forming,
+            result_id: None,
+            ends_by_ms: None,
+        };
+        pool.write_status_for_test(&id, &receipt);
+        let mut service = lobby_with(pool, &[(&entry, &id)]);
+        service.enqueue(
+            entry.profile.clone(),
+            session.clone(),
+            2,
+            entry.preference.into(),
+            None,
+            home(),
+            now,
+        );
+        assert!(matches!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Assigned { in_match: None, .. })
+        ));
+        receipt.phase = Phase::Failed;
+        if let MatchService::Lobby(lobby) = &service {
+            lobby.pool.write_status_for_test(&id, &receipt);
+        }
+        service.tick(now + Duration::from_secs(1));
+        assert_eq!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Failed {
+                code: "allocation_cancelled_or_expired".into()
+            })
+        );
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
     #[test]
     fn a_party_bot_practice_manifest_is_accepted_by_the_worker_contract() {
         let now = Instant::now();
@@ -906,25 +1819,27 @@ mod tests {
             in_party(w(1, MatchPreference::BotPractice, now), 7, 2),
             in_party(w(2, MatchPreference::BotPractice, now), 7, 2),
         ];
-        let chosen: Vec<_> = select(&q, now)
-            .unwrap()
+        let chosen: Vec<_> = picked(&q, now, MatchPreference::BotPractice)
             .iter()
             .map(|&i| q[i].clone())
             .collect();
-        let manifest = manifest_for(&chosen);
+        let manifest = manifest_for(&chosen, MatchPreference::BotPractice);
         assert_eq!(manifest.validate(), Ok(()));
         // A solo practice still validates; a split bot practice does not.
-        assert_eq!(manifest_for(&chosen[..1]).validate(), Ok(()));
+        assert_eq!(
+            manifest_for(&chosen[..1], MatchPreference::BotPractice).validate(),
+            Ok(())
+        );
         let mut split = manifest;
         split.humans[1].team = shared::map::Team::Blue;
         assert!(split.validate().is_err());
     }
 
     #[test]
-    fn quick_matches_keep_every_party_on_one_team() {
+    fn casual_matches_keep_every_party_on_one_team() {
         let now = Instant::now();
         let mut q: Vec<_> = (1..=10)
-            .map(|i| w(i, MatchPreference::Quick, now))
+            .map(|i| w(i, MatchPreference::Casual, now))
             .collect();
         for i in [0, 1, 2] {
             q[i] = in_party(q[i].clone(), 1, 3);
@@ -932,9 +1847,9 @@ mod tests {
         for i in [5, 6] {
             q[i] = in_party(q[i].clone(), 2, 2);
         }
-        let picked = select(&q, now).unwrap();
-        assert_eq!(picked.len(), 10);
-        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let ten = picked(&q, now, MatchPreference::Casual);
+        assert_eq!(ten.len(), 10);
+        let chosen: Vec<_> = ten.iter().map(|&i| q[i].clone()).collect();
         let teams = split_teams(&chosen);
         let team_of = |order: u64| teams[chosen.iter().position(|c| c.order == order).unwrap()];
         assert!([2, 3].iter().all(|&o| team_of(o) == team_of(1)));
@@ -952,28 +1867,312 @@ mod tests {
         assert!(splits(&[3, 2, 3, 2]));
         assert!(!splits(&[4, 3, 3]));
         assert!(!splits(&[4, 2, 2, 2]));
-        // A lone party in a bot-filled quick match still plays together.
+        // A lone party in a bot-filled Casual match still plays together.
         let now = Instant::now();
         let q = vec![
-            in_party(w(1, MatchPreference::Quick, now), 3, 2),
-            in_party(w(2, MatchPreference::Quick, now), 3, 2),
+            in_party(w(1, MatchPreference::Casual, now), 3, 2),
+            in_party(w(2, MatchPreference::Casual, now), 3, 2),
         ];
-        let picked = select(&q, now + QUICK_WAIT).unwrap();
-        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let pair = picked(&q, now + CASUAL_BOT_FILL, MatchPreference::Casual);
+        let chosen: Vec<_> = pair.iter().map(|&i| q[i].clone()).collect();
         let teams = split_teams(&chosen);
         assert_eq!(teams[0], teams[1]);
     }
 
     #[test]
-    fn rating_windows_and_preferences_stay_separate() {
+    fn ranked_rating_windows_and_queues_stay_separate() {
         let now = Instant::now();
         let mut q: Vec<_> = (1..=10)
-            .map(|i| w(i, MatchPreference::HumansOnly, now))
+            .map(|i| w(i, MatchPreference::Ranked, now))
             .collect();
         q[9].profile.rating = 1400;
         assert!(select(&q, now).is_none());
         q[9].profile.rating = 1000;
-        q[9].preference = MatchPreference::Quick;
+        q[9].preference = MatchPreference::Casual;
+        q[9].casual_since = Some(now);
         assert!(select(&q, now).is_none());
+    }
+
+    /// A practice lobby with room for several arenas, and the receipt a
+    /// worker writes: `phase` with a fresh heartbeat.
+    fn practice_lobby() -> (MatchService, std::path::PathBuf) {
+        let mut pool = crate::match_pool::Pool::for_test();
+        pool.set_capacity_for_test(8);
+        let directory = pool.test_directory().to_path_buf();
+        (lobby_with(pool, &[]), directory)
+    }
+    fn report(service: &mut MatchService, profile: &str, phase: Phase) {
+        let MatchService::Lobby(lobby) = service else {
+            unreachable!()
+        };
+        let id = lobby.assignments[profile].clone();
+        lobby.pool.adopt_for_test(&id);
+        lobby.pool.write_status_for_test(
+            &id,
+            &Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms(),
+                phase,
+                result_id: None,
+                ends_by_ms: None,
+            },
+        );
+    }
+    fn practice(service: &mut MatchService, entry: &Waiting, source: SourceIp, at: Instant) {
+        service.enqueue(
+            entry.profile.clone(),
+            entry.session.clone(),
+            1,
+            MatchPreference::BotPractice.into(),
+            None,
+            source,
+            at,
+        );
+    }
+    fn failed(service: &MatchService, entry: &Waiting, at: Instant) -> Option<String> {
+        match service.view(&entry.profile.profile_id, &entry.session, at) {
+            Some(MatchServiceView::Failed { code }) => Some(code),
+            _ => None,
+        }
+    }
+    fn neighbour() -> SourceIp {
+        SourceIp::of(std::net::SocketAddr::from(([198, 51, 100, 2], 40000)))
+    }
+
+    /// LR-16: a second vs Bots allocation from an IP whose first one is
+    /// Forming or Running is refused with a code the client shows in its own
+    /// words; another IP is not affected, and the IP plays again once its
+    /// match ended.
+    #[test]
+    fn a_second_bot_practice_from_one_ip_is_refused_while_the_first_holds_an_arena() {
+        let now = Instant::now();
+        let (mut service, directory) = practice_lobby();
+        let (first, second, other) = (
+            w(1, MatchPreference::BotPractice, now),
+            w(2, MatchPreference::BotPractice, now),
+            w(3, MatchPreference::BotPractice, now),
+        );
+        practice(&mut service, &first, home(), now);
+        service.tick(now);
+        for (phase, at) in [(Phase::Forming, 1), (Phase::Running, 2)] {
+            let at = now + Duration::from_secs(at);
+            report(&mut service, &first.profile.profile_id, phase);
+            service.tick(at);
+            practice(&mut service, &second, home(), at);
+            assert_eq!(failed(&service, &second, at).as_deref(), Some(ARENA_LIMIT));
+        }
+        // Another IP gets its own arena.
+        let at = now + Duration::from_secs(2);
+        practice(&mut service, &other, neighbour(), at);
+        service.tick(now + Duration::from_secs(3));
+        assert!(matches!(
+            service.view(&other.profile.profile_id, &other.session, at),
+            Some(MatchServiceView::Allocating | MatchServiceView::Assigned { .. })
+        ));
+        // A party or a lone Casual player from that IP is held to the same
+        // rule when bots would fill the match: it waits, then is refused.
+        let casual = w(4, MatchPreference::Casual, now);
+        let at = now + Duration::from_secs(4);
+        service.enqueue(
+            casual.profile.clone(),
+            casual.session.clone(),
+            1,
+            MatchPreference::Casual.into(),
+            None,
+            home(),
+            at,
+        );
+        let fill = at + CASUAL_BOT_FILL + Duration::from_secs(1);
+        service.enqueue(
+            casual.profile.clone(),
+            casual.session.clone(),
+            1,
+            MatchPreference::Casual.into(),
+            None,
+            home(),
+            fill,
+        );
+        service.tick(fill);
+        assert_eq!(
+            failed(&service, &casual, fill).as_deref(),
+            Some(ARENA_LIMIT)
+        );
+        // The first match ended: the IP may practice again.
+        report(&mut service, &first.profile.profile_id, Phase::Finished);
+        let later = fill + Duration::from_secs(1);
+        service.tick(later);
+        practice(&mut service, &second, home(), later);
+        assert_eq!(failed(&service, &second, later), None);
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// LR-16: an IP that left `practice_abandons` vs Bots allocations
+    /// unplayed within ten minutes cools down; a played match never counts.
+    #[test]
+    fn repeated_abandoned_bot_practice_triggers_a_short_cooldown() {
+        let limits = Limits::default();
+        let start = Instant::now();
+        let (mut service, directory) = practice_lobby();
+        let mut at = start;
+        for id in 1..=limits.practice_abandons as u64 {
+            let entry = w(id, MatchPreference::BotPractice, start);
+            practice(&mut service, &entry, home(), at);
+            at += Duration::from_secs(1);
+            service.tick(at);
+            assert_eq!(failed(&service, &entry, at), None, "{id}");
+            // Allocated, never joined: the worker gives up.
+            report(&mut service, &entry.profile.profile_id, Phase::Failed);
+            at += Duration::from_secs(1);
+            service.tick(at);
+        }
+        let next = w(100, MatchPreference::BotPractice, start);
+        practice(&mut service, &next, home(), at);
+        assert_eq!(
+            failed(&service, &next, at).as_deref(),
+            Some(PRACTICE_COOLDOWN)
+        );
+        // Only that IP cools down, and only for a while.
+        let other = w(101, MatchPreference::BotPractice, start);
+        practice(&mut service, &other, neighbour(), at);
+        assert_eq!(failed(&service, &other, at), None);
+        let after = at + limits.practice_cooldown;
+        service.tick(after);
+        practice(&mut service, &next, home(), after);
+        assert_eq!(failed(&service, &next, after), None);
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// LR-09: with every arena busy, each ready roster sees its place in the
+    /// line for the next free arena (vs Bots first, as `select` seats them),
+    /// with an estimate once arenas have freed; a search that is not ready
+    /// (Ranked 1/10) shows its own progress. The lobby reports the busy
+    /// period in `capacity.json`.
+    #[test]
+    fn a_full_lobby_shows_each_ready_roster_its_place_in_the_line() {
+        use crate::capacity::{CapacityReport, REPORT_FILE};
+        let now = Instant::now();
+        let pool = crate::match_pool::Pool::for_test(); // one arena
+        let directory = pool.test_directory().to_path_buf();
+        let mut service = lobby_with(pool, &[]);
+        let ip = |n: u8| SourceIp::of(std::net::SocketAddr::from(([198, 51, 100, n], 40000)));
+        let first = w(1, MatchPreference::BotPractice, now);
+        practice(&mut service, &first, ip(1), now);
+        service.tick(now);
+        report(&mut service, &first.profile.profile_id, Phase::Running);
+        let (second, third) = (
+            w(2, MatchPreference::BotPractice, now),
+            w(3, MatchPreference::BotPractice, now),
+        );
+        let ranked = w(4, MatchPreference::Ranked, now);
+        let at = now + Duration::from_secs(1);
+        service.enqueue(
+            ranked.profile.clone(),
+            ranked.session.clone(),
+            1,
+            MatchPreference::Ranked.into(),
+            None,
+            ip(4),
+            at,
+        );
+        practice(&mut service, &second, ip(2), at);
+        practice(&mut service, &third, ip(3), at);
+        let line = |service: &MatchService, entry: &Waiting, at| match service.view(
+            &entry.profile.profile_id,
+            &entry.session,
+            at,
+        ) {
+            Some(MatchServiceView::Waiting {
+                capacity_wait,
+                capacity_line,
+                ..
+            }) => {
+                assert_eq!(capacity_wait, capacity_line.is_some());
+                capacity_line
+            }
+            other => panic!("expected a wait, got {other:?}"),
+        };
+        // Known at once, before the next pass.
+        assert_eq!(
+            line(&service, &second, at),
+            Some(CapacityLine {
+                position: 1,
+                eta_secs: None
+            })
+        );
+        service.tick(at);
+        assert_eq!(line(&service, &third, at).unwrap().position, 2);
+        assert_eq!(
+            line(&service, &ranked, at),
+            None,
+            "not ready: no capacity wait"
+        );
+        let read = || -> CapacityReport {
+            serde_json::from_slice(&std::fs::read(directory.join(REPORT_FILE)).unwrap()).unwrap()
+        };
+        let busy = read();
+        assert_eq!(
+            (
+                busy.capacity,
+                busy.occupied,
+                busy.searching,
+                busy.waiting_for_arena
+            ),
+            (1, 1, 3, 2)
+        );
+        assert!(busy.busy_since_ms.is_some());
+        assert_eq!(busy.busy_periods, 1);
+
+        // The match ends and its port frees: the first in line gets it.
+        let MatchService::Lobby(lobby) = &mut service else {
+            unreachable!()
+        };
+        let id = lobby.assignments[&first.profile.profile_id].clone();
+        lobby.pool.write_status_for_test(
+            &id,
+            &Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms() - 36_000,
+                phase: Phase::Finished,
+                result_id: None,
+                ends_by_ms: None,
+            },
+        );
+        let freed = now + Duration::from_secs(2);
+        service.tick(freed);
+        let MatchService::Lobby(lobby) = &service else {
+            unreachable!()
+        };
+        assert!(lobby.assignments.contains_key(&second.profile.profile_id));
+        assert_eq!(line(&service, &third, freed).unwrap().position, 1);
+        // A minute on, one arena freed in 61 s: about a minute to wait.
+        let later = now + Duration::from_secs(61);
+        practice(&mut service, &third, ip(3), later);
+        service.enqueue(
+            ranked.profile.clone(),
+            ranked.session.clone(),
+            1,
+            MatchPreference::Ranked.into(),
+            None,
+            ip(4),
+            later,
+        );
+        service.tick(later);
+        assert_eq!(
+            line(&service, &third, later),
+            Some(CapacityLine {
+                position: 1,
+                eta_secs: Some(61)
+            })
+        );
+        // Nobody ready waits any more: the busy period is over.
+        service.cancel(&third.profile.profile_id);
+        service.tick(later + Duration::from_secs(1));
+        let clear = read();
+        assert_eq!(clear.busy_since_ms, None);
+        assert_eq!(clear.waiting_for_arena, 0);
+        assert_eq!(clear.searching, 1);
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
     }
 }

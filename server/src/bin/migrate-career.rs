@@ -7,7 +7,10 @@ fn main() {
         .build()
         .expect("runtime");
     match runtime.block_on(omoba_career_store::career_store::CareerStore::connect(&url)) {
-        Ok(_) => println!("Career schema version 3 ready."),
+        Ok(_) => println!(
+            "Career schema version {} ready.",
+            omoba_career_store::career_store::SCHEMA_VERSIONS.len()
+        ),
         Err(error) => {
             eprintln!("Career migration failed: {error}");
             std::process::exit(1);

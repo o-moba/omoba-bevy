@@ -1,7 +1,7 @@
 //! Opt-in presentation fixtures and production-action drivers for the edge HUD.
 //! Synthetic actors/ledger never leave the client. Purchases/utilities require
 //! authoritative receipts/acknowledgments, and are reported separately.
-use super::{BetaUiQa, clears_playfield, measured_logical_rect, measured_rect};
+use super::{BetaUiQa, compact_controls_clear_playfield, measured_logical_rect, measured_rect};
 use crate::{
     combat::{CombatStats, TargetState},
     input_context::{GameplayInputContext, InputContextSet},
@@ -420,8 +420,21 @@ pub(super) fn mobile_geometry_valid(
             return false;
         };
         let category = matches!(name, "MobileMinionAttack" | "MobileTowerAttack");
-        let minimum_visual = if category { 35.5 } else { 43.5 };
-        if rect.width().min(rect.height()) < minimum_visual
+        // Small phone artwork is deliberately distinct from its 44px input
+        // target. Check the rendered disc against the live layout, then
+        // validate capture separation below.
+        let expected_side = match name {
+            "MobileJoystick" => layout.joystick_radius * 2.0,
+            "MobileAttack" => layout.attack_radius * 2.0,
+            "MobileMinionAttack" | "MobileTowerAttack" => {
+                crate::mobile_controls::CATEGORY_DIAMETER * scale
+            }
+            "MobileRankMode" => layout.upgrade_radius * 2.0,
+            "MobileAttackCancel" => layout.cancel_radius * 2.0,
+            _ if name.starts_with("MobileAbility-") => layout.ability_radii[0] * 2.0,
+            _ => layout.auxiliary_radius * 2.0,
+        };
+        if (rect.width().min(rect.height()) - expected_side).abs() > 1.0
             || (rect.width() - rect.height()).abs() > 1.0
         {
             return false;
@@ -448,27 +461,6 @@ pub(super) fn mobile_geometry_valid(
         if expected.is_some_and(|expected| expected.distance(center) > 1.0) {
             return false;
         }
-        // All six skills/category controls share the 104px arc. Compact phones
-        // move Dash/Haste around the protected hero region; the remaining
-        // utilities keep their 168px arc. Check that contract independently of
-        // the exact rendered-vs-layout center comparison above.
-        let inner = name.starts_with("MobileAbility-");
-        let compact = mobile.viewport.x - mobile.safe.left - mobile.safe.right < 700.0;
-        let orbit = if inner || category {
-            Some(crate::ui::tokens::size::COMBAT_ORBIT_ABILITY_PHONE)
-        } else {
-            match name {
-                "MobileDash" if compact => Some(176.0),
-                "MobileHaste" if compact => Some(150.0),
-                "MobileDash" | "MobileHaste" | "MobileRecall" | "MobileRankMode"
-                | "MobileAttackCancel" => Some(crate::ui::tokens::size::COMBAT_ORBIT_UTILITY_PHONE),
-                _ => None,
-            }
-        };
-        if orbit.is_some_and(|orbit| (center.distance(attack.center()) - orbit * scale).abs() > 1.0)
-        {
-            return false;
-        }
         if let Some(slot) = name.strip_prefix("MobileAbility-") {
             // The rank ring shows only on an upgradable ability, on its disc.
             if let Some(rank) = shown(&format!("MobileRankRing-{slot}")) {
@@ -485,6 +477,9 @@ pub(super) fn mobile_geometry_valid(
             }
             radius = layout.category_radius;
         }
+        if name != "MobileJoystick" {
+            radius = radius.max(22.0);
+        }
         if name == "MobileJoystick" {
             // The capture circle (1.3 × r) may pass the safe bottom by the
             // redline's 2.6 px; the visible base stays inside.
@@ -497,10 +492,9 @@ pub(super) fn mobile_geometry_valid(
         {
             return false;
         }
-        if !clears_playfield(
+        if !compact_controls_clear_playfield(
             Rect::from_center_size(center, Vec2::splat(radius * 2.0)),
-            mobile.viewport,
-            true,
+            mobile,
         ) {
             return false;
         }
@@ -597,12 +591,12 @@ mod tests {
             (
                 "MobileMinionAttack".to_owned(),
                 layout.category_centers[0],
-                18.0 * mobile.combat_scale(),
+                crate::mobile_controls::CATEGORY_DIAMETER * 0.5 * mobile.combat_scale(),
             ),
             (
                 "MobileTowerAttack".to_owned(),
                 layout.category_centers[1],
-                18.0 * mobile.combat_scale(),
+                crate::mobile_controls::CATEGORY_DIAMETER * 0.5 * mobile.combat_scale(),
             ),
             (
                 "MobileDash".to_owned(),
@@ -656,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_radial_guard_checks_orbit_art_and_expanded_touch_bounds() {
+    fn rendered_compact_guard_checks_art_and_expanded_touch_bounds() {
         for viewport in [
             Vec2::new(693.0, 320.0),
             Vec2::new(763.0, 390.0),

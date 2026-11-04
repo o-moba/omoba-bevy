@@ -317,6 +317,9 @@ fn prepare(
             window.resolution.set_physical_resolution(width, height);
         }
         if (9..=11).contains(&qa.stage) {
+            // Desktop casts aim only in a focused window, as for a player; a QA run in a
+            // background window must not lose its aim.
+            window.focused = true;
             window.set_cursor_position(Some(Vec2::new(850.0, 300.0)));
             let key = if qa.ux {
                 KeyCode::KeyR
@@ -2797,6 +2800,7 @@ fn hold_aim(
     let key = crate::input_bindings::SKILL_CAST_KEYS[usize::from(hold.slot)];
     if let Ok(mut window) = windows.single_mut() {
         run.cursor_before = Some(window.physical_cursor_position());
+        window.focused = true;
         window.set_cursor_position(Some(hold.cursor));
     }
     keyboard.press(key);

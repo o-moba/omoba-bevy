@@ -1,0 +1,237 @@
+{
+  "schema": "omoba.wildspark-set-skin.v1",
+  "theme": "scrap-punk",
+  "title": "Scrap Punk Wildspark set",
+  "requirement": "wildspark.handheld.set",
+  "upload": {
+    "kind": "weapon",
+    "project": "omoba",
+    "platform": "desktop",
+    "profile": "handheld-glb-v1"
+  },
+  "license": "CC-BY-4.0",
+  "attribution": "Scrap Punk Wildspark set — original geometry by OMOBA contributors (generated with scripts/build_wildspark_skin.py); CC-BY-4.0",
+  "grip": {
+    "bone": "rightHand",
+    "offset": [
+      0,
+      0,
+      0
+    ],
+    "rotation_degrees": [
+      0,
+      0,
+      0
+    ],
+    "scale": 1
+  },
+  "set": {
+    "repeater": "WildsparkSetRepeater",
+    "launcher": "WildsparkSetLauncher",
+    "muzzle": {
+      "repeater": [
+        0.0,
+        0.12,
+        0.735
+      ],
+      "launcher": [
+        0.0,
+        0.13,
+        0.81
+      ]
+    }
+  },
+  "files": {
+    "model": {
+      "path": "scrap-punk-wildspark-set.glb",
+      "sha256": "32ed9c5faeda189a864666063d47536a7b448ffda8a11e1a292a61ee48289896",
+      "sizeBytes": 627168
+    },
+    "cover": {
+      "path": "cover.png",
+      "sha256": "e556f7b152a3fd6c72d8e6523ffa4932506856d6d7b45b54822022ea747495a9",
+      "sizeBytes": 212673,
+      "width": 640,
+      "height": 480
+    },
+    "repeater": {
+      "path": "repeater.png",
+      "sha256": "8002a4567bd889f7c16f42640dc5838f49b85919d2b0ddf8cd8f0d232691efe3",
+      "sizeBytes": 126407,
+      "width": 512,
+      "height": 512
+    },
+    "launcher": {
+      "path": "launcher.png",
+      "sha256": "c6054010d1b8ddc3b42e7f30dbdfe5f10d58693c8d2db91ca76aacd24e1ecb2a",
+      "sizeBytes": 146519,
+      "width": 512,
+      "height": 512
+    }
+  },
+  "glb": {
+    "scenes": 1,
+    "nodes": 7,
+    "meshes": 4,
+    "primitives": 32,
+    "materials": 9,
+    "vertices": 11815,
+    "triangles": 8064,
+    "nodeNames": [
+      "WildsparkLauncherReceiver",
+      "WildsparkSlide",
+      "WildsparkSetLauncher",
+      "WildsparkRepeaterReceiver",
+      "WildsparkRotor",
+      "WildsparkSetRepeater",
+      "wildspark-set"
+    ],
+    "materialNames": [
+      "Scrap Punk | gunmetal",
+      "Scrap Punk | duct tape",
+      "Scrap Punk | bolts",
+      "Scrap Punk | rust",
+      "Scrap Punk | scrap steel",
+      "Scrap Punk | toxic glow",
+      "Scrap Punk | soot",
+      "Scrap Punk | hazard green",
+      "Scrap Punk | rust bloom"
+    ]
+  },
+  "bounds": {
+    "repeater": {
+      "min": [
+        -0.175,
+        -0.17836,
+        -0.335
+      ],
+      "max": [
+        0.132,
+        0.268,
+        0.735
+      ]
+    },
+    "launcher": {
+      "min": [
+        -0.16,
+        -0.17836,
+        -0.335
+      ],
+      "max": [
+        0.1585,
+        0.35595,
+        0.81
+      ]
+    }
+  },
+  "envelopes": {
+    "repeater": {
+      "baseline": [
+        [
+          -0.17,
+          -0.155,
+          -0.3375
+        ],
+        [
+          0.17,
+          0.2575,
+          0.735
+        ]
+      ],
+      "allowed": [
+        [
+          -0.204,
+          -0.19625,
+          -0.44475
+        ],
+        [
+          0.204,
+          0.29875,
+          0.84225
+        ]
+      ]
+    },
+    "launcher": {
+      "baseline": [
+        [
+          -0.1825,
+          -0.155,
+          -0.3375
+        ],
+        [
+          0.1825,
+          0.3705,
+          0.81
+        ]
+      ],
+      "allowed": [
+        [
+          -0.219,
+          -0.20755,
+          -0.45225
+        ],
+        [
+          0.219,
+          0.42305,
+          0.92475
+        ]
+      ]
+    }
+  },
+  "gates": {
+    "budgets": {
+      "ok": true,
+      "issues": [],
+      "sizeBytes": 627168,
+      "scenes": 1,
+      "nodes": 7,
+      "meshes": 4,
+      "primitives": 32,
+      "materials": 9,
+      "vertices": 11815,
+      "triangles": 8064
+    },
+    "c4": {
+      "ok": true,
+      "issues": []
+    },
+    "studio": {
+      "ok": true,
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      },
+      "prepared": {
+        "sha256": "33472cc1e2dd2d7572a4270c72e626ce321cbf4a4e0a6680dde4076c04725c1b",
+        "sizeBytes": 627164
+      },
+      "validator": "ekza-registry web/app/lib/handheld-glb.ts parseHandheld(final=true), prepareHandheld(embedded grip)",
+      "revision": "90e7850"
+    },
+    "registry": {
+      "ok": true,
+      "validator": "ekza-registry backend app.services.studio.validate_model(asset_kind='weapon') -> handheld.py + handheld_checks.py",
+      "revision": "90e7850"
+    },
+    "game": {
+      "ok": true,
+      "validator": "omoba-bevy passport weapon-build --source --output-dir (validate_model)",
+      "revision": "795bc1a"
+    }
+  },
+  "generator": {
+    "script": "scripts/build_wildspark_skin.py",
+    "blender": "5.0.1",
+    "objects": 7
+  }
+}

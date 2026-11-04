@@ -21,10 +21,27 @@ use std::{
 };
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
+/// Every core career schema version, in order; a runtime requires all of them.
+pub const SCHEMA_VERSIONS: [i32; 5] = [1, 2, 3, 4, 5];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
 const MAX_SOCIAL: i64 = 64;
+
+/// How many profiles new device keys may create in 24 hours (LR-16): from one
+/// source and in total. A key that already has a profile is never counted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NewProfileLimits {
+    pub per_source: u32,
+    pub total: u32,
+}
+
+/// A new key from a source that already created `per_source` profiles today.
+pub const NEW_PROFILE_LIMIT_ERROR: &str = "Too many new profiles were created from this network today. Try again tomorrow, or sign in on a device that already has a profile.";
+/// A new key while `total` profiles were created today.
+pub const NEW_PROFILES_PAUSED_ERROR: &str = "New profiles are paused for today. Try again later, or sign in on a device that already has a profile.";
+/// Admission rows older than this are deleted; the limits look back 24 hours.
+const ADMISSION_RETENTION: &str = "48 hours";
 
 #[derive(Clone)]
 pub struct CareerStore {
@@ -108,58 +125,74 @@ where
 
 impl CareerStore {
     /// Read only provider-verified grants. Missing billing migrations fail closed.
+    /// One read-only snapshot: the bounded grant list (active first), the Hero
+    /// tier sum (`portal.supporter_points`) and the stored aura, combined by the
+    /// same rule as the Account API (`SupporterStatus::from_grants`).
     pub async fn supporter_status(
         &self,
         profile_id: &str,
     ) -> Result<shared::supporter::SupporterStatus, String> {
-        use shared::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
-        let rows = sqlx::query("SELECT provider, valid_from, valid_until, revoked_at, renewal_enabled, EXTRACT(EPOCH FROM now())::bigint AS now FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) DESC, valid_until DESC LIMIT 64")
-            .bind(profile_id).fetch_all(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
-        let mut status = SupporterStatus::default();
-        for row in rows {
-            let from: i64 = row.get("valid_from");
-            let until: i64 = row.get("valid_until");
-            let now: i64 = row.get("now");
-            let revoked = row.get::<Option<i64>, _>("revoked_at").is_some();
-            if !revoked && from <= now && until > now {
-                status.active = true;
-                status.active_until = Some(status.active_until.unwrap_or(0).max(until));
-            }
-            status.grants.push(SupporterGrantSummary {
-                provider: row.get("provider"),
-                valid_from: from,
-                valid_until: until,
-                revoked,
-                renewal_enabled: row.get("renewal_enabled"),
-            });
-        }
-        if status.active {
-            let selected: Option<Option<String>> = sqlx::query_scalar(
-                "SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1",
-            )
-            .bind(profile_id)
-            .fetch_optional(&self.pool)
+        use shared::supporter::{
+            AuraStyle, STATUS_GRANT_LIMIT, SupporterGrantSummary, SupporterStatus, tier_points,
+        };
+        let unavailable = |_| "Supporter storage is unavailable.".to_string();
+        let mut tx = self.pool.begin().await.map_err(unavailable)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            .execute(&mut *tx)
             .await
-            .map_err(|_| "Supporter storage is unavailable.".to_string())?;
-            status.equipped_aura = selected
-                .unwrap_or(Some("solar".into()))
-                .as_deref()
-                .and_then(AuraStyle::from_id);
-        }
-        Ok(status)
+            .map_err(unavailable)?;
+        let (now, points): (i64, i64) = sqlx::query_as(
+            "SELECT EXTRACT(EPOCH FROM now())::bigint, portal.supporter_points($1, EXTRACT(EPOCH FROM now())::bigint)",
+        )
+        .bind(profile_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(unavailable)?;
+        let rows = sqlx::query("SELECT provider, valid_from, valid_until, revoked_at, renewal_enabled, tier_points FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=$2 AND valid_until>$2) DESC, valid_until DESC LIMIT $3")
+            .bind(profile_id).bind(now).bind(STATUS_GRANT_LIMIT).fetch_all(&mut *tx).await.map_err(unavailable)?;
+        let grants = rows
+            .iter()
+            .map(|row| SupporterGrantSummary {
+                provider: row.get("provider"),
+                valid_from: row.get("valid_from"),
+                valid_until: row.get("valid_until"),
+                revoked: row.get::<Option<i64>, _>("revoked_at").is_some(),
+                renewal_enabled: row.get("renewal_enabled"),
+                tier_points: tier_points(i64::from(row.get::<i32, _>("tier_points"))),
+            })
+            .collect();
+        let preference: Option<Option<String>> =
+            sqlx::query_scalar("SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1")
+                .bind(profile_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(unavailable)?;
+        tx.commit().await.map_err(unavailable)?;
+        Ok(SupporterStatus::from_grants(
+            grants,
+            now,
+            tier_points(points),
+            preference.map(|aura| aura.as_deref().and_then(AuraStyle::from_id)),
+        ))
     }
 
     /// Caller has already verified a signed, active profile key. SQL checks the
-    /// grant in the same statement that changes the cosmetic preference.
+    /// grant and the Hero tier in the same statement that changes the cosmetic
+    /// preference: a base style needs an active grant, a tier style its points.
     pub async fn equip_supporter_aura(
         &self,
         profile_id: &str,
         aura: Option<shared::supporter::AuraStyle>,
     ) -> Result<shared::supporter::SupporterStatus, String> {
-        let updated = sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) SELECT $1,$2 WHERE $2::text IS NULL OR EXISTS (SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1 AND revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) ON CONFLICT(profile_id) DO UPDATE SET aura=EXCLUDED.aura")
-            .bind(profile_id).bind(aura.map(|a| a.id())).execute(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
+        let required = i64::from(aura.map_or(0, |style| style.required_points()));
+        let updated = sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) SELECT $1,$2 WHERE $2::text IS NULL OR (EXISTS (SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1 AND revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) AND portal.supporter_points($1,EXTRACT(EPOCH FROM now())::bigint)>=$3) ON CONFLICT(profile_id) DO UPDATE SET aura=EXCLUDED.aura")
+            .bind(profile_id).bind(aura.map(|a| a.id())).bind(required).execute(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
         if updated.rows_affected() == 0 {
-            return Err("An active Supporter membership is required to equip an aura.".into());
+            return Err(if required > 0 {
+                "This aura needs a higher Hero tier this month.".into()
+            } else {
+                "An active Supporter membership is required to equip an aura.".into()
+            });
         }
         self.supporter_status(profile_id).await
     }
@@ -180,7 +213,7 @@ impl CareerStore {
                 .fetch_all(&pool)
                 .await
                 .map_err(|e| StoreError::from(e).to_string())?;
-        if versions != [1, 2, 3] {
+        if versions != SCHEMA_VERSIONS {
             return Err("Unsupported career database schema version.".into());
         }
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
@@ -236,7 +269,7 @@ impl CareerStore {
             sqlx::query("INSERT INTO career_schema_version VALUES (1)")
                 .execute(&mut *tx)
                 .await?;
-        } else if versions != [1] && versions != [1, 2] && versions != [1, 2, 3] {
+        } else if !(1..=SCHEMA_VERSIONS.len()).any(|n| versions == SCHEMA_VERSIONS[..n]) {
             return Err("Unsupported career database schema version.".into());
         }
         if !versions.contains(&2) {
@@ -251,6 +284,18 @@ impl CareerStore {
         }
         if !versions.contains(&3) {
             sqlx::raw_sql(include_str!("../migrations/postgres/003_device_keys.sql"))
+                .execute(&mut *tx)
+                .await?;
+        }
+        if !versions.contains(&4) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/004_admission_limits.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if !versions.contains(&5) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/005_sanctions.sql"))
                 .execute(&mut *tx)
                 .await?;
         }
@@ -278,12 +323,28 @@ impl CareerStore {
         public_key: &str,
         nickname: &str,
     ) -> Result<ProfileSummary, String> {
-        retry(|| self.authenticate_inner(public_key, nickname)).await
+        retry(|| self.authenticate_inner(public_key, nickname, None)).await
+    }
+
+    /// [`Self::authenticate`] for a game sign-in from `source` (one IP: an IPv4
+    /// address or an IPv6 /64). A known key signs in as before; a new key gets
+    /// a profile only within `limits` (LR-16). A refusal is
+    /// [`NEW_PROFILE_LIMIT_ERROR`] or [`NEW_PROFILES_PAUSED_ERROR`] and creates
+    /// nothing.
+    pub async fn authenticate_from(
+        &self,
+        public_key: &str,
+        nickname: &str,
+        source: &str,
+        limits: NewProfileLimits,
+    ) -> Result<ProfileSummary, String> {
+        retry(|| self.authenticate_inner(public_key, nickname, Some((source, limits)))).await
     }
     async fn authenticate_inner(
         &self,
         public_key: &str,
         nickname: &str,
+        admission: Option<(&str, NewProfileLimits)>,
     ) -> StoreResult<ProfileSummary> {
         check_id(public_key)?;
         let nickname = normalize_nickname(nickname)?;
@@ -299,6 +360,9 @@ impl CareerStore {
                 return Err("This device key was revoked. Link a new device or use a recovery code.".into());
             }
             let profile = profile_row(&row)?; tx.commit().await?; return Ok(profile);
+        }
+        if let Some((source, limits)) = admission {
+            admit_new_profile(&mut tx, source, limits).await?;
         }
         let id: String = sqlx::query_scalar("SELECT replace(gen_random_uuid()::text,'-','') || replace(gen_random_uuid()::text,'-','')")
             .fetch_one(&mut *tx).await?;
@@ -353,19 +417,27 @@ impl CareerStore {
         })
         .await
     }
+    /// The player's own rename. Refused with [`moderation::NAME_LOCKED_ERROR`]
+    /// while a moderator's `name_reset` is active (LR-15).
     pub async fn rename(&self, id: &str, name: &str) -> Result<ProfileSummary, String> {
         retry(|| async {
             check_id(id)?;
             let name = normalize_nickname(name)?;
+            let mut tx = self.pool.begin().await?;
+            if moderation::name_locked(&mut tx, id).await? {
+                return Err(moderation::NAME_LOCKED_ERROR.into());
+            }
             let row = sqlx::query(
                 "UPDATE career_profiles SET nickname=$2 WHERE profile_id=$1 RETURNING *",
             )
             .bind(id)
             .bind(name)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *tx)
             .await?
             .ok_or("Profile not found.")?;
-            profile_row(&row)
+            let profile = profile_row(&row)?;
+            tx.commit().await?;
+            Ok(profile)
         })
         .await
     }
@@ -701,6 +773,33 @@ impl CareerStore {
         Ok(result)
     }
 
+    /// The retention job (LR-16): deletes at most `max_profiles` profiles whose
+    /// only key is older than `min_age_days` and that never played and are linked
+    /// to nothing (`career_prune_unplayed_profiles`, schema 4), and admission
+    /// rows older than 48 hours. Returns how many profiles went.
+    pub async fn prune_unplayed_profiles(
+        &self,
+        min_age_days: u32,
+        max_profiles: u32,
+    ) -> Result<u32, String> {
+        let days = i32::try_from(min_age_days).map_err(|_| "Invalid retention age.")?;
+        let limit = i32::try_from(max_profiles).map_err(|_| "Invalid retention batch.")?;
+        retry(|| async {
+            sqlx::query(&format!(
+                "DELETE FROM career_profile_admissions WHERE created_at < clock_timestamp() - interval '{ADMISSION_RETENTION}'"
+            ))
+            .execute(&self.pool)
+            .await?;
+            let pruned: i32 = sqlx::query_scalar("SELECT career_prune_unplayed_profiles($1, $2)")
+                .bind(days)
+                .bind(limit)
+                .fetch_one(&self.pool)
+                .await?;
+            Ok(u32::try_from(pruned).unwrap_or(0))
+        })
+        .await
+    }
+
     pub async fn heartbeat(&self) -> Result<(), String> {
         retry(|| async {
             sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()+interval '90 seconds' WHERE owner_id=$1 AND status!='settled' AND lease_until>clock_timestamp()")
@@ -972,6 +1071,47 @@ pub fn friendship_etag(created_epoch: &str, requested_by: &str, accepted: bool) 
     format!("v1:{created_epoch}:{requested_by}:{}", u8::from(accepted))
 }
 
+/// Counts a new profile for `source` inside the sign-in transaction, or refuses
+/// it when the source or everyone already reached today's limit (LR-16). One
+/// transaction-scoped lock serializes the check and the insert, so concurrent
+/// keys cannot both take the last place.
+async fn admit_new_profile(
+    tx: &mut Transaction<'_, Postgres>,
+    source: &str,
+    limits: NewProfileLimits,
+) -> StoreResult<()> {
+    if source.is_empty() || source.len() > 64 {
+        return Err("Invalid sign-in source.".into());
+    }
+    sqlx::query("SELECT pg_advisory_xact_lock(721946004)")
+        .execute(&mut **tx)
+        .await?;
+    let row = sqlx::query(
+        "WITH h AS (SELECT encode(sha256(convert_to(salt || $1, 'UTF8')), 'hex') AS source FROM career_admission_salt) \
+         SELECT h.source, \
+           (SELECT count(*) FROM career_profile_admissions a WHERE a.source = h.source AND a.created_at > clock_timestamp() - interval '24 hours') AS from_source, \
+           (SELECT count(*) FROM career_profile_admissions a WHERE a.created_at > clock_timestamp() - interval '24 hours') AS total \
+         FROM h",
+    )
+    .bind(source)
+    .fetch_one(&mut **tx)
+    .await?;
+    let from_source: i64 = row.try_get("from_source")?;
+    let total: i64 = row.try_get("total")?;
+    if total >= i64::from(limits.total) {
+        return Err(NEW_PROFILES_PAUSED_ERROR.into());
+    }
+    if from_source >= i64::from(limits.per_source) {
+        return Err(NEW_PROFILE_LIMIT_ERROR.into());
+    }
+    let hashed: String = row.try_get("source")?;
+    sqlx::query("INSERT INTO career_profile_admissions(source) VALUES($1)")
+        .bind(hashed)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 fn check_id(id: &str) -> StoreResult<()> {
     if !valid_profile_id(id) {
         Err("Invalid profile or public-key identifier.".into())
@@ -1057,20 +1197,11 @@ async fn append_participants(
     Ok(profiles)
 }
 fn validate_current_cohort(profiles: &BTreeMap<String, ProfileSummary>) -> StoreResult<()> {
-    let first = profiles
-        .values()
-        .next()
-        .ok_or("Rated allocation requires profiles.")?;
-    let (minimum, maximum) = profiles
-        .values()
-        .fold((first.rating, first.rating), |(low, high), profile| {
-            (low.min(profile.rating), high.max(profile.rating))
-        });
-    if profiles
-        .values()
-        .any(|profile| profile.newcomer() != first.newcomer())
-        || maximum - minimum > crate::matchmaking::MAX_RATING_SPREAD
-    {
+    if profiles.is_empty() {
+        return Err("Rated allocation requires profiles.".into());
+    }
+    // The same policy the queue and the lobby's Ranked search select with.
+    if !crate::matchmaking::same_cohort(profiles.values()) {
         // Queue snapshots on another process can outlive a completed match.
         // Locks are held through allocation commit, so current classification
         // cannot change after this check and before seats become authoritative.
@@ -1089,15 +1220,23 @@ fn roster_can_grow(result: &MatchResult) -> bool {
 /// The trusted allocator/runtime chooses this marker only after checking actual
 /// map/modifier settings. Persisted metadata still fails closed on malformed or
 /// unauthenticated rosters. This policy grants progression, never competitive Elo.
+///
+/// The reason names the queue: `allocated_bots` is vs Bots (and Quick before
+/// LR-08), which always seats bots; `casual_queue` is Casual PvP, which may
+/// seat ten humans. A recovered interruption keeps whichever roster it had.
 fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
     let interrupted_recovery = result.outcome != MatchOutcome::Completed
         && result.unrated_reason.as_deref() == Some("server_interrupted");
     let bots = result.participants.iter().filter(|p| p.is_bot).count();
+    let roster_fits_reason = match result.unrated_reason.as_deref() {
+        Some("allocated_bots") => bots > 0,
+        Some("casual_queue") => true,
+        _ => interrupted_recovery,
+    };
     if result.rated
-        || (result.unrated_reason.as_deref() != Some("allocated_bots") && !interrupted_recovery)
+        || !roster_fits_reason
         || result.map_profile != shared::map::ResolvedMap::default().map_profile
         || result.participants.len() != 10
-        || bots == 0
         || bots == result.participants.len()
         || result
             .participants
@@ -1268,6 +1407,9 @@ fn same_terminal_allocation(old: &MatchResult, new: &MatchResult) -> StoreResult
     }
     same_allocation(old, &comparable, roster_can_grow(old))
 }
+
+#[path = "moderation.rs"]
+pub mod moderation;
 
 #[cfg(test)]
 #[path = "career_store_tests.rs"]

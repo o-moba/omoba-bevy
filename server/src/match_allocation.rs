@@ -60,7 +60,8 @@ impl Manifest {
             || [shared::map::Team::Green, shared::map::Team::Blue]
                 .iter()
                 .any(|t| self.humans.iter().filter(|h| h.team == *t).count() > 5)
-            || (self.preference == MatchPreference::HumansOnly && self.humans.len() != 10)
+            // Ranked is ten humans; it is never filled with bots.
+            || (self.preference == MatchPreference::Ranked && self.humans.len() != 10)
             // Bot practice seats one player or one party, all on one team.
             || (self.preference == MatchPreference::BotPractice
                 && (self.humans.len() > shared::party::MAX_PARTY_SIZE
@@ -69,6 +70,17 @@ impl Manifest {
             return Err("Invalid allocated match manifest".into());
         }
         Ok(())
+    }
+    /// The worker's match mode (LR-08). Only Ranked runs the rated release
+    /// rules. Casual PvP and vs Bots run worker practice rules: bots take the
+    /// empty seats (none when ten humans queued Casual), and the round settles
+    /// as `public-casual-v1`, never rated.
+    pub fn match_mode(&self) -> crate::match_rules::MatchMode {
+        if self.preference.rated() {
+            crate::match_rules::MatchMode::Release
+        } else {
+            crate::match_rules::MatchMode::Practice
+        }
     }
     pub fn read(path: &Path) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|_| "Cannot read allocation manifest")?;
@@ -104,6 +116,17 @@ pub(crate) struct Status {
     pub heartbeat_ms: u64,
     pub phase: Phase,
     pub result_id: Option<String>,
+    /// While `running`: the Unix time (ms) by which the match ends at the
+    /// latest, its duration cap or, while no human is connected, the
+    /// abandoned-match reaping. The lobby shows it to a player who left (LR-13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_by_ms: Option<u64>,
+}
+impl Status {
+    /// The match was played: it is running or ended with a winner.
+    pub fn played(&self) -> bool {
+        matches!(self.phase, Phase::Running | Phase::Finished)
+    }
 }
 pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
@@ -228,15 +251,42 @@ mod tests {
         assert!(m.validate().is_err());
     }
     #[test]
-    fn humans_only_requires_full_roster() {
+    fn ranked_requires_full_roster() {
         let mut m = fixture();
-        m.preference = MatchPreference::HumansOnly;
+        m.preference = MatchPreference::Ranked;
         assert!(m.validate().is_err());
+    }
+
+    /// LR-08: the queue, not the head count, picks the worker rules. Ten
+    /// humans in Casual PvP play unrated practice rules; only Ranked is
+    /// release (rated) rules.
+    #[test]
+    fn only_ranked_runs_the_rated_release_rules() {
+        use crate::match_rules::MatchMode;
+        let mut m = fixture();
+        m.humans = (0..10_u8)
+            .map(|i| AllocatedHuman {
+                profile_id: format!("{i:064x}"),
+                session_id: format!("session-{i}"),
+                team: if i < 5 { Team::Green } else { Team::Blue },
+            })
+            .collect();
+        m.preference = MatchPreference::Casual;
+        assert_eq!(m.validate(), Ok(()));
+        assert_eq!(m.match_mode(), MatchMode::Practice);
+        m.preference = MatchPreference::Ranked;
+        assert_eq!(m.validate(), Ok(()));
+        assert_eq!(m.match_mode(), MatchMode::Release);
+        m.humans.truncate(1);
+        m.preference = MatchPreference::Casual;
+        assert_eq!(m.match_mode(), MatchMode::Practice);
+        m.preference = MatchPreference::BotPractice;
+        assert_eq!(m.match_mode(), MatchMode::Practice);
     }
 }
 
 #[cfg(test)]
-mod runtime_tests {
+pub(crate) mod runtime_tests {
     use shared::wire::GameState;
     use std::net::{SocketAddr, UdpSocket};
     use std::time::{Duration, Instant};
@@ -250,7 +300,8 @@ mod runtime_tests {
     use crate::match_rules::{MatchConfig, MatchMode};
     use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
     use crate::snapshot::{SNAPSHOT_INTERVAL, build_players_snapshot};
-    fn fixture() -> (ServerRuntime, SocketAddr, ClientPacket) {
+    /// An allocated BotPractice worker for one authenticated player.
+    pub(crate) fn fixture() -> (ServerRuntime, SocketAddr, ClientPacket) {
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.set_nonblocking(true).unwrap();
         let mut rt = ServerRuntime::new(
@@ -393,6 +444,124 @@ mod runtime_tests {
         assert_eq!(allocation.participants.len(), 10);
         rt.career.backend.test_ack_start(&allocation.result_id);
         assert!(rt.begin_career_round(now));
+    }
+
+    /// LR-08 acceptance: ten humans in Casual PvP are unrated (public casual,
+    /// `casual_queue`, no bots); the same ten humans in Ranked are rated.
+    #[test]
+    fn ten_allocated_humans_are_rated_only_in_ranked() {
+        for preference in [MatchPreference::Casual, MatchPreference::Ranked] {
+            let humans: Vec<_> = (0..10_u8)
+                .map(|i| AllocatedHuman {
+                    profile_id: format!("{:064x}", u64::from(i) + 1),
+                    session_id: format!("seat-{i}"),
+                    team: if i % 2 == 0 { Team::Green } else { Team::Blue },
+                })
+                .collect();
+            let manifest = Manifest {
+                version: 1,
+                allocation_id: "c".repeat(32),
+                endpoint: "127.0.0.1:41000".into(),
+                bind: "127.0.0.1:41000".into(),
+                preference,
+                humans: humans.clone(),
+                join_deadline_ms: unix_ms() + 180_000,
+            };
+            assert_eq!(manifest.validate(), Ok(()));
+            let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+            socket.set_nonblocking(true).unwrap();
+            let mut rt = ServerRuntime::new(
+                socket,
+                MatchConfig {
+                    mode: manifest.match_mode(),
+                    team_size: 5,
+                },
+            );
+            rt.career.backend = Box::new(crate::career_backend::MemoryCareer::test_backend(
+                rt.server_epoch,
+            ));
+            rt.match_service = crate::match_service::MatchService::Worker(Worker {
+                manifest,
+                directory: std::env::temp_dir().join(format!(
+                    "omoba-allocation-test-{}-{}",
+                    std::process::id(),
+                    rt.server_epoch
+                )),
+                recovery: false,
+                origin_epoch: 0,
+                aborted: false,
+                booted_at: Instant::now(),
+                last_status: None,
+                terminal_at: None,
+            });
+            let now = Instant::now();
+            for (i, human) in humans.iter().enumerate() {
+                let addr: SocketAddr = format!("127.0.0.1:{}", 60400 + i).parse().unwrap();
+                rt.career.backend.test_authenticated(
+                    addr,
+                    shared::career::ProfileSummary::new(
+                        human.profile_id.clone(),
+                        format!("Player {i}"),
+                    ),
+                    &human.session_id,
+                );
+                let join = ClientPacket::Join {
+                    handheld: Default::default(),
+                    prematch: false,
+                    team: Team::Green,
+                    character: default_character_choice(),
+                    hero_class: HeroClass::Mage,
+                    avatar: None,
+                    sprite_character: None,
+                    session_id: Some(human.session_id.clone()),
+                    passport_ticket: None,
+                };
+                rt.handle_packet(addr, join, now);
+            }
+            assert!(rt.allocated_humans_ready(), "{preference:?}");
+            assert!(!rt.begin_career_round(now), "waits for the durable start");
+            let allocation = rt.career_allocation_for_test().unwrap();
+            assert_eq!(allocation.participants.len(), 10);
+            assert!(allocation.participants.iter().all(|p| !p.is_bot));
+            match preference {
+                MatchPreference::Casual => {
+                    assert!(!allocation.rated);
+                    assert_eq!(allocation.ruleset, "public-casual-v1");
+                    assert_eq!(allocation.unrated_reason.as_deref(), Some("casual_queue"));
+                }
+                _ => {
+                    assert!(allocation.rated, "{:?}", allocation.unrated_reason);
+                    assert_eq!(allocation.ruleset, crate::career_runtime::RATED_RULESET);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn allocated_worker_bots_play_elite_whatever_level_is_requested() {
+        use shared::bot_profile::BotDifficulty;
+        let (mut rt, addr, join) = fixture();
+        let now = Instant::now();
+        // Online bots are always Elite: a worker never takes a practice level.
+        rt.set_bot_difficulty(BotDifficulty::Recruit);
+        rt.handle_packet(addr, join, now);
+        for team in [Team::Green, Team::Blue] {
+            assert_eq!(rt.bots.difficulty(team), BotDifficulty::Elite);
+        }
+        let profiles: Vec<_> = rt
+            .world
+            .players
+            .iter()
+            .filter(|(_, p)| p.hero.identity.is_bot)
+            .map(|(bot, _)| rt.bots.profile(*bot))
+            .collect();
+        assert_eq!(profiles.len(), 9);
+        assert!(
+            profiles
+                .iter()
+                .all(|p| *p == Some(crate::bots::BotProfile::ELITE)),
+            "{profiles:?}"
+        );
     }
 
     #[test]
@@ -571,6 +740,128 @@ mod runtime_tests {
         );
     }
 
+    /// The production return-path admission (probe, challenge, proof) for
+    /// `addr`, then the Hello it yields, as the receive loop dispatches it.
+    fn admit_public_endpoint(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) {
+        use shared::public_transport::{
+            PROBE_PADDING_BYTES, PublicClientDatagram, PublicServerDatagram,
+        };
+        let probe = serde_json::to_vec(&PublicClientDatagram::TransportProbe {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+            client_nonce: "a".repeat(32),
+            padding: "0".repeat(PROBE_PADDING_BYTES),
+        })
+        .unwrap();
+        let (epoch, match_id) = (rt.server_epoch, rt.match_id);
+        let crate::public_transport::Decision::Reply(challenge) = rt
+            .public_transport
+            .receive(addr, &probe, epoch, match_id, false, None, now)
+        else {
+            panic!("missing path challenge");
+        };
+        let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
+            serde_json::from_slice(&challenge).unwrap()
+        else {
+            panic!("a transport challenge is expected")
+        };
+        let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
+            server_epoch: epoch,
+            path_nonce,
+        })
+        .unwrap();
+        let crate::public_transport::Decision::Dispatch(hello) = rt
+            .public_transport
+            .receive(addr, &proof, epoch, match_id, false, None, now)
+        else {
+            panic!("path proof rejected");
+        };
+        rt.handle_packet(addr, hello, now);
+        assert!(rt.public_transport.validated(addr, now));
+    }
+
+    #[test]
+    fn detached_seat_gets_no_social_datagrams_and_reclaim_resumes_the_stream() {
+        use crate::runtime::ports::MemoryTransport;
+        use shared::social::{SocialCommand, SocialRequest};
+        let (mut rt, addr, join) = fixture();
+        let transport = MemoryTransport::new("127.0.0.1:41000".parse().unwrap());
+        rt.transport = Box::new(transport.clone());
+        let destinations = |transport: &MemoryTransport| -> Vec<SocketAddr> {
+            transport
+                .take_outbound()
+                .into_iter()
+                .map(|(to, _)| to)
+                .collect()
+        };
+        let now = Instant::now();
+        admit_public_endpoint(&mut rt, addr, now);
+        rt.handle_packet(addr, join.clone(), now);
+        let id = rt.world.players[&addr].hero.identity.id;
+        rt.begin_career_round(now);
+        let result = rt.career_allocation_for_test().unwrap();
+        rt.career.backend.test_ack_start(&result.result_id);
+        assert!(rt.begin_career_round(now));
+        rt.world.game_state = GameState::Running;
+        rt.match_started_at = Some(now);
+        let subscribe = SocialRequest {
+            request_id: 1,
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            session_id: "seat-a".into(),
+            command: SocialCommand::Subscribe,
+        };
+        rt.handle_social_request(addr, subscribe, true, now);
+        assert!(rt.social.subscribed(id));
+        transport.take_outbound();
+        rt.send_social_views(now);
+        let sent = destinations(&transport);
+        assert!(!sent.is_empty() && sent.iter().all(|to| *to == addr));
+
+        // Human -> bot handover: the live hero moves to an internal actor
+        // address (`[::]:N`) that a bot drives for the rest of the match.
+        rt.handle_packet(addr, ClientPacket::Leave, now);
+        let (&detached, seat) = rt
+            .world
+            .players
+            .iter()
+            .find(|(_, p)| p.hero.identity.id == id)
+            .unwrap();
+        assert!(crate::bots::is_bot_address(detached));
+        assert!(seat.joined && seat.framed_snapshots && !seat.hero.identity.is_bot);
+        assert!(rt.bots.kind(detached).is_some());
+        assert!(
+            rt.social.subscribed(id),
+            "the subscription follows the identity, not the endpoint"
+        );
+        let mut at = now;
+        for _ in 0..8 {
+            at += Duration::from_millis(250);
+            rt.send_social_views(at);
+        }
+        let sent = destinations(&transport);
+        assert!(
+            sent.is_empty(),
+            "neither the internal actor nor the departed endpoint gets Social datagrams: {sent:?}"
+        );
+
+        // Reclaim from a new endpoint: the identity's stream resumes there.
+        let reconnect: SocketAddr = "127.0.0.1:60411".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            reconnect,
+            shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+            "seat-a",
+        );
+        admit_public_endpoint(&mut rt, reconnect, at);
+        rt.handle_packet(reconnect, join, at);
+        assert_eq!(rt.world.players[&reconnect].hero.identity.id, id);
+        assert!(!rt.world.players.contains_key(&detached));
+        transport.take_outbound();
+        at += Duration::from_millis(250);
+        rt.send_social_views(at);
+        let sent = destinations(&transport);
+        assert!(!sent.is_empty() && sent.iter().all(|to| *to == reconnect));
+    }
+
     #[test]
     fn retained_human_survives_account_polling_and_reclaims_after_empty_grace() {
         for deliberate_leave in [false, true] {
@@ -667,7 +958,7 @@ mod runtime_tests {
         ] {
             let profile = shared::career::ProfileSummary::new(profile, session.into());
             if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
-                worker.manifest.preference = MatchPreference::Quick;
+                worker.manifest.preference = MatchPreference::Casual;
                 worker.manifest.humans.push(AllocatedHuman {
                     profile_id: profile.profile_id.clone(),
                     session_id: session.into(),
@@ -738,7 +1029,7 @@ mod runtime_tests {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now() + Duration::from_secs(30);
         if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
-            worker.manifest.preference = MatchPreference::Quick;
+            worker.manifest.preference = MatchPreference::Casual;
         }
         rt.maintain_roster(now);
         rt.career.backend.test_authenticated(
@@ -798,7 +1089,10 @@ mod runtime_tests {
             let mut buffer = [0; 4096];
             let (len, _) = client.recv_from(&mut buffer).unwrap();
             let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-                serde_json::from_slice(&buffer[..len]).unwrap();
+                serde_json::from_slice(&buffer[..len]).unwrap()
+            else {
+                panic!("a transport challenge is expected")
+            };
             deliver(
                 rt,
                 client,
@@ -939,7 +1233,10 @@ mod runtime_tests {
             panic!("missing path challenge");
         };
         let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-            serde_json::from_slice(&bytes).unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        else {
+            panic!("a transport challenge is expected")
+        };
         let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
             server_epoch: rt.server_epoch,
             path_nonce,

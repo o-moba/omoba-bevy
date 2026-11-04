@@ -1,0 +1,17 @@
+{
+  "queue.ranked": "Ranked",
+  "queue.casual": "Casual PvP",
+  "queue.bots": "vs Bots",
+  "queue.play.casual": "CASUAL PVP",
+  "queue.rated": "Rated",
+  "queue.unrated": "Unrated",
+  "queue.badge": "{queue} · {rating}",
+  "queue.searching": "{count} searching this queue",
+  "queue.offer.accept": "Also search Casual PvP",
+  "queue.offer.hint": "Few players are searching Ranked right now. You can also search Casual PvP and keep your place in Ranked.",
+  "queue.offer.party_pending": "Casual PvP is searched too once everyone in your party agrees.",
+  "queue.also_casual": "Also searching Casual PvP · your place in Ranked is kept",
+  "queue.failed.ranked_party_cohort": "Your party's ratings are too far apart for Ranked.\nCancel and play Casual PvP together.",
+  "queue.failed.arena_limit": "A match from your network is already running.\nFinish it first, or play Casual PvP with other players.",
+  "queue.failed.practice_cooldown": "Several vs Bots matches were started and left unplayed.\nTry again in a few minutes."
+}

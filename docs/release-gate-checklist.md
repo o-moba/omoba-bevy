@@ -1,5 +1,9 @@
 # Release gate checklist — gameplay slice
 
+> **Historical (April 2026).** This gate covered the TASK-12 gameplay slice and is no
+> longer used. RU releases follow [ops/vps/ru/release-checklist.md](../ops/vps/ru/release-checklist.md)
+> (LR-01), with each result stored in `docs/progress/`.
+
 **Scope:** Prototype MOBA-style slice: UDP session, match lifecycle, lanes, minions, towers, one server-validated player ability, jungle neutrals, progression (XP / level / skill points).
 
 **How to use:** Each row is **PASS** only if the criterion is true for the current build. **FAIL** blocks calling the slice release-ready. **PARTIAL** means documented gaps remain (see release readiness report).

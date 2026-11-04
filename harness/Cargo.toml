@@ -11,5 +11,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 shared = { path = "../shared" }
 
+[dev-dependencies]
+ed25519-dalek = "2.2.0"
+
 [lints]
 workspace = true

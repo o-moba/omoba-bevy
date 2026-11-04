@@ -7,7 +7,8 @@
 //! needs. The functions below are the only place the class growth, item
 //! bonuses and modifiers are combined into an effective number.
 
-use std::time::{Duration, Instant};
+use shared::clock::Instant;
+use std::time::Duration;
 
 use shared::SkillSlot;
 use shared::shop::ItemBonuses;

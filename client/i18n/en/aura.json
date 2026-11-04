@@ -1,5 +1,12 @@
 {
   "aura.solar": "Solar",
   "aura.lunar": "Lunar",
-  "aura.verdant": "Verdant"
+  "aura.verdant": "Verdant",
+  "aura.rose": "Rose",
+  "aura.jade": "Jade",
+  "aura.azure": "Azure",
+  "aura.crimson": "Crimson",
+  "aura.prism_i": "Prism I",
+  "aura.prism_ii": "Prism II",
+  "aura.prism_iii": "Prism III"
 }

@@ -173,7 +173,7 @@ async fn career_store_identity_reopen_and_explicit_rename() {
             .fetch_all(&f.store.pool)
             .await
             .unwrap();
-    assert_eq!(versions, [1, 2, 3]);
+    assert_eq!(versions, SCHEMA_VERSIONS);
     f.close().await;
 }
 
@@ -935,6 +935,104 @@ fn career_store_public_casual_policy_requires_frozen_authenticated_default_roste
     assert_eq!(pool_connections(None), 4);
 }
 
+/// A Casual PvP result (LR-08): ten authenticated humans, no bots, unrated.
+fn casual_pvp(profiles: &[ProfileSummary], n: u64) -> MatchResult {
+    let mut game = result(&profiles[0], &profiles[1], n);
+    game.map_profile = shared::map::ResolvedMap::default().map_profile;
+    game.ruleset = PUBLIC_CASUAL_RULESET.into();
+    game.rated = false;
+    game.unrated_reason = Some("casual_queue".into());
+    game.participants = profiles
+        .iter()
+        .zip(1..)
+        .map(|(profile, id)| {
+            participant(
+                profile,
+                id,
+                if id % 2 == 1 { Team::Green } else { Team::Blue },
+            )
+        })
+        .collect();
+    game
+}
+
+/// LR-08: Casual PvP may seat ten humans (`casual_queue`); vs Bots
+/// (`allocated_bots`) still needs at least one bot, and neither is rated.
+#[test]
+fn career_store_casual_pvp_admits_ten_humans_and_vs_bots_still_needs_bots() {
+    let profiles: Vec<_> = (0..10_u8)
+        .map(|n| ProfileSummary::new(format!("{n:064x}"), format!("Player-{n}")))
+        .collect();
+    let game = casual_pvp(&profiles, 1);
+    assert!(normalize(starting(&game)).is_ok());
+    assert!(normalize_terminal(game.clone()).is_ok());
+    assert!(!roster_can_grow(&game));
+    let mut rated = game.clone();
+    rated.rated = true;
+    assert!(normalize_terminal(rated).is_err());
+    let mut vs_bots = game.clone();
+    vs_bots.unrated_reason = Some("allocated_bots".into());
+    assert!(normalize_terminal(vs_bots).is_err(), "vs Bots without bots");
+    // A Casual PvP roster that bots filled is valid too.
+    let a = &profiles[0];
+    let b = &profiles[1];
+    let mut filled = public_casual(a, b, 2);
+    filled.unrated_reason = Some("casual_queue".into());
+    assert!(normalize_terminal(filled).is_ok());
+    let mut all_bots = public_casual(a, b, 3);
+    all_bots.unrated_reason = Some("casual_queue".into());
+    for p in &mut all_bots.participants[..2] {
+        p.is_bot = true;
+        p.profile_id = None;
+    }
+    assert!(normalize_terminal(all_bots).is_err(), "nobody to credit");
+    // The server can still interrupt a ten-human Casual PvP match.
+    let mut recovered = game;
+    recovered.outcome = MatchOutcome::Interrupted;
+    recovered.winner = None;
+    recovered.unrated_reason = Some("server_interrupted".into());
+    assert!(normalize_terminal(recovered).is_ok());
+}
+
+/// LR-08: ten humans in Casual PvP settle the casual XP and never touch
+/// rating, whatever their cohorts (a newcomer and a 1400 veteran here).
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_ten_human_casual_pvp_awards_casual_xp_without_rating() {
+    let f = Fixture::new().await;
+    let mut profiles = Vec::new();
+    for n in 1..=10 {
+        profiles.push(f.profile(n).await);
+    }
+    sqlx::query("UPDATE career_profiles SET rating=1400,rated_matches=40,matches_played=40,wins=20,losses=20 WHERE profile_id=$1")
+        .bind(&profiles[1].profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let game = casual_pvp(&profiles, 1);
+    f.store.start(starting(&game)).await.unwrap();
+    let saved = f.store.settle(game).await.unwrap();
+    assert!(saved.saved && !saved.rated);
+    for (p, profile) in saved.participants.iter().zip(&profiles) {
+        assert!(p.rating.is_none());
+        let won = p.team == Team::Green;
+        assert_eq!(p.progression_xp_gained, if won { 50 } else { 25 });
+        let after = f.store.profile(&profile.profile_id).await.unwrap();
+        let before = if profile.profile_id == profiles[1].profile_id {
+            40
+        } else {
+            0
+        };
+        assert_eq!(after.matches_played, before + 1);
+        assert_eq!(after.progression_xp, if won { 50 } else { 25 });
+    }
+    let veteran = f.store.profile(&profiles[1].profile_id).await.unwrap();
+    assert_eq!((veteran.rating, veteran.rated_matches), (1400, 40));
+    let newcomer = f.store.profile(&profiles[0].profile_id).await.unwrap();
+    assert_eq!((newcomer.rating, newcomer.rated_matches), (1000, 0));
+    f.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_public_casual_progression_is_idempotent_and_survives_reopen() {
@@ -1083,6 +1181,58 @@ async fn career_store_interrupted_custom_and_development_never_grant_casual_xp()
     f.close().await;
 }
 
+/// LR-11: a match the server ends (an abandoned worker or the duration cap)
+/// settles as Interrupted with its allocation's own reason: once, unrated,
+/// without a winner or XP, for a public-casual bot game and a rated allocation.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_server_ended_matches_settle_interrupted_once_and_unrated() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for game in [public_casual(&a, &b, 1), result(&a, &b, 2)] {
+        f.store.start(starting(&game)).await.unwrap();
+        let mut ended = game.clone();
+        ended.outcome = MatchOutcome::Interrupted;
+        ended.winner = None;
+        ended.rated = false;
+        if game.ruleset == RULESET {
+            // What `finish_career_round` writes for a non-practice round.
+            ended.unrated_reason = Some("The match did not finish normally.".into());
+        }
+        let (first, duplicate) =
+            tokio::join!(f.store.settle(ended.clone()), f.store.settle(ended.clone()));
+        let saved = first.unwrap();
+        assert_eq!(saved, duplicate.unwrap());
+        assert_eq!(saved.outcome, MatchOutcome::Interrupted);
+        assert!(saved.saved && !saved.rated && saved.winner.is_none());
+        assert!(
+            saved
+                .participants
+                .iter()
+                .all(|p| p.progression_xp_gained == 0 && p.rating.is_none())
+        );
+        assert_eq!(f.store.settle(ended).await.unwrap(), saved);
+    }
+    for profile in [&a, &b] {
+        let current = f.store.profile(&profile.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                current.rating,
+                current.rated_matches,
+                current.wins,
+                current.losses,
+                current.progression_xp,
+                current.matches_played
+            ),
+            (profile.rating, 0, 0, 0, 0, 2)
+        );
+        let (history, _) = f.store.history(&profile.profile_id, None).await.unwrap();
+        assert_eq!(history.len(), 2);
+    }
+    f.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_public_worker_recovery_does_not_settle_another_epoch() {
@@ -1135,5 +1285,442 @@ async fn career_store_public_worker_recovery_does_not_settle_another_epoch() {
             .unwrap()
             .is_empty()
     );
+    f.close().await;
+}
+
+/// LR-16: new device keys create profiles only within the per-source and the
+/// total 24-hour limits; existing keys always sign in; no raw address is kept.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_limits_new_profiles_per_source_and_in_total() {
+    let f = Fixture::new().await;
+    let limits = NewProfileLimits {
+        per_source: 2,
+        total: 3,
+    };
+    let key = |n: u64| format!("{n:064x}");
+    let home = "203.0.113.7";
+    let first = f
+        .store
+        .authenticate_from(&key(1), "One", home, limits)
+        .await
+        .unwrap();
+    f.store
+        .authenticate_from(&key(2), "Two", home, limits)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(3), "Three", home, limits)
+            .await
+            .unwrap_err(),
+        NEW_PROFILE_LIMIT_ERROR
+    );
+    // A refused key created nothing, and an existing key keeps working.
+    let profiles: i64 = sqlx::query_scalar("SELECT count(*) FROM career_profiles")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(profiles, 2);
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(1), "Ignored", home, limits)
+            .await
+            .unwrap(),
+        first
+    );
+    // Another network still gets the last place of the day, then nobody does.
+    f.store
+        .authenticate_from(&key(4), "Four", "198.51.100.9", limits)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(5), "Five", "192.0.2.1", limits)
+            .await
+            .unwrap_err(),
+        NEW_PROFILES_PAUSED_ERROR
+    );
+    // Rows hold a salted hash, never the address.
+    let raw: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM career_profile_admissions WHERE source IN ($1, $2)",
+    )
+    .bind(home)
+    .bind("198.51.100.9")
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    assert_eq!(raw, 0);
+    // The window is 24 hours: yesterday's profiles no longer count.
+    sqlx::query(
+        "UPDATE career_profile_admissions SET created_at = clock_timestamp() - interval '25 hours'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    // Two new keys race for the last place of one source: exactly one wins.
+    let tight = NewProfileLimits {
+        per_source: 1,
+        total: 100,
+    };
+    let (six, seven) = (key(6), key(7));
+    let (a, b) = tokio::join!(
+        f.store.authenticate_from(&six, "Six", home, tight),
+        f.store.authenticate_from(&seven, "Seven", home, tight)
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    // Retention drops admission rows after 48 hours.
+    sqlx::query(
+        "UPDATE career_profile_admissions SET created_at = clock_timestamp() - interval '49 hours' WHERE created_at < clock_timestamp() - interval '24 hours'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    f.store.prune_unplayed_profiles(30, 100).await.unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM career_profile_admissions")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 1);
+    f.close().await;
+}
+
+/// LR-16: the retention job deletes only profiles whose one key is older than
+/// the retention age, that never played, and that nothing else holds.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_prunes_only_old_unplayed_unlinked_profiles() {
+    let f = Fixture::new().await;
+    let unplayed = f.profile(1).await;
+    let recent = f.profile(2).await;
+    let (played, opponent) = (f.profile(3).await, f.profile(4).await);
+    let (friend, other_friend) = (f.profile(5).await, f.profile(6).await);
+    let two_keys = f.profile(7).await;
+    let online = f.profile(8).await;
+    let revoked = f.profile(9).await;
+    let held = f.profile(10).await;
+    let finished = result(&played, &opponent, 1);
+    f.store.start(starting(&finished)).await.unwrap();
+    f.store.settle(finished).await.unwrap();
+    f.store
+        .friend_action(
+            &friend.profile_id,
+            &other_friend.profile_id,
+            FriendAction::Request,
+        )
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO career_keys(public_key, profile_id) VALUES ($1, $2)")
+        .bind(format!("{:064x}", 70))
+        .bind(&two_keys.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    f.store
+        .touch_presences(&[(online.profile_id.clone(), None)])
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_keys SET revoked_at = clock_timestamp() WHERE profile_id = $1")
+        .bind(&revoked.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    // A row elsewhere (as a portal link or Supporter grant would be) holds a profile.
+    sqlx::raw_sql(
+        "CREATE TABLE portal_link (profile_id text REFERENCES career_profiles(profile_id))",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO portal_link VALUES ($1)")
+        .bind(&held.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE career_keys SET created_at = clock_timestamp() - interval '31 days' WHERE profile_id <> $1",
+    )
+    .bind(&recent.profile_id)
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    assert!(f.store.prune_unplayed_profiles(3, 100).await.is_err());
+    assert!(f.store.prune_unplayed_profiles(30, 0).await.is_err());
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 1);
+    assert!(f.store.profile(&unplayed.profile_id).await.is_err());
+    for kept in [
+        &recent,
+        &played,
+        &opponent,
+        &friend,
+        &other_friend,
+        &two_keys,
+        &online,
+        &revoked,
+        &held,
+    ] {
+        assert!(
+            f.store.profile(&kept.profile_id).await.is_ok(),
+            "{}",
+            kept.nickname
+        );
+    }
+    // The pruned key is free again: signing in makes a fresh profile.
+    let again = f.profile(1).await;
+    assert_ne!(again.profile_id, unplayed.profile_id);
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_sanctions_apply_expire_lift_and_audit() {
+    use moderation::{NAME_LOCKED_ERROR, NewSanction};
+    use shared::moderation::{Sanction, SanctionKind};
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let key = format!("{:064x}", 1);
+    let new = |kind, duration_secs| NewSanction {
+        profile_id: &a.profile_id,
+        kind,
+        reason: "Spam in team chat",
+        duration_secs,
+        actor: "ops.anna",
+    };
+    let clean = f.store.access(&key, &a.profile_id).await.unwrap();
+    assert!(clean.key_active && clean.sanctions.is_empty());
+    assert_eq!(clean.nickname.as_deref(), Some(a.nickname.as_str()));
+
+    // Applied: visible to the game at once, with its end.
+    let mute = f
+        .store
+        .add_sanction(new(SanctionKind::ChatMute, Some(3600)))
+        .await
+        .unwrap();
+    assert!(mute.renamed.is_none() && mute.sanction.active);
+    let until = mute.sanction.expires_at.unwrap();
+    assert!((until - mute.sanction.created_at - 3600).abs() <= 1);
+    let ban = f
+        .store
+        .add_sanction(new(SanctionKind::AccountBan, None))
+        .await
+        .unwrap();
+    assert_eq!(ban.sanction.expires_at, None);
+    let access = f.store.access(&key, &a.profile_id).await.unwrap();
+    assert_eq!(
+        access.sanctions,
+        vec![
+            Sanction {
+                kind: SanctionKind::ChatMute,
+                until: Some(until)
+            },
+            Sanction {
+                kind: SanctionKind::AccountBan,
+                until: None
+            }
+        ]
+    );
+    assert_eq!(
+        f.store.active_sanctions(&a.profile_id).await.unwrap(),
+        access.sanctions
+    );
+
+    // An expired sanction no longer applies; a lifted one neither.
+    let ranked = f
+        .store
+        .add_sanction(new(SanctionKind::RankedBan, Some(60)))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_sanctions SET created_at=clock_timestamp()-interval '2 hours', expires_at=clock_timestamp()-interval '1 second' WHERE sanction_id=$1")
+        .bind(ranked.sanction.sanction_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let lifted = f
+        .store
+        .lift_sanction(ban.sanction.sanction_id, "Appeal accepted", "ops.boris")
+        .await
+        .unwrap();
+    assert!(!lifted.active);
+    assert_eq!(lifted.lifted_by.as_deref(), Some("ops.boris"));
+    assert_eq!(lifted.lift_reason.as_deref(), Some("Appeal accepted"));
+    assert!(
+        f.store
+            .lift_sanction(ban.sanction.sanction_id, "Again", "ops.boris")
+            .await
+            .is_err(),
+        "a lifted sanction cannot be lifted twice"
+    );
+    assert!(
+        f.store
+            .lift_sanction(ranked.sanction.sanction_id, "Expired", "ops.boris")
+            .await
+            .is_err(),
+        "an expired sanction cannot be lifted"
+    );
+    assert_eq!(
+        f.store.active_sanctions(&a.profile_id).await.unwrap(),
+        vec![Sanction {
+            kind: SanctionKind::ChatMute,
+            until: Some(until)
+        }]
+    );
+    let active = f.store.sanctions(&a.profile_id, false).await.unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(
+        f.store.sanctions(&a.profile_id, true).await.unwrap().len(),
+        3
+    );
+
+    // A name reset renames to Player#NNNN, locks renames, and is audited.
+    let reset = f
+        .store
+        .add_sanction(new(SanctionKind::NameReset, Some(7 * 86_400)))
+        .await
+        .unwrap();
+    let (old_name, new_name) = reset.renamed.clone().unwrap();
+    assert_eq!(old_name, a.nickname);
+    let tag = new_name.strip_prefix("Player#").unwrap();
+    assert!(tag.len() == 4 && tag.bytes().all(|b| b.is_ascii_digit()));
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().nickname,
+        new_name
+    );
+    assert_eq!(
+        f.store.access(&key, &a.profile_id).await.unwrap().nickname,
+        Some(new_name.clone())
+    );
+    assert_eq!(
+        f.store
+            .rename(&a.profile_id, "Offensive")
+            .await
+            .unwrap_err(),
+        NAME_LOCKED_ERROR
+    );
+    f.store
+        .lift_sanction(reset.sanction.sanction_id, "Name is fine now", "ops.anna")
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .rename(&a.profile_id, "Fine")
+            .await
+            .unwrap()
+            .nickname
+            .starts_with("Fine#")
+    );
+
+    // Refusals: bad input never writes a row.
+    for bad in [
+        NewSanction {
+            reason: " ",
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+        NewSanction {
+            actor: "ops anna",
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+        new(SanctionKind::ChatMute, Some(0)),
+        new(
+            SanctionKind::ChatMute,
+            Some(moderation::MAX_SANCTION_SECS + 1),
+        ),
+        new(SanctionKind::Unknown, Some(60)),
+        NewSanction {
+            profile_id: &"f".repeat(64),
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+    ] {
+        assert!(f.store.add_sanction(bad).await.is_err(), "{bad:?}");
+    }
+
+    // The audit trail: every write, newest first; append-only for a year.
+    let events = f
+        .store
+        .moderation_events(Some(&a.profile_id), 50)
+        .await
+        .unwrap();
+    let actions: Vec<_> = events.iter().map(|e| e.action.as_str()).collect();
+    assert_eq!(
+        actions,
+        [
+            "sanction_lifted",
+            "sanction_added",
+            "sanction_lifted",
+            "sanction_added",
+            "sanction_added",
+            "sanction_added"
+        ]
+    );
+    assert_eq!(events[1].detail["kind"], "name_reset");
+    assert_eq!(events[1].detail["new_name"], new_name.as_str());
+    assert_eq!(events[1].detail["old_name"], a.nickname.as_str());
+    assert_eq!(events[1].actor, "ops.anna");
+    for statement in [
+        "UPDATE career_moderation_events SET actor='someone-else'",
+        "DELETE FROM career_moderation_events",
+    ] {
+        let error = sqlx::query(statement)
+            .execute(&f.store.pool)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("23514"),
+            "{statement}"
+        );
+    }
+
+    // The chat switch, audited without a profile.
+    assert!(f.store.chat_enabled().await.unwrap());
+    let off = f
+        .store
+        .set_chat(false, "Raid in chat", "ops.anna")
+        .await
+        .unwrap();
+    assert!(!off.enabled && off.changed_by == "ops.anna");
+    assert!(!f.store.chat_enabled().await.unwrap());
+    let chat_events = f.store.moderation_events(None, 10).await.unwrap();
+    assert_eq!(chat_events.len(), 1);
+    assert_eq!(chat_events[0].detail["enabled"], false);
+    f.store.set_chat(true, "Over", "ops.anna").await.unwrap();
+    assert!(f.store.chat_enabled().await.unwrap());
+
+    // Lookup by handle or ID, with keys.
+    assert!(f.store.find_profile("Nobody#0000").await.is_err());
+    let found = f
+        .store
+        .find_profile(&f.store.profile(&a.profile_id).await.unwrap().nickname)
+        .await
+        .unwrap();
+    assert_eq!(found.profile_id, a.profile_id);
+    assert_eq!(
+        f.store
+            .find_profile(&a.profile_id)
+            .await
+            .unwrap()
+            .profile_id,
+        a.profile_id
+    );
+    let keys = f.store.profile_keys(&a.profile_id).await.unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].key_prefix, &key[..16]);
+
+    // A sanctioned profile that never played is not pruned: the ban holds.
+    let throwaway = f.profile(2).await;
+    f.store
+        .add_sanction(NewSanction {
+            profile_id: &throwaway.profile_id,
+            ..new(SanctionKind::MatchmakingBan, None)
+        })
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_keys SET created_at=clock_timestamp()-interval '40 days' WHERE profile_id=$1")
+        .bind(&throwaway.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
+    assert!(f.store.profile(&throwaway.profile_id).await.is_ok());
     f.close().await;
 }

@@ -46,7 +46,7 @@ NEW_MOTIONS = (
     "overhead_plant", "rally_raise", "raise_from_earth", "two_hand_push", "shot_heavy", "burst_fire",
     "sky_shot", "ground_shot", "reload_snap", "aim_hold_loop", "aim_loose_r", "cast_thrust_r",
     "point_command", "hover_pulse", "levitate_loop", "draw_in", "hurl_overhand", "toss_underhand",
-    "place_quick", "kneel_plant",
+    "place_quick", "kneel_plant", "spell_charge", "ray_release",
 )
 FINGERS = ("Index", "Middle", "Ring", "Little", "Thumb")
 

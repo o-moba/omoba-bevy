@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
+    <!-- allowBackup="false" (ADR-026): the device key in the settings folder never goes to
+         a cloud backup; a reinstall reaches the old profile through VK ID or recovery codes. -->
     <application android:label="Omoba Beta" android:icon="@mipmap/ic_launcher" android:hasCode="false"
         android:allowBackup="false" android:extractNativeLibs="true"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">

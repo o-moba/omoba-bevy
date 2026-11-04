@@ -5,6 +5,292 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Creator tooling exports a game-owned Classic hero design policy beside the
+  animation contract. All 17 bases stay explicitly unconfigured until reviewed;
+  strict bindings reject `any`, wrong identities and stale hashes/revisions.
+  Legacy v1 remains unchanged; native admission/C3 and rollout remain gates.
+
+
+- Selected live enemy portraits now connect to the hero’s current projected
+  position with a gold outlined line. Offscreen targets keep a clipped edge
+  arrow; stale, hidden, dead and modal targets clear the connector.
+
+- Phone top HUD: a smaller144×40 selected target and allied portraits keep the
+  top edge together. Passive enemy death timers use a separate row below allies;
+  live lock targets keep their right-side slots. Settings/chat sit together
+  below the death row. The runtime layout has a fast renderer-free Rust contract
+  test, including the avatar-drop regression and narrow-screen fallback.
+
+- Mobile HUD interactions: the movement stick reanchors on a fresh lower-left
+  press and keeps its base after release; the kill feed sits below purchases on
+  the left. A selected visible enemy portrait shows a gold camera-relative
+  direction arrow, with stale/hidden targets excluded and touch ownership kept.
+
+- Mobile in-match HUD: compact reference-sized attack/skills and utility discs,
+  larger independent touch regions, bottom-row Recall/Dash/Haste, an inward
+  transparent joystick, shallow score ribbon and small settings/chat controls
+  beside the minimap. Ally portraits, quick-buy art and ability detail badges
+  leave more of the battlefield visible; desktop/menu scale is unchanged.
+
+- Prepare iOS Universal Link return from the existing RU web sign-in flow.
+  The main-nib delegate accepts only a fixed per-contour HTTPS return path;
+  the signed enrollment and explicit in-game confirmation remain authoritative.
+  Xcode/CLI domain entitlements and archive preservation are included. DNS/TLS,
+  website publication, profile refresh and physical-device acceptance remain
+  rollout gates. See [iOS links](mobile/ios/UNIVERSAL-LINKS.md).
+- RU OneTap sign-in accepts the configured portal's exact root redirect in
+  addition to its existing browser callback. The Account API still verifies
+  PKCE, returned state and provider identity; website registration and signed
+  game-first linking retain their existing semantics. No SQL migration or
+  production activation is included.
+
+- RU registration: website-first VK ID/OK/Mail.ru sign-in can create a default-stat
+  profile and session; game-first linking preserves existing progress. Add portal
+  migration 10 with a bounded registration function, reviewed-account device approval,
+  separate status-poll quota, revoked-key race protection and provider returned-state
+  validation. Native sign-in retries temporary failures without rotating its proof
+  and validates completion before staging a key. A real portal/API/PG browser rehearsal
+  and signed public-lobby game journey cover the critical path. Live VK app, hosting,
+  DNS, release rollout and physical-device checks remain gates. See
+  [registration](docs/registration.md).
+
+- Browser practice: an additive Bevy/WebGL 2 renderer runs the existing OMOBA
+  authoritative practice simulation in WASM, with seven standard classes, bots,
+  the shipped Verdant 2D art, movement, Q/W/E/R combat, dash, recall, pause and
+  restart. It has no socket, credentials, career writes or rating rewards.
+  `scripts/build-web.sh` produces a lazy-loadable same-origin `/game/` bundle.
+  Native simulation clocks keep the exact standard-library type. See
+  [browser practice](docs/browser-practice.md) for build and scope.
+
+- Native screenshot/demo launchers seed an isolated returning Global account-region fixture so their ordinary screen captures keep working after first-launch region confirmation. Existing fixture state is preserved; first-launch QA stays empty.
+
+- 0.45.0: default native clients bind an account region (RU or International)
+  before regional traffic, restore returning accounts automatically and isolate
+  keys/state. Region changes require a cold restart; the restart screen stops old
+  regional traffic. Lobby, account login, portal, legal documents, Ekza and purchase
+  offers follow the bound region. Player-facing raw server configuration is removed
+  in both contours. Native device replies identify their owning region and foreign
+  replies are refused. RU dev uses a separate authority; dev also refuses the new
+  RU production IP. No server deployment or public package is included. See
+  [remaining RU release gates](docs/plans/ru-release-2026-10-28.md).
+
+- RU market: the Russian servers move to the owner's **omoba.ru** domain
+  (registered at REG.RU): `https://omoba.ru` is the RU portal and landing (VK ID
+  callback `https://omoba.ru/api/auth/vk/callback`), `https://account.omoba.ru`
+  the Account API and `lobby.omoba.ru:4000` the lobby. `scripts/markets.py` (zone
+  `omoba.ru`), the RU host kit, Caddyfile.ru and the docs use the new names; no
+  `*.ru.omoba.io` name remains. `omoba.ru` is now a production zone wherever a
+  contour is checked: a dev build refuses it (client `endpoint_allowed_for`,
+  `release.py`), and so does the dev host tool. RU builds made before this change
+  baked the old names and must be rebuilt.
+
+- Game contract: OMOBA describes what creators may make for it as an Ekza Game
+  Protocol document, `shared/assets/catalog/game-contract.json`
+  (`ekza.game-contract.v1`, profile `omoba.character.v1`, CC0-1.0): 107 animation
+  slots keyed by gameplay identity (101 customizable), 18 targets with their
+  checklists and character offers, the default the game plays in every slot and
+  the rule table a custom clip must pass, tuned against the 57 shipped motions.
+  Generated from the game's own rows, kits, motion library and engine constants
+  (`OMOBA_WRITE_GAME_CONTRACT=1 cargo test -p client --lib game_contract_is_current`,
+  then `scripts/export_game_contract.py`), with its JSON Schemas, 45 package and
+  12 contract conformance fixtures (`scripts/build_game_contract_fixtures.py`) and
+  notes on each hero's asset needs for GP5. No engine behaviour changes. See
+  [the reference](docs/game-contract.md).
+
+- Documentation: a current architecture set in `docs/architecture/` (system and
+  deployment, identity and accounts, protocols, data, build and release,
+  methodology, an ADR log) written from the code and fact-checked against it, and
+  the launch-readiness plan `docs/plans/launch-readiness.md` (66 specs in three
+  milestones from an audit of matchmaking, ranked, bots, operations, client,
+  community, security and the RU launch). The RU server kit is marked not
+  deployable until its blockers are fixed (LR-02: the portal sends no ingress key
+  outside the dev contour). The DEV Account API activation now expects portal
+  schema 1–7. The 2026-09-25 architecture snapshots are marked historical, and
+  stale passages in supporter.md, the Account API README, CONTRIBUTING.md and the
+  VPS README are corrected. See
+  [the session note](docs/progress/2026-10-24-architecture-and-launch-readiness.md).
+
+- Markets: one build per region (`docs/markets.md`). `shared::market` bakes
+  `OMOBA_MARKET` (`global` default, `ru`, `cn`) and `OMOBA_FEATURE_EKZA|SUPPORTER|
+  VK_SIGN_IN` overrides into every crate; an unknown value fails the build.
+  `scripts/release.py --market ru [--feature NAME=on|off] [--account-api URL
+  --portal URL]` compiles the market's lobby, Account API and portal, names
+  packages `Omoba-<v>-ru-*` in `dist/v<v>-ru/`, packages only the market's
+  platforms (RU: macOS, Windows, Linux with the RU Account API, Android as
+  `space.ekza.omoba.ru`), and refuses another market's servers; `markets`,
+  `preflight` and `catalog` commands and `make release-ru*` targets support the
+  RU release. `ops/vps/ru/` holds the RU server units, Caddy ingress and env
+  examples. CN stays blocked until it has servers and sign-in providers.
+- Sign in with VK ID (VK, OK, Mail.ru) for markets with `vk_sign_in`. The Account
+  API (portal schema 7) exchanges the portal's authorization code itself and keeps
+  a VK user only as an HMAC under `OMOBA_SOCIAL_SECRET`. A linked VK account signs
+  the website in; an unknown one registers without creating a game profile and
+  is linked only when the game confirms with its active device key
+  (`POST /v1/auth/social/link`). In the game, Profile → «Войти через VK ID» opens
+  the portal's `/connect?code=…`, checks the request every three seconds, then
+  links this profile or switches to the VK account after a restart. Free-market
+  Account API builds serve no Supporter or Ekza library route and refuse billing
+  settings. See [the session note](docs/progress/2026-10-24-market-profiles.md).
+
+- Market builds are gated at compile time. A build without Ekza (`OMOBA_MARKET=ru`
+  or `cn`) starts no Ekza store, account link, wallet pairing or community
+  sculpture, pins closed loopback registry and passport endpoints (ignoring
+  `OMOBA_REGISTRY_URL`/`OMOBA_PASSPORT_URL`) and shows no Studio, wallet, Ekza
+  library or market UI in Collection, hero select and the draft; a saved Ekza
+  weapon falls back to the class default. Its server admits no protected avatar
+  or `ekza-` weapon and makes no registry or passport request. A build without
+  Supporter registers no Supporter or StoreKit plugin and hides "Support OMOBA".
+  First launch opens in the market's language, and a non-global market keeps its
+  settings in `omoba-bevy-<market>[-<contour>]`. The global build is unchanged.
+  See [the session note](docs/progress/2026-10-23-market-gating.md).
+
+- The Ekza rendition builder (`scripts/ekza_build_rendition.py`, profile
+  `desktop/humanoid-glb-v1`) now bakes idle/walk/attack/cast/death onto VRM 1.0
+  (`VRMC_vrm`) sources instead of failing with `build_failed: no VRM extension`.
+  VRM 1.0 thumbs follow the client runtime naming, and the rendition is turned to
+  rest facing -Z like VRM 0.x avatars. VRM 0.x renditions are byte-identical; a
+  model declaring both VRM versions is refused. The local import
+  (`scripts/convert_vrm_to_glb.py`) applies the same VRM 1.0 turn. The runtime
+  humanoid rig now requires uniform scale only on humanoid bones and their
+  ancestors (accessory nodes with exporter roundoff no longer reject an avatar),
+  and a VRM model whose runtime rig is rejected plays its embedded clips in matches
+  instead of standing static. See
+  [the session note](docs/progress/2026-10-22-vrm1-rendition.md).
+
+- Add a guarded DEV Account API host setup with persistent private credentials,
+  a restricted HTTPS ingress and exact-revision activation after database migration.
+
+- OMOBA Dev now includes its own Account API and player portal defaults on desktop,
+  iOS and Android. DEV account traffic rejects production runtime overrides; the
+  DEV Account API uses DEV Registry/Studio for library consent. Game-server
+  updates preserve an explicitly enabled Account API database login.
+
+- Dawnweaver reference pass. **Horizon Ray now burns hardest along its centre**: full
+  damage within 0.35 of the axis, easing to 60% at each target's graze point (damage
+  80 at the centre, 48 at the edge; previously a flat 72). Radiance detonations and the
+  re-applied mark keep their full value. The caster stands still through the 0.8 s
+  windup so the ray leaves from the hero who warned it (proposed for owner review), a
+  late server tick can no longer swallow a due ray, a fully intercepted spell no
+  longer arms Radiance, and marks include the team damage buff. Receipts carry
+  additive `core_hit` / `radiance_burst` flags. Presentation: a drawn core band that
+  matches the damage core, stronger core hits, a Radiance pop, a release afterglow,
+  charge and two-hand release motions, the lane facing kept through the release, an
+  audible charge telegraph for every listener, new synthesized beam/core/burst voices
+  and lane-gained release audio. Direction skills that ignore aim distance send the
+  far point of the aimed ray. Bots hold the Luminous Field, spare towers and lead the
+  ray. Catalog `standard-kits-8`, gameplay `dawnweaver-2026-10-11-reference`; matching
+  client and server required. See [the iteration record](docs/progress/2026-10-11-dawnweaver-reference.md).
+- Fix desktop aiming of held direction skills (reported on Wildspark's Last Spark on
+  Linux): the aim lane and the cast now read one mouse aim. Moving the cursor outside
+  a windowed game mid-hold keeps the last aim instead of firing along the hero's facing;
+  losing focus mid-hold (Alt+Tab, the desktop overview) cancels the hold instead of
+  casting; a controller (or a Linux joystick-class device) can no longer take the aim
+  off the mouse while a skill key is held; a same-frame key-repeat pair no longer
+  releases the cast early. A desktop first cast with no cursor aim is refused with a
+  one-line hint instead of flying along the hero's facing (recasts that ignore the aim
+  still go out). Touch and controller casting are unchanged; no protocol or
+  gameplay change. See [the investigation](docs/progress/2026-10-11-desktop-aim.md).
+
+- Hero aura orbits now use continuous, feathered ribbons with bright heads,
+  a gentler body glow and one counter-rotating orbit. The 3D effect uses 23
+  elements instead of 35; counted geometry drops from 13,056 to 1,632 triangles
+  per aura. Shared static meshes need no per-frame geometry uploads, new lights
+  or dependencies. The separately depth-sorted 2D fallback stays at 35 elements.
+  Server-owned eligibility and cleanup are unchanged. Local 5v5 practice captures
+  verify the 23-element effect on a moving Agnes and its removal after revocation.
+  A short desktop frame-time comparison at VSync 60 is recorded separately; it
+  does not measure isolated GPU cost or mobile performance.
+
+- Monthly Hero Supporter recognition: a refined cosmetic aura, lifetime credit
+  for unique verified monthly support periods, optional public acknowledgement,
+  and a paginated supporter directory linked to privacy-aware game profiles.
+  Expired support remains credited; refunds and payment replays cannot inflate
+  it. Existing server authority and Apple/Solana provider gates remain in place.
+  Includes a new Account API migration; deployment and real payment-provider
+  activation are separate operations. See [Supporter operations](docs/supporter.md).
+
+- Community sculpture pilot: a Registry-approved, temporary 3D placement beside
+  the Wendigo pit, with bounded hash-verified downloads, expiry/revocation, and
+  an original waving lucky cat. Click/tap the sculpture to read its moderated
+  title, credit and optional multiline description in a scrollable modal; input
+  stays blocked through opening/closing gestures and authorization loss removes
+  stale information. The GLB animation continues while reading. No objective or
+  collision changes. The linked
+  Web/Studio workflow is free; cryptocurrency payments remain disabled.
+  See [runtime and local verification](docs/community-sculptures.md).
+
+- Shared **Omoba Dev** Xcode scheme for Run and Archive: separate app identity,
+  DEV icon and dev lobby, protected against stale local contour/server settings.
+  iOS release tooling selects the matching scheme; linked worktrees share the
+  primary Cargo cache. See [dev quickstart](docs/dev-quickstart.md).
+
+- Connection profiles and the OMOBA Dev app ([docs/connection-profiles.md](docs/connection-profiles.md)).
+  **Production builds have no server selection at all**: the party lobby's server
+  field, the Home/phone SERVER button and the Beta/Local presets are gone, and a
+  `game_server_addr` saved by an older build is no longer read; desktop developers and
+  self-hosters override the lobby, registry and passport with `GAME_SERVER_ADDR`,
+  `OMOBA_REGISTRY_URL`, `OMOBA_PASSPORT_URL` (phones read none; the dev app ignores a
+  production one). **Dev-contour builds**
+  get a Connection panel (kit modal; Home and Party → Connection) with three profiles,
+  each one button for lobby, Ekza registry, market, Studio and passport: Dev (default:
+  `lobby.dev.omoba.io:4100`, `registry.dev.ekza.io`, `app.dev.omoba.io`,
+  `studio.dev.ekza.io`, closed passport), Local (loopback `:4000`/`:8018`/`:3010`/`:5188`)
+  and Custom (typed lobby, optional registry; production refused). A switch is confirmed,
+  saved, and applies at the next start (desktop: Restart now); Home shows the running
+  profile beside DEV. Each profile keeps its Ekza link, store caches and match-resume
+  hint in `profiles/<profile>/`. The dev app now also exists on phones:
+  `scripts/release.py build ios|android --contour dev` makes `space.ekza.omoba.dev`
+  ("OMOBA Dev", DEV-ribbon icon from `scripts/make_dev_icons.py`), which installs beside
+  `space.ekza.omoba.beta`; the release workflow builds the dev APK. `PROTOCOL_VERSION`
+  is unchanged.
+
+- DEV contour polish. A dev-contour build shows a `DEV` badge (kit badge,
+  `common.contour_badge`) beside the Home title and under the match score strip, and its
+  Collection and draft hints name `app.dev.omoba.io/market` instead of the production
+  market: the dictionaries now hold `{market}`, filled from the build's contour.
+  Production builds look the same as before. A saved Ekza connection is now restored at
+  startup, in the background, rather than when Collection, hero select or the draft
+  first opens.
+
+- Wildspark skin sets and "My Ekza library" weapons. One static `handheld-glb-v1`
+  GLB can carry both Wildspark guns (`WildsparkSetRepeater` / `WildsparkSetLauncher`,
+  [authoring guide](docs/wildspark-skin-sets.md)); the game shows the variant for the
+  replicated weapon mode and moves only that variant's rotor or slide. Two sample sets
+  (Candy Neon, Scrap Punk) are in `assets-src/skins/wildspark-sets/`, built by
+  `scripts/build_wildspark_skin.py`; they reach players only through Studio. Collection and
+  the draft list the connected account's weapons first as "My Ekza library" (claims made
+  on `app.omoba.io/market` appear without a restart), and avatars in the library carry
+  the same name. Studio items show the registry's attribution line next to creator and
+  licence. The picked avatar is remembered across restarts. The server logs one line per
+  Ekza handheld/avatar admission decision. Signing out of Ekza in the game also ends
+  that link on the registry, in the background and best effort, and a new pairing ends
+  the saved link it replaces, so reconnects no longer pile up active links. Needs
+  ekza-bevy-sdk `d18ec72` (`AccountSession::assets`, `disconnect`, store attribution);
+  free items stay server-admitted by approval; `PROTOCOL_VERSION` stays 11.
+
+- `make sdk-pin-check` checks that the `ekza-bevy-sdk` commit pinned in `Cargo.toml`
+  and `Cargo.lock` is on a branch of the SDK's GitHub repository (`SDK_BRANCH=dev`
+  requires it merged there). A commit known only to a local `~/.cargo/git` cache builds
+  on that machine and fails CI and fresh clones. Tooling only; not part of `make check`
+  because it needs the network.
+
+- DEV contour: `scripts/release.py build … --contour dev` makes desktop tester packages that
+  point at the dev lobby (`lobby.dev.omoba.io:4100` on the dedicated dev VPS) and
+  `registry.dev.ekza.io`. They are named `…-dev-…`, keep settings, session and caches in
+  `omoba-bevy-dev` instead of `omoba-bevy`, and are titled `OMOBA DEV` / `Omoba Dev.app`.
+  Dev builds use a closed loopback passport instead of the production `avatar.ekza.io`,
+  and at run time they offer an **OMOBA Dev** preset and refuse the production lobby in
+  every address they validate (typed, saved, `GAME_SERVER_ADDR`, match allocations).
+  `--registry` and `--passport` bake those origins for a build. No build, including the
+  iOS archive, inherits a compile-time setting from the shell (`OMOBA_DEFAULT_*`,
+  `OMOBA_ACCOUNT_API_URL`, `OMOBA_PORTAL_ORIGIN`, `EKZA_DEV_HTTP_HOST`). `release.yml`
+  gains `registry` and `contour` dispatch inputs. `ops/vps/omoba-lobby-dev.service` and
+  `ops/vps/dev/lobby_dev.py` install the dev lobby (UDP 4100/41100) on `vds-dev` with
+  dry-run, production refusals and rollback. The lobby gets its own career database
+  `omoba_dev` in the dev Supabase Postgres on that host, because a public lobby needs one
+  to start and to match players: roles, database and schema are created on the host, and
+  the password is generated there into a root-only file. Production builds, the production
+  unit and protocol are unchanged.
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
   `make release-publish` pins the packages to IPFS and verifies the gateway copies.

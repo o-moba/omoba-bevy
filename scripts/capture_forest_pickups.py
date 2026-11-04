@@ -5,6 +5,8 @@ An admitted Blue peer casts one normal Q, then stays passive. The Green native
 client uses production movement to collect a pickup and wait for its respawn.
 No synthetic damage/healing, particle freezing, or physical-device claims.
 """
+from qa_account_fixture import prepare_capture_account
+
 import argparse
 import copy
 import json
@@ -208,6 +210,7 @@ def main():
     children, peers, observer = [], [], None
     started=time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-pickup-qa-") as isolated:
+        prepare_capture_account(isolated)
         env=dict(os.environ, SERVER_ADDR=f"{address[0]}:{address[1]}",GAME_SERVER_ADDR=f"{address[0]}:{address[1]}",
                  OMOBA_MATCH_MODE="dev",OMOBA_TEAM_SIZE="5",OMOBA_CLIENT_CONFIG_DIR=str(Path(isolated)/"config"),
                  OMOBA_ASSET_DIR=str(assets),OMOBA_PLAYER_VISUAL_MODE=args.mode,OMOBA_DEBUG_UI="0",

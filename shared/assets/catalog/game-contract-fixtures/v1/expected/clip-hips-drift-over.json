@@ -1,0 +1,17 @@
+{
+  "case": "clip-hips-drift-over",
+  "contract": "sha256-490411f885107bc156482c90ac660e83ed2c968b9899a2526bb56ffd9728e42b",
+  "target": "wildspark",
+  "document": "ok",
+  "pack": "ok",
+  "warnings": [],
+  "slots": {
+    "base.run": [
+      "clip.in-place"
+    ],
+    "basic.wildspark.0": "pass",
+    "skill.wild_zap.release": "pass"
+  },
+  "slotWarnings": {},
+  "note": "hips 0.151 leg lengths off rest"
+}

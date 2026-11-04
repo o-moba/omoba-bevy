@@ -2,9 +2,9 @@
 //! id allocators and the round clocks. Simulation and request handlers take
 //! `&mut GameWorld` instead of long parameter lists of the individual maps.
 
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::wire::GameState;
 

@@ -12,5 +12,6 @@
   "common.no": "否",
   "common.on": "开",
   "common.off": "关",
-  "common.loading": "加载中…"
+  "common.loading": "加载中…",
+  "common.contour_badge": "{contour}"
 }
