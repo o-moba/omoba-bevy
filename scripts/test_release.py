@@ -756,13 +756,15 @@ class Markets(unittest.TestCase):
                 self.assertIn("СИСТЕМНЫЕ ТРЕБОВАНИЯ", readme)
                 for line in release.ru_system_requirements(target):
                     self.assertIn(line, readme)
-                # Support and community stay out until the owner provides them (LR-21).
-                self.assertNotIn("Поддержка:", readme)
+                # The owner provided the support e-mail; the community stays out until
+                # provided (LR-21).
+                self.assertIn(f"Поддержка: {legal.support_email}\n", readme)
+                self.assertNotIn("Сообщество ВКонтакте", readme)
                 self.assertNotIn("Telegram", readme)
         self.assertIn("xattr -dr com.apple.quarantine /path/to/Omoba.app", release.player_readme("0.45.0", "macos", ru))
         self.assertIn("tar -xzf omoba-0.45.0-ru-linux-x64.tar.gz\n      cd omoba-0.45.0-ru && ./omoba",
                       release.player_readme("0.45.0", "linux", ru))
-        self.assertEqual(release.readme_gaps(ru), ["support e-mail", "community (VK or Telegram)"])
+        self.assertEqual(release.readme_gaps(ru), ["community (VK or Telegram)"])
         provided = dataclasses_replace_legal(ru_market=markets.MARKETS["ru"], support_email="help@omoba.ru",
                                              community_vk="https://vk.com/omoba", community_telegram="https://t.me/omoba_ru")
         from unittest import mock
@@ -814,9 +816,9 @@ class Markets(unittest.TestCase):
                      "8aae7af23308babb6d39481e616ae57e1f405a222ad7b6c8741a0399dbe77f0b",
                  ("linux", release.resolve_flavor("dev")): "947518629a43e87e4007d491d405b1c5825b0f5d2089ccccd67bda9199292765",
                  ("linux", release.resolve_flavor("dev", market="ru")):
-                     "af6d89ee25959d6a87f5c57a51bfe34b4fb88c4e109ac64a7638efe667f461bf",
+                     "c5785a47ed7bc8f9c7576d8c88f2bbf2ada675cdbd309f5b93936ddb4c78df8d",
                  ("macos", release.resolve_flavor("dev", market="ru")):
-                     "7de29675683164d5965a58e0afb447559f7e50b30c854fe114c1621159ffed78"}
+                     "7e42be672a51466e0d646ef7a9ebacc3c7f9d38c560950984467e81717f32798"}
         for (target, flavor), digest in cases.items():
             with self.subTest(target=target, contour=flavor.contour, market=flavor.market, server=flavor.server):
                 text = release.player_readme("0.45.0", target, flavor)
@@ -900,7 +902,7 @@ class Markets(unittest.TestCase):
         self.assertEqual(plan["linux_binaries"], ["client", "server"])
         self.assertEqual(plan["server_bundle"], str(Path(temporary) / "v0.45.0-ru/server/omoba-0.45.0-ru-server-linux-x64.tar.gz"))
         self.assertEqual(plan["readme"], "ru")
-        self.assertEqual(plan["readme_gaps"], ["support e-mail", "community (VK or Telegram)"])
+        self.assertEqual(plan["readme_gaps"], ["community (VK or Telegram)"])
         # Without a Linux builder there is no bundle either; the global plan has none.
         no_linux = {**report["platforms"], "linux": False}
         self.assertNotIn("server", release.build_targets("all", release.resolve_flavor(market="ru"), no_linux))
