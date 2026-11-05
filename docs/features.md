@@ -16,6 +16,22 @@ portal gains a leaderboard with an opt-out. See
 [match progression](match-progression.md#ranked-window-at-low-population-lr-35),
 [the plan](plans/ranked-launch-readiness-2026-11-05.md) and ADR-027.
 
+## Fair play: remake and surrender (C5, unreleased)
+
+Authenticated teammates can start a remake before minute 3 when a teammate has
+been continuously absent for 90 seconds, or surrender from minute 10. Votes last
+30 seconds; a failed vote has a 120-second cooldown. A remake needs a strict
+majority of the remaining eligible humans; surrender needs four of five, or all
+remaining humans when fewer than four remain. Bots cannot vote. Round and vote
+generations prevent stale or opposing-team ballots from affecting the decision.
+
+Remakes have a distinct history result: innocent players receive no ordinary
+match/rating/XP credit, while a proved ranked leaver keeps the personal penalty.
+Surrender awards an ordinary win/loss with an explicit surrender explanation.
+Native pause controls and a live voting prompt use server eligibility; the portal
+shows neutral remakes, personal remake forfeits and surrender separately.
+Protocol 15 and career schema 8 require coordinated client/server rollout.
+
 ## Classic hero design authoring foundation
 
 The existing game-contract exporter also publishes a versioned hero design

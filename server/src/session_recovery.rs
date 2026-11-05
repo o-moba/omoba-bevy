@@ -200,7 +200,10 @@ impl ServerRuntime {
         }
     }
 
-    fn eligible_takeover_voters(&self, team: shared::map::Team) -> Vec<(SocketAddr, u64)> {
+    pub(crate) fn eligible_takeover_voters(
+        &self,
+        team: shared::map::Team,
+    ) -> Vec<(SocketAddr, u64)> {
         self.world
             .players
             .iter()

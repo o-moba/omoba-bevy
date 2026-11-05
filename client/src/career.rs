@@ -1254,6 +1254,7 @@ fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
     tr(match result.outcome {
         MatchOutcome::Abandoned => "career.result.abandoned",
         MatchOutcome::Interrupted => "career.result.interrupted",
+        MatchOutcome::Remade => "career.result.remade",
         MatchOutcome::Completed => "career.result.complete",
     })
 }
@@ -2268,6 +2269,7 @@ fn history_body(
                         (_, Some(false)) => "career.result.defeat",
                         (MatchOutcome::Abandoned, None) => "career.history.abandoned",
                         (MatchOutcome::Interrupted, None) => "career.history.interrupted",
+                        (MatchOutcome::Remade, None) => "career.result.remade",
                         (MatchOutcome::Completed, None) => "career.history.complete",
                     });
                     label(
@@ -3054,6 +3056,7 @@ mod tests {
     fn result() -> MatchResult {
         MatchResult {
             gameplay_started: true,
+            end_reason: None,
             result_id: "r1".into(),
             server_epoch: 1,
             match_id: 1,

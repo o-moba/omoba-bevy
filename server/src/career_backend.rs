@@ -2633,6 +2633,7 @@ mod tests {
     fn outbox_result(id: &str, outcome: MatchOutcome) -> MatchResult {
         MatchResult {
             gameplay_started: true,
+            end_reason: None,
             result_id: id.into(),
             server_epoch: 1,
             match_id: 1,
@@ -2933,6 +2934,7 @@ mod tests {
                 .as_millis() as u64;
             let mut result = MatchResult {
                 gameplay_started: true,
+                end_reason: None,
                 result_id: random_id::<16>(),
                 server_epoch: now,
                 match_id: if terminal { 1 } else { 2 },

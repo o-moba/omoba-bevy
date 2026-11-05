@@ -21,6 +21,11 @@ pub(crate) struct FairPlay {
 }
 
 impl FairPlay {
+    pub(crate) fn currently_absent(&self, id: u64, now: Instant) -> bool {
+        self.humans
+            .get(&id)
+            .is_some_and(|h| h.time.currently_absent(now))
+    }
     pub(crate) fn annotate(&self, participants: &mut [ParticipantResult]) {
         for participant in participants {
             participant.participation = self.humans.get(&participant.player_id).map(|human| {

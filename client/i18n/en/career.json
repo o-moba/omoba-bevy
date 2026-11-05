@@ -112,5 +112,7 @@
   "career.button.older": "Older",
   "career.player.progress_abandoned": "{rating} · +{xp} career XP · Left / AFK",
   "career.unrated.abandoned_reaped": "The match ended because no active players remained. Proven leaving and AFK penalties still apply.",
-  "career.unrated.duration_capped": "The match reached its time limit. No leaving or AFK penalties apply."
+  "career.unrated.duration_capped": "The match reached its time limit. No leaving or AFK penalties apply.",
+  "career.result.remade": "Remade",
+  "career.unrated.remake": "Early team remake; no ordinary match awards."
 }

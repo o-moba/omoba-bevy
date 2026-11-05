@@ -88,7 +88,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 | 31 | minor | gap | Harness PostgreSQL tests (300-client admission, registration journey) are never run by any automated gate | `.github/workflows/ci.yml:120` | In ci.yml `postgres` job add after the Python step: `cargo build --locked -p server` then `OMOBA_HARNESS_DATABASE_URL=$OMOBA_TEST_DATABASE_URL cargo test --locked -p harness --test admission -- --ignored --test-threads=1` (and the new ranked_journey test). Make admission.rs/registration_journey.rs fall back to OMOBA_TEST_DATABASE_URL when OMOBA_HARNESS_DATABASE_URL is unset, and add a `make test-postgres-harness` target. | done — owner-approved CI gate passes all 13 stages (1097.16 s, e3b0942/run 42005385554), including admission/registration and full Ranked Victory. Artifact inspected: fixture removed and no private-key file uploaded. |
 | 32 | minor | gap | No leaderboard / ranking surface anywhere (portal, API, DB) — rating has no social meaning | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/src/lib.rs:554` | Minimal LR-47 slice. (1) career-store migration 006_ladder.sql: `CREATE INDEX career_profiles_ladder ON career_profiles(rating DESC, rated_matches DESC, profile_id)`. (2) account-api/src/read.rs: `pub async fn leaderboard(app,&Option<Session>,query)` → top 100: `SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.wins,p.losses FROM career_profiles p JOIN portal.profile_settings s USING(profile_id) WHERE s.publi | done — GET /v1/leaderboard, portal page, opt-out (portal schema 11, career schema 6) |
 | 33 | minor | gap | No leaderboard: no index on career_profiles(rating), no API/portal endpoint (LR-47) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/001_career.sql:5` | Migration 006: `CREATE INDEX career_ladder ON career_profiles(rating DESC, profile_id) WHERE rated_matches >= 20` (plus SCHEMA_VERSIONS bump); account-api GET /leaderboard returning top-100 nickname/rating/rated_matches honouring portal.profile_settings.public_profile_enabled (or nickname-only), and a portal page with RU copy; optionally the client Home shows 'Ваше место #N'. | done — see #32 |
-| 34 | minor | gap | Leaver on the winning team gains full rating and 150 XP (LR-33) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/career_store.rs:731` | Minimal: in finish_inner, when `participant.disconnected && won` set progression_xp_gained = 0 and clamp the rating delta to <= 0 (keep the loser's normal loss), and surface this in the receipt (client already has career.player.progress_disconnected). Add a career_store_tests case. Full LR-33 (connected-time tracking, abandon counter + cooldown) is a later L. | partial — local implementation in progress: 90-second participation/AFK policy, individual leaver loss/no XP, teammate half-loss and exactly-once PostgreSQL cooldowns. All593 PostgreSQL/API/store/server tests pass, including48 store tests and15 AFK cases; full native client/current journey gates pending; not deployed. |
+| 34 | minor | gap | Leaver on the winning team gains full rating and 150 XP (LR-33) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/career_store.rs:731` | Minimal: in finish_inner, when `participant.disconnected && won` set progression_xp_gained = 0 and clamp the rating delta to <= 0 (keep the loser's normal loss), and surface this in the receipt (client already has career.player.progress_disconnected). Add a career_store_tests case. Full LR-33 (connected-time tracking, abandon counter + cooldown) is a later L. | done — 90s participation/AFK policy, individual leaver loss/no XP, teammate half-loss and exactly-once PostgreSQL cooldowns. 593 PostgreSQL/API/store/server tests and current native tests pass; commit 0db576fc CI 42061098787 is green in all seven jobs and all13 real public journeys. Artifact inspected/hash verified. No production deployment; remake/surrender and remaining P6 stay separate. |
 | 35 | minor | gap | Fixed K=32 with no placement/newcomer K (LR-53) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/matchmaking.rs:410` | Pass `rated_matches` into rating_changes_for_players and use K=48 while `rated_matches < NEWCOMER_MATCHES` (per player, winner/loser clamped independently as today), update the test expectations and the number in docs/match-progression.md. Tiers/seasons remain LR-53. | partial — K=48 for pre-match rated_matches<20, then K=32 from locked profiles; boundary/mixed-K/bounds and real PostgreSQL 20th→21st/idempotence tests pass. all 42 store tests (real PostgreSQL included) and all-target clippy pass. Current complete-gameplay CI 42024828738 passed: standard-map ten-human victory, exact +24/150 and -24/100 awards for fresh profiles; tiers/seasons remain in P6. |
 | 36 | minor | gap | RU guest home explains the modes but never explains the rating itself | `/Users/wotori/git/ekza/_workspace/worktrees/mm-web/src/components/guest-home.tsx:62` | Add a fourth landing section «Рейтинг» (two sentences from match-progression.md:186-195: старт 1000, меняется только в рейтинговых матчах, первые 20 матчей — группа новичков, обычный PvP и боты дают опыт) with ru/zh entries in landing-translations.ts, and assert it in tests/ru-landing.e2e.mjs. | done — RU landing rating section |
 | 37 | minor | gap | Newcomer/calibration state is a bare tag with no progress or explanation | `/Users/wotori/git/ekza/_workspace/worktrees/mm-web/src/components/portal.tsx:200` | Render `Новичок · {rated_matches}/{newcomer_matches} рейтинговых матчей` with a title/tooltip «Первые 20 рейтинговых матчей играются среди новичков; рейтинг пока калибруется» on /me and as a one-line notice above the chart on /me/stats; keys in ru/en/zh. No tiers, per spec. | done — Новичок · n/20 with tooltip on /me and /me/stats |
@@ -131,7 +131,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 - [major/ux/M] **Mobile player who locks the screen while Searching silently loses the queue place after 15 s and is re-queued at the back on resume; no keep-awake and no match-found sound/vibration** — `server/src/match_service.rs:668`. Fix: Keep the screen awake while in Searching/Draft on Android (`ANativeActivity_setWindowFlags(AWINDOW_FLAG_KEEP_SCREEN_ON)` via the ndk crate) and iOS (`isIdleTimerDisabled`); raise the lobby expiry to 60 s and have the client, on resume with a gap >15 s, show `searching.status.resumed` ('Поиск был прерван · продолжаем'); play a short SFX + vibration when the view becomes allocated/assigned. — **partial — search intent now retains FIFO age up to 60 s (ready acceptance remains 15 s); integrated Android/iOS foreground keep-awake, wall-time resume refresh, one-shot sound and iOS haptic are implemented; six policy tests pass. Integrated client/Android/iOS compile gates pass for the pre-haptic revision; approved Android haptic patch is applied and requires its own target check. Native Home and physical mobile evidence remain pending.**
 - [major/scale/M] **Daily pg_dump only: a host failure rolls every player's rating and history back up to 24 h; no WAL archiving or point-in-time recovery** — `ops/vps/ru/omoba-backup-ru.timer:7`. Fix: Enable `archive_mode=on` with an `archive_command` that ships WAL segments to the existing off-host backup target (pgBackRest or wal-g; or rsync as a stopgap), keep the nightly base dump, and extend `ru_backup.py check`/the restore drill to replay WAL to the latest point; as a one-line stopgap raise the dump cadence to hourly. — **open — WAL archiving / PITR (daily pg_dump only)**
 - [major/gap/L] **No remake or surrender: a Ranked match that loses a human in the first minute is played out 4v5 with a bot-piloted seat for up to 45 min and is fully rated for all 10** — `server/src/session_recovery.rs:200`. Fix: Server: `PrematchAction`-style `MatchVote { Remake \| Surrender }` on the worker; remake allowed while elapsed < 180 s and a seat has been disconnected ≥ 90 s → end as `Outcome::Remade`, unrated for everyone, abandon count for the leaver; surrender allowed after 600 s with 4/5 (or all remaining) votes → normal Completed result. Client: vote prompt in pause menu with Russian strings; store: `unrated — **open — remake / surrender (LR-34)**
-- [major/gap/S] **Ranked has no eligibility gate: a brand-new device-key profile with zero matches can queue Ranked, and reinstalling creates a fresh profile, so alts/smurfs are free** — `server/src/match_service.rs:892`. Fix: Add a server-side Ranked precondition in `FindMatch` handling: `profile.matches_played >= 10` (Casual/vs Bots count) or career level ≥ 5, refused with a new code `ranked_locked` and Russian text `queue.failed.ranked_locked` ('Рейтинговый режим откроется после 10 матчей · сыграно {played}/10'); show the same lock + progress on the Home queue card. Optionally require a linked VK ID for Ranked (one V — **open — Ranked entry gate (LR-37; owner default O-3: no gate at launch)**
+- [major/gap/S] **Ranked has no eligibility gate: a brand-new device-key profile with zero matches can queue Ranked, and reinstalling creates a fresh profile, so alts/smurfs are free** — `server/src/match_service.rs:892`. Fix: Add a server-side Ranked precondition in `FindMatch` handling: `profile.matches_played >= 10` (Casual/vs Bots count) or career level ≥ 5, refused with a new code `ranked_locked` and Russian text `queue.failed.ranked_locked` ('Рейтинговый режим откроется после 10 матчей · сыграно {played}/10'); show the same lock + progress on the Home queue card. Optionally require a linked VK ID for Ranked (one V — **open — Ranked entry gate (LR-37; owner update 2026-11-06: 10 completed public matches, no mandatory VK link; implementation/proof pending)**
 - [minor/ux/S] **Draft allows two players on one team to lock the same hero class; no per-team uniqueness or 'taken' feedback** — `server/src/prematch.rs:235`. Fix: In `handle_prematch` refuse `Select`/`Lock` whose `hero_class` is already locked by a joined teammate, setting `player.draft.error = Some("draft.error.hero_taken")` resolved client-side to 'Этого героя уже выбрал союзник'; grey the class card in the client draft when a teammate has locked it (draft snapshot already carries teammates' picks). — **open — duplicate hero per team in the draft**
 - [minor/scale/S] **nftables lobby rule is 400 pkt/s per source IP: ~250 players behind one carrier-grade NAT saturate it and the kernel drops FindMatch/presence for all of them** — `ops/vps/ru/nftables-omoba.conf:56`. Fix: Raise the lobby limit to e.g. 4000/s burst 8000 (it is a flood guard, not a fairness tool) or key the dynamic set by `ip saddr . udp sport` so each NAT'd client gets its own bucket; document the new figure in README 'Admission limits'. — **done — nftables lobby rule 4000/s burst 8000**
 - [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold, corrupt/oversized/limited-scan alerts, no active-checkpoint false positives; 24 monitor tests pass. RU installation remains part of deployment.**
@@ -468,3 +468,73 @@ Frozen AFK patches and hashes are kept under each worktree's
 CI may follow intermediate commits while root is below the local heavy-build
 threshold; that permission is pending. No feature commit/push bypassed that gate.
 Next independent P6 implementation is remake/surrender; all P7–P9 still required.
+
+### Saved AFK package and C5 continuation
+
+- Game AFK package: `18389e72`, pushed to PR148; portal: `6d987c2`, pushed to PR33.
+  The owner explicitly approved intermediate commits after targeted local checks
+  with the complete gate in existing CI. CI run `42056989638` is in progress;
+  it is not recorded as passed. The full local gate also runs against an isolated
+  source-identical AFK/compact-Home checkout; current C5 changes cannot enter it.
+- Unlocked Mac capture: `.agent/codex-ranked-readiness/product-home-native-input14-unlocked/`.
+  Actual RU 852×393 Home render shows rating/placement and the direct queues.
+  It exposed a version-label/nav overlap. Layout adjusted; fresh changed-source
+  screenshot is pending. This is a desktop phone preview with seeded QA data,
+  not a physical mobile or authenticated account acceptance result.
+- Portal AFK production build passed in addition to 242 tests, typecheck and
+  the focused browser scenario. It is saved, not deployed.
+- C5 source integration has begun: authenticated per-team vote slots, generation
+  and round checks, 30s/120s timing, remake/surrender terminal paths, native menu,
+  and settlement/history policy. Protocol 15/core 8 are only working-tree code.
+  Runtime/PostgreSQL/native/public-process verification is pending. C5 remains
+  open; C6/C7, tiers/seasons and every P7–P9 acceptance condition remain required.
+
+Owner decision 2026-11-06 for C6/O-3: Ranked opens after 10 completed public
+matches; linking VK is not required. This explicitly supersedes the old launch
+default. Server admission, authoritative completed-match counter, Home progress
+and public/PG proof are still required; the decision alone does not close C6.
+
+C5 targeted runtime/policy tests: 12 passed, no failures or ignores. Server/store/
+Account API all-target typecheck passed. Portal production build, focused RU
+390×844 browser check and 10 presentation tests passed; remake penalty/neutral
+and surrender screenshots inspected. C5 real PostgreSQL/public-process/native
+checks still pending. AFK notice fix `0db576fc` is pushed; repeat CI `42061098787`
+is running after the earlier run found the missing stable QA identifier.
+
+### Current AFK acceptance — 2026-11-06
+
+`0db576fc`: CI `42061098787` passed all seven jobs and all 13 complete public/PG
+stages (1136.32 s). Standard-map Ranked base victory took 445.59 s including
+setup, with gameplay duration 428402 ms. Result `f04d399b61e8d74b2efbe280b9f26128`: all
+ten profiles/history/receipts independently checked, exact +24/150 or -24/100,
+participation present with no false AFK/abandons. Artifact `13433365824` SHA256
+`8ea9b8407f23a8d90a2925518937bdbe2da13ce5ec197a5c73621435d9494091` verified;
+private fixture absent. Reports retained in `.agent/codex-ranked-readiness/ci-0db-postgres-harness/`.
+The new AFK notice test passes after its missing TestId was fixed. Finding #34
+is closed by current code and checks; this does not close the rest of P6 or
+physical-device/host acceptance. Current portal C5 presentation is saved in
+`8f6314b`, with 243 tests/3 expected skips, typecheck, production build and
+focused RU mobile browser proof passing. Game C5 PG/native/public checks remain.
+
+
+### C5 public-process proof — 2026-11-06
+
+The working implementation passed 608 real PostgreSQL tests (store50/API105/
+server453), 183 shared tests, 12 runtime/policy tests and all-target native clippy.
+Both real-time, signed ten-human Ranked process scenarios pass on protocol15/core8:
+
+- Remake: `a66bc505b1e3b6695585a508e639f226`, eligibility after96.209968s.
+  All ten profile/history/detail records checked; innocent neutral totals and
+  individual -32/no-XP/durable cooldown checked. Stale/opponent ballots rejected.
+- Surrender: `dce7261dce0ae4666c1f490676804993`, eligibility after600.183473s.
+  Explicit No, exact quorum, stale/opponent rejection and all ten ordinary
+  result/profile/history awards checked, without accelerated game clocks.
+
+The first remake probe settled correctly but failed its own unpaced account
+reads; phased reads respect the unchanged server throttle and the rerun passes.
+Raw artifacts: `.agent/codex-ranked-readiness/p6-public-remake-v2/` and
+`p6-public-surrender/`. Portal8f6314b is saved and verified separately.
+C5 remains partial until native kit/full committed CI and native visual proof.
+The existing PostgreSQL harness now includes15 stages; ordinary base victory
+remains an independent stage. C6 is next: owner-approved ten completed public
+matches, without VK requirement. All later P6–P9 work remains mandatory.

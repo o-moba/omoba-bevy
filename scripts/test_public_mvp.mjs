@@ -72,8 +72,9 @@ const scenario = opts.scenario || 'load';
 const draftExit=opts['draft-exit']||'leave';
 const exerciseStaleHandoff='exercise-stale-handoff' in opts;
 assert(['leave','disconnect'].includes(draftExit)&&(!opts['draft-exit']||scenario==='party-draft'), '--draft-exit=leave|disconnect is a party-draft option');
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft'].includes(scenario), 'unknown scenario');
-if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','remake','surrender'].includes(scenario), 'unknown scenario');
+if(['remake','surrender'].includes(scenario)) assert(!mix&&preference==='humans_only'&&clientsCount===10, `${scenario} uses --clients=10 --preference=humans_only`);
+else if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
 else if(['recovery','early-recovery'].includes(scenario)) assert(!mix&&((preference==='humans_only'&&clientsCount===10)||(preference!=='humans_only'&&clientsCount>=1&&clientsCount<=10)), `${scenario} uses one roster (Ranked: ten humans)`);
 else if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
 for(const [queue,count] of mix ?? [[preference,clientsCount]])assert(queue!=='humans_only'||count%10===0, 'Ranked (humans_only) forms only full ten-player matches: use a multiple of 10');
@@ -146,7 +147,7 @@ function launchLobby(){
  const child=spawn(scope[0], scope.slice(1), {env, detached:true, stdio:['ignore',logfile,logfile]});if(child.pid)ownedGroups.add(child.pid);return child;
 }
 let lobby=launchLobby();
-const all=[]; const report={scenario,queue_only:queueOnly||undefined,clients:clientsCount,preference,mix:mix?Object.fromEntries(mix):undefined,capacity,limits,max_wait_secs:maxWaitSecs,protocol:protocolVersion,host:{platform:process.platform,cpus:os.cpus().length,cpu_model:os.cpus()[0]?.model,memory_gib:Math.round(os.totalmem()/2**30*10)/10},input_hz_requested:inputHz,input_model:'signed_current_pose_transform',soak_seconds:soakSecs,started_at:new Date().toISOString(),scenarios:[],status:'RUNNING'};
+const all=[]; const report={scenario,queue_only:queueOnly||undefined,clients:clientsCount,preference,mix:mix?Object.fromEntries(mix):undefined,capacity,limits,max_wait_secs:maxWaitSecs,protocol:protocolVersion,host:{platform:process.platform,cpus:os.cpus().length,cpu_model:os.cpus()[0]?.model,memory_gib:Math.round(os.totalmem()/2**30*10)/10},input_hz_requested:inputHz,input_model:['remake','surrender'].includes(scenario)?'signed_bounded_movement_intent':'signed_current_pose_transform',soak_seconds:soakSecs,started_at:new Date().toISOString(),scenarios:[],status:'RUNNING'};
 const resources=[];
 let stopping=false;
 // A process's CPU time in seconds: /proc/<pid>/stat utime+stime on Linux (10 ms ticks; ps
@@ -243,12 +244,14 @@ class Client {
   if(!this.auth){if(now>=this.next){this.next=now+2000;const c=this.authChallenge;this.bootstrap({type:'career',request:c?{action:'authenticate',challenge:c,signature:sign(this.key,['omoba.career.auth.v1',c.public_key,c.nonce,c.server_epoch,c.session_id,c.nickname])}:{action:'challenge',public_key:this.publicKey,nickname:this.nickname,session_id:this.session}});}return;}
   // Representative signed movement-command verification/dispatch load. Current
   // authoritative pose avoids inventing movement or bypassing collision rules.
-  if(inputHz>0&&this.stage==='running'&&this.port!==lobbyPort&&now-this.lastInput>=1000/inputHz){
+  const intentional=['remake','surrender'].includes(scenario), hz=intentional?Math.max(1,inputHz):inputHz;
+  if(hz>0&&this.stage==='running'&&this.port!==lobbyPort&&now-this.lastInput>=1000/hz){
    const me=this.snapshot?.players?.find(p=>p.id===this.snapshot.your_id&&!p.is_bot);
    if(me){
-    this.lastInput=this.lastInput?this.lastInput+1000/inputHz:now;
-    if(now-this.lastInput>1000/inputHz)this.lastInput=now;
-    this.gameplay({type:'transform',x:me.x,y:me.y,z:me.z,yaw:me.yaw,dash_sequence:me.utility?.dash_sequence??0});
+    this.lastInput=this.lastInput?this.lastInput+1000/hz:now;
+    if(now-this.lastInput>1000/hz)this.lastInput=now;
+    const direction=[[0.15,0],[0,0.15],[-0.15,0],[0,-0.15]][this.transforms%4];
+    this.gameplay({type:'transform',x:me.x+(intentional?direction[0]:0),y:me.y,z:me.z+(intentional?direction[1]:0),yaw:me.yaw,dash_sequence:me.utility?.dash_sequence??0,...(intentional?{input_active:true}:{})});
     this.transforms++;this.firstTransform??=now;this.lastTransform=now;
    }
   }
@@ -610,7 +613,7 @@ function ownedWorkerPid(port) {
 // LR-11 + LR-13: the only human leaves a running bot practice. Until the worker
 // reaps it (reclaim window + grace, about 210 s of real time), Play on the
 // lobby answers with the in-match state, never a fresh handoff or a failure;
-// then the seat frees silently and Play allocates a new match.
+// then the seat frees, the leaver is cooled down, and a fresh player can play.
 async function abandoned(original) {
  const allocation=original.allocation;
  const checks=report.abandoned={checks:[],allocation_id:allocation.allocation_id};
@@ -623,13 +626,13 @@ async function abandoned(original) {
  player.queueId=original.queueId+1;all.push(player);
  await pumpUntil('lobby authentication after leave',()=>!!player.auth);
  let nextFind=0,nextProgress=0,inMatchAnswers=0,firstEnds=null;
- await pumpUntil('abandoned match reaped and a new match allocated',()=>player.allocation&&player.allocation.allocation_id!==allocation.allocation_id,330000,now=>{
+ await pumpUntil('abandoned match reaped and durable cooldown applied',()=>player.career?.match_service?.state==='failed'&&player.career.match_service.code==='play_cooldown',330000,now=>{
   const view=player.career?.match_service;
   if(view?.state==='assigned'&&view.allocation.allocation_id===allocation.allocation_id){
    assert(view.in_match,'the left running match was handed out as a fresh match');
    inMatchAnswers++;firstEnds??=view.in_match.ends_within_secs;
   }
-  assert.notEqual(view?.state,'failed',`play after leaving answered failed: ${wire(view)}`);
+  if(view?.state==='failed')assert.equal(view.code,'play_cooldown',`unexpected search failure: ${wire(view)}`);
   if(now>=nextFind){nextFind=now+2000;player.account({action:'find_match',request_id:player.queueId,preference:'bot_practice'});}
   if(now>=nextProgress){nextProgress=now+15000;console.log(wire({phase:'abandoned',elapsed_seconds:Math.round((now-leftAt)/1000),match_service:view?.state,ends_within_secs:view?.in_match?.ends_within_secs}));}
  });
@@ -641,9 +644,15 @@ async function abandoned(original) {
  assert.equal(status?.phase,'failed','the abandoned worker did not retire');
  const log=fs.readFileSync(path.join(root,'matches',allocation.allocation_id,'worker.log'),'utf8');
  assert(/MATCH_METRIC event=abandoned_reaped outcome=Interrupted/.test(log),'worker did not log the reaping');
- assert.equal(allocationManifests().filter(m=>m.humans.some(h=>h.profile_id===player.profile.profile_id)).length,2);
- checks.checks.push({name:'left_match_in_match_until_reaped_then_new_match',status:'PASS',waited_seconds:waited,in_match_answers:inMatchAnswers,first_ends_within_secs:firstEnds,new_allocation_id:player.allocation.allocation_id});
- report.scenarios.push('left_running_match_shows_in_match_until_reaped_then_play_queues');
+ assert.equal(allocationManifests().filter(m=>m.humans.some(h=>h.profile_id===player.profile.profile_id)).length,1,'cooled player received a new allocation');
+ assert.equal(player.career.play_cooldown?.strikes,1);
+ const remaining=Number(player.career.play_cooldown.until)-Date.now()/1000;
+ assert(remaining>250&&remaining<=301,'first abandon did not persist its five-minute cooldown');
+ const fresh=new Client(9500,lobbyPort,null,{preference:'bot_practice'});all.push(fresh);
+ await pumpUntil('a fresh profile can start after the abandoned worker retires',()=>fresh.stage==='running',45000);
+ assert.notEqual(fresh.allocation.allocation_id,allocation.allocation_id);
+ checks.checks.push({name:'left_match_in_match_until_reaped_then_durable_cooldown',status:'PASS',waited_seconds:waited,in_match_answers:inMatchAnswers,first_ends_within_secs:firstEnds,cooldown_remaining_secs:remaining,new_allocation_id:fresh.allocation.allocation_id});
+ report.scenarios.push('left_running_match_reaped_leaver_cooled_and_fresh_profile_can_play');
 }
 const quantiles=values=>{const v=values.filter(Number.isFinite).sort((a,b)=>a-b);return v.length?{p50:v[Math.floor(v.length*.5)],p95:v[Math.floor(v.length*.95)],p99:v[Math.floor(v.length*.99)],max:v.at(-1)}:null;};
 const mean=values=>values.length?values.reduce((a,b)=>a+b,0)/values.length:null;
@@ -687,6 +696,110 @@ async function capacityWait() {
 }
 // A complete public roster is killed before creating observers, so the early
 // case proves the durable marker before the normal 10-second checkpoint.
+async function teamVoteJourney(peers, kind) {
+ assert.equal(peers.length,10);
+ const allocation=peers[0].allocation, status=allocationStatus(allocation.allocation_id);
+ assert(status?.phase==='running'&&status.result_id);
+ const baselines=peers.map(c=>({...careerProgress(c),abandons:c.profile.abandons??0}));
+ const firstTeam=peers[0].snapshot.players.find(p=>p.id===peers[0].snapshot.your_id).team;
+ const sameTeam=peers.filter(c=>c.snapshot.players.find(p=>p.id===c.snapshot.your_id).team===firstTeam);
+ const opponent=peers.find(c=>!sameTeam.includes(c));
+ const leaver=kind==='remake'?sameTeam.shift():null;
+ if(leaver)leaver.close(); // Actual transport timeout + ninety seconds; no shortened server clock.
+ const voters=sameTeam, initiator=voters[0];
+ await pumpUntil(kind+' becomes server-eligible',()=>initiator.career?.match_vote?.[kind]?.available,
+  kind==='remake'?160000:630000,now=>{
+   assert.equal(allocationStatus(allocation.allocation_id)?.phase,'running','the game ended before the vote');
+   if(!report.last_vote_progress||now-report.last_vote_progress>15000){report.last_vote_progress=now;resourceSample();console.log(wire({phase:kind,waiting_for_eligibility:true,elapsed_seconds:Math.round((now-initiator.firstRunning)/1000)}));}
+  });
+ const elapsed=(performance.now()-initiator.firstRunning)/1000;
+ assert(elapsed>=(kind==='remake'?90:600)-1,'vote opened before its real gameplay gate');
+ const request=(c,action,generation,overrides={})=>{
+  const view=c.career?.match_vote;
+  if(view)c.gameplay({type:'match_vote',server_epoch:view.server_epoch,match_id:view.match_id,generation,kind,action,...overrides});
+ };
+ let next=0;
+ await pumpUntil('team vote starts',()=>initiator.career?.match_vote?.active?.kind===kind,5000,now=>{
+  if(now>=next){next=now+500;request(initiator,'start',initiator.career.match_vote.next_generation);}
+ });
+ const active=initiator.career.match_vote.active, generation=active.generation;
+ const required=kind==='remake'?3:4;
+ assert.equal(active.required,required);assert.equal(active.eligible,voters.length);assert.equal(active.yes,1);
+ request(opponent,'yes',generation);request(initiator,'yes',generation);request(voters[1],'yes',0);
+ const match=initiator.career.match_vote.match_id;
+ request(voters[1],'yes',generation,{match_id:typeof match==='bigint'?match+1n:match+1});
+ await pumpFor(700);
+ assert.equal(initiator.career.match_vote.active.yes,1,'opponent/duplicate/stale request changed the ballot');
+ request(voters[required],'no',generation);
+ await pumpUntil('explicit No is counted once',()=>initiator.career?.match_vote?.active?.no===1,5000);
+ next=0;
+ await pumpUntil('authoritative vote reaches saved settlement',()=>peers.some(c=>c.career?.last_result?.result_id===status.result_id&&c.career.last_result.saved),20000,now=>{
+  if(now>=next){next=now+500;for(const c of voters.slice(1,required))request(c,'yes',generation);}
+ });
+ for(const c of peers)c.close();
+ const observers=peers.map((c,i)=>new Client(9000+i,lobbyPort,c,{autoQueue:false,autoJoin:false,autoHandoff:false,preference:'humans_only'}));
+ all.push(...observers);
+ await pumpUntil('every vote participant reauthenticates on lobby',()=>observers.every(c=>c.auth),20000);
+ let query=9000,nextRead=0;
+ const profileRequests=observers.map(()=>++query);
+ // Career actions share the normal 100ms account throttle. Read one query
+ // kind per phase so a repeated Detail cannot starve History/Profile forever.
+ await pumpUntil('all ten vote results are durable',()=>observers.every(c=>c.lastDetail?.result_id===status.result_id&&c.lastDetail.saved),20000,now=>{
+  if(now>=nextRead){nextRead=now+1500;observers.forEach(c=>c.account({action:'detail',request_id:++query,result_id:status.result_id}));}
+ });
+ nextRead=0;
+ await pumpUntil('all ten vote profiles are durable',()=>observers.every((c,i)=>{
+  const p=c.profileResponses.get(String(profileRequests[i])),played=kind==='surrender'||peers[i]===leaver?1:0;
+  return p?.matches_played===baselines[i].matches_played+played;
+ }),20000,now=>{
+  if(now>=nextRead){nextRead=now+1500;observers.forEach((c,i)=>c.account({action:'profile',request_id:profileRequests[i],profile_id:baselines[i].profile_id}));}
+ });
+ nextRead=0;
+ await pumpUntil('all ten vote histories are durable',()=>observers.every(c=>c.lastHistory?.filter(r=>r.result_id===status.result_id).length===1),20000,now=>{
+  if(now>=nextRead){nextRead=now+1500;observers.forEach(c=>c.account({action:'history',request_id:++query,before:null}));}
+ });
+ const saved=observers[0].lastDetail;
+ assert.equal(saved.outcome,kind==='remake'?'remade':'completed');assert.equal(saved.end_reason,kind);
+ assert.equal(saved.rated,kind==='surrender');assert.equal(saved.participants.length,10);
+ assert.equal(saved.winner===null,kind==='remake');
+ if(kind==='surrender')assert.notEqual(saved.winner,firstTeam);
+ for(let i=0;i<observers.length;i++){
+  const c=observers[i],before=baselines[i],fresh=c.profileResponses.get(String(profileRequests[i]));
+  assert.deepEqual(c.lastDetail,saved,'participants loaded different settled receipts');
+  const p=saved.participants.find(p=>p.profile_id===before.profile_id),history=c.lastHistory.find(r=>r.result_id===saved.result_id);
+  const abandoned=peers[i]===leaver;
+  assert.equal(p.participation.abandoned,abandoned);assert.equal(fresh.abandons??0,before.abandons+Number(abandoned));
+  assert.deepEqual(history.rating,p.rating);
+  if(kind==='remake'){
+   assert.equal(p.progression_xp_gained,0);assert.equal(fresh.progression_xp,before.progression_xp);
+   assert.equal(fresh.wins,before.wins);assert.equal(fresh.losses,before.losses+Number(abandoned));
+   assert.equal(fresh.rated_matches,before.rated_matches+Number(abandoned));
+   assert.equal(fresh.rating,before.rating-(abandoned?32:0));
+   assert.equal(history.won,abandoned?false:null);
+   assert.equal(p.rating===null,!abandoned);
+  }else{
+   const won=p.team===saved.winner,delta=won?24:-24;
+   assert.equal(p.rating.delta,delta);assert.equal(fresh.rating,before.rating+delta);
+   assert.equal(fresh.progression_xp,before.progression_xp+(won?150:100));
+   assert.equal(fresh.wins,before.wins+Number(won));assert.equal(fresh.losses,before.losses+Number(!won));
+   assert.equal(fresh.rated_matches,before.rated_matches+1);assert.equal(history.won,won);
+  }
+ }
+ if(leaver){
+  const c=observers[peers.indexOf(leaver)];
+  assert.equal(c.career.play_cooldown?.strikes,1);
+  c.queueId++;next=0;
+  await pumpUntil('durable leaver cooldown rejects the next signed lobby search',()=>c.career?.match_service?.state==='failed'&&c.career.match_service.code==='play_cooldown',7000,now=>{
+   if(now>=next){next=now+1500;c.account({action:'find_match',request_id:c.queueId,preference:'humans_only'});}
+  });
+ }
+ report.team_vote={status:'PASS',kind,result_id:saved.result_id,participants:10,elapsed_to_vote_seconds:elapsed,
+  outcome:saved.outcome,all_profiles_checked:true,all_histories_checked:true,explicit_no:true,stale_and_opponent_votes_rejected:true,
+  durable_cooldown_checked:!!leaver,input_model:report.input_model};
+ delete report.last_vote_progress;
+ report.scenarios.push('signed_'+kind+'_through_durable_profiles_and_history');
+}
+
 async function recoverRoster(originals, early) {
  const original=originals[0], allocation=original.allocation;
  assert(originals.every(c=>c.allocation.allocation_id===allocation.allocation_id),'recovery needs one worker roster');
@@ -877,6 +990,7 @@ try {
  measure(allocations, runningAt);
  }
  }
+ if(['remake','surrender'].includes(scenario))await teamVoteJourney(all.filter(c=>c.stage==='running'),scenario);
  if(scenario==='termination')await gracefulTermination(all[0]);
  if(scenario==='ready-check')await readyCheckLifecycle();
  if(scenario==='lifecycle')await lifecycle(all[0]);

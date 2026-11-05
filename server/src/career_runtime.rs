@@ -189,6 +189,17 @@ pub(crate) fn encode_career_datagrams(
 }
 
 impl ServerRuntime {
+    pub(crate) fn career_allocation_is_live(&self) -> bool {
+        self.career
+            .round
+            .as_ref()
+            .is_some_and(|r| !r.finalized && r.result.gameplay_started)
+    }
+
+    pub(crate) fn career_refresh_views(&mut self, now: Instant) {
+        self.career.last_sent = None;
+        self.send_career_views(now);
+    }
     pub(crate) fn flush_career_for_shutdown(&mut self, now: Instant) -> bool {
         self.poll_career(now);
         self.career.pending.is_empty() && self.career.backend.flush_outbox()
@@ -644,6 +655,7 @@ impl ServerRuntime {
             let eligibility = self.rating_eligibility(&roster);
             let result = MatchResult {
                 gameplay_started: false,
+                end_reason: None,
                 result_id: self.career.backend.new_result_id(),
                 server_epoch: self.server_epoch,
                 match_id: self.match_id,
@@ -855,6 +867,7 @@ impl ServerRuntime {
         let round = self.career.round.as_mut().unwrap();
         round.finalized = true;
         round.result.outcome = outcome;
+        round.result.end_reason = reason.map(str::to_owned);
         round.result.winner = winner;
         round.result.ended_at_ms = utc_ms().max(round.result.started_at_ms);
         round.result.duration_ms = now
@@ -1392,6 +1405,7 @@ impl ServerRuntime {
 
     pub(crate) fn career_view(&self, addr: SocketAddr, now: Instant) -> CareerView {
         let mut view = self.career.backend.view(addr);
+        view.match_vote = self.match_vote_view(addr, now);
         view.takeovers = self.takeover_view(addr);
         view.afk_control = self.session_recovery.is_afk(addr);
         if let (Some(profile), Some(session)) = (

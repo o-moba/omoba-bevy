@@ -160,38 +160,48 @@ unversioned sibling comparison. The normal sibling comparison remains a
 reported local mismatch; it was not repaired or counted as passing.
 
 
-P6 ongoing (#34), uncommitted source: connected/disconnected/AFK accounting,
-90s grace, explicit/latching movement intent (protocol 14), individual leaver
-loss/noXP, innocent teammate half-loss, durable exactly-once cooldowns, async
-fresh queue access and atomic cross-owner admission denial. Player-caused
-unattended shutdown penalizes proved abandons; host crashes/caps do not. Legacy
-receipts cannot invent incidents or reverse an already recorded winner.
+P6 AFK/#34 is committed and verified in `18389e72` plus the stable QA identifier
+fix `0db576fc`. Human participation, 90s AFK/reconnect grace, individual leaver
+loss/no XP, teammate half-loss, exactly-once durable cooldowns and fresh/atomic
+queue admission are covered by 593 real PostgreSQL/API/store/server tests.
+Host failures/caps remain exempt and legacy results retain their historical meaning.
 
-Current local PostgreSQL gate: **593 passed, zero failed/ignored**, 18 suites,
-including 48 store and 440 server tests, signed live UDP, restricted-role grants,
-rollback/concurrency/replay, schema 6→7 with rating 1234 and cross-owner cooldowns.
-Only disposable 127.0.0.1:55581/omoba_test migrated. Shared 183, AFK runtime 15,
-time-policy 10, tooling 642 (9skips), assets pass; native test targets type-check.
-Workspace clippy and current client all-target/no-QA clippy pass; full client/current process gates pending.
+Current CI `42061098787` passes all seven jobs and all 13 complete public/PG
+journeys in 1136.32s. Native tests pass after CI caught and the patch fixed the
+missing TestId on the AFK notice. Standard-map Ranked victory: 445.59s including
+setup, 428402ms gameplay, result `f04d399b61e8d74b2efbe280b9f26128`. Ten fresh
+profiles/history/receipts independently verify exact +24/150 or -24/100 and no
+false AFK incidents. Artifact13433365824 SHA256
+8ea9b8407f23a8d90a2925518937bdbe2da13ce5ec197a5c73621435d9494091 verified;
+no private fixture retained. Prior 94311329 green CI remains historical evidence.
 
-Committed baseline 94311329: green CI 42024828738, all seven jobs/all 13 journey
-stages,3194.98s. Standard-map Ranked victory in 2539.88 s, result
-01ccac2e39690152af01c6cbbd3d8161; every fresh profile/history receives exact
-+24/150 or-24/100. Private fixture removed. Artifact 13417265646 SHA256
-fe5b706ca3d24b59f60631483f27cd3ed8f82bb2e23be1467a6c2be68ff66f4a verified.
+The Mac was unlocked and a real RU852×393 Home preview captured rating/placement
+and direct queues. It exposed the build-label/nav overlap; the source adjustment
+is committed, but its fresh native capture remains pending. System free space
+recovered above20GiB, so guarded local native verification resumed. Both caches
+are assigned within the allowed limit: B for native, A for headless server checks,
+on Orico. No cache was cleaned or third cache created.
 
-No deployment or production schema/role changes. Full native builds are stopped
-while root has 16 GiB (<AGENTS 20 GiB minimum); Mac still needs manual unlock for
-native phone screenshot. Keep #34/P6 partial. Remake/surrender, unique picks,
-eligibility, tiers/seasons and P7–P9 remain mandatory. See TODO and fair-play plan.
+C5 remake/surrender is working-tree integration: protocol15/core8, authenticated
+team votes, terminal persistence/history and native menu/prompt. Twelve targeted
+runtime/policy tests and server/store/API all-target typecheck pass; real PG,
+native and public-process checks are underway. Portal presentation is pushed in
+8f6314b: 243 tests pass (3 expected skips), typecheck/production build and focused
+RU390×844 Chrome fixture scenarios pass, with remake/surrender images inspected.
 
-Personal outcome/forced-end regression is fixed and proven in the 593-test gate:
-winning-team leavers and ranked unattended forfeits are individual losses in
-history, filters and the rating graph; ordinary crash/cap interruptions do not
-invent personal losses. Participation metadata remains visible after reconnect.
-Portal 242 tests (3 skips), typecheck and real Chrome synthetic-API RU390x844
-render pass; actual images inspected in mm-web/.agent/browser/fair-play/.
-Full native execution/current journey CI still pending; owner workflow exception
-requested because root16GiB violates the local heavy-build minimum. Frozen
-reviewable AFK snapshots are .agent/codex-ranked-readiness/p6-afk-frozen.* in both
-worktrees. Next P6 work is remake/surrender, without closing #34/P6 prematurely.
+Owner update 2026-11-06 for C6/O-3: Ranked requires ten completed public matches,
+without mandatory VK linking. Counter/server/Home/proof implementation remains.
+C7, tier/season rules and all P7–P9 stay required. No RU deployment or production
+schema/roles/infrastructure changes have been made.
+
+
+C5 local completion checkpoint:608 real PG,183 shared and12 runtime/policy tests
+pass, plus native all-target clippy. Actual signed remake and surrender process
+runs passed after real96.209968s/600.183473s eligibility. All ten profile/history/
+receipt records and exact awards verified; remake also proves persistent leaver
+cooldown admission. Result IDs a66bc505b1e3b6695585a508e639f226 and
+dce7261dce0ae4666c1f490676804993. No clocks or server throttle weakened.
+Full committed CI (15 stages), native kit execution and native vote visual proof
+remain pending. The frozen0db576fc local full gate also passes:2527Rust/642Python/
+62iOS-tooling tests, with104Rust ignores and9Python skips explicitly retained.
+C6 implementation follows after saving C5; owner decision recorded above.

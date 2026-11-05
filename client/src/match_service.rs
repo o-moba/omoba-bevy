@@ -1045,6 +1045,7 @@ mod tests {
             .add_systems(Update, update_match_service);
         let result = MatchResult {
             gameplay_started: true,
+            end_reason: None,
             result_id: "abandoned".into(),
             server_epoch: 7,
             match_id: 1,

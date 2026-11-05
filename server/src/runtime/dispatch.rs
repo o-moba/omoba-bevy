@@ -284,6 +284,24 @@ impl ServerRuntime {
         // the tail; then a paused sandbox swallows movement and combat; then
         // the per-variant handlers run on the (sandbox) simulation clock.
         let flow = match packet {
+            ClientPacket::MatchVote {
+                server_epoch,
+                match_id,
+                generation,
+                kind,
+                action,
+            } => {
+                self.handle_match_vote(
+                    addr,
+                    server_epoch,
+                    match_id,
+                    generation,
+                    kind,
+                    action,
+                    wall_now,
+                );
+                ControlFlow::Break(())
+            }
             ClientPacket::TakeoverVote {
                 server_epoch,
                 match_id,

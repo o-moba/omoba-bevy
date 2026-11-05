@@ -24,6 +24,7 @@ pub mod loadout;
 pub mod map;
 pub mod market;
 pub mod match_service;
+pub mod match_vote;
 pub mod math;
 pub mod moderation;
 pub mod navigation;

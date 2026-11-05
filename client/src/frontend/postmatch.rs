@@ -285,6 +285,9 @@ fn result_model(
                 result.winner.map(Into::into),
                 trf(
                     match result.winner {
+                        _ if result.end_reason.as_deref() == Some("surrender") => {
+                            "postmatch.summary.surrender"
+                        }
                         Some(shared::map::Team::Green) => "postmatch.summary.green",
                         Some(shared::map::Team::Blue) => "postmatch.summary.blue",
                         None => "postmatch.summary.nobody",
@@ -294,6 +297,7 @@ fn result_model(
             ),
             MatchOutcome::Abandoned => (None, tr("postmatch.summary.abandoned").to_owned()),
             MatchOutcome::Interrupted => (None, tr("postmatch.summary.interrupted").to_owned()),
+            MatchOutcome::Remade => (None, tr("postmatch.summary.remade").to_owned()),
         },
         None => (
             latch.winner,
@@ -327,6 +331,8 @@ fn result_model(
         },
         title: if abandoned {
             tr(Outcome::Defeat.key())
+        } else if result.is_some_and(|r| r.outcome == MatchOutcome::Remade) {
+            tr("postmatch.outcome.remade")
         } else {
             outcome_headline(winner, local_team)
         },
@@ -2751,7 +2757,11 @@ mod tests {
 
     #[test]
     fn saved_terminal_receipt_with_running_direct_server_returns_home_on_replay() {
-        for outcome in [MatchOutcome::Abandoned, MatchOutcome::Interrupted] {
+        for outcome in [
+            MatchOutcome::Abandoned,
+            MatchOutcome::Interrupted,
+            MatchOutcome::Remade,
+        ] {
             let mut app = App::new();
             app.add_message::<NetworkCommand>()
                 .add_message::<SessionUiCommand>()

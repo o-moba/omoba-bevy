@@ -188,11 +188,11 @@ def main(argv=None):
                    filter_name, "--", "--ignored", "--exact", "--test-threads=1", "--nocapture"],
             {"OMOBA_REGISTRATION_JOURNEY_FIXTURE": str(fixture)}, rust_test=True)
 
-    def public(name, options):
+    def public(name, options, timeout=420):
         case = output / name
         # Each script owns its complete lobby/worker process group and stops it.
         run(name, ["node", "scripts/test_public_mvp.mjs", *options, f"--output={case}"],
-            process_report=case / "report.json", timeout=420)
+            process_report=case / "report.json", timeout=timeout)
 
     try:
         run("build", ["cargo", "build", "--locked", "-p", "server", "-p", "harness",
@@ -217,6 +217,10 @@ def main(argv=None):
         public("ranked-early-crash", ["--scenario=early-recovery", "--clients=10",
                                        "--preference=humans_only", "--seconds=2", "--input-hz=0"])
         public("termination", ["--scenario=termination", "--seconds=1"])
+        public("remake", ["--scenario=remake", "--clients=10", "--preference=humans_only",
+                          "--seconds=1"], timeout=300)
+        public("surrender", ["--scenario=surrender", "--clients=10", "--preference=humans_only",
+                             "--seconds=1"], timeout=780)
         case = output / "ranked-victory"
         run("ranked-victory", [sys.executable, "scripts/public_bots_rehearsal.py",
                               "--server-bin", str(target / "debug/server"),

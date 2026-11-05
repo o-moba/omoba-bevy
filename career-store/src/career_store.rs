@@ -24,7 +24,7 @@ mod fair_play;
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 7] = [1, 2, 3, 4, 5, 6, 7];
+pub const SCHEMA_VERSIONS: [i32; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -308,6 +308,11 @@ impl CareerStore {
         }
         if !versions.contains(&7) {
             sqlx::raw_sql(include_str!("../migrations/postgres/007_fair_play.sql"))
+                .execute(&mut *tx)
+                .await?;
+        }
+        if !versions.contains(&8) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/008_match_votes.sql"))
                 .execute(&mut *tx)
                 .await?;
         }
@@ -738,10 +743,11 @@ impl CareerStore {
         // to wait out discipline. Host failure and duration caps remain exempt.
         let abandoned_reaped = result.outcome == MatchOutcome::Interrupted
             && result.unrated_reason.as_deref() == Some("abandoned_reaped");
+        let remade = result.outcome == MatchOutcome::Remade;
         let allocation: Json<MatchResult> = row.try_get("allocation")?;
-        let ranked_reaped = abandoned_reaped && allocation.rated;
+        let ranked_reaped = (abandoned_reaped || remade) && allocation.rated;
         let discipline = result.gameplay_started
-            && (result.outcome == MatchOutcome::Completed || abandoned_reaped)
+            && (result.outcome == MatchOutcome::Completed || abandoned_reaped || remade)
             && (result.ruleset == RULESET || public_casual);
         let abandoned_teams: Vec<_> = result
             .participants
@@ -757,6 +763,17 @@ impl CareerStore {
                 .get_mut(id)
                 .ok_or("Stored participant profile is missing.")?;
             if !result.gameplay_started {
+                continue;
+            }
+            // A remake is visible in history but does not count as a game for
+            // innocent players. The rated abandon remains an individual loss.
+            if remade && !(ranked_reaped && fair_play::proved_abandon(participant)) {
+                if discipline
+                    && fair_play::proved_abandon(participant)
+                    && let Some(total) = fair_play::record_abandon(&mut tx, id, result_id).await?
+                {
+                    profile.abandons = total;
+                }
                 continue;
             }
             profile.matches_played = profile
@@ -1323,6 +1340,7 @@ fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
         Some("abandoned_reaped" | "duration_capped") => {
             result.gameplay_started && result.outcome == MatchOutcome::Interrupted
         }
+        Some("remake") => result.gameplay_started && result.outcome == MatchOutcome::Remade,
         _ => interrupted_recovery,
     };
     if result.rated
@@ -1416,6 +1434,36 @@ fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
 }
 fn normalize_terminal(result: MatchResult) -> StoreResult<MatchResult> {
     let result = normalize(result)?;
+    match result.end_reason.as_deref() {
+        Some("surrender")
+            if result.outcome != MatchOutcome::Completed || result.duration_ms < 600_000 =>
+        {
+            return Err("Surrender requires a completed match after ten minutes.".into());
+        }
+        Some("remake") if result.outcome != MatchOutcome::Remade => {
+            return Err("Remake reason requires a remade match.".into());
+        }
+        Some(reason @ ("abandoned_reaped" | "duration_capped"))
+            if result.outcome != MatchOutcome::Interrupted
+                || !result.gameplay_started
+                || result.unrated_reason.as_deref() != Some(reason) =>
+        {
+            return Err("Forced end reason requires the matching played interruption.".into());
+        }
+        Some("surrender" | "remake" | "abandoned_reaped" | "duration_capped") | None => {}
+        Some(_) => return Err("Unknown authoritative match end reason.".into()),
+    }
+    if result.outcome == MatchOutcome::Remade
+        && (!result.gameplay_started
+            || result.end_reason.as_deref() != Some("remake")
+            || result.unrated_reason.as_deref() != Some("remake")
+            || !(90_000..180_000).contains(&result.duration_ms)
+            || !result.participants.iter().any(fair_play::proved_abandon))
+    {
+        return Err(
+            "Remake requires a played match, an abandon and the early remake window.".into(),
+        );
+    }
     if !result.gameplay_started && result.outcome == MatchOutcome::Completed {
         return Err("An unplayed allocation cannot complete or award progression.".into());
     }

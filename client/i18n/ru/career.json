@@ -112,5 +112,7 @@
   "career.button.older": "Ранее",
   "career.player.progress_abandoned": "{rating} · +{xp} очков опыта в карьере · Выход / AFK",
   "career.unrated.abandoned_reaped": "Матч завершён: активных игроков не осталось. Подтверждённые выходы и AFK по-прежнему наказываются.",
-  "career.unrated.duration_capped": "Матч достиг предельной длительности. Штрафы за выход и AFK не назначаются."
+  "career.unrated.duration_capped": "Матч достиг предельной длительности. Штрафы за выход и AFK не назначаются.",
+  "career.result.remade": "Ремейк",
+  "career.unrated.remake": "Ранний ремейк команды: обычных наград нет."
 }

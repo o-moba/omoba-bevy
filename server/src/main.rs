@@ -28,6 +28,7 @@ mod match_pool;
 mod match_rules;
 mod match_service;
 mod match_stats;
+mod match_votes;
 #[cfg(test)]
 mod minion_path_tests;
 mod moderation;

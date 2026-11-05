@@ -76,6 +76,13 @@ const LEGACY_MAX_MANA: f32 = crate::hero_balance::MAX_MANA;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientPacket {
+    MatchVote {
+        server_epoch: u64,
+        match_id: u64,
+        generation: u64,
+        kind: crate::match_vote::Kind,
+        action: crate::match_vote::Action,
+    },
     TakeoverVote {
         server_epoch: u64,
         match_id: u64,
@@ -1189,7 +1196,7 @@ mod tests {
     #[test]
     fn protocol_12_carries_tier_auras_and_tier_status() {
         use crate::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
-        assert_eq!(crate::protocol::PROTOCOL_VERSION, 14);
+        assert_eq!(crate::protocol::PROTOCOL_VERSION, 15);
         let equip = ClientPacket::Career {
             request: crate::career::CareerRequest::EquipSupporterAura {
                 request_id: 5,

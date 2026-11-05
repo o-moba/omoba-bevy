@@ -17,6 +17,13 @@ use super::{GameState, TargetId};
 
 #[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
+    MatchVote {
+        server_epoch: u64,
+        match_id: u64,
+        generation: u64,
+        kind: shared::match_vote::Kind,
+        action: shared::match_vote::Action,
+    },
     TakeoverVote {
         player_id: u64,
         generation: u64,
@@ -296,6 +303,28 @@ pub(in crate::net) fn send_network_commands(
                     && let Some(social) = social_client.as_mut()
                 {
                     social.request_failed(*request_id, error);
+                }
+            }
+            NetworkCommand::MatchVote {
+                server_epoch,
+                match_id,
+                generation,
+                kind,
+                action,
+            } => {
+                if client_session.join_confirmed()
+                    && !client_session.is_offline()
+                    && snapshot.as_ref().is_some_and(|s| {
+                        s.meta.server_epoch == *server_epoch && s.meta.match_id == *match_id
+                    })
+                {
+                    let _ = channels.outgoing.try_send(ClientPacket::MatchVote {
+                        server_epoch: *server_epoch,
+                        match_id: *match_id,
+                        generation: *generation,
+                        kind: *kind,
+                        action: *action,
+                    });
                 }
             }
             NetworkCommand::TakeoverVote {

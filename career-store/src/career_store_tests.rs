@@ -101,6 +101,7 @@ fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> Particip
 fn result(a: &ProfileSummary, b: &ProfileSummary, n: u64) -> MatchResult {
     MatchResult {
         gameplay_started: true,
+        end_reason: None,
         result_id: format!("fixture-result-{n}"),
         server_epoch: u64::MAX,
         match_id: n,
@@ -127,6 +128,129 @@ fn starting(result: &MatchResult) -> MatchResult {
     start.ended_at_ms = 0;
     start.duration_ms = 0;
     start
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn remake_preserves_innocent_totals_and_charges_one_ranked_abandon_exactly_once() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let completed = result(&a, &b, 1);
+    f.store.start(starting(&completed)).await.unwrap();
+    let mut remade = completed;
+    remade.outcome = MatchOutcome::Remade;
+    remade.rated = false;
+    remade.winner = None;
+    remade.duration_ms = 90_000;
+    remade.ended_at_ms = remade.started_at_ms + remade.duration_ms;
+    remade.unrated_reason = Some("remake".into());
+    remade.end_reason = Some("remake".into());
+    remade.participants[0].participation = Some(shared::career::Participation {
+        disconnected_ms: 90_000,
+        abandoned: true,
+        ..Default::default()
+    });
+    remade.participants[1].participation = Some(shared::career::Participation {
+        connected_ms: 90_000,
+        ..Default::default()
+    });
+    let other = f.another_owner().await;
+    let (left, right) = tokio::join!(f.store.settle(remade.clone()), other.settle(remade));
+    let saved = left.unwrap();
+    assert_eq!(saved, right.unwrap());
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, -32);
+    assert_eq!(saved.participant_won(&saved.participants[0]), Some(false));
+    assert_eq!(saved.participant_won(&saved.participants[1]), None);
+    assert!(
+        saved
+            .participants
+            .iter()
+            .all(|p| p.progression_xp_gained == 0)
+    );
+    let leaver = f.store.profile(&a.profile_id).await.unwrap();
+    assert_eq!(
+        (
+            leaver.rating,
+            leaver.rated_matches,
+            leaver.matches_played,
+            leaver.wins,
+            leaver.losses,
+            leaver.abandons
+        ),
+        (968, 1, 1, 0, 1, 1)
+    );
+    assert_eq!(f.store.profile(&b.profile_id).await.unwrap(), b);
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_some()
+    );
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 2), &b.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    assert_eq!(
+        f.store.history(&b.profile_id, None).await.unwrap().0.len(),
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn premature_surrender_or_remake_outside_window_cannot_write_awards_or_penalties() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut terminal = result(&a, &b, 1);
+    f.store.start(starting(&terminal)).await.unwrap();
+    terminal.end_reason = Some("surrender".into());
+    terminal.duration_ms = 599_999;
+    terminal.ended_at_ms = terminal.started_at_ms + terminal.duration_ms;
+    assert!(f.store.settle(terminal.clone()).await.is_err());
+    terminal.outcome = MatchOutcome::Remade;
+    terminal.rated = false;
+    terminal.winner = None;
+    terminal.unrated_reason = Some("remake".into());
+    terminal.end_reason = Some("remake".into());
+    terminal.participants[0].participation = Some(shared::career::Participation {
+        disconnected_ms: 90_000,
+        abandoned: true,
+        ..Default::default()
+    });
+    for duration in [89_999, 180_000] {
+        terminal.duration_ms = duration;
+        terminal.ended_at_ms = terminal.started_at_ms + duration;
+        assert!(f.store.settle(terminal.clone()).await.is_err());
+    }
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    assert_eq!(f.store.profile(&b.profile_id).await.unwrap(), b);
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    let mut surrender = result(&a, &b, 1);
+    surrender.duration_ms = 600_000;
+    surrender.ended_at_ms = surrender.started_at_ms + surrender.duration_ms;
+    surrender.end_reason = Some("surrender".into());
+    let saved = f.store.settle(surrender).await.unwrap();
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 24);
+    assert_eq!(saved.participants[0].progression_xp_gained, 150);
+    assert_eq!(saved.participants[1].rating.as_ref().unwrap().delta, -24);
+    assert_eq!(saved.participants[1].progression_xp_gained, 100);
+    f.close().await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -2096,7 +2220,7 @@ async fn fair_play_schema_upgrade_preserves_saved_profile_and_cooldown_is_cross_
     let f = Fixture::new().await;
     let a = f.profile(1).await;
     let b = f.profile(2).await;
-    sqlx::raw_sql("UPDATE career_profiles SET rating=1234,rated_matches=25,matches_played=25,wins=15,losses=10,progression_xp=1000; DROP TABLE career_abandon_events,career_play_penalties; ALTER TABLE career_profiles DROP COLUMN abandons; DELETE FROM career_schema_version WHERE version=7;")
+    sqlx::raw_sql("UPDATE career_profiles SET rating=1234,rated_matches=25,matches_played=25,wins=15,losses=10,progression_xp=1000; DROP TABLE career_abandon_events,career_play_penalties; ALTER TABLE career_profiles DROP COLUMN abandons; DELETE FROM career_schema_version WHERE version>=7;")
         .execute(&f.store.pool).await.unwrap();
     let upgraded = f.another_owner().await;
     let profile = upgraded.profile(&a.profile_id).await.unwrap();

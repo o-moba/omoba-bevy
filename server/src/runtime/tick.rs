@@ -92,6 +92,11 @@ impl ServerRuntime {
         }
         self.track_round_start(now);
         self.observe_fair_play(now, false);
+        self.tick_match_votes(now);
+        if self.match_service.worker().is_some_and(|w| w.aborted) {
+            self.send_retired_worker_views(now);
+            return;
+        }
         common::tick::skills(&mut self.world, &mut self.combat_log, now, dt);
         self.simulate_bots(now, dt);
         self.simulate_sandbox(now, dt);

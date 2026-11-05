@@ -138,6 +138,7 @@ fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResu
     };
     MatchResult {
         gameplay_started: true,
+        end_reason: None,
         result_id: id.into(),
         server_epoch: u64::MAX,
         match_id: n,
@@ -1227,7 +1228,7 @@ async fn fair_play_personal_history_filters_and_projection_agree() {
         .unwrap();
     let (sa, _) = login(&app, &key).await;
     let (sb, _) = login(&app, &other).await;
-    for n in 1..=2 {
+    for n in 1..=3 {
         sqlx::query("UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second' WHERE profile_id=$1")
             .bind(&a.profile_id).execute(&app.pool).await.unwrap();
         let id = crypto::random::<16>();
@@ -1244,6 +1245,13 @@ async fn fair_play_personal_history_filters_and_projection_agree() {
             terminal.winner = None;
             terminal.rated = false;
             terminal.unrated_reason = Some("abandoned_reaped".into());
+        }
+        if n == 3 {
+            terminal.outcome = MatchOutcome::Remade;
+            terminal.winner = None;
+            terminal.rated = false;
+            terminal.unrated_reason = Some("remake".into());
+            terminal.end_reason = Some("remake".into());
         }
         app.career.settle(terminal).await.unwrap();
         projected(&app, &id).await;
@@ -1281,5 +1289,22 @@ async fn fair_play_personal_history_filters_and_projection_agree() {
             .await
             .unwrap();
         assert_eq!(other_losses["matches"].as_array().unwrap().len(), 1);
+        if n == 3 {
+            assert_eq!(detail["match"]["end_reason"], "remake");
+            let remakes = read::history(&app, &sb, Some("days=all&outcome=remade"))
+                .await
+                .unwrap();
+            assert_eq!(remakes["matches"].as_array().unwrap().len(), 1);
+            assert!(remakes["matches"][0]["won"].is_null());
+            let innocent = accounts::me(&app, &sb).await.unwrap();
+            assert_eq!(innocent["profile"]["matches_played"], 2);
+            let innocent_stats = read::statistics(&app, &sb, Some("days=all&rated=all"))
+                .await
+                .unwrap();
+            assert_eq!(
+                innocent_stats["summary"]["matches"], 2,
+                "neutral remake must not enter ordinary statistics"
+            );
+        }
     }
 }

@@ -2114,7 +2114,7 @@ single, documented setting the owner can change later.
 | --- | --- | --- |
 | O-1 | **Ranked at launch**: humans-only 5v5, rated, never bot-filled. The searching screen shows how many players search in the queue; after 5 minutes it offers switching to Casual without losing the place in Ranked. | LR-08, `docs/match-progression.md` |
 | O-2 | **Casual PvP**: unrated, awards XP, groups every human in the queue regardless of rating or newcomer cohort, then bot-fills after 30 s. **vs Bots** stays a separate choice. | LR-08 |
-| O-3 | No ranked entry gate beyond the existing newcomer and eligibility rules (LR-37 later). | LR-08 |
+| O-3 | Owner update 2026-11-06: Ranked opens after 10 completed public matches; linking VK is not mandatory. This supersedes the previous no-entry-gate launch default. Implementation and acceptance remain C6/LR-37. | LR-08, LR-37 |
 | O-6, O-7 | Online bot difficulty and the hero roster stay as they are (LR-43, LR-45 later). | — |
 | O-8 | Hard match cap **45 minutes**. A capped or abandoned match settles as **Interrupted** (unrated, never counted twice), reusing the existing semantics. | LR-11, LR-12 |
 | O-9 | **RU chat off** at launch: a server-wide chat switch (`OMOBA_CHAT=off` in the RU lobby unit); reactions/emotes stay. Turning it on later needs the owner's legal check (ОРИ, 149-FZ). | LR-15, LR-41 |

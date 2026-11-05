@@ -116,6 +116,14 @@ impl Seat {
         }
     }
 
+    pub fn currently_absent(&self, now: Instant) -> bool {
+        !self.finalized
+            && (self.afk_takeover
+                || self
+                    .absent_since
+                    .is_some_and(|at| now.saturating_duration_since(at) >= GRACE))
+    }
+
     pub fn finalize(&mut self, now: Instant, connected: bool, alive: bool) -> Participation {
         if !self.finalized && now >= self.last_tick {
             self.observe(now, connected, alive);
@@ -279,5 +287,22 @@ mod tests {
             stats
         );
         assert!(!seat.observe(start + Duration::from_secs(600), true, true));
+    }
+
+    #[test]
+    fn remake_absence_is_current_not_a_historical_abandon_after_reclaim() {
+        let now = Instant::now();
+        let mut seat = Seat::new(now, true, true);
+        seat.observe(now, false, true);
+        assert!(!seat.currently_absent(now + Duration::from_secs(89)));
+        assert!(seat.currently_absent(now + GRACE));
+        seat.observe(now + GRACE, true, true);
+        seat.input(now + GRACE);
+        assert!(seat.snapshot().abandoned);
+        assert!(!seat.currently_absent(now + GRACE));
+        assert!(seat.observe(now + GRACE * 2, true, true));
+        assert!(seat.currently_absent(now + GRACE * 2));
+        seat.input(now + GRACE * 2);
+        assert!(!seat.currently_absent(now + GRACE * 2));
     }
 }

@@ -88,10 +88,12 @@ impl Filter {
                 _ => return Err(invalid()),
             };
         let outcome = q.get("outcome").filter(|v| v.as_str() != "all").cloned();
-        if outcome
-            .as_ref()
-            .is_some_and(|v| !matches!(v.as_str(), "win" | "loss" | "interrupted" | "abandoned"))
-        {
+        if outcome.as_ref().is_some_and(|v| {
+            !matches!(
+                v.as_str(),
+                "win" | "loss" | "interrupted" | "abandoned" | "remade"
+            )
+        }) {
             return Err(invalid());
         }
         let limit = q
@@ -174,7 +176,7 @@ pub async fn detail(app: &App, s: &Session, id: &str) -> Result<Value> {
 }
 pub async fn history(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> {
     let f = Filter::read(app, s, raw, false).await?;
-    let rows=sqlx::query("SELECT m.result FROM career_matches m JOIN career_participants cp USING(result_id) CROSS JOIN LATERAL jsonb_array_elements(m.result->'participants') p WHERE cp.profile_id=$1 AND p->>'profile_id'=$1 AND m.status='settled' AND coalesce((m.result->>'gameplay_started')::boolean,true) AND (m.result->>'ended_at_ms')::numeric >= $2::double precision*1000 AND ($3::text IS NULL OR p->>'hero_class'=$3) AND ($4::boolean IS NULL OR ((m.result->>'rated')::boolean OR p->'rating'->>'delta' IS NOT NULL)=$4) AND ($5::text IS NULL OR CASE WHEN $5 IN('win','loss') THEN (CASE WHEN m.result->>'outcome'='completed' AND m.result->>'winner' IS NOT NULL THEN (m.result->>'winner'=p->>'team') AND NOT coalesce((p->'participation'->>'abandoned')::boolean,false) WHEN m.result->>'outcome'='interrupted' AND m.result->>'unrated_reason'='abandoned_reaped' AND coalesce((p->'participation'->>'abandoned')::boolean,false) AND p->'rating'->>'delta' IS NOT NULL THEN false ELSE NULL END)=($5='win') ELSE m.result->>'outcome'=$5 END) AND ($6::text::numeric IS NULL OR ((m.result->>'ended_at_ms')::numeric,m.result_id)<($6::text::numeric,$7::text)) ORDER BY (m.result->>'ended_at_ms')::numeric DESC,m.result_id DESC LIMIT $8")
+    let rows=sqlx::query("SELECT m.result FROM career_matches m JOIN career_participants cp USING(result_id) CROSS JOIN LATERAL jsonb_array_elements(m.result->'participants') p WHERE cp.profile_id=$1 AND p->>'profile_id'=$1 AND m.status='settled' AND coalesce((m.result->>'gameplay_started')::boolean,true) AND (m.result->>'ended_at_ms')::numeric >= $2::double precision*1000 AND ($3::text IS NULL OR p->>'hero_class'=$3) AND ($4::boolean IS NULL OR ((m.result->>'rated')::boolean OR p->'rating'->>'delta' IS NOT NULL)=$4) AND ($5::text IS NULL OR CASE WHEN $5 IN('win','loss') THEN (CASE WHEN m.result->>'outcome'='completed' AND m.result->>'winner' IS NOT NULL THEN (m.result->>'winner'=p->>'team') AND NOT coalesce((p->'participation'->>'abandoned')::boolean,false) WHEN (m.result->>'outcome'='remade' OR (m.result->>'outcome'='interrupted' AND m.result->>'unrated_reason'='abandoned_reaped')) AND coalesce((p->'participation'->>'abandoned')::boolean,false) AND p->'rating'->>'delta' IS NOT NULL THEN false ELSE NULL END)=($5='win') ELSE m.result->>'outcome'=$5 END) AND ($6::text::numeric IS NULL OR ((m.result->>'ended_at_ms')::numeric,m.result_id)<($6::text::numeric,$7::text)) ORDER BY (m.result->>'ended_at_ms')::numeric DESC,m.result_id DESC LIMIT $8")
         .bind(&s.profile_id).bind(f.from).bind(&f.class).bind(f.rated).bind(&f.outcome).bind(f.cursor.as_ref().map(|c|c.0.to_string())).bind(f.cursor.as_ref().map(|c|&c.1)).bind(f.limit+1).fetch_all(&app.pool).await?;
     let more = rows.len() > f.limit as usize;
     let mut entries = Vec::new();
@@ -207,7 +209,11 @@ pub async fn project(app: &App, limit: i64) -> Result<usize> {
     for row in rows {
         let r: DbJson<MatchResult> = row.try_get("result")?;
         for p in &r.participants {
-            if !r.gameplay_started || p.is_bot || p.profile_id.is_none() {
+            if !r.gameplay_started
+                || p.is_bot
+                || p.profile_id.is_none()
+                || (r.outcome == shared::career::MatchOutcome::Remade && p.rating.is_none())
+            {
                 continue;
             }
             if !p.stats.damage_to_heroes.is_finite() {

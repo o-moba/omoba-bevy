@@ -7,19 +7,35 @@ All notable changes are recorded here. The canonical version is
 
 - Fix the AFK notice QA identifier: the new UI test could not find the rendered
   label by its stable ID. CI caught this after typechecking; the notice now carries
-  the ID used by the existing test. Full CI is being repeated.
+  the ID used by the existing test. All seven repeat CI jobs and all 13 complete
+  public/PG journeys pass for 0db576fc.
 
-- In progress (#34): account for human connected/disconnected and AI-control
+- Add server-owned remake/surrender votes and native menu/prompt controls.
+  Remake is available before 3 minutes after a 90-second teammate absence;
+  surrender starts at 10 minutes. Votes last 30 seconds with a 120-second
+  failed-vote cooldown. Innocent remakes do not change ordinary career totals;
+  a proved ranked leaver keeps the individual penalty. Protocol 15/core schema 8.
+  Local verification: 608 real PostgreSQL tests, 183 shared tests, 12 vote
+  runtime/policy tests and all-target native clippy pass. Both real public
+  process scenarios pass, including all ten saved profiles/histories and
+  stale/opponent vote rejection. Native kit execution/full CI and native visual
+  proof remain pending. Portal presentation is saved in 8f6314b.
+
+- Move the compact Home build label away from the bottom navigation. An actual
+  unlocked RU 852×393 capture verified rating/placement display and exposed the
+  overlap; the changed label position still needs a fresh native capture.
+
+- Account for human connected/disconnected and AI-control
   time, with 90-second AFK/reconnect grace and sticky abandon status. Winning
   leavers lose rating and earn no XP; innocent losing teammates receive half
   the normal loss. PostgreSQL settlement records one incident and a persistent
   5-minute / 30-minute / 24-hour cooldown in the same transaction. Local store
   tests pass, including all 593 PostgreSQL/API/store/server cases. Native client
-  execution and complete current journeys remain pending. Player-caused
+  tests and all 13 complete journeys pass in CI 42061098787. Player-caused
   unattended shutdown still penalizes proved abandons; host failure and duration
   caps are exempt. Native and portal history distinguish personal forfeits from
   team victory; API filtering, profile counters and rating graphs include the
-  same penalty. This feature is not deployed and #34 remains partial.
+  same penalty. Finding #34 is verified; production deployment remains pending.
 
 - Correlate probe ready consent with the current search so a retained old view
   cannot starve search refresh and falsely penalize reconnecting survivors.

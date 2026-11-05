@@ -127,6 +127,7 @@ pub enum MatchOutcome {
     Completed,
     Abandoned,
     Interrupted,
+    Remade,
 }
 
 fn legacy_gameplay_started() -> bool {
@@ -154,6 +155,8 @@ pub struct MatchResult {
     pub winner: Option<Team>,
     pub rated: bool,
     pub unrated_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
     pub participants: Vec<ParticipantResult>,
     /// True only after durable transaction acknowledgement.
     #[serde(default)]
@@ -168,8 +171,9 @@ impl MatchResult {
         if self.outcome == MatchOutcome::Completed {
             self.winner
                 .map(|winner| winner == participant.team && !abandoned)
-        } else if self.outcome == MatchOutcome::Interrupted
-            && self.unrated_reason.as_deref() == Some("abandoned_reaped")
+        } else if (self.outcome == MatchOutcome::Remade
+            || (self.outcome == MatchOutcome::Interrupted
+                && self.unrated_reason.as_deref() == Some("abandoned_reaped")))
             && abandoned
             && participant.rating.is_some()
         {
@@ -540,6 +544,8 @@ impl CareerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CareerView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_vote: Option<crate::match_vote::View>,
     #[serde(skip_serializing_if = "is_false")]
     pub afk_control: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]

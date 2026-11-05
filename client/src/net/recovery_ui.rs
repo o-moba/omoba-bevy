@@ -93,6 +93,11 @@ fn render(
     >,
 ) {
     let in_match = *screen.get() == crate::frontend::AppScreen::InMatch
+        && career
+            .view
+            .match_vote
+            .as_ref()
+            .is_none_or(|v| v.active.is_none())
         && modals.as_ref().is_none_or(|stack| stack.top().is_none());
     let viewport = windows.single().map_or(Vec2::new(852.0, 393.0), |w| {
         Vec2::new(w.width(), w.height())

@@ -147,7 +147,7 @@ Ops (`ops/vps/ru/*`, docs):
 | --- | --- | --- |
 | Accept/ready-check step before the worker spawns | Needs a new lobby view, client screen and its own tests; the re-queue above removes the player-visible damage of a no-show | LR-32 |
 | Leaver penalty, AFK detection, remake, surrender | Owner sets thresholds (O-13); needs connected-time tracking | LR-33, LR-34 |
-| Ranked entry gate, same-IP seating, void-match tooling | Owner default O-3 (no gate at launch) stands | LR-37 |
+| Ranked entry gate, same-IP seating, void-match tooling | Owner update 2026-11-06: Ranked requires 10 completed public matches, no mandatory VK link. C6 implementation/acceptance pending; other LR-37 integrity items remain open. | LR-37 |
 | Newcomer K, tiers, placement, seasons | Rating model decisions for the owner | LR-53 |
 | Casual backfill (humans replace bots) | Roster freeze is load-bearing for settlement | LR-36 |
 | Second game host / game directory | Architecture change (D0–D4) | LR-57 |

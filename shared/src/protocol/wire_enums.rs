@@ -27,8 +27,8 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-// Protocol 14 adds Transform.input_active; every enum variant is unchanged.
-const POLICY_PROTOCOL_VERSION: u16 = 14;
+// Protocol 15 adds authenticated MatchVote and the distinct Remade receipt.
+const POLICY_PROTOCOL_VERSION: u16 = 15;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;
@@ -67,7 +67,9 @@ macro_rules! wire_enums {
 
 wire_enums! {
     crate::compatibility::CompatibilityDatagram => Strict [CompatibilityProbe, CompatibilityReport],
-    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Interact, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem, TakeoverVote],
+    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Interact, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem, TakeoverVote, MatchVote],
+    crate::match_vote::Kind => Strict [Remake, Surrender],
+    crate::match_vote::Action => Strict [Start, Yes, No],
     crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
     crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
@@ -120,7 +122,7 @@ wire_enums! {
     crate::prematch::Role => Strict [Solo, Jungle, Mid, Carry, Support],
     crate::social::SocialTeam => Strict [Green, Blue],
     crate::social::SocialEventKind => Strict [Chat, Reaction],
-    crate::career::MatchOutcome => Strict [Completed, Abandoned, Interrupted],
+    crate::career::MatchOutcome => Strict [Completed, Abandoned, Interrupted, Remade],
     crate::shop::PurchaseError => Strict [Unavailable, Dead, OutsideBase, InsufficientGold, AlreadyOwned, InventoryFull, UnknownItem],
     crate::career::FriendPresence => Strict [Offline, Online, Playing],
     crate::sandbox::BotBehavior => Strict [Stationary, Flee, Attack, Fight],

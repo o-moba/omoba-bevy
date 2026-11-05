@@ -112,5 +112,7 @@
   "career.button.older": "更早",
   "career.player.progress_abandoned": "{rating} · +{xp}生涯经验 · 离开对局 / 挂机",
   "career.unrated.abandoned_reaped": "对局因没有活跃玩家而结束。已确认的离开或挂机仍会受罚。",
-  "career.unrated.duration_capped": "对局已达到时间上限，不会处罚离开或挂机。"
+  "career.unrated.duration_capped": "对局已达到时间上限，不会处罚离开或挂机。",
+  "career.result.remade": "重新比赛",
+  "career.unrated.remake": "提前重新比赛，不发放常规奖励。"
 }
