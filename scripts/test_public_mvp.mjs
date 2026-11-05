@@ -258,6 +258,21 @@ class Client {
   if(now-this.lastSend<300)return;this.lastSend=now;this.gameplay({type:'ping'});
   if(this.port===lobbyPort&&this.partyPresence&&now-(this.lastPresence||0)>2000){this.lastPresence=now;this.gameplay({type:'party',command:{command:'presence',nickname:this.nickname,avatar:null}});}
   if(this.port===lobbyPort){
+   if(this.preference==='humans_only' && (this.profile?.completed_public_matches??0)<10 && process.env.HARNESS_RANKED_FIXTURE_BIN) {
+    if(!this.qualificationFixture && this.profile) {
+     const run=spawnSync(process.env.HARNESS_RANKED_FIXTURE_BIN,[],{
+      input:JSON.stringify({profiles:[this.profile.profile_id],target:10}),encoding:'utf8',
+      env:{...process.env,OMOBA_HARNESS_DATABASE_URL:process.env.OMOBA_TEST_DATABASE_URL},timeout:60000,
+     });
+     assert.equal(run.status,0,`isolated Ranked fixture failed: ${run.stderr?.slice(-1200)}`);
+     this.qualificationFixture=JSON.parse(run.stdout.trim());
+     report.qualification_fixtures??=[];report.qualification_fixtures.push(this.qualificationFixture);
+    }
+    if(this.profile && now-(this.lastQualificationRead||0)>1500) {
+     this.lastQualificationRead=now;this.account({action:'profile',request_id:900000000+this.index,profile_id:this.profile.profile_id});
+    }
+    return;
+   }
    const ready=this.career?.match_service;
    if(this.exerciseStaleReady&&!this.staleReadyChecks&&this.autoQueue&&this.autoReady&&ready?.state==='ready_check'){
     // Model a fresh local search while the actual server still reports its
@@ -375,7 +390,7 @@ async function partyDraftLifecycle() {
  }
  assert.deepEqual(careerProgress(dodger),baselines[leaver.index]);
  let nextHistory=0;
- await pumpUntil('all ten unplayed histories remain empty',()=>[...survivors,dodger].every(c=>Array.isArray(c.lastHistory)&&c.lastHistory.length===0),15000,now=>{
+ await pumpUntil('all ten unplayed histories contain only disclosed warmup receipts',()=>[...survivors,dodger].every(c=>Array.isArray(c.lastHistory)&&c.lastHistory.every(row=>row.result_id.startsWith('synthetic-public-'))),15000,now=>{
   if(now>=nextHistory){nextHistory=now+1000;for(const c of [...survivors,dodger])c.account({action:'history',request_id:500,before:null});}
  });
  const penaltiesFile=path.join(root,'matches','dodge-penalties.json');
@@ -465,7 +480,7 @@ async function lifecycle(original) {
  const baseline=ids(original.snapshot);
  const allocation=original.allocation;
  const checks=report.lifecycle={checks:[],allocation_id:allocation.allocation_id,endpoint:allocation.endpoint};
- const waiting=new Client(1001,lobbyPort,null,{autoQueue:false,autoJoin:false});all.push(waiting);
+ const waiting=new Client(1001,lobbyPort,null,{preference:'humans_only',autoQueue:false,autoJoin:false});all.push(waiting);
  await pumpUntil('waiting player authentication',()=>!!waiting.auth);
  let nextQueue=0;
  await pumpUntil('humans-only waiting response',()=>waiting.career?.match_service?.state==='waiting'&&waiting.career?.match_service_request_id===waiting.queueId,20000,now=>{

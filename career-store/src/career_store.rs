@@ -24,7 +24,7 @@ mod fair_play;
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+pub const SCHEMA_VERSIONS: [i32; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -316,6 +316,13 @@ impl CareerStore {
                 .execute(&mut *tx)
                 .await?;
         }
+        if !versions.contains(&9) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/009_ranked_eligibility.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
             .fetch_one(&pool)
@@ -586,6 +593,9 @@ impl CareerStore {
             }
         }
         if result.rated {
+            if !recover && profiles.values().any(|p| !p.ranked_unlocked()) {
+                return Err(shared::career::error_code::RANKED_LOCKED.into());
+            }
             validate_current_cohort(&profiles)?;
         }
         tx.commit().await?;
@@ -781,6 +791,15 @@ impl CareerStore {
                 .checked_add(1)
                 .ok_or("Career match counter is full.")?;
             if result.outcome == MatchOutcome::Completed {
+                if !participant.is_bot
+                    && !fair_play::proved_abandon(participant)
+                    && (public_casual || (result.ruleset == RULESET && result.rated))
+                {
+                    profile.completed_public_matches = profile
+                        .completed_public_matches
+                        .checked_add(1)
+                        .ok_or("Completed public match counter is full.")?;
+                }
                 let won = result.winner == Some(participant.team)
                     && !fair_play::proved_abandon(participant);
                 if won {
@@ -848,9 +867,9 @@ impl CareerStore {
                     profile.abandons = total;
                 }
             }
-            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7 WHERE profile_id=$1")
+            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7,completed_public_matches=$8 WHERE profile_id=$1")
                 .bind(id).bind(profile.rating).bind(i64::from(profile.rated_matches)).bind(i64::from(profile.matches_played))
-                .bind(i64::from(profile.wins)).bind(i64::from(profile.losses)).bind(profile.progression_xp as i64)
+                .bind(i64::from(profile.wins)).bind(i64::from(profile.losses)).bind(profile.progression_xp as i64).bind(i64::from(profile.completed_public_matches))
                 .execute(&mut *tx).await?;
         }
         result.saved = true;
@@ -1220,6 +1239,7 @@ fn profile_row(row: &PgRow) -> StoreResult<ProfileSummary> {
             .map_err(|_| "Invalid stored profile counter.".into())
     };
     Ok(ProfileSummary {
+        completed_public_matches: counter("completed_public_matches")?,
         profile_id: row.try_get("profile_id")?,
         nickname: row.try_get("nickname")?,
         rating: row.try_get("rating")?,

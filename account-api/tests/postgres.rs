@@ -156,6 +156,17 @@ fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResu
     }
 }
 async fn start(app: &App, r: &MatchResult) {
+    // Explicit maturity snapshots keep these history/ACL fixtures focused on
+    // their original counters. Actual qualifying settlement has separate proof.
+    if r.rated {
+        let ids: Vec<_> = r
+            .participants
+            .iter()
+            .filter_map(|p| p.profile_id.as_deref())
+            .collect();
+        sqlx::query("UPDATE career_profiles SET completed_public_matches=GREATEST(completed_public_matches,10) WHERE profile_id=ANY($1)")
+            .bind(&ids).execute(&app.pool).await.unwrap();
+    }
     let mut allocation = r.clone();
     allocation.ended_at_ms = 0;
     allocation.duration_ms = 0;
@@ -1172,6 +1183,7 @@ async fn fair_play_game_runtime_can_append_but_cannot_rewrite_incidents() {
         "SELECT 1 FROM public.career_abandon_events LIMIT 0",
         "SELECT 1 FROM public.career_play_penalties LIMIT 0",
         "INSERT INTO public.career_abandon_events(profile_id,result_id) SELECT repeat('f',64),'fixture' WHERE false",
+        "UPDATE public.career_profiles SET completed_public_matches=10 WHERE false",
         "INSERT INTO public.career_play_penalties(profile_id,cooldown_until,strikes) SELECT repeat('f',64),clock_timestamp(),1 WHERE false",
         "UPDATE public.career_play_penalties SET strikes=strikes WHERE false",
     ] {

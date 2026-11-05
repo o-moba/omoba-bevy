@@ -130,8 +130,8 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 - [major/gap/M] **No drain/maintenance mode: deploy is refused while any match runs, so at ~1000 concurrent players the server can never be updated or hot-fixed** — `ops/vps/ru/ru_host.py:1562`. Fix: Add a lobby drain flag (e.g. `OMOBA_MATCH_ROOT/drain` file or SIGUSR1) that refuses new allocations with a localized `searching.match.draining` ('Сервер готовится к обновлению · новые матчи скоро возобновятся') while live matches finish; add `ru_host.py ship --drain` that sets the flag, waits for `occupied == 0` (bounded by OMOBA_MATCH_MAX_DURATION_SECS), then restarts; keep `guard_no_matches` as  — **open — drain/maintenance mode (LR-26); ship still refused while matches run**
 - [major/ux/M] **Mobile player who locks the screen while Searching silently loses the queue place after 15 s and is re-queued at the back on resume; no keep-awake and no match-found sound/vibration** — `server/src/match_service.rs:668`. Fix: Keep the screen awake while in Searching/Draft on Android (`ANativeActivity_setWindowFlags(AWINDOW_FLAG_KEEP_SCREEN_ON)` via the ndk crate) and iOS (`isIdleTimerDisabled`); raise the lobby expiry to 60 s and have the client, on resume with a gap >15 s, show `searching.status.resumed` ('Поиск был прерван · продолжаем'); play a short SFX + vibration when the view becomes allocated/assigned. — **partial — search intent now retains FIFO age up to 60 s (ready acceptance remains 15 s); integrated Android/iOS foreground keep-awake, wall-time resume refresh, one-shot sound and iOS haptic are implemented; six policy tests pass. Integrated client/Android/iOS compile gates pass for the pre-haptic revision; approved Android haptic patch is applied and requires its own target check. Native Home and physical mobile evidence remain pending.**
 - [major/scale/M] **Daily pg_dump only: a host failure rolls every player's rating and history back up to 24 h; no WAL archiving or point-in-time recovery** — `ops/vps/ru/omoba-backup-ru.timer:7`. Fix: Enable `archive_mode=on` with an `archive_command` that ships WAL segments to the existing off-host backup target (pgBackRest or wal-g; or rsync as a stopgap), keep the nightly base dump, and extend `ru_backup.py check`/the restore drill to replay WAL to the latest point; as a one-line stopgap raise the dump cadence to hourly. — **open — WAL archiving / PITR (daily pg_dump only)**
-- [major/gap/L] **No remake or surrender: a Ranked match that loses a human in the first minute is played out 4v5 with a bot-piloted seat for up to 45 min and is fully rated for all 10** — `server/src/session_recovery.rs:200`. Fix: Server: `PrematchAction`-style `MatchVote { Remake \| Surrender }` on the worker; remake allowed while elapsed < 180 s and a seat has been disconnected ≥ 90 s → end as `Outcome::Remade`, unrated for everyone, abandon count for the leaver; surrender allowed after 600 s with 4/5 (or all remaining) votes → normal Completed result. Client: vote prompt in pause menu with Russian strings; store: `unrated — **open — remake / surrender (LR-34)**
-- [major/gap/S] **Ranked has no eligibility gate: a brand-new device-key profile with zero matches can queue Ranked, and reinstalling creates a fresh profile, so alts/smurfs are free** — `server/src/match_service.rs:892`. Fix: Add a server-side Ranked precondition in `FindMatch` handling: `profile.matches_played >= 10` (Casual/vs Bots count) or career level ≥ 5, refused with a new code `ranked_locked` and Russian text `queue.failed.ranked_locked` ('Рейтинговый режим откроется после 10 матчей · сыграно {played}/10'); show the same lock + progress on the Home queue card. Optionally require a linked VK ID for Ranked (one V — **open — Ranked entry gate (LR-37; owner update 2026-11-06: 10 completed public matches, no mandatory VK link; implementation/proof pending)**
+- [major/gap/L] **No remake or surrender** — original finding at `server/src/session_recovery.rs:200`. Server-owned remake before180s after90s absence; strict majority of remaining humans, surrender from600s with4/5 (all when fewer remain),30s votes/120s failed cooldown. Innocent remakes are neutral; proved ranked leavers retain their individual penalty. — **partial — implemented/pushed7fd41139+b5a6b9ba; 608 real PG tests, both ten-human real-time process proofs and1571 native CI tests pass. Full15-stage CI42074945255 passes; native visual proof still pending.**
+- [major/gap/S] **Ranked has no eligibility gate** — original finding at `server/src/match_service.rs:892`. Owner decision2026-11-06: ten completed public matches, including Casual/vs Bots; no mandatory VK. Separate authoritative `completed_public_matches` excludes interruptions, remakes, custom/offline practice and own proved leaves/AFK. Fresh search and locked allocation admission; Home progress; existing seats still resume. — **partial — core9/server/Home working-tree implementation; three real PG eligibility cases and native clippy/build pass. Complete regressions, real tenth-game process proof and fresh native capture still pending.**
 - [minor/ux/S] **Draft allows two players on one team to lock the same hero class; no per-team uniqueness or 'taken' feedback** — `server/src/prematch.rs:235`. Fix: In `handle_prematch` refuse `Select`/`Lock` whose `hero_class` is already locked by a joined teammate, setting `player.draft.error = Some("draft.error.hero_taken")` resolved client-side to 'Этого героя уже выбрал союзник'; grey the class card in the client draft when a teammate has locked it (draft snapshot already carries teammates' picks). — **open — duplicate hero per team in the draft**
 - [minor/scale/S] **nftables lobby rule is 400 pkt/s per source IP: ~250 players behind one carrier-grade NAT saturate it and the kernel drops FindMatch/presence for all of them** — `ops/vps/ru/nftables-omoba.conf:56`. Fix: Raise the lobby limit to e.g. 4000/s burst 8000 (it is a flood guard, not a fairness tool) or key the dynamic set by `ip saddr . udp sport` so each NAT'd client gets its own bucket; document the new figure in README 'Admission limits'. — **done — nftables lobby rule 4000/s burst 8000**
 - [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold, corrupt/oversized/limited-scan alerts, no active-checkpoint false positives; 24 monitor tests pass. RU installation remains part of deployment.**
@@ -139,7 +139,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 ## Next steps, in order
 
 1. Finish the game PR into `dev` after `make check` + `scripts/postgres_tests.py` + `make verify-public-mvp`. Use the actual continuation results in [the progress record](../progress/2026-11-05-ranked-matchmaking-readiness.md); the initial full-client-gate claim was not reproducible (a private-field test initializer failed to compile and was fixed).
-2. Deploy order on RU: `omoba-account-api migrate` (career 6, portal 11) → Account API → portal (omoba-web#33) → lobby kit (`ru_host.py ship`; the unit now has 16 arenas, KillMode=process, new limits; bootstrap appends the new `OMOBA_LIMIT_*` lines).
+2. Deploy order on RU: `omoba-account-api migrate` (career 9 after C6, portal 11) → Account API → portal (omoba-web#33) → lobby kit (`ru_host.py ship`; the unit now has 16 arenas, KillMode=process, new limits; bootstrap appends the new `OMOBA_LIMIT_*` lines).
 3. LR-09: run `scripts/test_public_mvp.mjs` on the RU host (`--limits-from omoba-lobby-ru.service`, `--mix`), fill the README table, set capacity/cgroup from the measurement.
 4. LR-32: unanimous 15-second confirmation and persistent host-local cooldown are implemented and network-tested. Native RU ready-screen visual acceptance is verified; cross-host penalty sharing remains P7.
 5. LR-33 leaver policy (owner thresholds), LR-34 remake/surrender, LR-37 Ranked gate (owner O-3), LR-53 newcomer K / tiers.
@@ -538,3 +538,55 @@ C5 remains partial until native kit/full committed CI and native visual proof.
 The existing PostgreSQL harness now includes15 stages; ordinary base victory
 remains an independent stage. C6 is next: owner-approved ten completed public
 matches, without VK requirement. All later P6–P9 work remains mandatory.
+
+
+### C6 implementation checkpoint — 2026-11-06
+
+Owner-approved gate is working-tree code: `completed_public_matches`, core9
+historical backfill, exactly-once settlement increment, fresh QueueAccess and
+locked new-allocation admission, localized refusal and Home0/9/10 progress.
+No mandatory VK requirement or server bypass. Existing allocation replay is exempt.
+Three real PG eligibility cases pass (0/9/10, exclusions, upgrade/recovery/replay);
+expanded concurrent/backfill coverage and the complete regression gate are running.
+Native all-target clippy and13 Python tool cases pass. New guarded native build
+runs on cacheB; general headless checks useA, both on Orico.
+
+Public test setup explicitly distinguishes synthetic prior Casual receipts from
+real gameplay. A loopback-omoba_test-only store example prepares prior results;
+no server admission override is introduced. A new signed gameplay rehearsal is
+being verified: denial0, nine disclosed prior receipts, denial9, real standard-map
+vs-Bots completion10 and acceptance10 on a fresh lobby connection. Until it passes,
+C6 remains partial. No release/deployment claim is made.
+
+C5 is pushed in7fd41139; CI found two Clippy single-match findings, fixed separately
+inb5a6b9ba after passing local server clippy. Current repeat full CI42074945255 is
+running. Do not treat7fd41139's initial CI as green.
+
+
+C5 native kit acceptance now passes in CI42074945255/b5a6b9ba:1571client tests
+pass (one intentional ignore), including both actual vote-control press tests,
+stable control identity while timer/counts change,44px touch targets, original
+round/generation and unavailable-action guards. Both normal/dev client jobs pass;
+PG/process CI and native visual proof still pending.
+
+C6 admission review moved the public search gate to the queue's actual new-entry
+boundary, after existing live allocations are recognized. Thus a legacy zero-count
+profile can resume its own allocated seat while a new Ranked search still fails;
+new database allocation remains independently locked. Regression coverage added.
+The first broad regression found an old schema-upgrade fixture without actual
+qualifying receipts; it now asserts that aggregate stats do not fabricate maturity
+and separately sets its explicit cooldown-test snapshot. A C5 test also raced an
+unauthorized foreign live owner; it now proves fencing first, races valid retries
+from the actual owner and then checks cross-owner terminal replay. Production
+ownership fencing was preserved.
+
+
+C5 final CI evidence: b5a6b9ba/run42074945255, all seven jobs and15 public/PG
+stages PASS1852.27s. Remake result b7aff3e3f97755a1b0fb90e29ce68902;
+surrender d9dc14289adfad8f31ecc76564910454. Ordinary Ranked base victory
+30b5e2413afa56633fe7c31e081376c3 took427.58s; all ten exact rating/XP awards,
+history and no-false-AFK participation independently rechecked. Artifact13441500118
+SHA25655cd68ea379433a178c1d3a483780a2b5759bd12feee835de9f3741c2b75b8a8
+verified before safe extraction, private fixture absent. Reports/provenance retained
+in `.agent/codex-ranked-readiness/ci-b5-postgres-harness/`. C5 native visual
+acceptance remains; C6 full17-stage committed CI and tenth-game proof are pending.

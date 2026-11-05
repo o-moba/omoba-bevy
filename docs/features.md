@@ -32,6 +32,17 @@ Native pause controls and a live voting prompt use server eligibility; the porta
 shows neutral remakes, personal remake forfeits and surrender separately.
 Protocol 15 and career schema 8 require coordinated client/server rollout.
 
+## Ranked eligibility (C6, in progress)
+
+Ranked opens after ten completed public games, including approved public vs-Bots
+and Casual PvP. A separate authoritative counter excludes remakes, interruptions,
+custom/offline practice and the player's proved leaves/AFK. The store increments
+it exactly once with settlement and migrates trusted historical completions.
+New Ranked searches read current progress asynchronously; new allocations check
+all profiles under locks. Existing allocations/recovery remain usable. Home
+shows completed-public progress and disables Ranked until it reaches10. Linking
+VK is optional. Core schema9 is required; full acceptance is still pending.
+
 ## Classic hero design authoring foundation
 
 The existing game-contract exporter also publishes a versioned hero design

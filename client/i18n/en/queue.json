@@ -31,5 +31,7 @@
   "queue.ready.accept": "Accept match",
   "queue.ready.decline": "Decline",
   "queue.failed.play_cooldown": "Matchmaking is temporarily unavailable after leaving or going AFK.",
-  "queue.play_cooldown.remaining": "Leaving / AFK cooldown: {seconds}s remaining."
+  "queue.play_cooldown.remaining": "Leaving / AFK cooldown: {seconds}s remaining.",
+  "queue.failed.ranked_locked": "Ranked opens after 10 completed public matches. Play Casual PvP or vs Bots to make progress.",
+  "queue.ranked_locked.progress": "Complete {total} public matches to unlock Ranked ({played}/{total}). Remakes, interruptions and your own leaves/AFK do not count."
 }

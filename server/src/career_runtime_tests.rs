@@ -45,6 +45,7 @@ fn addr(port: u16) -> SocketAddr {
 }
 fn profile(id: u64, rating: i32, experienced: bool) -> ProfileSummary {
     let mut p = ProfileSummary::new(format!("{id:064x}"), format!("Hero {id}"));
+    p.completed_public_matches = 10; // Explicit maturity fixture; admission tests use fresh profiles.
     p.rating = rating;
     p.rated_matches = if experienced { 25 } else { 0 };
     p
@@ -555,6 +556,29 @@ fn empty_roster_finalizes_abandoned_before_reset_without_ranked_winner() {
     assert!(result.participants[0].disconnected);
 }
 
+// Prior-maturity snapshots for unrelated two-player UDP/store integration cases.
+// The separate process journey creates real synthetic public receipts and proves
+// a standard-map tenth completion; these fixtures keep their existing stat baselines.
+fn qualify_ranked_test_key(url: &str, public_key: &str, nickname: &str) {
+    let admin = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    admin.block_on(async {
+        let store = career_store::CareerStore::connect_runtime(url)
+            .await
+            .unwrap();
+        let profile = store.authenticate(public_key, nickname).await.unwrap();
+        let pool = sqlx::PgPool::connect(url).await.unwrap();
+        sqlx::query("UPDATE career_profiles SET completed_public_matches=10 WHERE profile_id=$1")
+            .bind(&profile.profile_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    });
+}
+
 #[test]
 fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     use ed25519_dalek::Signer;
@@ -587,7 +611,7 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     ));
     rt.career.backend = Box::new(career_backend::CareerBackend::test_with_database(
         rt.server_epoch,
-        url,
+        url.clone(),
         outbox,
     ));
     let sockets = [
@@ -605,6 +629,7 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
+        qualify_ranked_test_key(&url, &public_key, &format!("UDP Hero {index}"));
         let address = socket.local_addr().unwrap();
         let session = format!("live-signed-{index}");
         send(
@@ -1317,7 +1342,7 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
     ));
     rt.career.backend = Box::new(career_backend::CareerBackend::test_with_database(
         rt.server_epoch,
-        url,
+        url.clone(),
         outbox,
     ));
     let sockets = [
@@ -1335,6 +1360,7 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
+        qualify_ranked_test_key(&url, &public_key, &format!("Tier Hero {index}"));
         let address = socket.local_addr().unwrap();
         let session = format!("tier-signed-{index}");
         send(

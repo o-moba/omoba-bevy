@@ -49,6 +49,7 @@ struct CliArgs {
     telemetry: bool,
     public: bool,
     exit_after_result: bool,
+    ranked_eligibility_probe: bool,
     rush_objectives: bool,
     preference: shared::match_service::MatchPreference,
 }
@@ -58,6 +59,7 @@ fn parse_args() -> CliArgs {
     let mut telemetry = false;
     let mut public = false;
     let mut exit_after_result = false;
+    let mut ranked_eligibility_probe = false;
     let mut rush_objectives = false;
     let mut preference = shared::match_service::MatchPreference::Ranked;
     let mut server: SocketAddr = "127.0.0.1:4000".parse().expect("default addr parses");
@@ -91,6 +93,7 @@ fn parse_args() -> CliArgs {
             "--telemetry" => telemetry = true,
             "--public" => public = true,
             "--exit-after-result" => exit_after_result = true,
+            "--ranked-eligibility-probe" => ranked_eligibility_probe = true,
             "--rush-objectives" => rush_objectives = true,
             "--preference" => {
                 preference = match args.next().as_deref() {
@@ -125,12 +128,25 @@ fn parse_args() -> CliArgs {
         eprintln!("--rush-objectives is a loopback rehearsal option");
         std::process::exit(2);
     }
+    if ranked_eligibility_probe
+        && !(public
+            && exit_after_result
+            && count == 1
+            && server.ip().is_loopback()
+            && preference == shared::match_service::MatchPreference::BotPractice)
+    {
+        eprintln!(
+            "eligibility probe requires one public loopback vs-Bots client with --exit-after-result"
+        );
+        std::process::exit(2);
+    }
     CliArgs {
         count,
         server,
         telemetry,
         public,
         exit_after_result,
+        ranked_eligibility_probe,
         rush_objectives,
         preference,
     }
@@ -186,6 +202,9 @@ fn main() {
             bot.join_with_loadout(team, Character::Ipfs, class, avatar);
             bot
         };
+        if args.ranked_eligibility_probe {
+            bot.enable_ranked_eligibility_probe(args.server);
+        }
         println!(
             "bot#{index}: join sent ({:?}, lane {:?}, avatar {})",
             class,
@@ -499,7 +518,7 @@ fn main() {
                 })).collect();
                 let peers: Vec<_> = runners.iter().map(|r| serde_json::json!({
                     "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis()),
-                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"error":s.error}))
+                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count}))
                 })).collect();
                 println!(
                     "BOT_SAMPLE {}",
@@ -526,6 +545,9 @@ fn main() {
                         return false;
                     };
                     result.saved
+                        && (!args.ranked_eligibility_probe
+                            || (s.ranked_denied_counts == [0, 9]
+                                && s.ranked_accepted_count == Some(10)))
                         && result.outcome == shared::career::MatchOutcome::Completed
                         && profile.matches_played == initial.matches_played + 1
                         && history.iter().any(|r| r.result_id == result.result_id)

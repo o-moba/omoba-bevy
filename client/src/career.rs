@@ -1270,6 +1270,11 @@ pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
     {
         return Some(play_cooldown_text(view));
     }
+    if code == Some(shared::career::error_code::RANKED_LOCKED)
+        || error == shared::career::error_code::RANKED_LOCKED
+    {
+        return Some(ranked_locked_text(view));
+    }
     // A moderation refusal (LR-15) names its end from the view's sanctions.
     if let Some(text) = code.and_then(|code| crate::moderation::refusal_text(code, &view.sanctions))
     {
@@ -1278,6 +1283,20 @@ pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
     Some(
         code.and_then(admission_error)
             .map_or_else(|| error.clone(), str::to_owned),
+    )
+}
+
+pub(crate) fn ranked_locked_text(view: &CareerView) -> String {
+    let played = view
+        .profile
+        .as_ref()
+        .map_or(0, |p| p.completed_public_matches);
+    trf(
+        "queue.ranked_locked.progress",
+        &[
+            ("played", &played),
+            ("total", &shared::career::RANKED_REQUIRED_PUBLIC_MATCHES),
+        ],
     )
 }
 
@@ -2912,6 +2931,23 @@ mod tests {
             assert!(
                 server_error_text(&paused).unwrap().starts_with(pause),
                 "{locale}"
+            );
+            let mut profile = ProfileSummary::new("a".repeat(64), "Player".into());
+            profile.completed_public_matches = 9;
+            let locked = CareerView {
+                profile: Some(profile),
+                error_code: Some(error_code::RANKED_LOCKED.into()),
+                ..refused.clone()
+            };
+            let rendered = server_error_text(&locked).unwrap();
+            assert_eq!(rendered, ranked_locked_text(&locked));
+            assert!(
+                rendered.contains("9/10") && !rendered.contains('{'),
+                "{locale}: {rendered}"
+            );
+            assert!(
+                !failed(error_code::RANKED_LOCKED).contains('{'),
+                "generic refusal cannot expose placeholders"
             );
             assert!(failed("arena_limit").starts_with(arena), "{locale}");
             assert!(

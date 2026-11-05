@@ -37,6 +37,8 @@ pub struct PublicBotStatus {
     pub history: Option<Vec<MatchSummary>>,
     pub allocation: Option<MatchAllocation>,
     pub error: Option<String>,
+    pub ranked_denied_counts: Vec<u32>,
+    pub ranked_accepted_count: Option<u32>,
 }
 
 pub(crate) struct PublicSession {
@@ -66,6 +68,8 @@ pub(crate) struct PublicSession {
     next_result_query: Instant,
     result_query: u64,
     pub status: PublicBotStatus,
+    eligibility_lobby: Option<SocketAddr>,
+    match_vote: Option<shared::match_vote::View>,
 }
 
 fn random_hex() -> String {
@@ -106,6 +110,8 @@ impl PublicSession {
             next_join: now,
             next_result_query: now,
             result_query: 100,
+            eligibility_lobby: None,
+            match_vote: None,
             status: PublicBotStatus {
                 phase: "probing",
                 profile_id: None,
@@ -115,8 +121,39 @@ impl PublicSession {
                 history: None,
                 allocation: None,
                 error: None,
+                ranked_denied_counts: Vec::new(),
+                ranked_accepted_count: None,
             },
         }
+    }
+
+    pub fn enable_eligibility_probe(&mut self, lobby: SocketAddr) {
+        assert!(
+            lobby.ip().is_loopback(),
+            "eligibility rehearsal is loopback only"
+        );
+        self.eligibility_lobby = Some(lobby);
+    }
+
+    fn reset_transport(&mut self, lobby: bool) {
+        self.status.phase = "probing";
+        self.client_nonce = random_hex();
+        self.epoch = 0;
+        self.match_id = 0;
+        self.path = None;
+        self.auth = None;
+        self.challenge = None;
+        self.account_sequence = 0;
+        self.sequence = 0;
+        self.prematch_sequence = 0;
+        self.view = None;
+        self.match_vote = None;
+        self.joined = false;
+        self.lobby = lobby;
+        self.next_probe = Instant::now();
+        self.next_auth = Instant::now();
+        self.next_join = Instant::now();
+        self.next_action = Instant::now();
     }
 
     fn datagram(socket: &UdpSocket, value: &PublicClientDatagram) {
@@ -240,14 +277,19 @@ impl PublicSession {
         if let (Some(nonce), Some(profile)) = (view.auth_nonce, view.profile) {
             self.auth = Some(nonce);
             self.status.profile_id = Some(profile.profile_id.clone());
-            self.status
-                .initial_profile
-                .get_or_insert_with(|| profile.clone());
+            if self.lobby && self.status.allocation.is_none() {
+                self.status.initial_profile = Some(profile.clone());
+            } else {
+                self.status
+                    .initial_profile
+                    .get_or_insert_with(|| profile.clone());
+            }
             self.status.profile = Some(profile);
             if matches!(self.status.phase, "authenticating" | "probing") {
                 self.status.phase = if self.lobby { "searching" } else { "joining" };
             }
         }
+        self.match_vote = view.match_vote;
         if view.history_loaded {
             self.status.history = Some(view.history);
         }
@@ -255,6 +297,54 @@ impl PublicSession {
             self.status.result = Some(result);
         }
         self.status.error = view.error_code.or(view.error);
+        if self.eligibility_lobby.is_some() {
+            let count = self
+                .status
+                .profile
+                .as_ref()
+                .map_or(0, |p| p.completed_public_matches);
+            if self.lobby && view.match_service_request_id == Some(9000 + u64::from(count)) {
+                if matches!(&view.match_service, Some(MatchServiceView::Failed { code }) if code == shared::career::error_code::RANKED_LOCKED)
+                    && [0, 9].contains(&count)
+                    && !self.status.ranked_denied_counts.contains(&count)
+                {
+                    self.status.ranked_denied_counts.push(count);
+                }
+                if count == 10
+                    && matches!(
+                        &view.match_service,
+                        Some(MatchServiceView::Waiting {
+                            preference: MatchPreference::Ranked,
+                            ..
+                        })
+                    )
+                {
+                    self.status.ranked_accepted_count = Some(count);
+                }
+            }
+            // A retained request1 can still describe the just-finished bot
+            // allocation. The final probe asks Ranked explicitly; never follow
+            // that old handoff while waiting for the lobby to retire it.
+            if self.lobby && count == 10 && self.status.result.as_ref().is_some_and(|r| r.saved) {
+                return None;
+            }
+            if !self.lobby
+                && count == 10
+                && self.status.result.as_ref().is_some_and(|r| {
+                    r.saved
+                        && r.outcome == shared::career::MatchOutcome::Completed
+                        && self
+                            .status
+                            .history
+                            .as_ref()
+                            .is_some_and(|h| h.iter().any(|row| row.result_id == r.result_id))
+                })
+            {
+                let lobby = self.eligibility_lobby.unwrap();
+                self.reset_transport(true);
+                return Some(lobby);
+            }
+        }
         if self.auth.is_none() || !self.lobby || view.match_service_request_id != Some(SEARCH_ID) {
             return None;
         }
@@ -264,22 +354,7 @@ impl PublicSession {
                 addr.port() != 0 && !addr.ip().is_unspecified() && !addr.ip().is_multicast()
             })?;
             self.status.allocation = Some(allocation.clone());
-            self.status.phase = "probing";
-            self.client_nonce = random_hex();
-            self.epoch = 0;
-            self.match_id = 0;
-            self.path = None;
-            self.auth = None;
-            self.challenge = None;
-            self.account_sequence = 0;
-            self.sequence = 0;
-            self.prematch_sequence = 0;
-            self.view = None;
-            self.joined = false;
-            self.lobby = false;
-            self.next_probe = Instant::now();
-            self.next_auth = Instant::now();
-            self.next_join = Instant::now();
+            self.reset_transport(false);
             return Some(endpoint);
         }
         self.status.phase = match self.view {
@@ -385,6 +460,35 @@ impl PublicSession {
             self.next_ping = now + ACTION_RETRY;
             self.send(socket, &ClientPacket::Ping);
         }
+        // The eligibility proof needs a legitimate completed public game, not
+        // a second base-destruction benchmark. If it is still running after the
+        // ordinary ten-minute window, exercise the server-offered surrender.
+        // The independent Ranked victory stage still requires base destruction.
+        if self.eligibility_lobby.is_some()
+            && !self.lobby
+            && self.status.phase == "running"
+            && now >= self.next_action
+            && let Some(vote) = self.match_vote.as_ref().filter(|v| {
+                v.server_epoch == self.epoch
+                    && v.match_id == self.match_id
+                    && v.surrender.available
+                    && v.cooldown_secs == 0
+                    && v.active.is_none()
+            })
+            && let Some(generation) = vote.next_generation
+        {
+            self.next_action = now + RETRY * 2;
+            self.send(
+                socket,
+                &ClientPacket::MatchVote {
+                    server_epoch: vote.server_epoch,
+                    match_id: vote.match_id,
+                    generation,
+                    kind: shared::match_vote::Kind::Surrender,
+                    action: shared::match_vote::Action::Start,
+                },
+            );
+        }
         if !self.lobby && self.status.phase == "victory" && now >= self.next_result_query {
             self.next_result_query = now + ACTION_RETRY;
             self.result_query += 1;
@@ -410,6 +514,65 @@ impl PublicSession {
         }
         if self.lobby && now >= self.next_action {
             self.next_action = now + ACTION_RETRY;
+            if self.eligibility_lobby.is_some() {
+                let count = self
+                    .status
+                    .profile
+                    .as_ref()
+                    .map_or(0, |p| p.completed_public_matches);
+                if ([0, 9].contains(&count) && !self.status.ranked_denied_counts.contains(&count))
+                    || (count == 10 && self.status.ranked_accepted_count.is_none())
+                {
+                    self.next_action = now + RETRY * 2;
+                    self.account(
+                        socket,
+                        CareerAction::FindMatch {
+                            request_id: 9000 + u64::from(count),
+                            preference: MatchPreference::Ranked,
+                            also_casual: false,
+                        },
+                    );
+                    return;
+                }
+                if count == 0 && self.status.ranked_denied_counts.contains(&0) {
+                    self.next_action = now + RETRY * 2;
+                    if let Some(id) = &self.status.profile_id {
+                        self.account(
+                            socket,
+                            CareerAction::Profile {
+                                request_id: 900_000_001,
+                                profile_id: id.clone(),
+                            },
+                        );
+                    }
+                    return;
+                }
+                if self.status.ranked_accepted_count.is_some() {
+                    self.account(socket, CareerAction::CancelQueue);
+                    return;
+                }
+            }
+            if self.preference == MatchPreference::Ranked
+                && self
+                    .status
+                    .profile
+                    .as_ref()
+                    .is_none_or(|p| !p.ranked_unlocked())
+            {
+                // Ordinary signed reads only. A process-test coordinator may
+                // prepare disclosed prior games separately in its disposable DB.
+                self.next_action = now + RETRY * 2;
+                if let Some(id) = &self.status.profile_id {
+                    self.account(
+                        socket,
+                        CareerAction::Profile {
+                            request_id: 900_000_000,
+                            profile_id: id.clone(),
+                        },
+                    );
+                }
+                return;
+            }
             match &self.view {
                 Some(MatchServiceView::ReadyCheck {
                     check_id,
@@ -574,5 +737,75 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn eligibility_surrender_requires_the_current_authoritative_window() {
+        let (socket, peer) = sockets();
+        let now = Instant::now();
+        let mut session = PublicSession::new(
+            MatchPreference::BotPractice,
+            HeroClass::Warrior,
+            "Probe".into(),
+        );
+        session.enable_eligibility_probe(peer.local_addr().unwrap());
+        session.auth = Some("c".repeat(64));
+        session.path = Some("b".repeat(64));
+        session.epoch = 19;
+        session.match_id = 7;
+        session.lobby = false;
+        session.joined = true;
+        session.status.phase = "running";
+        session.next_ping = now + Duration::from_secs(60);
+        session.next_action = now;
+        let base = shared::match_vote::View {
+            server_epoch: 19,
+            match_id: 7,
+            next_generation: Some(5),
+            cooldown_secs: 0,
+            remake: shared::match_vote::Eligibility {
+                available: false,
+                starts_in_secs: 0,
+                code: "window_closed".into(),
+            },
+            surrender: shared::match_vote::Eligibility {
+                available: true,
+                starts_in_secs: 0,
+                code: "available".into(),
+            },
+            active: None,
+        };
+        peer.set_nonblocking(true).unwrap();
+        for invalid in 0..3 {
+            let mut view = base.clone();
+            match invalid {
+                0 => view.surrender.available = false,
+                1 => view.server_epoch += 1,
+                _ => view.cooldown_secs = 1,
+            }
+            session.match_vote = Some(view);
+            session.tick(&socket);
+            assert_eq!(
+                peer.recv(&mut [0; 16384]).unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        }
+        peer.set_nonblocking(false).unwrap();
+        session.match_vote = Some(base);
+        session.tick(&socket);
+        let PublicClientDatagram::SignedCommand { command } = receive(&peer) else {
+            panic!("expected signed vote")
+        };
+        assert_eq!((command.server_epoch, command.match_id), (19, 7));
+        assert!(matches!(
+            serde_json::from_str::<ClientPacket>(&command.payload).unwrap(),
+            ClientPacket::MatchVote {
+                server_epoch: 19,
+                match_id: 7,
+                generation: 5,
+                kind: shared::match_vote::Kind::Surrender,
+                action: shared::match_vote::Action::Start,
+            }
+        ));
     }
 }

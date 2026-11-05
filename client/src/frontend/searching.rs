@@ -404,6 +404,9 @@ fn refresh_status(
             let status = if matches!(view, shared::match_service::MatchServiceView::Failed { code } if code == shared::career::error_code::PLAY_COOLDOWN)
             {
                 crate::career::play_cooldown_text(&career.view)
+            } else if matches!(view, shared::match_service::MatchServiceView::Failed { code } if code == shared::career::error_code::RANKED_LOCKED)
+            {
+                crate::career::ranked_locked_text(&career.view)
             } else {
                 crate::match_service::status_text(view)
             };

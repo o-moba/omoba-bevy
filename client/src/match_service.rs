@@ -1818,8 +1818,9 @@ mod tests {
         // language (never the generic "could not start: <code>" line), as do
         // the re-search notice, the prematch reset codes and the unrated
         // reason the career store sends.
-        const LOBBY_CODES: [&str; 12] = [
+        const LOBBY_CODES: [&str; 13] = [
             "ranked_party_cohort",
+            "ranked_locked",
             "arena_limit",
             "practice_cooldown",
             "queue_full",

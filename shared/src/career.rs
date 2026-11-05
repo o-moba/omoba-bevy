@@ -203,6 +203,9 @@ pub struct MatchSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProfileSummary {
+    /// Completed approved public games, excluding this player's proved abandons.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub completed_public_matches: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub abandons: u32,
     pub profile_id: String,
@@ -217,6 +220,7 @@ pub struct ProfileSummary {
 impl ProfileSummary {
     pub fn new(profile_id: String, nickname: String) -> Self {
         Self {
+            completed_public_matches: 0,
             abandons: 0,
             profile_id,
             nickname,
@@ -231,10 +235,15 @@ impl ProfileSummary {
     pub fn newcomer(&self) -> bool {
         self.rated_matches < NEWCOMER_MATCHES
     }
+    pub fn ranked_unlocked(&self) -> bool {
+        self.completed_public_matches >= RANKED_REQUIRED_PUBLIC_MATCHES
+    }
     pub fn level(&self) -> u64 {
         1 + self.progression_xp / 1000
     }
 }
+
+pub const RANKED_REQUIRED_PUBLIC_MATCHES: u32 = 10;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -596,6 +605,7 @@ pub struct PlayCooldown {
 /// Stable codes of [`CareerView::error_code`].
 pub mod error_code {
     pub const PLAY_COOLDOWN: &str = "play_cooldown";
+    pub const RANKED_LOCKED: &str = "ranked_locked";
     /// A new device key from a network that created today's share of new
     /// profiles (LR-16).
     pub const NEW_PROFILE_LIMIT: &str = "new_profile_limit";
@@ -861,5 +871,26 @@ mod tests {
         b = a.clone();
         b.server_epoch = 2;
         assert_ne!(a.signing_bytes(), b.signing_bytes());
+    }
+}
+
+#[cfg(test)]
+mod ranked_eligibility_tests {
+    use super::*;
+    #[test]
+    fn legacy_profile_defaults_to_locked_and_ten_completions_unlock_without_identity_link() {
+        let mut profile = ProfileSummary::new("a".repeat(64), "Player".into());
+        let legacy = serde_json::to_value(&profile).unwrap();
+        assert!(legacy.get("completed_public_matches").is_none());
+        let decoded: ProfileSummary = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.completed_public_matches, 0);
+        assert!(!decoded.ranked_unlocked());
+        profile.completed_public_matches = 9;
+        assert!(!profile.ranked_unlocked());
+        profile.completed_public_matches = 10;
+        assert!(profile.ranked_unlocked());
+        let roundtrip: ProfileSummary =
+            serde_json::from_slice(&serde_json::to_vec(&profile).unwrap()).unwrap();
+        assert_eq!(roundtrip, profile);
     }
 }

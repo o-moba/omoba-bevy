@@ -99,6 +99,14 @@ impl Bot {
         bot
     }
 
+    pub fn enable_ranked_eligibility_probe(&self, lobby: SocketAddr) {
+        self.public
+            .as_ref()
+            .expect("public session required")
+            .borrow_mut()
+            .enable_eligibility_probe(lobby);
+    }
+
     pub fn public_status(&self) -> Option<crate::PublicBotStatus> {
         self.public
             .as_ref()

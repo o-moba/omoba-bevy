@@ -153,6 +153,7 @@ pub(crate) enum Reply {
     RecoveryChecked,
     Flushed(u64, bool),
     RefreshAccess {
+        completed_public_matches: Option<u32>,
         addr: SocketAddr,
         nonce: String,
         key_active: Option<bool>,
@@ -332,6 +333,7 @@ impl MemoryLink {
             }
             Job::RefreshAccess { addr, nonce, .. } => {
                 self.replies.push_back(Reply::RefreshAccess {
+                    completed_public_matches: None,
                     addr,
                     nonce,
                     key_active: Some(true),
@@ -1098,6 +1100,10 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                                 c.key_checked = Some(Instant::now());
                                 c.view.sanctions = access.sanctions;
                                 c.view.play_cooldown = access.play_cooldown;
+                                if let Some(profile) = c.view.profile.as_mut() {
+                                    profile.completed_public_matches =
+                                        access.completed_public_matches;
+                                }
                                 if let (Some(nickname), Some(profile)) =
                                     (access.nickname, c.view.profile.as_mut())
                                 {
@@ -1129,6 +1135,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 }
                 Reply::ChatSwitch(enabled) => self.chat_switch = Some(enabled),
                 Reply::RefreshAccess {
+                    completed_public_matches,
                     addr,
                     nonce,
                     key_active,
@@ -1142,6 +1149,11 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     };
                     if c.auth.as_ref().is_none_or(|auth| auth.nonce != nonce) {
                         continue;
+                    }
+                    if let (Some(count), Some(profile)) =
+                        (completed_public_matches, c.view.profile.as_mut())
+                    {
+                        profile.completed_public_matches = count;
                     }
                     if let Some(cooldown) = play_cooldown {
                         c.view.play_cooldown = cooldown;
@@ -1862,10 +1874,18 @@ fn worker(
                     }
                     _ => None,
                 };
-                let (nickname, sanctions, play_cooldown) = access
-                    .map(|a| (a.nickname, Some(a.sanctions), Some(a.play_cooldown)))
+                let (nickname, sanctions, play_cooldown, completed_public_matches) = access
+                    .map(|a| {
+                        (
+                            a.nickname,
+                            Some(a.sanctions),
+                            Some(a.play_cooldown),
+                            Some(a.completed_public_matches),
+                        )
+                    })
                     .unwrap_or_default();
                 let _ = replies.try_send(Reply::RefreshAccess {
+                    completed_public_matches,
                     addr,
                     nonce,
                     key_active,
@@ -2118,6 +2138,7 @@ mod tests {
         let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
         let until = unix_seconds() + 300;
         let fresh = || omoba_career_store::career_store::moderation::Access {
+            completed_public_matches: 10,
             key_active: true,
             nickname: None,
             sanctions: Vec::new(),
@@ -2133,6 +2154,11 @@ mod tests {
         backend.poll();
         assert_eq!(backend.take_match_requests(), vec![request]);
         assert_eq!(backend.view(addr).play_cooldown.unwrap().until, until);
+        assert_eq!(
+            backend.view(addr).profile.unwrap().completed_public_matches,
+            10,
+            "fresh QueueAccess must replace the stale login's zero progress"
+        );
         for (sequence, current, valid_nonce, access) in [
             (1, Some(2), true, Ok(Some(fresh()))),  // replaced search
             (2, None, true, Ok(Some(fresh()))),     // cancellation
@@ -2353,6 +2379,7 @@ mod tests {
             until: Some(unix_seconds() + 600),
         };
         let refresh = |sanctions: Vec<Sanction>, nickname: Option<&str>| Reply::RefreshAccess {
+            completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
             key_active: Some(true),
@@ -2386,6 +2413,7 @@ mod tests {
         backend.link.replies.push_back(refresh(vec![mute], None));
         backend.poll();
         backend.link.replies.push_back(Reply::RefreshAccess {
+            completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
             key_active: None,
@@ -2520,6 +2548,7 @@ mod tests {
         // The next refresh reports the grant gone: the aura goes with it.
         let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
         backend.link.replies.push_back(Reply::RefreshAccess {
+            completed_public_matches: None,
             addr,
             nonce,
             key_active: Some(true),
@@ -2542,6 +2571,7 @@ mod tests {
             "session",
         );
         backend.link.replies.push_back(Reply::RefreshAccess {
+            completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
             key_active: Some(false),
@@ -2570,6 +2600,7 @@ mod tests {
         let expired = Instant::now() - COSMETIC_CACHE_TTL;
         backend.clients.get_mut(&addr).unwrap().key_checked = Some(expired);
         backend.link.replies.push_back(Reply::RefreshAccess {
+            completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
             key_active: None,

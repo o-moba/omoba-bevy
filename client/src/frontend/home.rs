@@ -380,6 +380,7 @@ struct HomeSignature {
     nickname: String,
     rating: i32,
     rated_matches: u32,
+    completed_public_matches: u32,
     matches: u32,
     wins: u32,
     losses: u32,
@@ -440,6 +441,7 @@ fn signature(
         ),
         rating: profile.map_or(0, |profile| profile.rating),
         rated_matches: profile.map_or(0, |profile| profile.rated_matches),
+        completed_public_matches: profile.map_or(0, |profile| profile.completed_public_matches),
         matches: profile.map_or(0, |profile| profile.matches_played),
         wins: profile.map_or(0, |profile| profile.wins),
         losses: profile.map_or(0, |profile| profile.losses),
@@ -984,7 +986,11 @@ fn spawn_home(
                                 let label = if action == HomeAction::Ranked {
                                     career.view.profile.as_ref().map_or_else(
                                         || tr(label).to_owned(),
-                                        |p| trf("home.ranked.rating", &[("rating", &p.rating)]),
+                                        |p| if p.ranked_unlocked() {
+                                            trf("home.ranked.rating", &[("rating", &p.rating)])
+                                        } else {
+                                            trf("home.ranked.locked", &[("played", &p.completed_public_matches), ("total", &shared::career::RANKED_REQUIRED_PUBLIC_MATCHES)])
+                                        },
                                     )
                                 } else {
                                     tr(label).to_owned()
@@ -1000,7 +1006,9 @@ fn spawn_home(
                                     id.into(),
                                     (),
                                 );
-                                if !session.is_connected() {
+                                if !session.is_connected()
+                                    || (action == HomeAction::Ranked && career.view.profile.as_ref().is_none_or(|p| !p.ranked_unlocked()))
+                                {
                                     row.commands().entity(button).insert(Pressable {
                                         disabled: true,
                                         ..default()
@@ -1398,6 +1406,18 @@ fn home_actions(
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
     for Activated { action, .. } in activated.read() {
+        if *action == HomeAction::Ranked
+            && career.view.match_service.is_some()
+            && career
+                .view
+                .profile
+                .as_ref()
+                .is_none_or(|p| !p.ranked_unlocked())
+        {
+            career.view.error = Some(shared::career::error_code::RANKED_LOCKED.into());
+            career.view.error_code = Some(shared::career::error_code::RANKED_LOCKED.into());
+            continue;
+        }
         match action {
             HomeAction::Resume => {
                 session_ui.write(crate::net::SessionUiCommand::ResumeMatch);
@@ -2183,6 +2203,10 @@ mod tests {
             app.world_mut()
                 .resource_mut::<ClientSession>()
                 .set_state_for_test(ClientConnectionState::Connected);
+            let mut qualified =
+                shared::career::ProfileSummary::new("a".repeat(64), "Qualified".into());
+            qualified.completed_public_matches = 10;
+            app.world_mut().resource_mut::<CareerClient>().view.profile = Some(qualified);
             app.add_systems(Startup, spawn_home);
             app.update();
             app
@@ -2534,6 +2558,7 @@ mod tests {
         let mut profile = shared::career::ProfileSummary::new("test".into(), "Игрок".into());
         profile.rating = 1199;
         profile.rated_matches = 19;
+        profile.completed_public_matches = 10;
         let mut career = app.world_mut().resource_mut::<CareerClient>();
         career.view.profile = Some(profile);
         career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
@@ -2552,6 +2577,37 @@ mod tests {
                 .filter_map(|e| app.world().get::<Text>(e))
                 .any(|t| t.0.contains("1199"))
         );
+        for count in [0, 9, 10] {
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .view
+                .profile
+                .as_mut()
+                .unwrap()
+                .completed_public_matches = count;
+            app.update();
+            app.update();
+            let button = harness::find(app.world_mut(), "HomeRanked").unwrap();
+            let disabled = app
+                .world()
+                .get::<Pressable>(button)
+                .is_some_and(|p| p.disabled);
+            assert_eq!(disabled, count < 10);
+            let label = app
+                .world()
+                .get::<Children>(button)
+                .unwrap()
+                .iter()
+                .filter_map(|e| app.world().get::<Text>(e))
+                .map(|t| t.0.as_str())
+                .collect::<String>();
+            let expected = if count < 10 {
+                format!("{count}/10")
+            } else {
+                "1199".to_owned()
+            };
+            assert!(label.contains(&expected));
+        }
         harness::press(app.world_mut(), "HomeLeaderboard");
         app.update();
         assert_eq!(

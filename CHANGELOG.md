@@ -5,9 +5,21 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Require ten completed public matches for Ranked, without mandatory VK.
+  Track a separate authoritative counter with schema9 historical backfill and
+  exactly-once settlement; check fresh search progress and locked new allocation.
+  Existing allocated seats remain resumable. Home and queue refusals show progress.
+  Remakes, interruptions, custom/offline practice and own proved leaves/AFK do
+  not count; ordinary completed surrender does. Local612PG/API/server,184shared,
+  27harness and13Python tests pass, with headless/native clippy and installed UI
+  assets checked. Full17-stage CI, real tenth-completion acceptance and fresh
+  native visual proof remain pending. Synthetic warmup receipts in process tests
+  are disclosed and restricted to a separate loopback-omoba_test-only helper.
+
 - Fix two server Clippy findings caught by C5 CI: express vote-deadline terminal
-  handling with `if let`. Local process proofs remain valid; repeat full CI is
-  required before C5 acceptance.
+  handling with `if let`. The repeat full CI42074945255 passes all seven jobs;
+  all15 public/PG journeys and both native vote press tests pass. Native visual
+  acceptance remains pending.
 
 - Fix the AFK notice QA identifier: the new UI test could not find the rendered
   label by its stable ID. CI caught this after typechecking; the notice now carries

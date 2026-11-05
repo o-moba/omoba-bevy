@@ -280,6 +280,11 @@ fn seed_home_fixture(mut career: ResMut<crate::career::CareerClient>) {
     }
     let mut profile = shared::career::ProfileSummary::new("qa-render-only".into(), "Игрок".into());
     profile.rating = 1234;
+    profile.completed_public_matches = std::env::var("OMOBA_HOME_COMPLETED_PUBLIC_QA")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|count| *count <= 10)
+        .unwrap_or(10);
     profile.rated_matches = 19;
     profile.matches_played = 19;
     profile.wins = 10;

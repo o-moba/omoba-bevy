@@ -45,5 +45,6 @@
   "home.ranked.rating": "Ranked\nRating {rating}",
   "home.button.leaderboard": "Leaderboard",
   "home.leaderboard.error": "Could not open the leaderboard. Try again.",
-  "home.recovery.afk": "You were inactive: AI controls your hero. Move or use a skill to take control again. The AFK mark remains for this match."
+  "home.recovery.afk": "You were inactive: AI controls your hero. Move or use a skill to take control again. The AFK mark remains for this match.",
+  "home.ranked.locked": "Ranked locked\n{played}/{total} public games"
 }

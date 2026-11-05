@@ -214,8 +214,14 @@ Owner defaults O-1 to O-3 (`docs/plans/launch-readiness.md` §7), each one setti
   taken. A party searches Casual only once every member took the offer.
 - **Casual PvP** (O-2) groups every human in the queue before bots fill the empty
   seats after 30 s (`CASUAL_BOT_FILL`). vs Bots stays a separate choice.
-- **No Ranked entry gate** (O-3) beyond the newcomer and eligibility rules; an
-  entry gate (career level, match count, VK ID in RU) is LR-37.
+- **Ranked entry** (owner update2026-11-06, supersedes O-3): complete ten public
+  matches, including approved Casual PvP/vs Bots. Linking VK is optional.
+  `completed_public_matches` counts completed approved public receipts exactly
+  once, excluding remakes, interruptions, custom/offline practice and the
+  player's proved leave/AFK. A normal completed surrender counts. Core schema9
+  backfills trusted receipts. The server checks fresh search progress and every
+  new allocation under locks; existing allocated seats remain resumable. Home
+  and queue refusals show the same progress. Full acceptance is tracked asC6.
 - The widening Ranked window (LR-35) shipped on 2026-11-05 as described above;
   humans replacing bots in Casual (LR-36) is later work.
 

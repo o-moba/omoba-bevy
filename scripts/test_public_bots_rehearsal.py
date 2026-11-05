@@ -54,9 +54,10 @@ class PublicBotsRehearsalTests(unittest.TestCase):
         result = {"result_id": "result", "saved": True, "outcome": "completed", "rated": True,
                   "winner": "green", "ruleset": "verdant-default-v1", "participants": participants}
         return [{"result": copy.deepcopy(result),
-                 "initial_profile": {"rating": 1000, "rated_matches": rated_matches, "matches_played": rated_matches,
+                 "initial_profile": {"rating": 1000, "rated_matches": rated_matches, "matches_played": rated_matches, "completed_public_matches": 10,
                                      "wins": 0, "losses": rated_matches, "progression_xp": 0},
                  "profile": {"profile_id": str(i), "matches_played": rated_matches + 1, "rated_matches": rated_matches + 1,
+                             "completed_public_matches": 11,
                              "rating": participants[i]["rating"]["after"],
                              "progression_xp": participants[i]["progression_xp_gained"],
                              "wins": int(i < 5), "losses": rated_matches + int(i >= 5)},
@@ -113,7 +114,7 @@ class PublicBotsRehearsalTests(unittest.TestCase):
             for participant in status["result"]["participants"]:
                 participant["rating"] = None
                 participant["progression_xp_gained"] = 0
-            status["profile"].update(rating=1000, rated_matches=0, progression_xp=0)
+            status["profile"].update(rating=1000, rated_matches=0, progression_xp=0, completed_public_matches=10)
             status["history"][0]["rating"] = None
         self.assertEqual(rehearsal.verify_results(statuses, 10, False, True), "result")
         statuses[-1]["profile"]["rated_matches"] = 1

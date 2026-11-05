@@ -205,3 +205,33 @@ Full committed CI (15 stages), native kit execution and native vote visual proof
 remain pending. The frozen0db576fc local full gate also passes:2527Rust/642Python/
 62iOS-tooling tests, with104Rust ignores and9Python skips explicitly retained.
 C6 implementation follows after saving C5; owner decision recorded above.
+
+
+C6 progress: core9 counter/backfill and server+Home gate are implemented in the
+working tree. Three real PG eligibility tests pass; native clippy and13 Python
+checks pass. Full PG, current native build and public tenth-completion proof
+are underway. Synthetic qualification uses a separate loopback-only store example
+and is disclosed in process reports; real Ranked victory remains an ordinary game.
+C5 CI first found two server Clippy single-match errors; b5a6b9ba fixes them and
+repeat CI42074945255 is running. Both source commits are pushed. Native screenshot
+still awaits a usable unlocked screen; the owner was already asked once again.
+
+
+C6 native client build passes in771.07s, root free minimum50.26GiB. All1111
+tracked client/shared/common/passport files stayed identical to the build source
+manifest. Binary SHA25666f1e272e29377e9d8dee5641bfefdc13f7a5153aa1dafc39c6949e16eca5ac3,
+kept in the existing Orico cacheB. Fresh native capture still needs manual unlock.
+The counter-only progress QA input affects only the existing render fixture; it
+cannot authorize a real account. No new production dependencies or CI YAML edits.
+
+
+C6 complete targeted verification: fresh `postgres_tests.py` passes all612 cases
+(store53/API105/server454),18 suites/no ignores; shared184/harness27, Python13,
+headless all-target clippy and native all-target clippy pass. Installed UI assets
+pass with the known external-handoff override; CJK463876bytes retains old glyphs.
+The native build snapshot precedes the final Searching refusal-format refinement;
+its Home implementation is unchanged, but it is not claimed as the exact latest
+complete client. Final screen/CI proof remains pending. The eligibility probe
+supports ordinary surrender only when the worker offers it after ten minutes;
+standard Ranked base destruction remains an independent stage.
+C5 full CI42074945255 is now green across all seven jobs; native1571 tests pass.

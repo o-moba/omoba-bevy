@@ -58,11 +58,23 @@ impl Fixture {
             .await
             .unwrap()
     }
-    async fn profile(&self, n: u64) -> ProfileSummary {
+    async fn fresh_profile(&self, n: u64) -> ProfileSummary {
         self.store
             .authenticate(&format!("{n:064x}"), &format!("Player-{n}"))
             .await
             .unwrap()
+    }
+    async fn profile(&self, n: u64) -> ProfileSummary {
+        let profile = self.fresh_profile(n).await;
+        // Explicit qualifying snapshot for unrelated legacy store cases. These
+        // tests isolate rating/history baselines; eligibility tests below use
+        // fresh_profile and actual public settlement instead of this snapshot.
+        sqlx::query("UPDATE career_profiles SET completed_public_matches=10 WHERE profile_id=$1")
+            .bind(&profile.profile_id)
+            .execute(&self.store.pool)
+            .await
+            .unwrap();
+        self.store.profile(&profile.profile_id).await.unwrap()
     }
     async fn expire(&self, id: &str) {
         sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()-interval '1 second' WHERE result_id=$1")
@@ -156,9 +168,16 @@ async fn remake_preserves_innocent_totals_and_charges_one_ranked_abandon_exactly
         ..Default::default()
     });
     let other = f.another_owner().await;
-    let (left, right) = tokio::join!(f.store.settle(remade.clone()), other.settle(remade));
+    // A foreign live owner is correctly fenced before terminal intent exists.
+    // Race valid retries from the actual owner, then replay from another host.
+    assert!(other.settle(remade.clone()).await.is_err());
+    let (left, right) = tokio::join!(
+        f.store.settle(remade.clone()),
+        f.store.settle(remade.clone())
+    );
     let saved = left.unwrap();
     assert_eq!(saved, right.unwrap());
+    assert_eq!(saved, other.settle(remade).await.unwrap());
     assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, -32);
     assert_eq!(saved.participant_won(&saved.participants[0]), Some(false));
     assert_eq!(saved.participant_won(&saved.participants[1]), None);
@@ -2220,7 +2239,7 @@ async fn fair_play_schema_upgrade_preserves_saved_profile_and_cooldown_is_cross_
     let f = Fixture::new().await;
     let a = f.profile(1).await;
     let b = f.profile(2).await;
-    sqlx::raw_sql("UPDATE career_profiles SET rating=1234,rated_matches=25,matches_played=25,wins=15,losses=10,progression_xp=1000; DROP TABLE career_abandon_events,career_play_penalties; ALTER TABLE career_profiles DROP COLUMN abandons; DELETE FROM career_schema_version WHERE version>=7;")
+    sqlx::raw_sql("UPDATE career_profiles SET rating=1234,rated_matches=25,matches_played=25,wins=15,losses=10,progression_xp=1000; DROP TABLE career_abandon_events,career_play_penalties; ALTER TABLE career_profiles DROP COLUMN abandons, DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version>=7;")
         .execute(&f.store.pool).await.unwrap();
     let upgraded = f.another_owner().await;
     let profile = upgraded.profile(&a.profile_id).await.unwrap();
@@ -2233,6 +2252,15 @@ async fn fair_play_schema_upgrade_preserves_saved_profile_and_cooldown_is_cross_
         ),
         (1234, 25, 1000, 0)
     );
+    assert_eq!(
+        profile.completed_public_matches, 0,
+        "aggregate counters are not fabricated public receipts"
+    );
+    // This test targets cooldown fencing, not the separate new-admission gate.
+    sqlx::query("UPDATE career_profiles SET completed_public_matches=10")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
     let mut completed = result(&a, &b, 1);
     completed.duration_ms = 100_000;
     completed.ended_at_ms = 101_000;
@@ -2368,5 +2396,225 @@ async fn fair_play_only_player_caused_unattended_shutdown_adds_discipline() {
             (1000, 0, 0, 0)
         );
     }
+    f.close().await;
+}
+
+fn public_eligibility_fixture(a: &ProfileSummary, n: u64) -> MatchResult {
+    let mut game = result(a, a, n);
+    game.ruleset = PUBLIC_CASUAL_RULESET.into();
+    game.map_profile = shared::map::ResolvedMap::default().map_profile;
+    game.rated = false;
+    game.unrated_reason = Some("allocated_bots".into());
+    game.participants = (0..10)
+        .map(|i| {
+            let mut p = participant(a, i + 1, if i < 5 { Team::Green } else { Team::Blue });
+            if i != 0 {
+                p.is_bot = true;
+                p.profile_id = None;
+            }
+            p
+        })
+        .collect();
+    game
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn ranked_eligibility_counts_ten_completed_public_games_and_locked_admission() {
+    let f = Fixture::new().await;
+    let a = f.fresh_profile(1).await;
+    let b = f.profile(2).await;
+    let other = f.another_owner().await;
+    for count in 0..=10 {
+        let current = f.store.profile(&a.profile_id).await.unwrap();
+        assert_eq!(current.completed_public_matches, count);
+        assert_eq!(current.ranked_unlocked(), count >= 10);
+        let access = f
+            .store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap();
+        assert_eq!(access.completed_public_matches, count);
+        let ranked = starting(&result(&a, &b, 100));
+        if count < 10 {
+            assert_eq!(
+                other.start(ranked).await.unwrap_err(),
+                shared::career::error_code::RANKED_LOCKED
+            );
+            let pending: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM career_matches WHERE status!='settled'")
+                    .fetch_one(&f.store.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(pending, 0, "denied allocation must roll back every row");
+            let game = public_eligibility_fixture(&a, u64::from(count) + 1);
+            f.store.start(starting(&game)).await.unwrap();
+            let (left, right) =
+                tokio::join!(f.store.settle(game.clone()), f.store.settle(game.clone()));
+            left.unwrap();
+            right.unwrap();
+            // Cross-owner settlement replay cannot duplicate progress.
+            other.settle(game).await.unwrap();
+        } else {
+            other.start(ranked).await.unwrap();
+        }
+    }
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().matches_played,
+        10
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn ranked_eligibility_excludes_abandon_interruption_remake_and_custom_results() {
+    let f = Fixture::new().await;
+    let a = f.fresh_profile(1).await;
+    for n in 1..=5 {
+        let mut game = public_eligibility_fixture(&a, n);
+        match n {
+            1 => {
+                game.participants[0].participation = Some(shared::career::Participation {
+                    disconnected_ms: 90_000,
+                    abandoned: true,
+                    ..Default::default()
+                });
+                game.duration_ms = 90_000;
+            }
+            2 => {
+                game.outcome = MatchOutcome::Interrupted;
+                game.winner = None;
+            }
+            3 => {
+                game.outcome = MatchOutcome::Remade;
+                game.winner = None;
+                game.unrated_reason = Some("remake".into());
+                game.end_reason = Some("remake".into());
+                game.duration_ms = 90_000;
+                game.participants[0].participation = Some(shared::career::Participation {
+                    disconnected_ms: 90_000,
+                    abandoned: true,
+                    ..Default::default()
+                });
+            }
+            4 => {
+                game.ruleset = "custom-unrated-v1".into();
+            }
+            5 => {
+                game.gameplay_started = false;
+                game.outcome = MatchOutcome::Abandoned;
+                game.winner = None;
+                game.unrated_reason = Some("prematch_abandoned".into());
+            }
+            _ => unreachable!(),
+        }
+        game.ended_at_ms = game.started_at_ms + game.duration_ms;
+        // Cooldown is orthogonal; expire only this disposable fixture's penalty.
+        sqlx::query(
+            "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+        )
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+        let mut start = starting(&game);
+        start.participants[0].participation = None;
+        if n == 3 {
+            start.unrated_reason = Some("allocated_bots".into());
+            start.end_reason = None;
+        }
+        f.store
+            .start(start)
+            .await
+            .unwrap_or_else(|e| panic!("case {n}: {e}"));
+        f.store.settle(game).await.unwrap();
+        assert_eq!(
+            f.store
+                .profile(&a.profile_id)
+                .await
+                .unwrap()
+                .completed_public_matches,
+            0
+        );
+    }
+    // Backfill must apply the same exclusions as live settlement.
+    sqlx::raw_sql("ALTER TABLE career_profiles DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version=9;")
+        .execute(&f.store.pool).await.unwrap();
+    let upgraded = f.another_owner().await;
+    assert_eq!(
+        upgraded
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        0
+    );
+    // A legacy terminal disconnect without participation does not fabricate an
+    // abandon. A completed trusted public receipt still counts once.
+    sqlx::query(
+        "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    let mut legacy = public_eligibility_fixture(&a, 6);
+    legacy.participants[0].disconnected = true;
+    f.store.start(starting(&legacy)).await.unwrap();
+    f.store.settle(legacy).await.unwrap();
+    assert_eq!(
+        f.store
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn ranked_eligibility_backfill_and_existing_allocation_recovery_preserve_progress() {
+    let f = Fixture::new().await;
+    let a = f.fresh_profile(1).await;
+    let b = f.fresh_profile(2).await;
+    let game = public_eligibility_fixture(&a, 1);
+    f.store.start(starting(&game)).await.unwrap();
+    f.store.settle(game).await.unwrap();
+    // Reconstruct a pre-schema9 database from trusted receipts.
+    sqlx::raw_sql("ALTER TABLE career_profiles DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version=9;")
+        .execute(&f.store.pool).await.unwrap();
+    let upgraded = f.another_owner().await;
+    assert_eq!(
+        upgraded
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        1
+    );
+    assert_eq!(
+        upgraded
+            .profile(&b.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        0
+    );
+    assert!(upgraded.start(starting(&result(&a, &b, 2))).await.is_err());
+    // Durable outbox replay of an already allocated pre-upgrade round remains
+    // recoverable. This trusted API is not an unauthenticated queue bypass.
+    let old = starting(&result(&a, &b, 2));
+    upgraded.ensure_allocation(old.clone()).await.unwrap();
+    upgraded.start(old).await.unwrap();
+    assert_eq!(
+        upgraded
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        1
+    );
+    upgraded.pool.close().await;
     f.close().await;
 }

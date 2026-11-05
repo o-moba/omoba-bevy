@@ -443,6 +443,10 @@ impl ServerRuntime {
             self.career_error(addr, shared::career::error_code::PLAY_COOLDOWN);
             return;
         }
+        if !profile.ranked_unlocked() {
+            self.career_error(addr, shared::career::error_code::RANKED_LOCKED);
+            return;
+        }
         // This standalone queue is rated: a matchmaking or ranked ban
         // refuses it (LR-15).
         if let Some((code, _)) = shared::moderation::queue_refusal(

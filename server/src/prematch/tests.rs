@@ -686,7 +686,10 @@ fn loaded_peers_still_wait_for_durable_career_ack_and_frozen_loadout_is_recorded
         let session = format!("auth-{i}");
         rt.career.backend.test_authenticated(
             address(i),
-            shared::career::ProfileSummary::new(format!("{:064x}", i), format!("Hero {i}")),
+            shared::career::ProfileSummary {
+                completed_public_matches: 10,
+                ..shared::career::ProfileSummary::new(format!("{:064x}", i), format!("Hero {i}"))
+            },
             &session,
         );
         join(&mut rt, address(i), &session, now, true);

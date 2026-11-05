@@ -867,6 +867,15 @@ impl MatchService {
             }
             return;
         }
+        // This is a new admission. Existing live assignments above must still
+        // offer Resume after an eligibility-policy upgrade; they create no seat.
+        if preference == MatchPreference::Ranked && !profile.ranked_unlocked() {
+            lobby.errors.insert(
+                profile.profile_id,
+                shared::career::error_code::RANKED_LOCKED.into(),
+            );
+            return;
+        }
         if lobby.waiting.len() >= lobby.max_waiting {
             lobby.errors.insert(profile.profile_id, "queue_full".into());
             return;
@@ -2039,7 +2048,10 @@ mod tests {
     }
     fn w(id: u64, p: MatchPreference, now: Instant) -> Waiting {
         Waiting {
-            profile: ProfileSummary::new(format!("{id:064x}"), "Player".into()),
+            profile: ProfileSummary {
+                completed_public_matches: 10,
+                ..ProfileSummary::new(format!("{id:064x}"), "Player".into())
+            },
             session: format!("s{id}"),
             preference: p,
             queued: now,
@@ -2049,6 +2061,40 @@ mod tests {
             casual_since: (p == MatchPreference::Casual).then_some(now),
         }
     }
+    #[test]
+    fn new_ranked_search_requires_ten_completed_public_matches() {
+        let now = Instant::now();
+        let pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_owned();
+        let mut service = lobby_with(pool, &[]);
+        let mut entry = w(1, MatchPreference::Ranked, now);
+        for count in [0, 9, 10] {
+            entry.profile.completed_public_matches = count;
+            service.enqueue(
+                entry.profile.clone(),
+                entry.session.clone(),
+                u64::from(count) + 1,
+                MatchPreference::Ranked.into(),
+                Some((5, 2)),
+                home(),
+                now,
+            );
+            let view = service.view(&entry.profile.profile_id, &entry.session, now);
+            if count < 10 {
+                assert_eq!(
+                    view,
+                    Some(MatchServiceView::Failed {
+                        code: shared::career::error_code::RANKED_LOCKED.into()
+                    })
+                );
+            } else {
+                assert!(matches!(view, Some(MatchServiceView::Waiting { .. })));
+            }
+        }
+        drop(service);
+        let _ = std::fs::remove_dir_all(directory); // Only this test's empty fixture.
+    }
+
     /// The indices `select` picks, for a queue that must form.
     fn picked(waiting: &[Waiting], now: Instant, queue: MatchPreference) -> Vec<usize> {
         let selection = select(waiting, now).expect("a roster forms");
@@ -2469,7 +2515,10 @@ mod tests {
         let player: std::net::SocketAddr = "127.0.0.1:60200".parse().unwrap();
         rt.career.backend.test_authenticated(
             player,
-            ProfileSummary::new("c".repeat(64), "Rude#0001".into()),
+            ProfileSummary {
+                completed_public_matches: 10,
+                ..ProfileSummary::new("c".repeat(64), "Rude#0001".into())
+            },
             "rude",
         );
         let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
@@ -2722,6 +2771,20 @@ mod tests {
         };
         find_match(&mut service, 2);
         assert_eq!(service.request_id(profile, session), Some(2));
+        // A policy upgrade cannot strand the existing authenticated seat.
+        // Asking for Ranked with a legacy counter resumes its current match.
+        let mut legacy = entry.profile.clone();
+        legacy.completed_public_matches = 0;
+        service.enqueue(
+            legacy,
+            session.clone(),
+            9,
+            MatchPreference::Ranked.into(),
+            None,
+            home(),
+            now,
+        );
+        in_match(&service);
         let secs = in_match(&service).ends_within_secs.unwrap();
         assert!((195..=200).contains(&secs), "{secs}");
         // Retries and lobby ticks keep the seat and add no queue entry.

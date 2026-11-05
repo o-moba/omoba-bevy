@@ -135,7 +135,8 @@ def main(argv=None):
     env.update(OMOBA_TEST_DATABASE_URL=url, OMOBA_HARNESS_DATABASE_URL=url,
                OMOBA_PORTAL_TEST_DATABASE_URL=url, OMOBA_REQUIRE_TEST_DATABASE="1",
                CARGO_TARGET_DIR=str(target), CARGO_TERM_COLOR="never",
-               CARGO_CACHE_AUTO_CLEAN_FREQUENCY="never", HARNESS_SERVER_BIN=str(target / "debug/server"))
+               CARGO_CACHE_AUTO_CLEAN_FREQUENCY="never", HARNESS_SERVER_BIN=str(target / "debug/server"),
+               HARNESS_RANKED_FIXTURE_BIN=str(target / "debug/examples/qualify-ranked-fixture"))
     env.setdefault("CARGO_BUILD_JOBS", "1")
     report = {"status": "RUNNING", "stages": [], "fixture_methods": [],
               "scope": "loopback PostgreSQL; Account API provider/enrollment fixtures; real public gameplay",
@@ -197,6 +198,8 @@ def main(argv=None):
     try:
         run("build", ["cargo", "build", "--locked", "-p", "server", "-p", "harness",
                       "-p", "omoba-account-api", "--bins"])
+        run("build-ranked-fixture", ["cargo", "build", "--locked", "-p", "omoba-career-store",
+                                     "--example", "qualify-ranked-fixture"])
         run("migrate", [str(target / "debug/omoba-account-api"), "migrate"], {"OMOBA_DATABASE_URL": url})
         harness("admission-300", "admission", ADMISSION_TEST)
         run("registration-api", ["cargo", "test", "--locked", "-p", "omoba-account-api", "--test",
@@ -221,10 +224,18 @@ def main(argv=None):
                           "--seconds=1"], timeout=300)
         public("surrender", ["--scenario=surrender", "--clients=10", "--preference=humans_only",
                              "--seconds=1"], timeout=780)
+        eligibility = output / "ranked-eligibility"
+        eligibility_timeout = min(args.ranked_timeout, 1200)
+        run("ranked-eligibility", [sys.executable, "scripts/public_bots_rehearsal.py",
+                                  "--server-bin", str(target / "debug/server"),
+                                  "--bots-bin", str(target / "debug/bots"), "--require-victory",
+                                  "--ranked-eligibility", "--clients", "1", "--preference", "bot_practice",
+                                  "--timeout", str(eligibility_timeout), "--output", str(eligibility)],
+            process_report=eligibility / "report.json", timeout=eligibility_timeout + 60)
         case = output / "ranked-victory"
         run("ranked-victory", [sys.executable, "scripts/public_bots_rehearsal.py",
                               "--server-bin", str(target / "debug/server"),
-                              "--bots-bin", str(target / "debug/bots"), "--require-victory",
+                              "--bots-bin", str(target / "debug/bots"), "--require-victory", "--qualify-ranked-fixtures",
                               "--timeout", str(args.ranked_timeout), "--output", str(case)],
             process_report=case / "report.json", timeout=args.ranked_timeout + 60)
         report["status"] = "PASS"

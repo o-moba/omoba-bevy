@@ -62,9 +62,11 @@ def verify_results(statuses, count, ranked, custom_map=False):
             assert not result["rated"]
             assert result["ruleset"] in ("custom-unrated-v1", "practice-bots-v1")
         else:
-            assert result["ruleset"] == "verdant-default-v1"
+            assert result["ruleset"] == ("verdant-default-v1" if ranked else "public-casual-v1")
         assert len(result["participants"]) == 10
         assert profile["matches_played"] == initial["matches_played"] + 1
+        assert profile.get("completed_public_matches",0) == initial.get("completed_public_matches",0) + int(not custom_map)
+
         assert sum(row["result_id"] == result["result_id"] for row in status["history"]) == 1
         me = next(p for p in result["participants"] if p["profile_id"] == profile["profile_id"])
         assert not me.get("is_bot", False)
@@ -143,6 +145,10 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--preference", choices=("humans_only", "quick", "bot_practice"), default="humans_only")
     parser.add_argument("--clients", type=int, default=10)
+    parser.add_argument("--qualify-ranked-fixtures", action="store_true",
+                        help="seed disclosed synthetic prior Casual receipts in loopback omoba_test")
+    parser.add_argument("--ranked-eligibility", action="store_true",
+                        help="prove wire denial0/9, real tenth public game and Ranked acceptance10")
     parser.add_argument("--seconds", type=float, default=15)
     parser.add_argument("--require-victory", action="store_true")
     parser.add_argument("--test-map", type=Path, help="explicit local custom map; never a rated proof")
@@ -153,6 +159,8 @@ def main(argv=None):
         parser.error("set OMOBA_TEST_DATABASE_URL to a loopback /omoba_test database without URL options")
     if not 1 <= args.clients <= 10 or (args.preference == "humans_only" and args.clients != 10):
         parser.error("use 1..10 clients; Ranked requires ten")
+    if args.ranked_eligibility and not (args.clients == 1 and args.preference == "bot_practice" and args.require_victory and not args.test_map):
+        parser.error("eligibility requires one vs-Bots client, real victory and the standard map")
     if not 0 < args.seconds <= args.timeout <= 3600:
         parser.error("require 0 < seconds <= timeout <= 3600")
     for binary in (args.server_bin, args.bots_bin):
@@ -176,6 +184,8 @@ def main(argv=None):
                "--server", f"127.0.0.1:{port}", "--preference", args.preference, "--telemetry"]
     if args.require_victory:
         command.append("--exit-after-result")
+    if args.ranked_eligibility:
+        command.append("--ranked-eligibility-probe")
     if args.test_map:
         command.append("--rush-objectives")
     if args.test_map:
@@ -208,6 +218,21 @@ def main(argv=None):
                     for kind, payload in read_events(evidence):
                         if kind == "BOT_SAMPLE":
                             sample = payload
+                            peers = sample.get("peers", [])
+                            ids = [p.get("public", {}).get("profile_id") for p in peers]
+                            maturity_fixture = args.qualify_ranked_fixtures and args.preference == "humans_only"
+                            eligibility_fixture = args.ranked_eligibility and all(
+                                p.get("public", {}).get("ranked_denied_counts") == [0] for p in peers)
+                            if ((maturity_fixture or eligibility_fixture)
+                                    and not report.get("qualification_fixture")
+                                    and len(ids) == args.clients and all(ids)):
+                                helper = args.server_bin.resolve().parent / "examples/qualify-ranked-fixture"
+                                fixture = subprocess.run([str(helper)], input=json.dumps({"profiles":ids,"target":9 if args.ranked_eligibility else 10}),
+                                    text=True, capture_output=True, timeout=120,
+                                    env=dict(env, OMOBA_TEST_DATABASE_URL=database))
+                                assert fixture.returncode == 0, "isolated Ranked fixture failed: " + fixture.stderr[-1200:]
+                                report["qualification_fixture"] = json.loads(fixture.stdout)
+
                             samples.append(sample)
                             if running_roster(sample, args.clients):
                                 running_at = running_at or time.monotonic()
@@ -215,6 +240,14 @@ def main(argv=None):
                             statuses = payload
                             report["result_id"] = verify_results(statuses, args.clients, args.preference == "humans_only" and not args.test_map, bool(args.test_map))
                             report["results"] = statuses
+                            if args.ranked_eligibility:
+                                assert all(s["ranked_denied_counts"] == [0, 9] and s["ranked_accepted_count"] == 10 for s in statuses)
+                                assert all(s["initial_profile"]["completed_public_matches"] == 9
+                                           and s["profile"]["completed_public_matches"] == 10 for s in statuses)
+                                report["ranked_eligibility"] = {"status":"PASS", "wire_denials":[0,9],"wire_acceptance":10,"real_standard_map_tenth_completion":True,"completion_reason":statuses[0]["result"].get("end_reason") or "base_destroyed","vk_required":False}
+                                if report["ranked_eligibility"]["completion_reason"] == "surrender":
+                                    assert statuses[0]["result"]["duration_ms"] >= 600000, "ordinary surrender must wait ten real gameplay minutes"
+
                     assert lobby.poll() is None, "owned lobby exited"
                     if report.get("result_id"):
                         assert bots.wait(timeout=5) == 0, "AI clients failed after result"
