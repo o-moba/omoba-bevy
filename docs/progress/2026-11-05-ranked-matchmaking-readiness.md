@@ -528,3 +528,32 @@ Node/Python cross-decode and120 Node truncation/trailing/concatenation refusals
 PASS. Direct production use of already-locked flate2=1.1.0 awaits owner approval
 under the root AGENTS dependency rule. No production transport/protocol/manifest
 change has been applied. Specs/draft/corpus/results are retained under task proof.
+
+### P7 connected playing clients — 2026-11-06
+
+Added safe per-peer UDP counters (raw/blocking/drain, accepted complete snapshots,
+JSON/framing errors), safe allocation telemetry and guarded native shard runner.
+The runner rejects missing/stale/duplicate peers, bot-filled or inconsistent
+allocations, counter regressions and non-current worker receipts. It preserves
+Running receipts at acceptance and exact source/binary/manifest hashes before
+cleanup.1 loopback UDP counter test,28 harness unit tests,5 Python policy/receipt
+checks and all-target harness clippy PASS.
+
+Ten-client final and100-client initial probes PASS before actual1000-client
+acceptance:1000 signed native AI actors occupy100 ten-human Casual arenas,
+zero server bots. All Running49.22s after startup;20s all-playing soak passes
+continuous freshness/identity/error checks. Independent current hashes and100
+Running ten-human receipts rechecked; final max peer age573ms, no final account,
+JSON or framing errors. Fresh server SHA256
+`ba9d40bccbe9d469eae9fccfdabf8bdafe4e44d56f6c8d45b89004bb34f59351`,
+harness`c9a7c821e3ad60d6671cb9cb5a141bc440272c2d91f63520408eadf94f5347d0`.
+
+Over18.81s resource samples:101 server processes mean526.08% CPU, peak1536.55MiB;
+100 generator processes mean224.67% CPU, peak582.27MiB. DB CPU is excluded.
+Downlink p50=200199/p95=258272/p99=278937 bytes/player/s; received complete
+snapshots median11.72Hz/p05=10.97Hz, below nominal20Hz. This is short local
+M4 Pro14-core48GiB evidence without RU/cgroup limits, not a sustained SLA,
+1000 physical people or1000 rated players. Egress/performance and RU proof remain.
+Owned PG max_connections100→200 was restored100 after all owned processes stopped.
+Full raw reports: `.agent/codex-ranked-readiness/p7-playing-{10-final,100-v1,1000-v1}/`;
+checks/specs/hash evidence under task `p7-playing-*`. New tool full CI is pending.

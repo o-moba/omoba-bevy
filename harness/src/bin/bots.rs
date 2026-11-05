@@ -518,7 +518,8 @@ fn main() {
                 })).collect();
                 let peers: Vec<_> = runners.iter().map(|r| serde_json::json!({
                     "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis()),
-                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count}))
+                    "transport":r.bot.transport_stats(),
+                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count}))
                 })).collect();
                 println!(
                     "BOT_SAMPLE {}",

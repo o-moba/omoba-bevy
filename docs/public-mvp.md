@@ -444,3 +444,45 @@ limits are2048 in this test, so the wire proof does not distinguish them. Exact
 u64 epochs are preserved. `--smoke=8` tests only a small per-source fixture; the
 large run requires `--allow-large`. It binds only its owned loopback lobby and
 changes no OS/network setting or production cap.
+
+### Native playing-load evidence
+
+`scripts/public_playing_capacity.py` drives signed public Casual clients in
+native ten-client AI processes. They explicitly confirm, draft, load and generate
+ordinary movement/skill/shop actions at the existing10Hz driver tick. Every
+simultaneous peer must be Running with a snapshot younger than2s, a unique
+profile, no account/JSON/framing errors and a ten-human/zero-bot allocation.
+The final report preserves fresh matching worker receipts and manifest hashes
+before cleanup. Safe counters measure received UDP bytes and accepted complete
+ordered snapshots; server resources and generator resources are separate.
+
+Build current `server` and `harness --bin bots` into the assigned shared Cargo
+cache. Prepare/migrate only a disposable loopback `/omoba_test` database and set
+`OMOBA_TEST_DATABASE_URL`; `psql` must be on PATH. Run the small smoke first:
+
+```bash
+python3 scripts/public_playing_capacity.py \
+  --server-bin "$CARGO_TARGET_DIR/debug/server" \
+  --bots-bin "$CARGO_TARGET_DIR/debug/bots" \
+  --clients 10 --seconds 15 --output .agent/playing-small
+```
+
+The1000-client mode requires `--allow-large --clients 1000` and100 worker ports,
+plus at least108 existing test DB connections (the owned test sample used200).
+The runner refuses insufficient connections and never changes that setting.
+Use a new output directory for every run, and never overlap these tests with
+schema-resetting PG tests. All bindings are loopback, source fixture allowances
+are disclosed, private signing keys stay in memory and only owned process groups
+are stopped. `--seconds` is15–120; `--timeout` bounds startup plus soak. No live
+host, credentials, OS limits, CI or production settings are changed.
+
+The2026-11-06 local sample reaches1000 clients in100 distinct ten-human Casual
+arenas after49.22s and passes20s all-playing soak. Final maximum snapshot age is
+573ms; complete received snapshots median11.72Hz/p05=10.97Hz, below nominal20Hz.
+Downlink p50=200199/p95=258272/p99=278937 bytes/player/s. On M4 Pro14-core48GiB,
+the101 server processes sample5.26 CPU cores and1536.55MiB peak summed RSS;100
+generator processes use2.25 cores/582.27MiB. DB CPU is excluded. The temporary
+owned PG connection limit was restored200→100 after all owned processes stopped.
+This short local AI-driver sample is not a sustained SLA,1000 physical people,
+a1000-player Ranked journey or RU/cgroup capacity proof. Keep egress, latency,
+longer soak, multi-host and RU-host acceptance open.

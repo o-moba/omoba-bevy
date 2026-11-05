@@ -27,6 +27,17 @@ pub const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
 /// Storage exceeds the legal payload limit, preventing prefix truncation.
 const DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 
+/// Monotonic received-wire counters, including lobby/auth traffic. Safe for
+/// load telemetry: no packet contents, identities or session credentials.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct TransportStats {
+    pub received_datagrams: u64,
+    pub received_bytes: u64,
+    pub accepted_snapshots: u64,
+    pub decode_errors: u64,
+    pub framing_errors: u64,
+}
+
 /// A connected bot client.
 pub struct Bot {
     socket: UdpSocket,
@@ -39,8 +50,7 @@ pub struct Bot {
     order: shared::protocol::SnapshotOrder,
     framed: bool,
     dash_sequence: u64,
-    /// Decode failures are reported once per bot, then counted silently.
-    decode_errors: u64,
+    transport_stats: TransportStats,
 }
 
 impl Bot {
@@ -67,7 +77,7 @@ impl Bot {
             order: Default::default(),
             framed: false,
             dash_sequence: 0,
-            decode_errors: 0,
+            transport_stats: TransportStats::default(),
         }
     }
 
@@ -113,11 +123,28 @@ impl Bot {
             .map(|session| session.borrow().status.clone())
     }
 
+    pub fn transport_stats(&self) -> TransportStats {
+        self.transport_stats
+    }
+
+    fn record_receive(&mut self, len: usize) {
+        self.transport_stats.received_datagrams =
+            self.transport_stats.received_datagrams.saturating_add(1);
+        self.transport_stats.received_bytes = self
+            .transport_stats
+            .received_bytes
+            .saturating_add(len as u64);
+    }
+
     fn decode_received(&mut self, len: usize) -> Option<ServerPacket> {
-        let bytes = self
-            .assembler
-            .push(&self.recv_buf[..len], Instant::now())
-            .ok()??;
+        let bytes = match self.assembler.push(&self.recv_buf[..len], Instant::now()) {
+            Ok(bytes) => bytes?,
+            Err(_) => {
+                self.transport_stats.framing_errors =
+                    self.transport_stats.framing_errors.saturating_add(1);
+                return None;
+            }
+        };
         if let Some(session) = &self.public
             && let Ok(packet) =
                 serde_json::from_slice::<shared::public_transport::PublicServerDatagram>(&bytes)
@@ -128,8 +155,9 @@ impl Bot {
         let packet: ServerPacket = match serde_json::from_slice(&bytes) {
             Ok(packet) => packet,
             Err(error) => {
-                self.decode_errors += 1;
-                if self.decode_errors == 1 {
+                self.transport_stats.decode_errors =
+                    self.transport_stats.decode_errors.saturating_add(1);
+                if self.transport_stats.decode_errors == 1 {
                     eprintln!(
                         "bot: dropping undecodable server packet ({error}); \
                          later decode failures are counted, not logged"
@@ -180,6 +208,8 @@ impl Bot {
             .iter()
             .find(|p| p.id == packet.your_id())
             .map_or(0, |p| p.utility.dash_sequence);
+        self.transport_stats.accepted_snapshots =
+            self.transport_stats.accepted_snapshots.saturating_add(1);
         Some(packet)
     }
 
@@ -349,7 +379,10 @@ impl Bot {
                 return None;
             }
             match self.socket.recv(&mut self.recv_buf) {
-                Ok(len) => return Some(self.recv_buf[..len].to_vec()),
+                Ok(len) => {
+                    self.record_receive(len);
+                    return Some(self.recv_buf[..len].to_vec());
+                }
                 Err(error) if is_timeout(&error) => {}
                 Err(error) => panic!("bot socket raw recv failed: {error}"),
             }
@@ -373,6 +406,7 @@ impl Bot {
         loop {
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
+                    self.record_receive(len);
                     if let Some(packet) = self.decode_received(len) {
                         latest = packet;
                     }
@@ -400,6 +434,7 @@ impl Bot {
             }
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
+                    self.record_receive(len);
                     if let Some(packet) = self.decode_received(len) {
                         return Some(packet);
                     }

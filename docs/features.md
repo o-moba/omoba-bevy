@@ -16,6 +16,16 @@ portal gains a leaderboard with an opt-out. See
 [match progression](match-progression.md#ranked-window-at-low-population-lr-35),
 [the plan](plans/ranked-launch-readiness-2026-11-05.md) and ADR-027.
 
+## Connected playing-load evidence (unreleased)
+
+A guarded loopback runner drives signed native clients in ten-client AI shards
+and records actual received UDP bytes, complete snapshots and decoding errors.
+It requires simultaneous fresh Running state, unique profiles and matching
+ten-human immutable worker receipts, with generator resources measured separately.
+A short1000-client/100-arena Casual run passes on M4 Pro with zero server bots;
+received snapshot cadence falls below20Hz, so egress/latency and RU-host capacity
+remain open. See [load procedure](public-mvp.md#native-playing-load-evidence).
+
 ## Fair play: remake and surrender (C5, unreleased)
 
 Authenticated teammates can start a remake before minute 3 when a teammate has

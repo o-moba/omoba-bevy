@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add guarded native playing-load measurement with exact UDP counters, separate
+  generator/server resources and captured worker receipts. Actual1000 signed
+  clients occupy100 Casual arenas with zero server bots for20s after all are
+  Running; source/binary/roster identities independently rechecked. On M4 Pro,
+  servers use5.26 cores/1536.55MiB and the generator2.25 cores/582.27MiB. Received
+  snapshots median11.72Hz (below nominal20Hz); egress/latency, longer soak and
+  RU capacity remain open. Counter fixture,28 harness tests,5 probe policy tests
+  and strict harness clippy PASS. No production protocol/rule/config change.
+
 - Update the existing Rustls lock entry from0.23.25 to0.23.46 for four upstream
   TLS security advisories. No new packages, feature changes or TLS validation
   bypasses. All650 real PG/API/server tests and strict affected-crate clippy
@@ -19,8 +28,8 @@ All notable changes are recorded here. The canonical version is
   2048 admitted paths and correlated72-byte ServerFull for the2049th (495-byte
   probe), covering the combined global/per-source boundary.100 actual arenas
   also PASS with100 connected humans/900 server bots; the temporary local DB
-  connection limit is restored.1000 connected playing humans, egress reduction
-  and RU capacity/deployment remain required. No schema/protocol/dependency or
+  connection limit is restored. The separate native1000-playing follow-up is
+  recorded above; egress reduction and RU capacity/deployment remain required. No schema/protocol/dependency or
   production configuration changes.
 
 - Bound Ranked cohort selection to rating sweeps and a fixed set of oldest party
