@@ -27,6 +27,9 @@ const REQUEST_RETENTION: Duration = Duration::from_secs(30);
 /// Initial persisted dodge cooldown; repeat dodges within 24 hours escalate.
 /// Also applies to missed or declined match confirmations in every queue.
 const DODGE_COOLDOWN: Duration = Duration::from_secs(60);
+/// Short mobile suspensions keep search age; this is independent of the
+/// immutable roster's 15-second explicit acceptance deadline.
+const SEARCH_INTENT_TTL: Duration = Duration::from_secs(60);
 const READY_WINDOW: Duration = Duration::from_secs(15);
 /// A roster whose worker failed to spawn is refused for this long, so a broken
 /// deployment does not re-select the same ten players every pass.
@@ -1356,7 +1359,7 @@ impl MatchService {
     }
 }
 fn expire_waiting(waiting: &mut Vec<Waiting>, now: Instant) {
-    waiting.retain(|w| now.saturating_duration_since(w.touched) < Duration::from_secs(15));
+    waiting.retain(|w| now.saturating_duration_since(w.touched) < SEARCH_INTENT_TTL);
 }
 
 /// This unit searches `queue`: its own queue, and Casual PvP too for a Ranked
@@ -2056,14 +2059,20 @@ mod tests {
     fn abandoned_queue_expires_without_explicit_find_match_retry() {
         let now = Instant::now();
         let mut waiting = vec![w(1, MatchPreference::Ranked, now)];
-        expire_waiting(&mut waiting, now + Duration::from_secs(14));
-        assert_eq!(waiting.len(), 1);
+        for seconds in [15, 30, 59] {
+            expire_waiting(&mut waiting, now + Duration::from_secs(seconds));
+            assert_eq!(waiting.len(), 1);
+            assert_eq!(
+                waiting[0].queued, now,
+                "short suspension preserves FIFO age"
+            );
+        }
         // Runtime heartbeats do not touch queue intent. Only enqueue/retry does.
-        expire_waiting(&mut waiting, now + Duration::from_secs(15));
+        expire_waiting(&mut waiting, now + Duration::from_secs(60));
         assert!(waiting.is_empty());
         waiting.push(w(2, MatchPreference::Ranked, now));
-        waiting[0].touched = now + Duration::from_secs(14);
-        expire_waiting(&mut waiting, now + Duration::from_secs(15));
+        waiting[0].touched = now + Duration::from_secs(59);
+        expire_waiting(&mut waiting, now + Duration::from_secs(60));
         assert_eq!(waiting.len(), 1);
     }
 
@@ -3230,13 +3239,20 @@ mod tests {
             cooled,
         );
         assert_eq!(failed(&service, dodger, cooled), None);
-        // The nine did not renew their place in this fixture, so it expired;
-        // the dodger is queued again, at the back.
-        assert_eq!(waiting_orders(&service).len(), 1);
+        // The new 60-second mobile lease (plus requeue grace) still protects
+        // the survivors here. A cooled dodger joins behind all nine.
+        let orders = waiting_orders(&service);
+        assert_eq!(orders.len(), 10);
+        assert_eq!(&orders[..9], &[2, 3, 5, 6, 7, 8, 9, 10, 11]);
+        assert!(orders[9] > orders[8]);
         assert!(matches!(
             service.view(&dodger.profile.profile_id, &dodger.session, cooled),
             Some(MatchServiceView::Waiting { .. })
         ));
+        // Without actual search retries everyone eventually expires, including
+        // the last entrant; no runtime heartbeat preserves abandoned intent.
+        tick_accepted(&mut service, cooled + SEARCH_INTENT_TTL);
+        assert!(waiting_orders(&service).is_empty());
         let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
     }
 

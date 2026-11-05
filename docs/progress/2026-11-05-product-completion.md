@@ -315,3 +315,64 @@ registration/reconnect, 300-client restart admission, ready timeout/replacement,
 party exits, early crash and SIGTERM all passed in the same automated gate.
 Local extracted reports: `.agent/codex-ranked-readiness/ci-e3-postgres-harness/`.
 Finding #31 and P4 are done. P5–P9 remain required for full product readiness.
+
+
+## Client product continuation (P5, in progress)
+
+- #65: Home public queues and party launches send one preferred JoinPrematch and
+  enter Searching directly. Card class, valid avatar fallback and equipment are
+  retained; allocation assigns the actual team and owns Draft. Offline/standalone
+  games retain their picker. Home and party launch regressions passed.
+- #39: phone identity plate shows rating/newcomer n/20 and opens the trusted
+  regional leaderboard; desktop has a ladder button, Ranked a rating subtitle.
+  Render signature includes rated_matches. Placement 19→20 without a rating
+  change, real plate activation, token-free trusted navigation and failure toast
+  regressions passed. Tier/season policy remains explicit P6 (LR-53).
+- #45: global once-per-new-epoch notice for a lost party or restarted solo search
+  survives stale party-view expiry. Functional regression passed.
+- C3: queue intent expires after 60 seconds, preserving FIFO through shorter
+  pauses. Ready acceptance remains exactly 15 seconds. The integrated client
+  keeps the foreground screen awake in Searching/Draft/Loading/InMatch (Android
+  window flag / iOS main-thread UIKit), plays one existing UI sound per live
+  unanswered ready check, and adds foreground iOS haptics. Wall-clock resume
+  detection handles suspension even without an unfocused frame. After >15 s the
+  old countdown is discarded and the same search is refreshed without changing
+  request identity or accepting it. Android haptics remain a separate prepared
+  dependency/permission patch awaiting owner approval; physical mobile behavior
+  remains unverified.
+
+P5 baseline `make check` passed 2496 Rust tests (95 ignored), 639 Python tests
+(9 skipped), and 62 iOS packaging tests. The isolated PostgreSQL gate passed all
+567 tests, none ignored. The first PostgreSQL repeat was contaminated by our
+concurrent standalone UI server sharing the same disposable database and claiming
+expired fixtures. No production recovery/timeout workaround was added; repeat
+with exclusive database ownership passed. Subsequent render fixtures use no DB.
+
+The server process separately passed 15-second ready timeout/replacement after
+changing the queue lease: nine accepts, no pre-unanimity worker, original FIFO,
+late reply rejection and replacement allocation. Evidence:
+`.agent/codex-ranked-readiness/p5-ready-15s-confirmed/report.json`.
+Cooldown/retained-FIFO/eventual-expiry regression passed.
+
+The native RU 852×393 Home capture initially failed because the returning-player
+render fixture has no actual account. Added an explicitly QA-only admitted
+profile, ordered after snapshots and before Home rendering; capture now requires
+rating, leaderboard and public queues. No authentication or persistence is
+created by this fixture. The ready renderer similarly requires actual 6/10 and
+15-second text and clears the unrelated unconfigured-storage render notice.
+The corrected Home capture is still due; previous failures are not acceptance.
+
+Full P5 gates found and fixed a legacy test's missing ProfileCard/TeamSelection
+resources and missing CJK display glyphs. The game subset was rebuilt from the
+existing read-only upstream full font, retaining all old glyphs; final addition
+is 榜/评/曾 (+1308 bytes from HEAD). Installed manifest/budget check passes;
+sibling omoba-ui files are untouched.
+
+C3 baseline client test-target type check and iOS Swift SDK type check passed.
+After resume-freshness changes, all six standalone policy tests and all 62 iOS
+packaging tests passed. The combined client test build was stopped by the disk
+watchdog at 19.30 GiB free (minimum from AGENTS is ~20 GiB). It did not complete,
+and is not counted as passing. No cache was removed and no heavy local build is
+allowed until disk headroom returns. Latest integrated source requires the CI
+client gate and native Home capture. P5 remains open until its required evidence
+is obtained; Android vibration remains pending explicit approval.

@@ -23,16 +23,22 @@ use crate::ui::{Activated, Pressable, UiActionAppExt, UiSet};
 
 pub struct HomeScreenPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct HomeViews;
+
 impl Plugin for HomeScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<HomeAction>()
+            .init_resource::<HomePortal>()
             .add_systems(OnEnter(AppScreen::Home), (spawn_home_backdrop, spawn_home))
             .add_systems(Update, layout_home_chrome.run_if(in_state(AppScreen::Home)))
             .add_systems(
                 Update,
-                (home_actions, refresh_home)
+                (home_actions, leaderboard_actions, refresh_home)
                     .chain()
+                    .in_set(HomeViews)
                     .after(UiSet::Dispatch)
+                    .before(crate::net::ClientNetPipeline::SendCommands)
                     .run_if(in_state(AppScreen::Home)),
             );
     }
@@ -50,6 +56,7 @@ enum HomeAction {
     Card,
     Collection,
     History,
+    Leaderboard,
     Profile,
     Party,
     Help,
@@ -69,6 +76,65 @@ enum HomeAction {
 
 #[derive(Component)]
 struct HomeRoot;
+
+#[derive(Resource)]
+struct HomePortal {
+    origin: Result<String, String>,
+    open: fn(&str) -> Result<(), String>,
+    opened: Option<String>,
+}
+
+impl Default for HomePortal {
+    fn default() -> Self {
+        Self {
+            origin: omoba_passport::web_account::WebAccountApi::from_env().map(|api| api.origin),
+            open: crate::platform::open_external_url,
+            opened: None,
+        }
+    }
+}
+
+fn leaderboard_actions(
+    mut activated: MessageReader<Activated<HomeAction>>,
+    mut portal: ResMut<HomePortal>,
+    mut toasts: MessageWriter<kit::surfaces::ToastRequest>,
+) {
+    for Activated { action, .. } in activated.read() {
+        if *action != HomeAction::Leaderboard {
+            continue;
+        }
+        let result = portal.origin.clone().and_then(|origin| {
+            let link = format!("{}/leaderboard", origin.trim_end_matches('/'));
+            portal.opened = Some(link.clone());
+            (portal.open)(&link)
+        });
+        if let Err(error) = result {
+            warn!("Leaderboard did not open: {error}");
+            toasts.write(kit::surfaces::ToastRequest {
+                kind: kit::surfaces::ToastKind::Warning,
+                text: tr("home.leaderboard.error").to_owned(),
+            });
+        }
+    }
+}
+
+fn rating_line(profile: Option<&shared::career::ProfileSummary>) -> String {
+    let Some(profile) = profile else {
+        return tr("home.rating.pending").to_owned();
+    };
+    trf(
+        if profile.newcomer() {
+            "home.rating.newcomer"
+        } else {
+            "home.rating.rated"
+        },
+        &[
+            ("rating", &profile.rating),
+            ("played", &profile.rated_matches),
+            ("total", &shared::career::NEWCOMER_MATCHES),
+        ],
+    )
+}
 
 #[derive(Component)]
 enum HomeChrome {
@@ -294,6 +360,7 @@ struct HomeSignature {
     resume_available: bool,
     nickname: String,
     rating: i32,
+    rated_matches: u32,
     matches: u32,
     wins: u32,
     losses: u32,
@@ -353,6 +420,7 @@ fn signature(
             |profile| profile.nickname.clone(),
         ),
         rating: profile.map_or(0, |profile| profile.rating),
+        rated_matches: profile.map_or(0, |profile| profile.rated_matches),
         matches: profile.map_or(0, |profile| profile.matches_played),
         wins: profile.map_or(0, |profile| profile.wins),
         losses: profile.map_or(0, |profile| profile.losses),
@@ -894,10 +962,18 @@ fn spawn_home(
                                 ("queue.ranked", HomeAction::Ranked, "HomeRanked"),
                                 ("queue.bots", HomeAction::BotPractice, "HomeBotPractice"),
                             ] {
+                                let label = if action == HomeAction::Ranked {
+                                    career.view.profile.as_ref().map_or_else(
+                                        || tr(label).to_owned(),
+                                        |p| trf("home.ranked.rating", &[("rating", &p.rating)]),
+                                    )
+                                } else {
+                                    tr(label).to_owned()
+                                };
                                 let button = kit::spawn_button(
                                     row,
                                     secondary((row_width - gap) / 2.0),
-                                    tr(label),
+                                    label,
                                     TextStyle::new(TextRole::Button),
                                     ButtonKind::Secondary,
                                     None,
@@ -1102,6 +1178,23 @@ fn spawn_home_identity(
                         .entity(account)
                         .insert(kit::controls::icon_button_node(account_side, radius::PILL));
                 });
+            kit::spawn_button(
+                column,
+                Node {
+                    width: Val::Px(332.0),
+                    height: Val::Px(home_control_size(44.0, mobile, fit)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                tr("home.button.leaderboard"),
+                TextStyle::new(TextRole::Button),
+                ButtonKind::Secondary,
+                Some(Icon::NavUsers),
+                HomeAction::Leaderboard,
+                "HomeLeaderboard".into(),
+                (),
+            );
             if let Some(last) = last_match {
                 column
                     .spawn((
@@ -1132,21 +1225,24 @@ fn spawn_home_identity(
     let name = profile.map_or(fallback_nickname, |profile| profile.nickname.as_str());
     let level = profile.map_or(1, shared::career::ProfileSummary::level);
     root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(63.0 * unit),
-            top: Val::Px(10.0 * unit),
-            width: Val::Px(300.0 * unit),
-            height: Val::Px(48.0 * unit),
-            padding: UiRect::axes(Val::Px(space::S8 * unit), Val::Px(space::S4 * unit)),
-            column_gap: Val::Px(space::S8 * unit),
-            align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(border::HAIRLINE)),
-            border_radius: BorderRadius::all(Val::Px(radius::PILL)),
-            ..default()
-        },
-        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
-        BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
+        kit::plate_button(
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(63.0 * unit),
+                top: Val::Px(10.0 * unit),
+                width: Val::Px(300.0 * unit),
+                height: Val::Px(56.0 * unit),
+                padding: UiRect::axes(Val::Px(space::S8 * unit), Val::Px(space::S4 * unit)),
+                column_gap: Val::Px(space::S8 * unit),
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                ..default()
+            },
+            HomeAction::Leaderboard,
+            "HomeLeaderboard",
+            default(),
+        ),
         Name::new("HomeIdentity"),
     ))
     .with_children(|chip| {
@@ -1174,6 +1270,7 @@ fn spawn_home_identity(
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             min_width: Val::Px(0.0),
+            flex_grow: 1.0,
             ..default()
         })
         .with_children(|text| {
@@ -1193,7 +1290,12 @@ fn spawn_home_identity(
                 11.0,
                 accent,
             ));
+            text.spawn((
+                widgets::label(rating_line(profile), 11.0, theme::GOLD),
+                Name::new("HomeRating"),
+            ));
         });
+        chip.spawn(kit::icon_node(Icon::NavChevronRight, 16.0, theme::GOLD));
     });
     if let Some(last) = last_match {
         root.spawn((
@@ -1201,7 +1303,7 @@ fn spawn_home_identity(
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(63.0 * unit),
-                top: Val::Px(64.0 * unit),
+                top: Val::Px(72.0 * unit),
                 width: Val::Px(260.0 * unit),
                 height: Val::Px(40.0 * unit),
                 padding: UiRect::horizontal(Val::Px(space::S12 * unit)),
@@ -1259,6 +1361,8 @@ fn queue_of(action: HomeAction) -> shared::match_service::MatchPreference {
 fn home_actions(
     mut next: ResMut<NextState<AppScreen>>,
     mut career: ResMut<CareerClient>,
+    card: Res<ProfileCard>,
+    mut selection: ResMut<crate::team::TeamSelection>,
     mut requests: MessageWriter<NetworkCommand>,
     mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
     session: Res<ClientSession>,
@@ -1316,11 +1420,17 @@ fn home_actions(
                 }
 
                 matchmaking.preference = queue_of(*action);
-                next.set(AppScreen::HeroSelect);
+                if career.view.match_service.is_some() && !session.is_offline() {
+                    requests.write(selection.queue_from_card(&card));
+                    next.set(AppScreen::Searching);
+                } else {
+                    next.set(AppScreen::HeroSelect);
+                }
             }
             HomeAction::Card => next.set(AppScreen::Card),
             HomeAction::Collection => next.set(AppScreen::Collection),
             HomeAction::History => crate::career::open_history_modal(&mut career, &mut requests),
+            HomeAction::Leaderboard => {}
             HomeAction::Profile => career.open_profile_modal(),
             HomeAction::Help => {
                 if let Some(help) = help.as_deref_mut() {
@@ -1847,6 +1957,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
@@ -1885,6 +1996,7 @@ mod tests {
                 .init_resource::<CareerClient>()
                 .init_resource::<ClientSession>()
                 .init_resource::<ProfileCard>()
+                .init_resource::<crate::team::TeamSelection>()
                 .init_resource::<AvatarThumbnails>()
                 .init_resource::<crate::party::PartyClient>()
                 .insert_resource(ActiveConnection::for_contour(contour, None))
@@ -1921,6 +2033,8 @@ mod tests {
                 .init_resource::<ClientSession>()
                 .init_resource::<crate::match_service::MatchServiceClient>()
                 .init_resource::<crate::mobile_ui::ServerEntry>()
+                .init_resource::<ProfileCard>()
+                .init_resource::<crate::team::TeamSelection>()
                 .insert_resource(ActiveConnection::for_contour(contour, None))
                 .add_message::<NetworkCommand>()
                 .add_message::<crate::net::SessionUiCommand>()
@@ -1953,6 +2067,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .init_resource::<crate::match_service::MatchServiceClient>()
@@ -2022,6 +2137,7 @@ mod tests {
                 .init_resource::<CareerClient>()
                 .init_resource::<ClientSession>()
                 .init_resource::<ProfileCard>()
+                .init_resource::<crate::team::TeamSelection>()
                 .init_resource::<AvatarThumbnails>()
                 .init_resource::<crate::party::PartyClient>()
                 .init_resource::<crate::match_service::MatchServiceClient>()
@@ -2081,8 +2197,12 @@ mod tests {
             ("HomeBotPractice", MatchPreference::BotPractice),
             ("HomePlay", MatchPreference::Casual),
         ] {
-            // Each press leaves Home for hero select.
+            // Public queues commit a preferred presentation and go straight to search.
             let mut app = home("en", true);
+            app.world_mut().resource_mut::<ProfileCard>().main_class = shared::HeroClass::Mage;
+            app.world_mut()
+                .resource_mut::<crate::team::TeamSelection>()
+                .handheld = shared::handheld::HandheldSelection::Unequipped;
             harness::press(app.world_mut(), id);
             app.update();
             assert_eq!(
@@ -2091,6 +2211,26 @@ mod tests {
                     .preference,
                 queue,
                 "{id}"
+            );
+            assert!(matches!(
+                *app.world().resource::<NextState<AppScreen>>(),
+                NextState::Pending(AppScreen::Searching)
+            ));
+            let sent: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect();
+            assert!(
+                matches!(
+                    &sent[..],
+                    [NetworkCommand::JoinPrematch {
+                        hero_class: shared::HeroClass::Mage,
+                        handheld: shared::handheld::HandheldSelection::Unequipped,
+                        ..
+                    }]
+                ),
+                "one public join from {id}"
             );
         }
         // No public lobby: one Play button, no queues to pick.
@@ -2148,6 +2288,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
@@ -2220,6 +2361,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .insert_resource(session)
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .init_resource::<crate::match_service::MatchServiceClient>()
@@ -2327,6 +2469,92 @@ mod tests {
             .iter(app.world())
             .find(|(found, _)| found.as_str() == name)
             .map(|(_, text)| text.0.clone())
+    }
+
+    #[test]
+    fn phone_home_updates_placement_and_opens_its_trusted_ladder() {
+        if crate::i18n::testing::isolated(
+            "frontend::home::tests::phone_home_updates_placement_and_opens_its_trusted_ladder",
+        ) {
+            return;
+        }
+        use crate::ui::test_id::harness;
+        use kit::surfaces::ToastRequest;
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        let mut app = update_home(
+            crate::update::ClientUpdate::for_test(None, || Ok(vec![])),
+            session,
+        );
+        app.insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+            .insert_resource(HomePortal {
+                origin: Ok("https://portal.example/".into()),
+                open: |_| Ok(()),
+                opened: None,
+            })
+            .add_message::<ToastRequest>()
+            .add_systems(Update, leaderboard_actions.after(UiSet::Dispatch));
+        app.world_mut().spawn((
+            Window {
+                resolution: (852, 393).into(),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(crate::i18n::LocaleId::parse("ru").unwrap());
+        let mut profile = shared::career::ProfileSummary::new("test".into(), "Игрок".into());
+        profile.rating = 1199;
+        profile.rated_matches = 19;
+        let mut career = app.world_mut().resource_mut::<CareerClient>();
+        career.view.profile = Some(profile);
+        career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1199 · Новичок 19/20")
+        );
+        let button = harness::find(app.world_mut(), "HomeRanked").unwrap();
+        assert!(
+            app.world()
+                .get::<Children>(button)
+                .unwrap()
+                .iter()
+                .filter_map(|e| app.world().get::<Text>(e))
+                .any(|t| t.0.contains("1199"))
+        );
+        harness::press(app.world_mut(), "HomeLeaderboard");
+        app.update();
+        assert_eq!(
+            app.world().resource::<HomePortal>().opened.as_deref(),
+            Some("https://portal.example/leaderboard")
+        );
+        // Only the count changes: the render signature must still refresh.
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .profile
+            .as_mut()
+            .unwrap()
+            .rated_matches = 20;
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1199 · 20 рейтинговых")
+        );
+        app.world_mut().resource_mut::<HomePortal>().origin = Err("test unavailable".into());
+        harness::press(app.world_mut(), "HomeLeaderboard");
+        app.update();
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<ToastRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].text, tr("home.leaderboard.error"));
     }
 
     /// LR-14 acceptance: on a mismatch an outdated RU game shows «Требуется
@@ -2516,6 +2744,8 @@ mod tests {
             .init_state::<AppScreen>()
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<crate::match_service::MatchServiceClient>()
             .add_message::<NetworkCommand>()
             .add_message::<crate::net::SessionUiCommand>()

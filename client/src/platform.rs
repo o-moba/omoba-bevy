@@ -6,10 +6,12 @@
 use bevy::prelude::*;
 use std::path::PathBuf;
 
+mod match_attention;
 mod ui_profile;
 pub(crate) use ui_profile::{UiProfile, ui_profile};
 
 pub fn configure_app(app: &mut App) {
+    match_attention::install(app);
     #[cfg(target_os = "ios")]
     {
         unsafe extern "C" {

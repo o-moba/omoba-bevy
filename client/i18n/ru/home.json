@@ -38,5 +38,11 @@
   "home.recovery.bot": "Бот",
   "home.recovery.idle": "Ожидание",
   "home.recovery.seat": "{name} · {policy}",
-  "home.recovery.team": "Управление союзниками ({count})"
+  "home.recovery.team": "Управление союзниками ({count})",
+  "home.rating.pending": "Рейтинг · Таблица игроков",
+  "home.rating.newcomer": "Рейтинг {rating} · Новичок {played}/{total}",
+  "home.rating.rated": "Рейтинг {rating} · {played} рейтинговых",
+  "home.ranked.rating": "Рейтинговый\nРейтинг {rating}",
+  "home.button.leaderboard": "Таблица игроков",
+  "home.leaderboard.error": "Не удалось открыть таблицу игроков. Повторите попытку."
 }

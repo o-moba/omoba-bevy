@@ -9,5 +9,6 @@
   "party.error.invite_declined": "That player declined. Try again in a minute.",
   "party.error.invite_rate": "Too many invitations. Wait a minute.",
   "party.error.unknown": "The server did not accept that.",
-  "party.notice.lobby_restarted": "Reconnected to the lobby. Your party was disbanded."
+  "party.notice.lobby_restarted": "Reconnected to the lobby. Your party was disbanded.",
+  "party.notice.search_restarted": "Reconnected to the lobby. Your search has restarted."
 }

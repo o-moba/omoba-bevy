@@ -1,6 +1,6 @@
 //! Client side of parties: the latest server [`PartyView`], the periodic
 //! presence announcement (nickname and avatar other members see), and
-//! following the leader's launch into hero select.
+//! following the leader's launch directly into the public queue.
 //!
 //! The server owns every rule (`server/src/party.rs`); this module only sends
 //! [`PartyCommand`]s and remembers what came back.
@@ -47,6 +47,9 @@ pub(crate) struct PartyClient {
     seen_launch: u64,
     pending_launch: Option<PartyLaunch>,
     notice: Option<(PartyNotice, Instant)>,
+    /// Expiry hides stale UI but must not erase why a new epoch dissolved it.
+    had_party: bool,
+    pending_restart: Option<bool>,
 }
 
 impl PartyClient {
@@ -63,8 +66,11 @@ impl PartyClient {
         if server_epoch != self.server_epoch {
             // Another server (or a restart): sequences start over and nothing
             // it launched before is ours to follow.
-            if self.server_epoch != 0 && self.view.party.is_some() {
-                self.notice = Some((PartyNotice::LobbyRestarted, now));
+            if self.server_epoch != 0 {
+                self.pending_restart = Some(self.had_party);
+                if self.had_party {
+                    self.notice = Some((PartyNotice::LobbyRestarted, now));
+                }
             }
             self.server_epoch = server_epoch;
             self.sequence = 0;
@@ -91,6 +97,7 @@ impl PartyClient {
             self.seen_launch = launch.sequence;
             self.pending_launch = Some(launch);
         }
+        self.had_party = view.party.is_some();
         self.view = view;
     }
 
@@ -131,7 +138,19 @@ pub(crate) struct PartyPlugin;
 impl Plugin for PartyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PartyClient>()
-            .add_systems(Update, (announce_presence, expire_view, follow_launch));
+            .add_message::<crate::ui::widgets::surfaces::ToastRequest>()
+            .add_systems(Update, (announce_presence, expire_view))
+            .add_systems(
+                Update,
+                announce_restart
+                    .after(expire_view)
+                    .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                    .before(crate::ui::UiSet::Paint),
+            )
+            .add_systems(
+                Update,
+                follow_launch.before(crate::net::ClientNetPipeline::SendCommands),
+            );
     }
 }
 
@@ -178,6 +197,29 @@ fn expire_view(mut party: ResMut<PartyClient>) {
     party.expire(Instant::now());
 }
 
+/// Connection loss matters on every screen, including Home and an active
+/// search. A toast is independent of the party-lobby panel and fires once.
+fn announce_restart(
+    mut party: ResMut<PartyClient>,
+    flow: Res<crate::match_service::MatchServiceClient>,
+    mut toasts: MessageWriter<crate::ui::widgets::surfaces::ToastRequest>,
+) {
+    let Some(had_party) = party.pending_restart.take() else {
+        return;
+    };
+    let key = if had_party {
+        "party.notice.lobby_restarted"
+    } else if flow.active {
+        "party.notice.search_restarted"
+    } else {
+        return;
+    };
+    toasts.write(crate::ui::widgets::surfaces::ToastRequest {
+        kind: crate::ui::widgets::surfaces::ToastKind::Warning,
+        text: crate::i18n::tr(key).to_owned(),
+    });
+}
+
 /// Screens a launch may pull a member away from: browsing, never a queue,
 /// a draft or a match.
 pub(crate) fn launch_can_leave(screen: AppScreen) -> bool {
@@ -197,6 +239,9 @@ fn follow_launch(
     screen: Res<State<AppScreen>>,
     mut next: ResMut<NextState<AppScreen>>,
     mut matchmaking: ResMut<crate::match_service::MatchServiceClient>,
+    card: Res<crate::frontend::card::ProfileCard>,
+    mut selection: ResMut<crate::team::TeamSelection>,
+    mut requests: MessageWriter<NetworkCommand>,
     session: Res<ClientSession>,
     mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
 ) {
@@ -211,9 +256,8 @@ fn follow_launch(
         session_ui.write(crate::net::SessionUiCommand::LeaveMatch);
     }
     matchmaking.preference = launch.preference;
-    if current != AppScreen::HeroSelect {
-        next.set(AppScreen::HeroSelect);
-    }
+    requests.write(selection.queue_from_card(&card));
+    next.set(AppScreen::Searching);
 }
 
 #[cfg(test)]
@@ -221,6 +265,57 @@ mod tests {
     use super::*;
     use shared::match_service::MatchPreference;
     use shared::party::PartyInfo;
+
+    #[test]
+    fn a_party_launch_joins_the_public_queue_once_without_a_first_picker() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppScreen>()
+            .init_resource::<PartyClient>()
+            .init_resource::<ClientSession>()
+            .init_resource::<crate::frontend::card::ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
+            .init_resource::<crate::match_service::MatchServiceClient>()
+            .add_message::<NetworkCommand>()
+            .add_message::<crate::net::SessionUiCommand>()
+            .add_systems(Update, follow_launch);
+        app.world_mut()
+            .resource_mut::<crate::frontend::card::ProfileCard>()
+            .main_class = shared::HeroClass::Ranger;
+        app.world_mut().resource_mut::<PartyClient>().pending_launch = Some(PartyLaunch {
+            sequence: 1,
+            preference: MatchPreference::Ranked,
+        });
+        app.update();
+        assert!(matches!(
+            *app.world().resource::<NextState<AppScreen>>(),
+            NextState::Pending(AppScreen::Searching)
+        ));
+        assert_eq!(
+            app.world()
+                .resource::<crate::match_service::MatchServiceClient>()
+                .preference,
+            MatchPreference::Ranked
+        );
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert!(matches!(
+            &sent[..],
+            [NetworkCommand::JoinPrematch {
+                hero_class: shared::HeroClass::Ranger,
+                ..
+            }]
+        ));
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<NetworkCommand>>()
+                .is_empty()
+        );
+    }
 
     fn view(party_id: Option<u64>, launch: Option<u64>) -> PartyView {
         PartyView {
@@ -266,6 +361,65 @@ mod tests {
         assert!(client.in_party() && client.is_live(now));
         client.expire(now + VIEW_STALE_AFTER);
         assert!(!client.in_party());
+    }
+
+    #[test]
+    fn restart_toast_survives_party_expiry_and_reaches_any_screen_once() {
+        use crate::ui::widgets::surfaces::ToastRequest;
+        for had_party in [false, true] {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .init_resource::<PartyClient>()
+                .init_resource::<crate::match_service::MatchServiceClient>()
+                .add_message::<ToastRequest>()
+                .add_systems(Update, announce_restart);
+            app.world_mut()
+                .resource_mut::<crate::match_service::MatchServiceClient>()
+                .active = true;
+            let now = Instant::now();
+            app.world_mut().resource_mut::<PartyClient>().apply_view(
+                9,
+                1,
+                view(had_party.then_some(4), None),
+                now,
+            );
+            app.update();
+            assert!(
+                app.world().resource::<Messages<ToastRequest>>().is_empty(),
+                "first admission is not a restart"
+            );
+            let later = now + VIEW_STALE_AFTER;
+            let mut party = app.world_mut().resource_mut::<PartyClient>();
+            party.expire(later);
+            assert!(!party.in_party());
+            party.apply_view(11, 1, view(None, None), later);
+            app.update();
+            let sent: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<ToastRequest>>()
+                .drain()
+                .collect();
+            assert_eq!(sent.len(), 1);
+            assert_eq!(
+                sent[0].text,
+                crate::i18n::tr(if had_party {
+                    "party.notice.lobby_restarted"
+                } else {
+                    "party.notice.search_restarted"
+                })
+            );
+            app.world_mut().resource_mut::<PartyClient>().apply_view(
+                11,
+                2,
+                view(None, None),
+                later,
+            );
+            app.update();
+            assert!(
+                app.world().resource::<Messages<ToastRequest>>().is_empty(),
+                "no repeated toast"
+            );
+        }
     }
 
     #[test]

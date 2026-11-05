@@ -97,6 +97,16 @@ const MAX_AUTO_REQUEUES: u8 = 3;
 const WORKER_LOST_NOTICE: &str = "queue.requeue.worker_lost";
 
 impl MatchServiceClient {
+    /// Refresh the same search after device sleep without changing FIFO identity
+    /// or consent. An allocated handoff must keep its worker state instead.
+    pub(crate) fn refresh_after_resume(&mut self) -> bool {
+        if !self.active || self.allocation.is_some() {
+            return false;
+        }
+        self.last_request = None;
+        true
+    }
+
     pub(crate) fn restore_resume(&mut self, saved: &crate::net::recovery::SavedResume) {
         self.allocation = Some(saved.allocation.clone());
         self.lobby_addr = Some(saved.lobby.clone());
@@ -787,6 +797,31 @@ pub(crate) fn in_match_text(state: InMatch) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn device_resume_refreshes_the_same_queue_and_preserves_explicit_consent() {
+        let mut flow = MatchServiceClient {
+            active: true,
+            request_id: 42,
+            ready_answer: Some(("accepted-before-sleep".into(), true)),
+            last_request: Some(Instant::now()),
+            ..default()
+        };
+        assert!(flow.refresh_after_resume());
+        assert!(flow.last_request.is_none());
+        assert_eq!(flow.request_id, 42);
+        assert_eq!(
+            flow.ready_answer,
+            Some(("accepted-before-sleep".into(), true))
+        );
+        flow.allocation = Some(allocation());
+        flow.last_request = Some(Instant::now());
+        assert!(!flow.refresh_after_resume());
+        assert!(flow.last_request.is_some());
+        flow.allocation = None;
+        flow.active = false;
+        assert!(!flow.refresh_after_resume());
+    }
+
     #[test]
     fn cancellation_discards_pending_handoff() {
         let mut flow = MatchServiceClient {

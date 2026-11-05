@@ -5,6 +5,20 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Public solo and party queues enter search directly with the profile card's
+  preferred class and valid avatar; the allocated draft owns hero selection.
+  Offline practice keeps its picker (#65).
+- Home shows rating and the first 20 ranked matches on phones, links the
+  trusted regional leaderboard and shows rating on the Ranked button. Placement
+  count changes refresh the card even when rating is unchanged (#39).
+- Lobby reconnection announces lost groups and restarted solo searches globally,
+  including after stale party UI expired, once per new server epoch (#45).
+- Preserve search age through mobile pauses of less than 60 seconds. Explicit
+  match acceptance still expires after exactly 15 seconds; longer silent search
+  entries expire at 60 seconds. Foreground mobile search/draft/loading/play keeps
+  the screen awake. A long resume refreshes the same search before displaying
+  ready state; live unanswered checks sound once and vibrate on iOS (C3).
+
 - Verify the native Russian 15-second match confirmation at 852×393: visible
   acceptance count, countdown and separate Accept/Decline controls. This is a
   desktop-rendered phone viewport; physical mobile checks remain separate.

@@ -122,6 +122,12 @@ impl Plugin for FrontendQaPlugin {
         .add_systems(Update, accept_party_invite)
         .add_systems(
             Update,
+            seed_home_fixture
+                .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                .before(crate::frontend::home::HomeViews),
+        )
+        .add_systems(
+            Update,
             seed_ready_fixture
                 .after(crate::net::SessionReactions)
                 .before(crate::frontend::searching::SearchingViews),
@@ -247,6 +253,9 @@ fn seed_ready_fixture(
     mut career: ResMut<crate::career::CareerClient>,
 ) {
     if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1") {
+        career.view.storage_enabled = true;
+        career.view.error = None;
+        career.view.error_code = None;
         matchmaking.active = true;
         matchmaking.preference = shared::match_service::MatchPreference::Ranked;
         career.view.match_service_request_id = Some(0);
@@ -259,6 +268,33 @@ fn seed_ready_fixture(
             remaining_secs: 15,
         });
     }
+}
+
+/// The returning-player capture has no live account. A known admitted profile
+/// is a render fixture only; no key, server admission or career credit is made.
+fn seed_home_fixture(mut career: ResMut<crate::career::CareerClient>) {
+    if std::env::var("OMOBA_HOME_ONLY_QA").as_deref() != Ok("1")
+        || std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() != Ok("1")
+    {
+        return;
+    }
+    let mut profile = shared::career::ProfileSummary::new("qa-render-only".into(), "Игрок".into());
+    profile.rating = 1234;
+    profile.rated_matches = 19;
+    profile.matches_played = 19;
+    profile.wins = 10;
+    profile.losses = 9;
+    profile.progression_xp = 1900;
+    career.view.profile = Some(profile);
+    career.view.storage_enabled = true;
+    career.view.error = None;
+    career.view.error_code = None;
+    career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
+    career.protection.status = Some(shared::device_account::AccountProtection {
+        recovery_codes_remaining: 8,
+        active_devices: 1,
+        ..default()
+    });
 }
 
 fn drive(
@@ -407,13 +443,20 @@ fn observe(
     )>,
     buttons: Query<crate::qa::QaName, With<Button>>,
     preview_cameras: Query<&Camera, With<crate::frontend::preview::PreviewCamera>>,
+    career: Res<crate::career::CareerClient>,
+    text: Query<(&Name, &Text)>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.finished {
         return;
     }
     if qa.started.elapsed() > Duration::from_secs(180) {
-        fail(&mut qa, "180-second capture deadline", &mut exit);
+        let reason = format!(
+            "180-second capture deadline (profile={}, preview={:?})",
+            career.view.profile.is_some(),
+            preview.status
+        );
+        fail(&mut qa, &reason, &mut exit);
         return;
     }
     if qa.in_flight {
@@ -475,6 +518,21 @@ fn observe(
         return;
     }
     if qa.applied_stage != Some(qa.stage) || *screen.get() != VIEWS[qa.stage].1 {
+        return;
+    }
+    if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1")
+        && !text.iter().any(|(name, label)| {
+            name.as_str() == "SearchingStatus" && label.0.contains("6/10") && label.0.contains("15")
+        })
+    {
+        // Correct controls alone do not prove the timer: a backend error may
+        // have replaced the actual ready status. Wait for the complete state.
+        return;
+    }
+    if qa.stage == 0
+        && std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1")
+        && career.view.profile.is_none()
+    {
         return;
     }
     if qa.stage == 0
@@ -540,12 +598,30 @@ fn observe(
         }
     }
     let required: &[&str] = match qa.stage {
+        0 if mobile.enabled
+            && viewport.y < 600.0
+            && std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") =>
+        {
+            &[
+                "HomePlay",
+                "HomeAccount",
+                "HomeCollection",
+                "HomeHistory",
+                "HomeParty",
+                "HomeRanked",
+                "HomeBotPractice",
+                "HomeLeaderboard",
+                "HomeRating",
+            ]
+        }
         0 if mobile.enabled && viewport.y < 600.0 => &[
             "HomePlay",
             "HomeAccount",
             "HomeCollection",
             "HomeHistory",
             "HomeParty",
+            "HomeLeaderboard",
+            "HomeRating",
         ],
         0 if std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") => &[
             "HomePlay",
@@ -556,6 +632,7 @@ fn observe(
             "HomeCollection",
             "HomeHistory",
             "HomeParty",
+            "HomeLeaderboard",
         ],
         0 => &[
             "HomePlay",
@@ -564,6 +641,7 @@ fn observe(
             "HomeCollection",
             "HomeHistory",
             "HomeParty",
+            "HomeLeaderboard",
         ],
         1 => &["CardBack", "CardOpenCollection"],
         2 if viewport.y < 600.0 => &["CollectionBack", "AvatarShowcase", "AvatarEquip"],
