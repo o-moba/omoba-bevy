@@ -5,6 +5,20 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add runtime maintenance drain with bounded operator-marker polling, exact
+  operation acknowledgement and localized search refusal. Pause all ready
+  checks without dodge penalties, preserve party/FIFO, keep live workers and
+  Resume, then require fresh consent.656 real PG/API/server tests,6 new drain
+  tests, native retry/localization and actual signed pause/restart/adoption
+  rehearsal PASS. Host ship/wait/cancel integration and full CI remain required.
+- Keep native rehearsal actors sending deliberate ordinary held movement/aim
+  on fresh alive decisions. A prior full-CI Ranked victory correctly failed
+  after an actor went AFK; production penalties and exact Elo checks remain.
+  Retain result diagnostics before verification and explicitly reject AFK/
+  abandonment/disconnection in the ordinary victory proof. Make the Unicode
+  account-search fixture unique across repeated/load tests.9 oracle tests and
+  current656 PG/API/server checks PASS; full victory/CI repeat pending.
+
 - Add guarded native playing-load measurement with exact UDP counters, separate
   generator/server resources and captured worker receipts. Actual1000 signed
   clients occupy100 Casual arenas with zero server bots for20s after all are

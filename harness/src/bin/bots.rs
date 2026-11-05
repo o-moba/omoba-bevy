@@ -450,19 +450,29 @@ fn main() {
                             },
                         })
                         .collect();
-                    if let Some(target) = decision.move_target.and_then(|target| {
-                        runner
-                            .navigation
-                            .next([x, z], [target.0, target.1], &structures)
-                    }) {
-                        let (nx, nz, yaw) = step_toward(
-                            (x, z),
-                            (target[0], target[1]),
-                            TICK_INTERVAL.as_secs_f32() * me.item_bonuses.move_speed_multiplier,
-                        );
-                        runner.bot.send_transform(nx, 0.5, nz, yaw);
-                        runner.position = Some((nx, nz));
-                    }
+                    let transform = decision
+                        .move_target
+                        .and_then(|target| {
+                            runner
+                                .navigation
+                                .next([x, z], [target.0, target.1], &structures)
+                        })
+                        .map(|target| {
+                            step_toward(
+                                (x, z),
+                                (target[0], target[1]),
+                                TICK_INTERVAL.as_secs_f32() * me.item_bonuses.move_speed_multiplier,
+                            )
+                        })
+                        .unwrap_or((x, z, me.yaw));
+                    // This fresh alive controller deliberately holds movement/
+                    // aim even while waiting for minion support or a route.
+                    // Send the normal active-input packet like the native
+                    // client's held control; Ping alone is not gameplay input.
+                    runner
+                        .bot
+                        .send_transform(transform.0, 0.5, transform.1, transform.2);
+                    runner.position = Some((transform.0, transform.1));
                     if let Some(slot) = choose_self_sustain(me, &runner.last_cast_at, now) {
                         runner.bot.cast_slot(harness::TargetId::player(my_id), slot);
                         runner.last_cast_at[slot as usize] = Some(now);

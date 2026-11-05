@@ -80,6 +80,11 @@ def verify_results(statuses, count, ranked, custom_map=False):
         if ranked:
             assert {p["profile_id"] for p in result["participants"]} == profiles
             assert all(not p.get("is_bot", False) and p["profile_id"] for p in result["participants"])
+            assert all(p.get("participation") is not None
+                       and p["participation"]["afk_ms"] == 0
+                       and p["participation"]["disconnected_ms"] == 0
+                       and not p["participation"]["abandoned"]
+                       for p in result["participants"]), "Ranked rehearsal requires active connected human-seat controllers"
             rating = me["rating"]
             assert rating
             assert rating["before"] == initial["rating"]
@@ -238,8 +243,8 @@ def main(argv=None):
                                 running_at = running_at or time.monotonic()
                         elif kind == "BOT_RESULT":
                             statuses = payload
-                            report["result_id"] = verify_results(statuses, args.clients, args.preference == "humans_only" and not args.test_map, bool(args.test_map))
                             report["results"] = statuses
+                            report["result_id"] = verify_results(statuses, args.clients, args.preference == "humans_only" and not args.test_map, bool(args.test_map))
                             if args.ranked_eligibility:
                                 assert all(s["ranked_denied_counts"] == [0, 9] and s["ranked_accepted_count"] == 10 for s in statuses)
                                 assert all(s["initial_profile"]["completed_public_matches"] == 9

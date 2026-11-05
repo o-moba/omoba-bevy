@@ -127,7 +127,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 ## Critic items (missed by the eight reviewers)
 
 - [major/bug/M] **Lobby crash or deploy SIGTERMs every live match worker; workers have no signal handler, so all running (incl. Ranked) matches die and settle as unrated 'server_interrupted'** — `ops/vps/ru/omoba-lobby-ru.service:42`. Fix: Set `KillMode=process` (and `SendSIGHUP=no`) in omoba-lobby-ru.service and the ru_host.py unit rules so only the lobby PID is stopped and workers are adopted on restart (the code path already exists); add a SIGTERM handler in the worker that writes a checkpoint and settles Interrupted gracefully for the real host-shutdown case; add a release test that restarts the lobby unit under a running bot ma — **done in kit — KillMode=process preserves live workers; SIGTERM/SIGINT handler fsyncs terminal records, forces final status publication, process rehearsal passes (Interrupted, no Elo/XP, one played match). RU rollout remains pending.**
-- [major/gap/M] **No drain/maintenance mode: deploy is refused while any match runs, so at ~1000 concurrent players the server can never be updated or hot-fixed** — `ops/vps/ru/ru_host.py:1562`. Fix: Add a lobby drain flag (e.g. `OMOBA_MATCH_ROOT/drain` file or SIGUSR1) that refuses new allocations with a localized `searching.match.draining` ('Сервер готовится к обновлению · новые матчи скоро возобновятся') while live matches finish; add `ru_host.py ship --drain` that sets the flag, waits for `occupied == 0` (bounded by OMOBA_MATCH_MAX_DURATION_SECS), then restarts; keep `guard_no_matches` as  — **open — drain/maintenance mode (LR-26); ship still refused while matches run**
+- [major/gap/M] **No drain/maintenance mode: deploy is refused while any match runs, so at ~1000 concurrent players the server can never be updated or hot-fixed** — `ops/vps/ru/ru_host.py:1562`. Fix: Add a lobby drain flag (e.g. `OMOBA_MATCH_ROOT/drain` file or SIGUSR1) that refuses new allocations with a localized `searching.match.draining` ('Сервер готовится к обновлению · новые матчи скоро возобновятся') while live matches finish; add `ru_host.py ship --drain` that sets the flag, waits for `occupied == 0` (bounded by OMOBA_MATCH_MAX_DURATION_SECS), then restarts; keep `guard_no_matches` as  — **partial — runtime pauses new ready/allocation, preserves queued parties/FIFO without dodges and publishes operation acknowledgement.6 new server/656 real PG checks, native retry/localization and signed live/restart/adoption/Resume proof PASS. Host ship/wait/cancel integration, fresh full CI and RU rollout remain required.**
 - [major/ux/M] **Mobile player who locks the screen while Searching silently loses the queue place after 15 s and is re-queued at the back on resume; no keep-awake and no match-found sound/vibration** — `server/src/match_service.rs:668`. Fix: Keep the screen awake while in Searching/Draft on Android (`ANativeActivity_setWindowFlags(AWINDOW_FLAG_KEEP_SCREEN_ON)` via the ndk crate) and iOS (`isIdleTimerDisabled`); raise the lobby expiry to 60 s and have the client, on resume with a gap >15 s, show `searching.status.resumed` ('Поиск был прерван · продолжаем'); play a short SFX + vibration when the view becomes allocated/assigned. — **partial — FIFO intent60s, foreground keep-awake/resume refresh, ready sound and approved iOS/Android haptics implemented. Android compile and all7-job CI42097650577 PASS with the approved VIBRATE/JNI patch; current native/mobile visual and physical keep-awake/haptic verification remain pending.**
 - [major/scale/M] **Daily pg_dump only: a host failure rolls every player's rating and history back up to 24 h; no WAL archiving or point-in-time recovery** — `ops/vps/ru/omoba-backup-ru.timer:7`. Fix: Enable `archive_mode=on` with an `archive_command` that ships WAL segments to the existing off-host backup target (pgBackRest or wal-g; or rsync as a stopgap), keep the nightly base dump, and extend `ru_backup.py check`/the restore drill to replay WAL to the latest point; as a one-line stopgap raise the dump cadence to hourly. — **open — WAL archiving / PITR (daily pg_dump only)**
 - [major/gap/L] **No remake or surrender** — original finding at `server/src/session_recovery.rs:200`. Server-owned remake before180s after90s absence; strict majority of remaining humans, surrender from600s with4/5 (all when fewer remain),30s votes/120s failed cooldown. Innocent remakes are neutral; proved ranked leavers retain their individual penalty. — **partial — implemented/pushed7fd41139+b5a6b9ba; 608 real PG tests, both ten-human real-time process proofs and1571 native CI tests pass. Full15-stage CI42074945255 passes; native visual proof still pending.**
@@ -787,3 +787,26 @@ p05=10.97Hz/median11.72Hz; downlink p95=258272 bytes/player/s. Server group
 test DB restored200→100 and all owned processes stopped. This is short local
 Casual AI-driver evidence, not1000 physical people, a rated journey, sustained
 SLA or RU-host capacity. Egress/performance and committed full CI remain open.
+
+
+P9 full0c596fab CI42123329169 FAIL:6/7 jobs,17/18 public stages PASS. A natural
+Ranked victory ends with one idle native actor correctly forfeited for AFK;
+the ordinary all-active Elo oracle rejects teammate loss reduction. Raw failed
+artifact13462397903/hash is retained. The test driver now sends deliberate
+ordinary held movement/aim on fresh alive decisions; dead/unjoined/stale peers
+still send no active input. The verifier explicitly requires no AFK/abandon/
+disconnection and saves result rows before asserting. No production AFK/Elo
+change. A separate repeated-PG fixture uses a unique Unicode prefix instead of
+a common name hidden by the bounded search page. Current656 PG/API/server and
+9 Ranked verifier checks PASS; fresh full Ranked victory is running.
+
+P8/C2 runtime and signed process checkpoint PASS: a marker pauses all queued
+ready checks (0/9/10 confirmations tested) without strikes, preserves groups/
+FIFO and permits active seat Resume. The capacity report acknowledges a unique
+operation ID; malformed markers fail closed. Existing match keeps advancing
+while a free arena stays unused; old decline/15s expiry do not invent a dodge.
+After cancellation a new check and actual second match start. A second marker
+survives actual lobby restart, both workers are adopted and Resume still works.
+Native maintenance retry/cancel and RU/EN/ZH strings pass; current visual still
+awaits manual unlock. Host ship/wait/cancel integration and production approval
+remain open. Full current CI is mandatory; no C2/RU completion is claimed.

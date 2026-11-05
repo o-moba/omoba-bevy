@@ -342,7 +342,11 @@ async fn portal_postgres_contract_and_security() {
         .0,
         StatusCode::CONFLICT
     );
-    let rename = bytes(json!({"nickname":"Новый Ник"}));
+    // Keep the Unicode prefix unique even after repeated integration/load
+    // fixtures; the discoverable search endpoint deliberately bounds its page.
+    let nickname_suffix = crypto::random::<8>();
+    let nickname = format!("Нов{nickname_suffix}");
+    let rename = bytes(json!({"nickname":nickname}));
     accounts::mutate(
         &app,
         &sa,
@@ -354,7 +358,7 @@ async fn portal_postgres_contract_and_security() {
     .unwrap();
     assert_eq!(
         app.career.profile(&a.profile_id).await.unwrap().nickname,
-        format!("Новый Ник#{}", a.nickname.rsplit_once('#').unwrap().1)
+        format!("{nickname}#{}", a.nickname.rsplit_once('#').unwrap().1)
     );
     let bad = bytes(json!({"nickname":"Hacker","rating":5000}));
     assert!(
@@ -386,9 +390,13 @@ async fn portal_postgres_contract_and_security() {
             .is_none()
     );
     assert!(
-        accounts::search(&app, &sb, Some("query=%D0%9D%D0%BE"))
-            .await
-            .unwrap()["players"]
+        accounts::search(
+            &app,
+            &sb,
+            Some(&format!("query=%D0%BD%D0%BE%D0%B2{nickname_suffix}"))
+        )
+        .await
+        .unwrap()["players"]
             .as_array()
             .unwrap()
             .iter()

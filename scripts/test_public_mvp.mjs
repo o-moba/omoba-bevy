@@ -99,7 +99,7 @@ const scenario = opts.scenario || 'load';
 const draftExit=opts['draft-exit']||'leave';
 const exerciseStaleHandoff='exercise-stale-handoff' in opts;
 assert(['leave','disconnect'].includes(draftExit)&&(!opts['draft-exit']||scenario==='party-draft'), '--draft-exit=leave|disconnect is a party-draft option');
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','unique-draft','remake','surrender'].includes(scenario), 'unknown scenario');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','unique-draft','remake','surrender','drain'].includes(scenario), 'unknown scenario');
 if(['remake','surrender','unique-draft'].includes(scenario)) assert(!mix&&preference==='humans_only'&&clientsCount===10, `${scenario} uses --clients=10 --preference=humans_only`);
 else if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
 else if(['recovery','early-recovery'].includes(scenario)) assert(!mix&&((preference==='humans_only'&&clientsCount===10)||(preference!=='humans_only'&&clientsCount>=1&&clientsCount<=10)), `${scenario} uses one roster (Ranked: ten humans)`);
@@ -136,6 +136,7 @@ assert(process.env.OMOBA_TEST_DATABASE_URL, 'Use a disposable OMOBA_TEST_DATABAS
 assert(process.env.HARNESS_SERVER_BIN, 'Build server and set HARNESS_SERVER_BIN');
 assert(clientsCount >= 1 && clientsCount <= (allowLarge ? 1000 : 100), allowLarge ? 'clients must be 1-1000' : 'clients must be 1-100 (--allow-large lifts the cap to 1000)');
 const capacity = scenario==='capacity-wait' ? 1 : Number(opts.capacity || (queueOnly?1:Math.min(100, Math.max(16,clientsCount))));
+assert(scenario!=='drain'||capacity===2,'--scenario=drain requires --capacity=2 to prove a free arena stays unused');
 assert(!queueOnly||capacity===1,'--queue-only uses --capacity=1 and one disclosed normal capacity-holder');
 assert(!queueOnly||isolatedQueueDatabase(process.env.OMOBA_TEST_DATABASE_URL),'--queue-only requires a loopback /omoba_test database without URI options');
 assert(Number.isInteger(capacity)&&capacity>=1&&capacity<=100, 'capacity must be 1-100 (the server pool maximum)');
@@ -813,6 +814,69 @@ async function capacityWait() {
  report.capacity_wait={view:second.career.match_service,report:busy};
  report.scenarios.push('full_pool_shows_place_in_line_and_reports_busy');
 }
+
+async function maintenanceDrain(original) {
+ const rootPath=path.join(root,'matches'), marker=path.join(rootPath,'drain');
+ const operation=crypto.randomBytes(16).toString('hex');
+ const second=new Client(3201,lobbyPort,null,{autoHandoff:false,autoJoin:false,autoReady:false,preference:'bot_practice'});all.push(second);
+ await pumpUntil('second roster awaits explicit consent',()=>second.career?.match_service?.state==='ready_check');
+ const oldCheck=second.career.match_service.check_id;
+ assert.equal(allocationManifests().length,1);
+ fs.mkdirSync(marker);fs.writeFileSync(path.join(marker,operation),'',{flag:'wx'});
+ const markerAt=Date.now();
+ const capacityReport=()=>{try{return JSON.parse(fs.readFileSync(path.join(rootPath,'capacity.json'),'utf8'));}catch{return null;}};
+ await pumpUntil('lobby acknowledges this exact maintenance operation',()=>{
+  const r=capacityReport();return r?.draining&&r.drain_operation_id===operation&&r.updated_ms>=markerAt&&r.occupied===1&&second.career?.match_service?.code==='server_draining';
+ },10000);
+ const firstTick=original.snapshot.snapshot_tick;
+ second.account({action:'ready_match',request_id:second.queueId,check_id:oldCheck,accepted:false});
+ const third=new Client(3202,lobbyPort,null,{autoHandoff:false,autoJoin:false,preference:'bot_practice'});all.push(third);
+ await pumpUntil('new signed search receives correlated maintenance refusal',()=>third.career?.match_service_request_id===third.queueId&&third.career.match_service?.state==='failed'&&third.career.match_service.code==='server_draining');
+ await pumpFor(16000,()=>{
+  assert.equal(allocationManifests().length,1,'maintenance started another worker despite a free arena');
+  assert.equal(allocationStatus(original.allocation.allocation_id)?.phase,'running','maintenance stopped the existing match');
+ });
+ assert(original.snapshot.snapshot_tick>firstTick,'existing worker stopped advancing');
+ assert(performance.now()-original.lastSnapshot<2000,'existing match lost fresh snapshots');
+ const penaltyPath=path.join(rootPath,'dodge-penalties.json');
+ const penalties=fs.existsSync(penaltyPath)?JSON.parse(fs.readFileSync(penaltyPath,'utf8')):{};
+ assert(!penalties[second.profile.profile_id],'maintenance/old decline created a dodge strike');
+ assert.equal(third.allocationsSeen.length,0);
+ third.autoQueue=false;third.account({action:'cancel_queue'});
+ // Remove only this operation's marker, then require a fresh explicit check.
+ assert.deepEqual(fs.readdirSync(marker),[operation]);
+ fs.unlinkSync(path.join(marker,operation));fs.rmdirSync(marker);
+ second.autoReady=true;second.autoJoin=true;second.autoHandoff=true;
+ let freshCheck=null;
+ await pumpUntil('normal search resumes through fresh consent and actual play',()=>second.stage==='running',25000,()=>{
+  const r=second.career?.match_service;if(r?.state==='ready_check'){assert.notEqual(r.check_id,oldCheck);freshCheck=r.check_id;}
+ });
+ assert(freshCheck,'resume skipped explicit new consent');
+ assert.notEqual(second.allocation.allocation_id,original.allocation.allocation_id);
+ assert.equal(allocationManifests().length,2);
+ await pumpFor(500);
+ await pumpUntil('lobby publishes resumed state',()=>capacityReport()?.draining===false,10000);
+ // A maintenance marker must survive a lobby restart without becoming a
+ // phantom arena or disturbing adopted matches/resume admission.
+ const restartOperation=crypto.randomBytes(16).toString('hex');
+ fs.mkdirSync(marker);fs.writeFileSync(path.join(marker,restartOperation),'',{flag:'wx'});
+ await pumpUntil('second maintenance operation is acknowledged',()=>capacityReport()?.draining&&capacityReport()?.drain_operation_id===restartOperation,10000);
+ const restartAt=Date.now();
+ await restartAndRecover(original,false);
+ await pumpUntil('restarted lobby retains exact maintenance acknowledgement',()=>{
+  const r=capacityReport();return r?.draining&&r.drain_operation_id===restartOperation&&r.updated_ms>=restartAt&&r.occupied===2;
+ },10000);
+ const afterRestart=new Client(3203,lobbyPort,null,{autoHandoff:false,autoJoin:false,preference:'bot_practice'});all.push(afterRestart);
+ await pumpUntil('new search is refused by the restarted draining lobby',()=>afterRestart.career?.match_service_request_id===afterRestart.queueId&&afterRestart.career.match_service?.code==='server_draining');
+ assert.equal(allocationManifests().length,2);
+ assert.deepEqual(fs.readdirSync(marker),[restartOperation]);
+ afterRestart.autoQueue=false;afterRestart.account({action:'cancel_queue'});
+ fs.unlinkSync(path.join(marker,restartOperation));fs.rmdirSync(marker);
+ await pumpUntil('restarted lobby resumes after explicit cancellation',()=>capacityReport()?.draining===false,10000);
+ assert(all.every(c=>c.errors.length===0),'drain probe received transport errors');
+ report.drain={status:'PASS',operation_id:operation,restart_operation_id:restartOperation,capacity:2,existing_allocation:original.allocation.allocation_id,new_allocation:second.allocation.allocation_id,paused_ready_without_penalty:true,late_decline_rejected:true,new_search_correlated_refusal:true,existing_worker_advanced:true,fresh_consent_required:true,lobby_restart_keeps_drain_and_adopted_workers:true,resume_allowed_during_drain:true,observation_seconds:16};
+ report.scenarios.push('maintenance_pauses_new_matches_and_preserves_live_play_fifo_consent');
+}
 // A complete public roster is killed before creating observers, so the early
 // case proves the durable marker before the normal 10-second checkpoint.
 async function teamVoteJourney(peers, kind) {
@@ -1150,6 +1214,7 @@ try {
  if(scenario==='lifecycle')await lifecycle(all[0]);
  if(scenario==='abandoned')await abandoned(all[0]);
  if(scenario==='capacity-wait')await capacityWait();
+ if(scenario==='drain')await maintenanceDrain(all[0]);
  if(scenario==='early-recovery'||(scenario==='recovery'&&preference!=='bot_practice'))await recoverRoster(all.filter(c=>c.stage==='running'),scenario==='early-recovery');
  else if(scenario==='lobby-restart'||scenario==='recovery')await restartAndRecover(all[0],scenario==='recovery');
  report.total_transforms_sent=all.reduce((n,c)=>n+c.transforms,0);

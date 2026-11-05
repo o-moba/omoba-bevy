@@ -26,6 +26,17 @@ A short1000-client/100-arena Casual run passes on M4 Pro with zero server bots;
 received snapshot cadence falls below20Hz, so egress/latency and RU-host capacity
 remain open. See [load procedure](public-mvp.md#native-playing-load-evidence).
 
+## Maintenance drain runtime (C2, in progress)
+
+The lobby can pause new matches while active workers finish normally. Pending
+confirmations return to their original party/FIFO entries without dodge strikes;
+new/paused searches receive localized maintenance text and remain cancellable.
+A unique operator marker is acknowledged in capacity reports; invalid markers
+fail closed. Current matches and Resume survive an actual draining-lobby
+restart. Removing the marker requires a fresh confirmation before a new match.
+Runtime, native state/localization and signed process checks pass; host update
+controller integration, full CI and RU rollout remain required.
+
 ## Fair play: remake and surrender (C5, unreleased)
 
 Authenticated teammates can start a remake before minute 3 when a teammate has

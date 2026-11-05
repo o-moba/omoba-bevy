@@ -486,3 +486,36 @@ owned PG connection limit was restored200→100 after all owned processes stoppe
 This short local AI-driver sample is not a sustained SLA,1000 physical people,
 a1000-player Ranked journey or RU/cgroup capacity proof. Keep egress, latency,
 longer soak, multi-host and RU-host acceptance open.
+
+### Maintenance drain runtime (C2, host controller pending)
+
+The lobby polls `<match root>/drain/` from its ordinary one-second scheduling
+pass. The directory must contain exactly one empty regular file named by a
+32-character lowercase hex operation ID. Symlinks, non-directories, malformed
+names, multiple entries or read errors pause allocation without acknowledging
+an operation. Runtime reads at most two entries and no marker contents. Player
+views use cached state; workers do not consult the marker.
+
+Entering maintenance returns every pending ready check, including fully
+accepted ones, to its original party/FIFO entries without a dodge strike.
+Waiting clients may renew/cancel normally. New searches receive the localized
+`server_draining` response. Removing the marker resumes ordinary selection with
+a fresh check ID and new explicit consent. Existing worker gameplay, retained
+seats and Resume continue, including after a draining-lobby restart.
+
+`capacity.json` adds `draining` and optional `drain_operation_id` under format1.
+A deployment controller must require its exact operation ID, a fresh report and
+occupied0, then retain the existing no-running-workers guard before migration
+or restart. An old report or an older runtime without acknowledgement cannot
+prove a drain. Timeout must preserve matches and maintenance state; cancelling
+must remove only that operator's marker. Host ship/wait/cancel integration is
+still being prepared and requires the standing production approval before use.
+No RU host was changed by the runtime implementation or loopback rehearsals.
+
+Current software evidence:6 new server cases,656 real PG/API/server tests,
+native maintenance retry/cancel and three-language failure copy pass. Signed
+capacity2 rehearsal proves an active match advances while a free arena stays
+unused, old consent expires without penalty, new searches are refused, and
+cancellation creates a fresh confirmation and another real match. A second
+operation survives actual lobby restart with both workers adopted and Resume
+usable. Fresh visual/physical acceptance and final committed CI remain separate.

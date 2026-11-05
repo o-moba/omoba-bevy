@@ -1544,6 +1544,80 @@ mod tests {
         assert!(!app.world().resource::<MatchServiceClient>().active);
     }
 
+    #[test]
+    fn maintenance_keeps_the_same_search_and_never_reuses_old_consent() {
+        let lobby = "127.0.0.1:4000";
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test(lobby);
+        let mut app = App::new();
+        app.insert_resource(session)
+            .insert_resource(CareerIdentity::authenticated_for_test(lobby, 9, "seat-a"))
+            .insert_resource(ClientSessionId("seat-a".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(9, 1, 1),
+                ..default()
+            })
+            .insert_resource(MatchServiceClient {
+                active: true,
+                request_id: 77,
+                preference: MatchPreference::Casual,
+                pending_join: Some(lock_in()),
+                ready_answer: Some(("cancelled-by-maintenance".into(), true)),
+                ..default()
+            })
+            .init_resource::<CareerClient>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(Update, update_match_service);
+        app.world_mut().resource_mut::<CareerClient>().view = CareerView {
+            match_service_request_id: Some(77),
+            match_service: Some(MatchServiceView::Failed {
+                code: "server_draining".into(),
+            }),
+            ..default()
+        };
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<MatchServiceClient>()
+                .last_request = None;
+            app.update();
+            let commands = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect::<Vec<_>>();
+            assert!(matches!(
+                commands.as_slice(),
+                [NetworkCommand::Career(
+                    shared::career::CareerRequest::FindMatch { request_id: 77, .. }
+                )]
+            ));
+            assert!(
+                app.world_mut()
+                    .resource_mut::<Messages<SessionUiCommand>>()
+                    .drain()
+                    .next()
+                    .is_none()
+            );
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert!(flow.is_searching() && flow.allocation.is_none());
+            assert!(
+                flow.ready_check(&app.world().resource::<CareerClient>().view)
+                    .is_none()
+            );
+        }
+        app.world_mut().resource_mut::<MatchServiceClient>().active = false;
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
     /// The allocation this player left, while the lobby still hands it out
     /// before its match runs, reads as closing, never as connecting.
     #[test]
@@ -1818,7 +1892,7 @@ mod tests {
         // language (never the generic "could not start: <code>" line), as do
         // the re-search notice, the prematch reset codes and the unrated
         // reason the career store sends.
-        const LOBBY_CODES: [&str; 13] = [
+        const LOBBY_CODES: [&str; 14] = [
             "ranked_party_cohort",
             "ranked_locked",
             "arena_limit",
@@ -1832,6 +1906,7 @@ mod tests {
             "dodge_cooldown",
             "party_member_left",
             "capacity_busy",
+            "server_draining",
         ];
         const OTHER_KEYS: [&str; 5] = [
             WORKER_LOST_NOTICE,
@@ -1870,6 +1945,7 @@ mod tests {
             "worker_spawn_failed",
             "lobby_busy",
             "capacity_busy",
+            "server_draining",
         ] {
             let text = status_text(&MatchServiceView::Failed { code: code.into() });
             assert!(

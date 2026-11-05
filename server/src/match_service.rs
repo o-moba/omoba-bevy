@@ -1,4 +1,5 @@
 //! One public lobby schedules independent, immutable game workers.
+mod drain;
 mod queue_views;
 mod ranked_selection;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -202,6 +203,7 @@ pub(crate) struct Lobby {
     /// Members shown "a member left" until a time.
     notices: HashMap<String, Instant>,
     party_rosters: HashMap<u64, Vec<(String, String)>>,
+    drain: drain::State,
 }
 
 impl Lobby {
@@ -229,6 +231,7 @@ impl Lobby {
                 )
             })
             .collect();
+        let drain = drain::State::new(pool.root());
         Self {
             pool,
             ready: HashMap::new(),
@@ -261,6 +264,7 @@ impl Lobby {
             party_opt_outs: HashMap::new(),
             notices: HashMap::new(),
             party_rosters: HashMap::new(),
+            drain,
         }
     }
 
@@ -447,6 +451,22 @@ impl Lobby {
         }
     }
 
+    /// Maintenance is not a declined/missed confirmation. Keep every original
+    /// party/FIFO entry, including humans who had not answered yet.
+    fn pause_ready_for_drain(&mut self, now: Instant) {
+        if self.ready.is_empty() {
+            return;
+        }
+        for check in std::mem::take(&mut self.ready).into_values() {
+            for mut entry in check.entries {
+                entry.touched = now + REQUEUE_GRACE;
+                self.waiting.push(entry);
+            }
+        }
+        self.ready_profiles.clear();
+        self.waiting.sort_by_key(|entry| entry.order);
+    }
+
     /// Returns the humans of an ended, never-started allocation to the queue
     /// in their original order and with their original queue age, except
     /// `left` (profiles or sessions that chose to leave). Their assignment is
@@ -505,7 +525,7 @@ impl Lobby {
     /// their profiles with its 1-based place. A roster the per-source limits
     /// would refuse takes no place.
     fn refresh_line(&mut self, now: Instant) {
-        if self.pool.occupied() + self.ready.len() < self.pool.capacity() {
+        if self.drain.active() || self.pool.occupied() + self.ready.len() < self.pool.capacity() {
             self.line.clear();
             self.line_key = None;
             return;
@@ -542,7 +562,7 @@ impl Lobby {
     /// The capacity-busy metric after a scheduling pass (LR-09): the journal
     /// line and `<match root>/capacity.json`.
     fn report_capacity(&mut self, now: Instant) {
-        let update = self.capacity.update(
+        let mut update = self.capacity.update(
             crate::capacity::Sample {
                 capacity: self.pool.capacity(),
                 occupied: self.pool.occupied() + self.ready.len(),
@@ -552,14 +572,19 @@ impl Lobby {
             now,
             unix_ms(),
         );
+        update.report.draining = self.drain.active();
+        update.report.drain_operation_id = self.drain.operation_id().map(str::to_owned);
         if let Some(line) = &update.log {
             println!("{line}");
         }
-        if update.write {
-            let _ = crate::match_allocation::atomic_json(
+        if (update.write || self.drain.report_pending)
+            && crate::match_allocation::atomic_json(
                 &self.pool.root().join(crate::capacity::REPORT_FILE),
                 &update.report,
-            );
+            )
+            .is_ok()
+        {
+            self.drain.report_pending = false;
         }
     }
 
@@ -856,6 +881,10 @@ impl MatchService {
                     .errors
                     .insert(profile.profile_id, "already_queued".into());
             }
+            return;
+        }
+        if lobby.drain.active() {
+            lobby.errors.insert(profile.profile_id, drain::CODE.into());
             return;
         }
         // This is a new admission. Existing live assignments above must still
@@ -1156,6 +1185,16 @@ impl MatchService {
                 code: PARTY_MEMBER_LEFT.into(),
             });
         }
+        if lobby.drain.active()
+            && lobby
+                .requests
+                .get(profile)
+                .is_some_and(|(s, _, _)| s == session)
+        {
+            return Some(MatchServiceView::Failed {
+                code: drain::CODE.into(),
+            });
+        }
         if let Some(index) = lobby.queue_views.index(&lobby.waiting, profile) {
             let line = lobby.line.get(profile).map(|&position| CapacityLine {
                 position,
@@ -1183,6 +1222,7 @@ impl MatchService {
             return;
         }
         lobby.last_poll = Some(now);
+        lobby.drain.poll(lobby.pool.root());
         lobby.pool.poll();
         lobby.last_handoff_refresh = Some(now);
         lobby.turnover.observe(lobby.pool.occupied(), now);
@@ -1293,7 +1333,11 @@ impl MatchService {
                 .get(id)
                 .is_some_and(|slot| !slot.terminal())
         });
-        lobby.tick_ready(now);
+        if lobby.drain.active() {
+            lobby.pause_ready_for_drain(now);
+        } else {
+            lobby.tick_ready(now);
+        }
         expire_waiting(&mut lobby.waiting, now);
         lobby.track_abandons(now);
         lobby.requests.retain(|profile, (_, _, touched)| {
@@ -1328,6 +1372,9 @@ impl MatchService {
             .retain(|id, _| queued_parties.contains(id));
         // At most four OS process launches per scheduling pass.
         for _ in 0..4 {
+            if lobby.drain.active() {
+                break;
+            }
             if lobby.pool.occupied() + lobby.ready.len() >= lobby.pool.capacity() {
                 break;
             }
@@ -3808,6 +3855,214 @@ mod tests {
             panic!("ready check is required");
         };
         (service, entries, directory, check_id)
+    }
+
+    fn activate_drain(directory: &std::path::Path, id: &str) {
+        let marker = directory.join(drain::MARKER);
+        std::fs::create_dir(&marker).unwrap();
+        std::fs::write(marker.join(id), []).unwrap();
+    }
+
+    #[test]
+    fn drain_pauses_every_ready_roster_without_dodges_and_resumes_fifo_with_fresh_consent() {
+        for accepted in [0, 9, 10] {
+            let now = Instant::now();
+            let (mut service, mut entries, directory, check_id) = ready_fixture(now);
+            for entry in entries.iter_mut().take(2) {
+                entry.party = Some((99, 2));
+            }
+            let original_order = if let MatchService::Lobby(lobby) = &mut service {
+                let roster = lobby.ready.get_mut(&check_id).unwrap();
+                for member in &mut roster.entries {
+                    member.party = entries
+                        .iter()
+                        .find(|e| e.profile.profile_id == member.profile.profile_id)
+                        .unwrap()
+                        .party;
+                }
+                roster.entries.iter().map(|w| w.order).collect::<Vec<_>>()
+            } else {
+                unreachable!()
+            };
+            for entry in entries.iter().take(accepted) {
+                service.respond_ready(
+                    &entry.profile.profile_id,
+                    &entry.session,
+                    7,
+                    &check_id,
+                    true,
+                    now,
+                );
+            }
+            let operation = "a".repeat(32);
+            activate_drain(&directory, &operation);
+            // Views do not inspect files between normal bounded scheduling ticks.
+            assert!(matches!(
+                service.view(&entries[0].profile.profile_id, &entries[0].session, now),
+                Some(MatchServiceView::ReadyCheck { .. })
+            ));
+            let paused = now + Duration::from_secs(1);
+            service.tick(paused);
+            // Even a delayed explicit decline for the old check cannot penalize
+            // a roster cancelled by maintenance, including all-approved rosters.
+            service.respond_ready(
+                &entries[0].profile.profile_id,
+                &entries[0].session,
+                7,
+                &check_id,
+                false,
+                paused,
+            );
+            if let MatchService::Lobby(lobby) = &service {
+                assert!(lobby.ready.is_empty() && lobby.ready_profiles.is_empty());
+                assert!(lobby.assignments.is_empty() && lobby.pool.slots.is_empty());
+                assert!(lobby.penalties.is_empty() && lobby.refusals.is_empty());
+                assert_eq!(
+                    lobby.waiting.iter().map(|w| w.order).collect::<Vec<_>>(),
+                    original_order
+                );
+                assert!(lobby.waiting.iter().all(|w| w.queued == now));
+                assert_eq!(
+                    lobby
+                        .waiting
+                        .iter()
+                        .filter(|w| w.party == Some((99, 2)))
+                        .count(),
+                    2
+                );
+                assert!(!lobby.drain.report_pending);
+            }
+            for entry in &entries {
+                assert_eq!(
+                    service.view(&entry.profile.profile_id, &entry.session, paused),
+                    Some(MatchServiceView::Failed {
+                        code: drain::CODE.into()
+                    })
+                );
+            }
+            let report: crate::capacity::CapacityReport = serde_json::from_slice(
+                &std::fs::read(directory.join(crate::capacity::REPORT_FILE)).unwrap(),
+            )
+            .unwrap();
+            assert!(report.draining);
+            assert_eq!(
+                report.drain_operation_id.as_deref(),
+                Some(operation.as_str())
+            );
+            assert_eq!((report.occupied, report.searching), (0, 10));
+            // Ordinary retries during a longer maintenance window retain age.
+            for seconds in [21, 41, 61, 81, 101, 121] {
+                enqueue_all(
+                    &mut service,
+                    &entries,
+                    7,
+                    now + Duration::from_secs(seconds),
+                );
+                service.tick(now + Duration::from_secs(seconds + 1));
+            }
+            std::fs::remove_dir_all(directory.join(drain::MARKER)).unwrap();
+            assert_eq!(
+                service.view(
+                    &entries[0].profile.profile_id,
+                    &entries[0].session,
+                    now + Duration::from_secs(122)
+                ),
+                Some(MatchServiceView::Failed {
+                    code: drain::CODE.into()
+                })
+            );
+            service.tick(now + Duration::from_secs(123));
+            let Some(MatchServiceView::ReadyCheck {
+                check_id: new_id,
+                accepted_count: 0,
+                ..
+            }) = service.view(
+                &entries[0].profile.profile_id,
+                &entries[0].session,
+                now + Duration::from_secs(123),
+            )
+            else {
+                panic!("normal consent must resume")
+            };
+            assert_ne!(new_id, check_id, "maintenance cannot reuse old consent");
+            if let MatchService::Lobby(lobby) = &service {
+                assert!(
+                    lobby
+                        .ready
+                        .values()
+                        .flat_map(|r| &r.entries)
+                        .all(|w| w.queued == now)
+                );
+            }
+            let _ = std::fs::remove_dir_all(directory);
+        }
+    }
+
+    #[test]
+    fn drain_refuses_new_admission_but_keeps_live_allocation_resume_and_request_correlation() {
+        let now = Instant::now();
+        let entry = w(1, MatchPreference::BotPractice, now);
+        let mut pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_path_buf();
+        let id = pool
+            .allocate(manifest_for(std::slice::from_ref(&entry), entry.preference))
+            .unwrap();
+        let status = Status {
+            allocation_id: id.clone(),
+            server_epoch: 7,
+            heartbeat_ms: unix_ms(),
+            phase: Phase::Running,
+            result_id: None,
+            ends_by_ms: Some(unix_ms() + 60000),
+            joined_sessions: vec![entry.session.clone()],
+            released_sessions: vec![],
+        };
+        pool.write_status_for_test(&id, &status);
+        pool.slots.get_mut(&id).unwrap().status = Some(status);
+        activate_drain(&directory, &"b".repeat(32));
+        let mut service = lobby_with(pool, &[(&entry, &id)]);
+        enqueue_all(&mut service, std::slice::from_ref(&entry), 2, now);
+        assert!(
+            matches!(service.view(&entry.profile.profile_id,&entry.session,now),Some(MatchServiceView::Assigned {allocation,in_match:Some(_)} ) if allocation.allocation_id==id)
+        );
+        let new = w(2, MatchPreference::BotPractice, now);
+        enqueue_all(&mut service, std::slice::from_ref(&new), 3, now);
+        assert_eq!(
+            service.request_id(&new.profile.profile_id, &new.session),
+            Some(3)
+        );
+        assert_eq!(
+            service.view(&new.profile.profile_id, &new.session, now),
+            Some(MatchServiceView::Failed {
+                code: drain::CODE.into()
+            })
+        );
+        if let MatchService::Lobby(lobby) = &service {
+            assert!(lobby.waiting.is_empty() && lobby.ready.is_empty());
+            assert_eq!(lobby.pool.slots.len(), 1);
+            assert!(lobby.penalties.is_empty());
+        }
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn invalid_drain_marker_pauses_and_cannot_acknowledge_an_operation() {
+        let now = Instant::now();
+        let (mut service, entries, directory, _) = ready_fixture(now);
+        std::fs::create_dir(directory.join(drain::MARKER)).unwrap();
+        service.tick(now + Duration::from_secs(1));
+        assert_eq!(
+            service.view(&entries[0].profile.profile_id, &entries[0].session, now),
+            Some(MatchServiceView::Failed {
+                code: drain::CODE.into()
+            })
+        );
+        let report: crate::capacity::CapacityReport = serde_json::from_slice(
+            &std::fs::read(directory.join(crate::capacity::REPORT_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert!(report.draining && report.drain_operation_id.is_none());
+        let _ = std::fs::remove_dir_all(directory);
     }
     #[test]
     fn lobby_applies_signed_consent_and_cancel_at_receipt_without_global_maintenance() {

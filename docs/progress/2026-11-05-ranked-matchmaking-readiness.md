@@ -557,3 +557,40 @@ M4 Pro14-core48GiB evidence without RU/cgroup limits, not a sustained SLA,
 Owned PG max_connections100→200 was restored100 after all owned processes stopped.
 Full raw reports: `.agent/codex-ranked-readiness/p7-playing-{10-final,100-v1,1000-v1}/`;
 checks/specs/hash evidence under task `p7-playing-*`. New tool full CI is pending.
+
+### P8 maintenance runtime and P9 CI correction — 2026-11-06
+
+C2 runtime reads a bounded operator marker once per lobby scheduling tick; views
+read cached state. Paused0/9/10-accepted rosters return to waiting without dodge
+strikes, retaining original party/FIFO/age; live assignment Resume remains.
+An additive capacity report publishes draining plus exact operation ID; invalid
+markers stop allocations without acknowledging an operation.6 new server tests
+and all656 current real PG/API/server tests in18 suites PASS,0 failures/ignores.
+Strict server/API/harness clippy passes. Native maintenance retry/cancel and
+RU/EN/ZH failure-text checks PASS in B; Mac still locked, fresh visuals pending.
+
+Signed capacity2 drain v2 PASS:one running match keeps advancing while a free
+arena stays unused, pending consent pauses beyond15s without penalty, delayed
+decline is harmless and a fresh search gets correlated maintenance refusal.
+After cancellation a new explicit check starts a second real match. A second
+operation survives actual lobby restart; both workers remain adopted, existing
+seat Resume works and new searches remain refused. Host ship/wait/cancel
+controller and production approval remain required; no RU/config change.
+
+P9:0c596fab full CI42123329169 FAILs only Ranked-victory,6/7 jobs and17/18
+public/PG stages PASS. Verified failed artifact13462397903 SHA256
+`86ba4dd956ba80df7fa19d6ecc2e1b25677c95a25ab0b896cce00fb93f4d418a`.
+Natural base victory lasts955624ms; a connected Ranger idles >90s (unchanged
+visible pose/action109.55s), validly forfeits -32/0XP and innocent losers lose12.
+The ordinary no-AFK Elo proof correctly rejects this. Keep FAIL. Test actors
+now send ordinary held movement/aim on every fresh alive decision, like native
+active-input controls while waiting; dead/unjoined/stale actors remain inactive.
+No production AFK/Elo change. Verifier saves all result rows before asserting
+and explicitly refuses AFK/abandonment/disconnection.9 verifier tests PASS.
+
+The first local P8 PG run also retained FAIL:shared Unicode queryНо matched
+more old fixture names than the bounded search page, hiding the target. Unique
+short Unicode rename/lowercase prefix fixes test isolation without deleting
+data or changing the API; fresh full656-test repeat PASS. Current actual
+standard-map ten-client Ranked victory is running; new committed full CI remains
+required. All proof specs/raw failures/results remain in task artifacts.

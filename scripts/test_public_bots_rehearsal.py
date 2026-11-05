@@ -48,6 +48,8 @@ class PublicBotsRehearsalTests(unittest.TestCase):
     def completed_ranked(rated_matches=0):
         delta = 24 if rated_matches < 20 else 16
         participants = [{"profile_id": str(i), "team": "green" if i < 5 else "blue",
+                         "participation": {"connected_ms": 600000, "disconnected_ms": 0,
+                                           "afk_ms": 0, "abandoned": False},
                          "rating": {"before": 1000, "after": 1000 + (delta if i < 5 else -delta),
                                     "delta": delta if i < 5 else -delta},
                          "progression_xp_gained": 150 if i < 5 else 100} for i in range(10)]
@@ -65,6 +67,20 @@ class PublicBotsRehearsalTests(unittest.TestCase):
 
     def test_a_complete_rated_result_checks_every_profile_and_history(self):
         self.assertEqual(rehearsal.verify_results(self.completed_ranked(), 10, True), "result")
+
+    def test_ordinary_ranked_proof_cannot_accept_afk_or_missing_participation(self):
+        for mutation in ("afk", "disconnected", "abandoned", "missing"):
+            statuses = self.completed_ranked()
+            for status in statuses:
+                participant = status["result"]["participants"][5]
+                if mutation == "missing":
+                    participant.pop("participation")
+                else:
+                    key = {"afk": "afk_ms", "disconnected": "disconnected_ms",
+                           "abandoned": "abandoned"}[mutation]
+                    participant["participation"][key] = True if mutation == "abandoned" else 1
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(AssertionError, "active connected"):
+                rehearsal.verify_results(statuses, 10, True)
 
     def test_twentieth_match_uses_placement_k_and_the_next_uses_regular_k(self):
         for count, delta in [(19, 24), (20, 16)]:

@@ -33,5 +33,6 @@
   "queue.failed.play_cooldown": "因离开对局或挂机，暂时无法匹配。",
   "queue.play_cooldown.remaining": "离开对局或挂机的等待时间：{seconds}秒。",
   "queue.failed.ranked_locked": "完成10场公开对局后解锁排位。可以通过普通对战或人机对战积累进度。",
-  "queue.ranked_locked.progress": "完成 {total} 场公开对局以解锁排位（{played}/{total}）。重开、中断及自己退出或挂机的对局不计入。"
+  "queue.ranked_locked.progress": "完成 {total} 场公开对局以解锁排位（{played}/{total}）。重开、中断及自己退出或挂机的对局不计入。",
+  "queue.failed.server_draining": "服务器正在准备更新。新对局即将恢复，系统会自动重试匹配…"
 }

@@ -33,5 +33,6 @@
   "queue.failed.play_cooldown": "Поиск временно недоступен из-за выхода или AFK в матче.",
   "queue.play_cooldown.remaining": "До окончания штрафа за выход или AFK: {seconds} с.",
   "queue.failed.ranked_locked": "Ranked откроется после 10 завершённых публичных матчей. Играйте в обычный PvP или против ботов.",
-  "queue.ranked_locked.progress": "Завершите {total} публичных матчей для доступа к Ranked ({played}/{total}). Ремейки, прерывания и ваши ливы/AFK не учитываются."
+  "queue.ranked_locked.progress": "Завершите {total} публичных матчей для доступа к Ranked ({played}/{total}). Ремейки, прерывания и ваши ливы/AFK не учитываются.",
+  "queue.failed.server_draining": "Сервер готовится к обновлению. Новые матчи скоро возобновятся. Повторяем поиск автоматически…"
 }
