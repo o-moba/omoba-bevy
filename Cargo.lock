@@ -2082,6 +2082,7 @@ dependencies = [
  "ed25519-dalek",
  "ekza-bevy-sdk",
  "getrandom 0.3.4",
+ "jni",
  "omoba-passport",
  "serde",
  "serde_json",

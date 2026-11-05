@@ -22,7 +22,9 @@ All notable changes are recorded here. The canonical version is
   match acceptance still expires after exactly 15 seconds; longer silent search
   entries expire at 60 seconds. Foreground mobile search/draft/loading/play keeps
   the screen awake. A long resume refreshes the same search before displaying
-  ready state; live unanswered checks sound once and vibrate on iOS (C3).
+  ready state; live unanswered checks sound once and vibrate on iOS/Android (C3).
+  Android vibration respects system haptic settings and safely tolerates an
+  unavailable vibrator; it uses the already pinned JNI package.
   The process gate verifies retained FIFO after a 30-second pause and eventual
   60-second expiry despite continued signed Home heartbeats.
 

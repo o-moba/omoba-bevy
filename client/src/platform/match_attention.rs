@@ -11,6 +11,8 @@ use crate::{
     match_service::MatchServiceClient,
     ui::widgets::surfaces::{ToastKind, ToastRequest},
 };
+#[cfg(target_os = "android")]
+mod android;
 mod policy;
 
 pub(super) fn install(app: &mut App) {
@@ -114,7 +116,8 @@ fn match_haptic() {
         }
         unsafe { omoba_attention_match_found() };
     }
-    // The Android JNI/permission addition is a separate owner-reviewed patch.
+    #[cfg(target_os = "android")]
+    android::match_found();
 }
 
 #[cfg(test)]

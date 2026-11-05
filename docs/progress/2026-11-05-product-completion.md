@@ -337,9 +337,8 @@ Finding #31 and P4 are done. P5–P9 remain required for full product readiness.
   unanswered ready check, and adds foreground iOS haptics. Wall-clock resume
   detection handles suspension even without an unfocused frame. After >15 s the
   old countdown is discarded and the same search is refreshed without changing
-  request identity or accepting it. Android haptics remain a separate prepared
-  dependency/permission patch awaiting owner approval; physical mobile behavior
-  remains unverified.
+  request identity or accepting it. Android haptics were subsequently approved and applied as described below;
+  physical mobile behavior remains unverified.
 
 P5 baseline `make check` passed 2496 Rust tests (95 ignored), 639 Python tests
 (9 skipped), and 62 iOS packaging tests. The isolated PostgreSQL gate passed all
@@ -375,7 +374,7 @@ watchdog at 19.30 GiB free (minimum from AGENTS is ~20 GiB). It did not complete
 and is not counted as passing. No cache was removed and no heavy local build is
 allowed until disk headroom returns. Latest integrated source requires the CI
 client gate and native Home capture. P5 remains open until its required evidence
-is obtained; Android vibration remains pending explicit approval.
+is obtained; Android vibration was subsequently approved/applied; its own target gate is pending.
 
 
 ### P5 complete-gate fixture correction
@@ -422,8 +421,8 @@ self-consistent but outdated ±16 award to fresh profiles is explicitly rejected
 Historical ±16 evidence above predates this change and is retained as such;
 current complete-gameplay CI must verify fresh-profile ±24 before #35 closes.
 
-P5 is awaiting its corrected complete-gate repeat, Android haptic approval and
-native Home evidence. Repeated guarded native builds stopped when free root
+P5 is awaiting its corrected complete-gate repeat, the approved Android haptic
+target check and native Home evidence. Repeated guarded native builds stopped when free root
 disk fell below 20 GiB; no heavy native build will be retried until sufficient
 headroom is available. This does not block the isolated store work. Fair-play
 accounting, remake/surrender, uniqueness, explicit tiers/seasons and the owner
@@ -436,3 +435,21 @@ expectation corrected in ea9bcde. Separate iOS compile workflow 42013403638 also
 passed on the actual aarch64-apple-ios target. Combined gate repeat 42014873649
 is running for ea9bcde; native Home rendering remains blocked by local disk
 headroom, and physical device behavior is not claimed.
+
+
+### Approved Android match-found haptic
+
+The owner explicitly approved the prepared Android dependency/permission patch.
+Applied that exact patch; reverse-apply check verifies it. Added Android-only
+jni =0.21.1 (already a transitive dependency), one client lockfile dependency edge,
+and the normal VIBRATE permission. No new packages/versions were resolved.
+
+A live foreground unanswered check invokes one 80 ms one-shot vibration through
+the existing Android VM. Respect system haptic-feedback settings and hardware
+availability; bound JNI local references and clear pending Java exceptions so
+failure cannot poison later calls. The production JNI source exactly matches
+the previously type-checked review fixture (SHA-256
+04204464716f9e1bae28a2600b861e40fbe1222f5b1fbf38d107cd9dbbb16516).
+Seven Android packaging tests and locked cargo metadata pass. Current actual
+Android target compilation remains due in CI; physical vibration is unverified.
+The 15-second acceptance still requires an explicit player action.
