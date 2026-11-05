@@ -213,6 +213,7 @@ fn dash_crosses_live_structures_and_old_transform_packets_cannot_undo_blink() {
     rt.handle_packet(
         addr,
         ClientPacket::Transform {
+            input_active: false,
             x: 0.0,
             y: PLAYER_GROUND_Y,
             z: 0.0,
@@ -225,6 +226,7 @@ fn dash_crosses_live_structures_and_old_transform_packets_cannot_undo_blink() {
     rt.handle_packet(
         addr,
         ClientPacket::Transform {
+            input_active: false,
             x: x - 0.1,
             y: PLAYER_GROUND_Y,
             z: 0.0,

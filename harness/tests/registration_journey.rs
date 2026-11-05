@@ -762,6 +762,7 @@ impl Peer {
         let before = self.own().unwrap().clone();
         let tick = self.meta.snapshot_tick;
         self.gameplay(ClientPacket::Transform {
+            input_active: false,
             x: before.x + 0.2,
             y: before.y,
             z: before.z,

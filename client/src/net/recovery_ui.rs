@@ -44,6 +44,7 @@ struct Signature {
     scale: u32,
     panel_top: u32,
     home: bool,
+    afk: bool,
     seats: Vec<TakeoverSeatView>,
     locale: u32,
 }
@@ -120,6 +121,7 @@ fn render(
         scale: unit.to_bits(),
         panel_top: panel_top.to_bits(),
         home,
+        afk: in_match && career.view.afk_control,
         seats: if in_match && session.join_confirmed() {
             career.view.takeovers.clone()
         } else {
@@ -134,7 +136,7 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    if !signature.home && signature.seats.is_empty() {
+    if !signature.home && !signature.afk && signature.seats.is_empty() {
         return;
     }
     let panel_width = 240.0_f32.min((viewport.x - 24.0).max(44.0));
@@ -165,6 +167,20 @@ fn render(
                     "RecoveryHome",
                     unit,
                 );
+                return;
+            }
+            if signature.afk {
+                root.spawn((
+                    Text::new(tr("home.recovery.afk")),
+                    TextFont {
+                        font_size: (13.0 * unit).into(),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    Name::new("AfkControlNotice"),
+                ));
+            }
+            if signature.seats.is_empty() {
                 return;
             }
             button(
@@ -291,6 +307,32 @@ fn button(
 mod tests {
     use super::*;
     use crate::ui::test_id::harness;
+    #[test]
+    fn own_afk_notice_needs_no_teammate_vote_and_clears_after_reclaim() {
+        let mut app = harness::kit_app();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .insert_state(crate::frontend::AppScreen::InMatch)
+            .insert_resource(ClientSession::admitted_for_test())
+            .init_resource::<crate::career::CareerClient>()
+            .add_message::<SessionUiCommand>()
+            .add_message::<NetworkCommand>()
+            .add_plugins(RecoveryUiPlugin);
+        app.world_mut()
+            .resource_mut::<crate::career::CareerClient>()
+            .view
+            .afk_control = true;
+        app.update();
+        assert!(harness::find(app.world_mut(), "AfkControlNotice").is_some());
+        assert!(harness::find(app.world_mut(), "TakeoverToggle").is_none());
+        assert!(harness::find(app.world_mut(), "RecoveryHome").is_none());
+        app.world_mut()
+            .resource_mut::<crate::career::CareerClient>()
+            .view
+            .afk_control = false;
+        app.update();
+        assert!(harness::find(app.world_mut(), "AfkControlNotice").is_none());
+    }
+
     #[test]
     fn real_recognizer_activates_home_and_collapsed_takeover_controls() {
         let mut app = harness::kit_app();

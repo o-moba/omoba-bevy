@@ -13,6 +13,7 @@ mod career_runtime_tests;
 mod combat_feedback;
 mod debug;
 mod entities;
+mod fair_play;
 mod forest_pickups;
 mod formation;
 mod game_world;

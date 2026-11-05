@@ -810,12 +810,36 @@ fn observe(
     qa.in_flight = true;
 }
 
-fn readback(captured: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMut<FrontendQa>) {
+fn has_rendered_rgba_pixels(bytes: &[u8]) -> bool {
+    bytes
+        .chunks_exact(4)
+        .any(|pixel| pixel[..3].iter().any(|&value| value != 0))
+}
+
+fn readback(
+    captured: On<ScreenshotCaptured>,
+    shots: Query<&Shot>,
+    mut qa: ResMut<FrontendQa>,
+    mut exit: MessageWriter<AppExit>,
+) {
     if let Ok(shot) = shots.get(captured.entity)
         && captured.image.width() == qa.pixels.x
         && captured.image.height() == qa.pixels.y
         && !qa.readbacks.contains(&shot.0)
     {
+        if !captured
+            .image
+            .data
+            .as_deref()
+            .is_some_and(has_rendered_rgba_pixels)
+        {
+            fail(
+                &mut qa,
+                "capture has no rendered color pixels; unlock the display and verify renderer readiness",
+                &mut exit,
+            );
+            return;
+        }
         qa.readbacks.push(shot.0);
     }
 }
@@ -823,6 +847,21 @@ fn readback(captured: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn black_or_alpha_only_readback_is_not_successful_visual_evidence() {
+        for bytes in [
+            vec![],
+            vec![0; 16],
+            vec![0, 0, 0, 255, 0, 0, 0, 255],
+            vec![0, 0, 0, 1],
+        ] {
+            assert!(!has_rendered_rgba_pixels(&bytes));
+        }
+        assert!(has_rendered_rgba_pixels(&[
+            0, 0, 0, 255, 240, 200, 160, 255
+        ]));
+    }
 
     #[test]
     fn every_captured_screen_has_a_distinct_file_and_root() {

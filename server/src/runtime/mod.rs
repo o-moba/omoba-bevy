@@ -89,6 +89,7 @@ impl ServerRuntime {
 }
 
 pub(crate) struct ServerRuntime {
+    pub(crate) fair_play: crate::fair_play::FairPlay,
     pub(crate) session_recovery: crate::session_recovery::SessionRecovery,
     pub(crate) sandbox: Option<sandbox::SandboxRuntime>,
     pub(crate) match_service: match_service::MatchService,
@@ -205,6 +206,7 @@ impl ServerRuntime {
     ) -> Self {
         let now = clock.now();
         Self {
+            fair_play: Default::default(),
             session_recovery: Default::default(),
             sandbox: None,
             match_service: match_service::MatchService::default(),

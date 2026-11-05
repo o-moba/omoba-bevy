@@ -401,7 +401,12 @@ fn refresh_status(
             // A matchmaking or ranked ban (LR-15), with its end.
             text
         } else {
-            let status = crate::match_service::status_text(view);
+            let status = if matches!(view, shared::match_service::MatchServiceView::Failed { code } if code == shared::career::error_code::PLAY_COOLDOWN)
+            {
+                crate::career::play_cooldown_text(&career.view)
+            } else {
+                crate::match_service::status_text(view)
+            };
             // A search the client started on its own (the found match never
             // began) says why above the queue status.
             match flow.as_deref().and_then(|flow| flow.notice()) {

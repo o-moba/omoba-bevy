@@ -47,7 +47,7 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
     }
     let actor = s.map(|s| s.profile_id.as_str()).unwrap_or("");
     // Access flags and public fields come from one MVCC snapshot, avoiding privacy TOCTOU.
-    let row=sqlx::query("SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.matches_played,p.wins,p.losses,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact,
+    let row=sqlx::query("SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.matches_played,p.wins,p.losses,p.abandons,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact,
         coalesce(pref.recognition_visible,false) AS supporter_visible,credit.months_supported,credit.hero_until
         FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id)
         LEFT JOIN portal.supporter_preferences pref USING(profile_id)
@@ -61,7 +61,13 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
     let mut p = json!({"profile_id":id,"nickname":row_text(&row,"nickname")?});
     if contact || row.try_get::<bool, _>("stats")? {
         p["rating"] = json!(row.try_get::<i32, _>("rating")?);
-        for field in ["rated_matches", "matches_played", "wins", "losses"] {
+        for field in [
+            "rated_matches",
+            "matches_played",
+            "wins",
+            "losses",
+            "abandons",
+        ] {
             p[field] = json!(row.try_get::<i64, _>(field)?);
         }
         let xp = row_text(&row, "xp")?;

@@ -70,6 +70,7 @@ fn utc_ms() -> u64 {
 }
 fn participant(player: &ConnectedPlayer) -> ParticipantResult {
     ParticipantResult {
+        participation: None,
         is_bot: player.hero.identity.is_bot,
         player_id: player.hero.identity.id,
         profile_id: player
@@ -421,6 +422,16 @@ impl ServerRuntime {
         let Some(profile) = self.career.backend.profile(addr) else {
             return;
         };
+        if self
+            .career
+            .backend
+            .view(addr)
+            .play_cooldown
+            .is_some_and(|p| p.until > crate::moderation::unix_now())
+        {
+            self.career_error(addr, shared::career::error_code::PLAY_COOLDOWN);
+            return;
+        }
         // This standalone queue is rated: a matchmaking or ranked ban
         // refuses it (LR-15).
         if let Some((code, _)) = shared::moderation::queue_refusal(
@@ -813,6 +824,16 @@ impl ServerRuntime {
         winner: Option<Team>,
         now: Instant,
     ) {
+        self.finish_career_round_with_reason(outcome, winner, now, None);
+    }
+
+    pub(crate) fn finish_career_round_with_reason(
+        &mut self,
+        outcome: MatchOutcome,
+        winner: Option<Team>,
+        now: Instant,
+        reason: Option<&str>,
+    ) {
         if self
             .career
             .round
@@ -822,11 +843,15 @@ impl ServerRuntime {
             return;
         }
         self.update_career_totals();
-        let participants = if self.combat_log.ledger.is_started() {
+        self.observe_fair_play(now, true);
+        let mut participants = if self.combat_log.ledger.is_started() {
             Some(self.combat_log.ledger.freeze())
         } else {
             None
         };
+        if let Some(participants) = participants.as_mut() {
+            self.fair_play.annotate(participants);
+        }
         let round = self.career.round.as_mut().unwrap();
         round.finalized = true;
         round.result.outcome = outcome;
@@ -854,6 +879,11 @@ impl ServerRuntime {
                 );
             }
         }
+        if outcome != MatchOutcome::Completed
+            && let Some(reason) = reason
+        {
+            round.result.unrated_reason = Some(reason.into());
+        }
         for participant in &round.result.participants {
             self.career
                 .last_results
@@ -878,6 +908,7 @@ impl ServerRuntime {
             return;
         }
         self.update_career_totals();
+        self.observe_fair_play(now, false);
         let Some(round) = self.career.round.as_mut() else {
             return;
         };
@@ -888,6 +919,7 @@ impl ServerRuntime {
         }
         let mut checkpoint = round.result.clone();
         checkpoint.participants = self.combat_log.ledger.snapshot();
+        self.fair_play.annotate(&mut checkpoint.participants);
         checkpoint.duration_ms = now
             .saturating_duration_since(round.started_at)
             .as_millis()
@@ -907,6 +939,7 @@ impl ServerRuntime {
     }
 
     pub(crate) fn reset_career_round(&mut self) {
+        self.fair_play = Default::default();
         let career_flow = self.career_flow_active();
         self.career.round = None;
         self.career.queue.release_selection();
@@ -1158,6 +1191,22 @@ impl ServerRuntime {
                 self.career.backend.profile(addr),
                 self.career.backend.authenticated_session(addr),
             ) {
+                if self
+                    .career
+                    .backend
+                    .view(addr)
+                    .play_cooldown
+                    .is_some_and(|p| p.until > crate::moderation::unix_now())
+                {
+                    self.match_service.refuse(
+                        &profile.profile_id,
+                        session,
+                        request.request_id,
+                        shared::career::error_code::PLAY_COOLDOWN,
+                        now,
+                    );
+                    continue;
+                }
                 // A matchmaking or ranked ban refuses the search, localized
                 // with its end from the career view (LR-15).
                 if let Some((code, _)) = shared::moderation::queue_refusal(
@@ -1344,6 +1393,7 @@ impl ServerRuntime {
     pub(crate) fn career_view(&self, addr: SocketAddr, now: Instant) -> CareerView {
         let mut view = self.career.backend.view(addr);
         view.takeovers = self.takeover_view(addr);
+        view.afk_control = self.session_recovery.is_afk(addr);
         if let (Some(profile), Some(session)) = (
             self.career.backend.profile(addr),
             self.career.backend.authenticated_session(addr),

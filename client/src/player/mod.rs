@@ -73,6 +73,7 @@ impl Plugin for PlayerPlugin {
                 sync_jump_fallback_mode,
                 handle_player_input.after(crate::input_context::InputContextSet::Resolve),
                 move_player_analog,
+                crate::net::latch_movement_input,
                 plan_movement_routes,
                 animate_jump,
                 move_player,

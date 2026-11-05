@@ -1187,7 +1187,9 @@ fn player_progress(player: &ParticipantResult) -> String {
         ("rating", &rating(player.rating.as_ref())),
         ("xp", &player.progression_xp_gained),
     ];
-    if player.disconnected {
+    if player.participation.is_some_and(|p| p.abandoned) {
+        trf("career.player.progress_abandoned", &args)
+    } else if player.disconnected {
         trf("career.player.progress_disconnected", &args)
     } else {
         trf("career.player.progress", &args)
@@ -1204,6 +1206,7 @@ fn profile_progress(profile: &ProfileSummary) -> String {
             ("wins", &profile.wins),
             ("losses", &profile.losses),
             ("played", &profile.matches_played),
+            ("abandons", &profile.abandons),
         ],
     )
 }
@@ -1241,22 +1244,31 @@ pub(crate) fn local_participant<'a>(
         })
 }
 fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
-    match result.outcome {
-        MatchOutcome::Abandoned => tr("career.result.abandoned"),
-        MatchOutcome::Interrupted => tr("career.result.interrupted"),
-        MatchOutcome::Completed => match (result.winner, local_participant(result, career)) {
-            (Some(winner), Some(player)) if winner == player.team => tr("career.result.victory"),
-            (Some(_), Some(_)) => tr("career.result.defeat"),
-            _ => tr("career.result.complete"),
-        },
+    if let Some(won) = local_participant(result, career).and_then(|p| result.participant_won(p)) {
+        return tr(if won {
+            "career.result.victory"
+        } else {
+            "career.result.defeat"
+        });
     }
+    tr(match result.outcome {
+        MatchOutcome::Abandoned => "career.result.abandoned",
+        MatchOutcome::Interrupted => "career.result.interrupted",
+        MatchOutcome::Completed => "career.result.complete",
+    })
 }
+
 /// The server's refusal in the player's language: its own copy for a code
 /// the client knows (`admission.error.<code>`, LR-16), otherwise the
 /// server's text.
 pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
     let error = view.error.as_ref()?;
     let code = view.error_code.as_deref();
+    if code == Some(shared::career::error_code::PLAY_COOLDOWN)
+        || error == shared::career::error_code::PLAY_COOLDOWN
+    {
+        return Some(play_cooldown_text(view));
+    }
     // A moderation refusal (LR-15) names its end from the view's sanctions.
     if let Some(text) = code.and_then(|code| crate::moderation::refusal_text(code, &view.sanctions))
     {
@@ -1266,6 +1278,19 @@ pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
         code.and_then(admission_error)
             .map_or_else(|| error.clone(), str::to_owned),
     )
+}
+
+pub(crate) fn play_cooldown_text(view: &CareerView) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64);
+    match view.play_cooldown {
+        Some(p) => trf(
+            "queue.play_cooldown.remaining",
+            &[("seconds", &p.until.saturating_sub(now).max(0))],
+        ),
+        None => tr("queue.failed.play_cooldown").into(),
+    }
 }
 
 fn admission_error(code: &str) -> Option<&'static str> {
@@ -2238,14 +2263,12 @@ fn history_body(
                     ..column_node()
                 })
                 .with_children(|p| {
-                    let outcome = tr(match item.outcome {
-                        MatchOutcome::Abandoned => "career.history.abandoned",
-                        MatchOutcome::Interrupted => "career.history.interrupted",
-                        MatchOutcome::Completed => match item.won {
-                            Some(true) => "career.result.victory",
-                            Some(false) => "career.result.defeat",
-                            None => "career.history.complete",
-                        },
+                    let outcome = tr(match (item.outcome, item.won) {
+                        (_, Some(true)) => "career.result.victory",
+                        (_, Some(false)) => "career.result.defeat",
+                        (MatchOutcome::Abandoned, None) => "career.history.abandoned",
+                        (MatchOutcome::Interrupted, None) => "career.history.interrupted",
+                        (MatchOutcome::Completed, None) => "career.history.complete",
                     });
                     label(
                         p,
@@ -3044,6 +3067,7 @@ mod tests {
             rated: false,
             unrated_reason: Some("Practice match".into()),
             participants: vec![ParticipantResult {
+                participation: None,
                 is_bot: false,
                 player_id: 7,
                 profile_id: Some("a".repeat(64)),

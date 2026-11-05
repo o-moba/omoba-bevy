@@ -64,3 +64,9 @@ GRANT USAGE ON SEQUENCE career_sanctions_sanction_id_seq,career_moderation_event
 -- Neither runtime role receives schema CREATE, ownership, or migration privileges.
 -- In a legacy database, explicitly remove public schema CREATE from PUBLIC before
 -- deployment. Fresh PostgreSQL 15+ databases already use the owner-only default.
+
+-- Fair play (career schema 7): append incidents and update durable cooldowns.
+-- No runtime may edit or delete individual incident records.
+GRANT SELECT,INSERT ON career_abandon_events TO :"game_role";
+GRANT SELECT,INSERT,UPDATE ON career_play_penalties TO :"game_role";
+GRANT SELECT ON career_abandon_events,career_play_penalties TO :"portal_role";

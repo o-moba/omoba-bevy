@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 // Version 12 adds the seven Hero tier aura styles (`AuraStyle`, a strict enum) and
 // the tier fields of `SupporterStatus` (LR-67); client and server ship together.
 // Version 13 adds unanimous 15-second ready checks and signed answers.
-pub const PROTOCOL_VERSION: u16 = 13;
+// Version 14 distinguishes movement input from reflected poses for AFK reclaim.
+pub const PROTOCOL_VERSION: u16 = 14;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

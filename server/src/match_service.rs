@@ -2462,7 +2462,7 @@ mod tests {
         let mut rt = ServerRuntime::for_test(
             MemoryTransport::new("127.0.0.1:4000".parse().unwrap()),
             ManualClock::new(now),
-            crate::career_backend::MemoryCareer::test_backend(7),
+            crate::career_backend::MemoryCareer::immediate(7),
             crate::match_rules::MatchConfig::dev(),
         );
         rt.match_service = lobby;
@@ -2545,6 +2545,34 @@ mod tests {
         rt.career.backend.test_set_sanctions(player, Vec::new());
         assert!(matches!(
             find(&mut rt, MatchPreference::Ranked),
+            MatchServiceView::Waiting { .. }
+        ));
+        rt.career.backend.test_set_play_cooldown(
+            player,
+            Some(shared::career::PlayCooldown {
+                until: hour,
+                strikes: 1,
+            }),
+        );
+        for preference in [
+            MatchPreference::Ranked,
+            MatchPreference::Casual,
+            MatchPreference::BotPractice,
+        ] {
+            assert_eq!(
+                find(&mut rt, preference),
+                failed(shared::career::error_code::PLAY_COOLDOWN)
+            );
+        }
+        rt.career.backend.test_set_play_cooldown(
+            player,
+            Some(shared::career::PlayCooldown {
+                until: crate::moderation::unix_now() - 1,
+                strikes: 1,
+            }),
+        );
+        assert!(matches!(
+            find(&mut rt, MatchPreference::Casual),
             MatchServiceView::Waiting { .. }
         ));
         let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.

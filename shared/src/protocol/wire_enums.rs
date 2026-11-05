@@ -27,7 +27,8 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 13;
+// Protocol 14 adds Transform.input_active; every enum variant is unchanged.
+const POLICY_PROTOCOL_VERSION: u16 = 14;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;

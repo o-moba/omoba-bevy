@@ -29,5 +29,7 @@
   "queue.ready.found": "Матч найден · подтвердили {count}/{needed}\nПодтвердите за {seconds} с",
   "queue.ready.accepted": "Вы подтвердили · готовы {count}/{needed}\nЖдём остальных · {seconds} с",
   "queue.ready.accept": "Принять матч",
-  "queue.ready.decline": "Отклонить"
+  "queue.ready.decline": "Отклонить",
+  "queue.failed.play_cooldown": "Поиск временно недоступен из-за выхода или AFK в матче.",
+  "queue.play_cooldown.remaining": "До окончания штрафа за выход или AFK: {seconds} с."
 }

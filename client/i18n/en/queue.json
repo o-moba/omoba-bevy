@@ -29,5 +29,7 @@
   "queue.ready.found": "Match found · {count}/{needed} accepted\nConfirm within {seconds}s",
   "queue.ready.accepted": "Accepted · {count}/{needed} ready\nWaiting for the others · {seconds}s",
   "queue.ready.accept": "Accept match",
-  "queue.ready.decline": "Decline"
+  "queue.ready.decline": "Decline",
+  "queue.failed.play_cooldown": "Matchmaking is temporarily unavailable after leaving or going AFK.",
+  "queue.play_cooldown.remaining": "Leaving / AFK cooldown: {seconds}s remaining."
 }

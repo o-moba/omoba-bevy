@@ -85,6 +85,7 @@ struct Client {
     challenge: Option<(AuthChallenge, Instant)>,
     auth: Option<AuthChallenge>,
     sequence: u64,
+    queue_sequence: Option<u64>,
     last_request: Option<Instant>,
     touched: Instant,
     playing: bool,
@@ -101,6 +102,7 @@ impl Default for Client {
             challenge: None,
             auth: None,
             sequence: 0,
+            queue_sequence: None,
             last_request: None,
             touched: Instant::now(),
             playing: false,
@@ -113,6 +115,13 @@ impl Default for Client {
 }
 
 pub(crate) enum Job {
+    QueueAccess {
+        request: crate::career_port::MatchRequest,
+        nonce: String,
+        sequence: u64,
+        public_key: String,
+        profile_id: String,
+    },
     RefreshAccess {
         addr: SocketAddr,
         nonce: String,
@@ -135,6 +144,12 @@ pub(crate) enum Job {
     Presence(Vec<(String, Option<String>)>),
 }
 pub(crate) enum Reply {
+    QueueAccess {
+        request: crate::career_port::MatchRequest,
+        nonce: String,
+        sequence: u64,
+        access: Result<Option<omoba_career_store::career_store::moderation::Access>, String>,
+    },
     RecoveryChecked,
     Flushed(u64, bool),
     RefreshAccess {
@@ -146,6 +161,7 @@ pub(crate) enum Reply {
         /// when the database could not be read.
         nickname: Option<String>,
         sanctions: Option<Vec<Sanction>>,
+        play_cooldown: Option<Option<shared::career::PlayCooldown>>,
     },
     Login {
         addr: SocketAddr,
@@ -283,6 +299,19 @@ impl MemoryLink {
     }
     fn acknowledge(&mut self, job: Job) {
         match job {
+            Job::QueueAccess {
+                request,
+                nonce,
+                sequence,
+                ..
+            } => {
+                self.replies.push_back(Reply::QueueAccess {
+                    request,
+                    nonce,
+                    sequence,
+                    access: Ok(None),
+                });
+            }
             Job::Login { addr, challenge } => {
                 let profile = self
                     .profiles
@@ -309,6 +338,7 @@ impl MemoryLink {
                     supporter: Some(Default::default()),
                     nickname: None,
                     sanctions: None,
+                    play_cooldown: None,
                 });
             }
             Job::Action {
@@ -641,6 +671,16 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         self.clients.get(&addr).is_some_and(|client| client.playing)
     }
     #[cfg(test)]
+    fn test_set_play_cooldown(
+        &mut self,
+        addr: SocketAddr,
+        cooldown: Option<shared::career::PlayCooldown>,
+    ) {
+        if let Some(client) = self.clients.get_mut(&addr) {
+            client.view.play_cooldown = cooldown;
+        }
+    }
+    #[cfg(test)]
     fn test_set_sanctions(&mut self, addr: SocketAddr, sanctions: Vec<Sanction>) {
         if let Some(client) = self.clients.get_mut(&addr) {
             client.view.sanctions = sanctions;
@@ -712,6 +752,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         }
         let now = unix_seconds();
         view.sanctions.retain(|sanction| sanction.active_at(now));
+        view.play_cooldown = view.play_cooldown.filter(|p| p.until > now);
         view
     }
     fn sanctions(&self, addr: SocketAddr) -> Vec<Sanction> {
@@ -947,13 +988,23 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     also_casual,
                 } = action
                 {
-                    if c.view.profile.is_some() && self.match_requests.len() < MAX_JOBS {
-                        self.match_requests.push(crate::career_port::MatchRequest {
+                    if let Some(profile) = &c.view.profile {
+                        c.queue_sequence = Some(sequence);
+                        let request = crate::career_port::MatchRequest {
                             addr,
                             request_id,
                             preference,
                             also_casual,
-                        });
+                        };
+                        if !self.link.try_send(Job::QueueAccess {
+                            request,
+                            nonce: session_nonce,
+                            sequence,
+                            public_key: auth.public_key.clone(),
+                            profile_id: profile.profile_id.clone(),
+                        }) {
+                            c.view.error = Some("Account service is busy. Retry shortly.".into());
+                        }
                     }
                     return;
                 }
@@ -977,6 +1028,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     return;
                 }
                 if matches!(action, CareerAction::CancelQueue) {
+                    c.queue_sequence = None;
                     self.cancelled.push(addr);
                     return;
                 }
@@ -1015,6 +1067,55 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn poll(&mut self) {
         while let Some(reply) = self.link.try_recv() {
             match reply {
+                Reply::QueueAccess {
+                    request,
+                    nonce,
+                    sequence,
+                    access,
+                } => {
+                    let Some(c) = self.clients.get_mut(&request.addr) else {
+                        continue;
+                    };
+                    if c.auth.as_ref().is_none_or(|a| a.nonce != nonce)
+                        || c.queue_sequence != Some(sequence)
+                    {
+                        continue;
+                    }
+                    c.queue_sequence = None;
+                    match access {
+                        Ok(access) => {
+                            if let Some(access) = access {
+                                if !access.key_active {
+                                    c.auth = None;
+                                    c.challenge = None;
+                                    c.profile_ready = false;
+                                    c.key_checked = None;
+                                    c.view.auth_nonce = None;
+                                    c.view.challenge = None;
+                                    c.view.error = Some("This device has been revoked.".into());
+                                    continue;
+                                }
+                                c.key_checked = Some(Instant::now());
+                                c.view.sanctions = access.sanctions;
+                                c.view.play_cooldown = access.play_cooldown;
+                                if let (Some(nickname), Some(profile)) =
+                                    (access.nickname, c.view.profile.as_mut())
+                                {
+                                    profile.nickname = nickname;
+                                }
+                            }
+                            if self.match_requests.len() < MAX_JOBS {
+                                self.match_requests.push(request);
+                            } else {
+                                c.view.error =
+                                    Some("Account service is busy. Retry shortly.".into());
+                            }
+                        }
+                        Err(error) => {
+                            c.view.error = Some(error);
+                        }
+                    }
+                }
                 Reply::Flushed(generation, success) => {
                     if success {
                         self.flushed_generation =
@@ -1034,12 +1135,16 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     supporter,
                     nickname,
                     sanctions,
+                    play_cooldown,
                 } => {
                     let Some(c) = self.clients.get_mut(&addr) else {
                         continue;
                     };
                     if c.auth.as_ref().is_none_or(|auth| auth.nonce != nonce) {
                         continue;
+                    }
+                    if let Some(cooldown) = play_cooldown {
+                        c.view.play_cooldown = cooldown;
                     }
                     if let Some(sanctions) = sanctions {
                         c.view.sanctions = sanctions;
@@ -1512,6 +1617,17 @@ const STORE_UNAVAILABLE: &str = "Profile storage is unavailable. Retry shortly."
 /// A sign-in or account action that waited [`STORE_WAIT`] for the database.
 fn unavailable(job: Job) -> Option<Reply> {
     match job {
+        Job::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            ..
+        } => Some(Reply::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            access: Err(STORE_UNAVAILABLE.into()),
+        }),
         Job::Login { addr, challenge } => Some(Reply::Login {
             addr,
             challenge,
@@ -1541,6 +1657,20 @@ fn answer(
     admission: &Admission,
 ) -> Option<Reply> {
     match job {
+        Job::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            public_key,
+            profile_id,
+        } => Some(Reply::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            access: rt
+                .block_on(store.access(&public_key, &profile_id))
+                .map(Some),
+        }),
         Job::Login { addr, challenge } => {
             let source = SourceIp::of(addr).key();
             let result = rt.block_on(async {
@@ -1553,7 +1683,10 @@ fn answer(
                     )
                     .await?;
                 // An account ban refuses the sign-in itself (LR-15).
-                let sanctions = store.active_sanctions(&profile.profile_id).await?;
+                let access = store
+                    .access(&challenge.public_key, &profile.profile_id)
+                    .await?;
+                let sanctions = access.sanctions;
                 if shared::moderation::active(&sanctions, SanctionKind::AccountBan, unix_seconds())
                     .is_some()
                 {
@@ -1574,6 +1707,7 @@ fn answer(
                     supporter: store.supporter_status(&profile.profile_id).await.ok(),
                     profile: Some(profile),
                     last_result,
+                    play_cooldown: access.play_cooldown,
                     sanctions,
                     ..Default::default()
                 })
@@ -1702,7 +1836,7 @@ fn worker(
                 pending.insert(id, record);
                 last_retry = Instant::now() - Duration::from_secs(3);
             }
-            Ok(job @ (Job::Login { .. } | Job::Action { .. })) => {
+            Ok(job @ (Job::Login { .. } | Job::Action { .. } | Job::QueueAccess { .. })) => {
                 if parked.len() >= MAX_JOBS
                     && let Some(reply) = parked.pop_front().and_then(|(_, job)| unavailable(job))
                 {
@@ -1728,8 +1862,8 @@ fn worker(
                     }
                     _ => None,
                 };
-                let (nickname, sanctions) = access
-                    .map(|a| (a.nickname, Some(a.sanctions)))
+                let (nickname, sanctions, play_cooldown) = access
+                    .map(|a| (a.nickname, Some(a.sanctions), Some(a.play_cooldown)))
                     .unwrap_or_default();
                 let _ = replies.try_send(Reply::RefreshAccess {
                     addr,
@@ -1738,6 +1872,7 @@ fn worker(
                     supporter,
                     nickname,
                     sanctions,
+                    play_cooldown,
                 });
             }
             Ok(Job::Presence(presence)) => {
@@ -1966,6 +2101,72 @@ mod tests {
     /// LR-16: one IP holds at most `endpoints_per_ip` career clients; another
     /// IP is not affected, and an idle client of that IP gives way.
     #[test]
+    fn queue_access_is_fresh_correlated_and_fails_closed() {
+        let mut backend = MemoryCareer::test_backend(7);
+        let addr = at([127, 0, 0, 1], 50101);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("c".repeat(64), "Player".into()),
+            "session",
+        );
+        let request = crate::career_port::MatchRequest {
+            addr,
+            request_id: 1,
+            preference: shared::match_service::MatchPreference::Ranked,
+            also_casual: false,
+        };
+        let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
+        let until = unix_seconds() + 300;
+        let fresh = || omoba_career_store::career_store::moderation::Access {
+            key_active: true,
+            nickname: None,
+            sanctions: Vec::new(),
+            play_cooldown: Some(shared::career::PlayCooldown { until, strikes: 1 }),
+        };
+        backend.clients.get_mut(&addr).unwrap().queue_sequence = Some(1);
+        backend.link.replies.push_back(Reply::QueueAccess {
+            request,
+            nonce: nonce.clone(),
+            sequence: 1,
+            access: Ok(Some(fresh())),
+        });
+        backend.poll();
+        assert_eq!(backend.take_match_requests(), vec![request]);
+        assert_eq!(backend.view(addr).play_cooldown.unwrap().until, until);
+        for (sequence, current, valid_nonce, access) in [
+            (1, Some(2), true, Ok(Some(fresh()))),  // replaced search
+            (2, None, true, Ok(Some(fresh()))),     // cancellation
+            (2, Some(2), false, Ok(Some(fresh()))), // old sign-in
+            (2, Some(2), true, Err(STORE_UNAVAILABLE.to_owned())),
+            (
+                3,
+                Some(3),
+                true,
+                Ok(Some(omoba_career_store::career_store::moderation::Access {
+                    key_active: false,
+                    ..fresh()
+                })),
+            ),
+        ] {
+            backend.clients.get_mut(&addr).unwrap().queue_sequence = current;
+            backend.link.replies.push_back(Reply::QueueAccess {
+                request,
+                nonce: if valid_nonce {
+                    nonce.clone()
+                } else {
+                    "old".into()
+                },
+                sequence,
+                access,
+            });
+            backend.poll();
+            assert!(backend.take_match_requests().is_empty());
+        }
+        assert!(backend.authenticated_session(addr).is_none());
+        assert!(backend.view(addr).auth_nonce.is_none());
+    }
+
+    #[test]
     fn one_ip_holds_at_most_n_career_clients() {
         let limit = Limits::default().endpoints_per_ip;
         let mut backend = MemoryCareer::test_backend(7);
@@ -2158,6 +2359,7 @@ mod tests {
             supporter: None,
             nickname: nickname.map(str::to_owned),
             sanctions: Some(sanctions),
+            play_cooldown: Some(None),
         };
         backend
             .link
@@ -2190,6 +2392,7 @@ mod tests {
             supporter: None,
             nickname: None,
             sanctions: None,
+            play_cooldown: None,
         });
         backend.poll();
         assert_eq!(backend.sanctions(addr), vec![mute]);
@@ -2323,6 +2526,7 @@ mod tests {
             supporter: Some(SupporterStatus::default()),
             nickname: None,
             sanctions: None,
+            play_cooldown: None,
         });
         backend.poll();
         assert_eq!(backend.supporter_aura(addr), None);
@@ -2344,6 +2548,7 @@ mod tests {
             supporter: None,
             nickname: None,
             sanctions: None,
+            play_cooldown: None,
         });
         backend.poll();
         assert!(backend.authenticated_session(addr).is_none());
@@ -2371,6 +2576,7 @@ mod tests {
             supporter: None,
             nickname: None,
             sanctions: None,
+            play_cooldown: None,
         });
         backend.poll();
         assert_eq!(backend.clients[&addr].key_checked, Some(expired));
@@ -2741,6 +2947,7 @@ mod tests {
                 unrated_reason: Some("test".into()),
                 saved: false,
                 participants: vec![ParticipantResult {
+                    participation: None,
                     is_bot: false,
                     player_id: 1,
                     profile_id: Some(profile.profile_id.clone()),

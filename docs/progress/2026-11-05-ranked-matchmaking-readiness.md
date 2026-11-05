@@ -160,19 +160,38 @@ unversioned sibling comparison. The normal sibling comparison remains a
 reported local mismatch; it was not repaired or counted as passing.
 
 
-P6 ongoing: #34 participation and durable discipline implementation. Local
-PostgreSQL store suite passed 44/44 (no ignored tests), including new concurrent
-settlement/replay/reopen and exact award cases. Current runtime/client checks,
-UI feedback and process proof remain pending. No deployment, no production
-schema changes, no claim that all 68 findings are closed. See the TODO P6
-continuation and `docs/plans/fair-play-2026-11-05.md`.
+P6 ongoing (#34), uncommitted source: connected/disconnected/AFK accounting,
+90s grace, explicit/latching movement intent (protocol 14), individual leaver
+loss/noXP, innocent teammate half-loss, durable exactly-once cooldowns, async
+fresh queue access and atomic cross-owner admission denial. Player-caused
+unattended shutdown penalizes proved abandons; host crashes/caps do not. Legacy
+receipts cannot invent incidents or reverse an already recorded winner.
 
-Committed baseline `94311329` now has green CI42024828738 (all seven jobs,
-all13 PostgreSQL/public stages,3194.98s). Standard-map full Ranked victory:
-result01ccac2e39690152af01c6cbbd3d8161, every fresh profile receives exact
-+24/150 or -24/100, private fixture removed. Artifact13417265646 SHA256
-fe5b706ca3d24b59f60631483f27cd3ed8f82bb2e23be1467a6c2be68ff66f4a.
-Current P6: fresh async queue access plus an atomic DB admission guard; four
-fair-play PostgreSQL cases pass after that guard, including cross-owner denial
-and no leaked allocation. Time policy10/10, Python642 (9skips), UI assets pass.
-Full native tests remain pending while root free space is below20GiB.
+Current local PostgreSQL gate: **593 passed, zero failed/ignored**, 18 suites,
+including 48 store and 440 server tests, signed live UDP, restricted-role grants,
+rollback/concurrency/replay, schema 6→7 with rating 1234 and cross-owner cooldowns.
+Only disposable 127.0.0.1:55581/omoba_test migrated. Shared 183, AFK runtime 15,
+time-policy 10, tooling 642 (9skips), assets pass; native test targets type-check.
+Workspace clippy and current client all-target/no-QA clippy pass; full client/current process gates pending.
+
+Committed baseline 94311329: green CI 42024828738, all seven jobs/all 13 journey
+stages,3194.98s. Standard-map Ranked victory in 2539.88 s, result
+01ccac2e39690152af01c6cbbd3d8161; every fresh profile/history receives exact
++24/150 or-24/100. Private fixture removed. Artifact 13417265646 SHA256
+fe5b706ca3d24b59f60631483f27cd3ed8f82bb2e23be1467a6c2be68ff66f4a verified.
+
+No deployment or production schema/role changes. Full native builds are stopped
+while root has 16 GiB (<AGENTS 20 GiB minimum); Mac still needs manual unlock for
+native phone screenshot. Keep #34/P6 partial. Remake/surrender, unique picks,
+eligibility, tiers/seasons and P7–P9 remain mandatory. See TODO and fair-play plan.
+
+Personal outcome/forced-end regression is fixed and proven in the 593-test gate:
+winning-team leavers and ranked unattended forfeits are individual losses in
+history, filters and the rating graph; ordinary crash/cap interruptions do not
+invent personal losses. Participation metadata remains visible after reconnect.
+Portal 242 tests (3 skips), typecheck and real Chrome synthetic-API RU390x844
+render pass; actual images inspected in mm-web/.agent/browser/fair-play/.
+Full native execution/current journey CI still pending; owner workflow exception
+requested because root16GiB violates the local heavy-build minimum. Frozen
+reviewable AFK snapshots are .agent/codex-ranked-readiness/p6-afk-frozen.* in both
+worktrees. Next P6 work is remake/surrender, without closing #34/P6 prematurely.

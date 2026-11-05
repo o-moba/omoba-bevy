@@ -226,7 +226,9 @@ impl ServerRuntime {
                 }
             }
         }
-        self.handle_packet_authorized(addr, packet, now);
+        if self.human_network_activity(addr, &packet, now) {
+            self.handle_packet_authorized(addr, packet, now);
+        }
     }
 
     pub(crate) fn handle_packet_authorized(

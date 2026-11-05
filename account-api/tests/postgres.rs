@@ -115,6 +115,7 @@ async fn login(app: &App, key: &SigningKey) -> (auth::Session, String) {
 }
 fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResult {
     let p = |profile: &ProfileSummary, player_id, team| ParticipantResult {
+        participation: None,
         player_id,
         is_bot: false,
         profile_id: Some(profile.profile_id.clone()),
@@ -478,6 +479,9 @@ async fn runtime_roles_cannot_rewrite_game_rewards() {
     for query in [
         "UPDATE career_profiles SET rating=5000 WHERE false",
         "UPDATE career_profiles SET progression_xp=999999 WHERE false",
+        "UPDATE career_profiles SET abandons=999999 WHERE false",
+        "UPDATE career_play_penalties SET strikes=999 WHERE false",
+        "INSERT INTO career_abandon_events(profile_id,result_id) SELECT repeat('f',64),'forged' WHERE false",
         "UPDATE career_matches SET result='{}'::jsonb WHERE false",
         "INSERT INTO career_profiles(profile_id,nickname) VALUES(repeat('f',64),'Intruder')",
         "CREATE TABLE portal.unauthorized(id integer)",
@@ -1144,4 +1148,138 @@ async fn an_unplayed_draft_never_enters_history_or_analytics() {
             .matches_played,
         0
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated local roles installed by ops/grants.sql"]
+async fn fair_play_game_runtime_can_append_but_cannot_rewrite_incidents() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").expect("isolated owner URL");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::query("SET ROLE omoba_game_test")
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&url)
+        .await
+        .unwrap();
+    for query in [
+        "SELECT 1 FROM public.career_abandon_events LIMIT 0",
+        "SELECT 1 FROM public.career_play_penalties LIMIT 0",
+        "INSERT INTO public.career_abandon_events(profile_id,result_id) SELECT repeat('f',64),'fixture' WHERE false",
+        "INSERT INTO public.career_play_penalties(profile_id,cooldown_until,strikes) SELECT repeat('f',64),clock_timestamp(),1 WHERE false",
+        "UPDATE public.career_play_penalties SET strikes=strikes WHERE false",
+    ] {
+        sqlx::query(query).execute(&pool).await.unwrap();
+    }
+    for query in [
+        "UPDATE public.career_abandon_events SET created_at=clock_timestamp() WHERE false",
+        "DELETE FROM public.career_abandon_events WHERE false",
+        "DELETE FROM public.career_play_penalties WHERE false",
+    ] {
+        let error = sqlx::query(query).execute(&pool).await.unwrap_err();
+        assert_eq!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("42501"),
+            "{query}"
+        );
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn fair_play_personal_history_filters_and_projection_agree() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    let app = App::connect(
+        &url,
+        Config {
+            origin: "https://players.example".into(),
+            secret: [91; 32],
+            trust_loopback_proxy: false,
+            release_file: None,
+        },
+    )
+    .await
+    .unwrap();
+    let fresh = || {
+        let mut seed = [0; 32];
+        getrandom::fill(&mut seed).unwrap();
+        SigningKey::from_bytes(&seed)
+    };
+    let (key, other) = (fresh(), fresh());
+    let a = app
+        .career
+        .authenticate(&crypto::hex(key.verifying_key().as_bytes()), "Fair-play-a")
+        .await
+        .unwrap();
+    let b = app
+        .career
+        .authenticate(
+            &crypto::hex(other.verifying_key().as_bytes()),
+            "Fair-play-b",
+        )
+        .await
+        .unwrap();
+    let (sa, _) = login(&app, &key).await;
+    let (sb, _) = login(&app, &other).await;
+    for n in 1..=2 {
+        sqlx::query("UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second' WHERE profile_id=$1")
+            .bind(&a.profile_id).execute(&app.pool).await.unwrap();
+        let id = crypto::random::<16>();
+        let mut terminal = result(&a, &b, &id, n);
+        start(&app, &terminal).await;
+        terminal.participants[0].participation = Some(Participation {
+            connected_ms: 30_000,
+            disconnected_ms: 90_000,
+            afk_ms: 0,
+            abandoned: true,
+        });
+        if n == 2 {
+            terminal.outcome = MatchOutcome::Interrupted;
+            terminal.winner = None;
+            terminal.rated = false;
+            terminal.unrated_reason = Some("abandoned_reaped".into());
+        }
+        app.career.settle(terminal).await.unwrap();
+        projected(&app, &id).await;
+        let card = accounts::me(&app, &sa).await.unwrap();
+        assert_eq!(card["profile"]["abandons"], n);
+        let detail = read::detail(&app, &sa, &id).await.unwrap();
+        let own = detail["match"]["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["profile_id"].as_str() == Some(a.profile_id.as_str()))
+            .unwrap();
+        assert_eq!(own["participation"]["disconnected_ms"], "90000");
+        let losses = read::history(&app, &sa, Some("days=all&outcome=loss"))
+            .await
+            .unwrap();
+        assert_eq!(losses["matches"].as_array().unwrap().len(), n as usize);
+        assert!(
+            losses["matches"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["won"] == false)
+        );
+        let wins = read::history(&app, &sa, Some("days=all&outcome=win"))
+            .await
+            .unwrap();
+        assert!(wins["matches"].as_array().unwrap().is_empty());
+        let stats = read::statistics(&app, &sa, Some("days=all&outcome=loss"))
+            .await
+            .unwrap();
+        assert_eq!(stats["summary"]["matches"], n);
+        assert_eq!(stats["summary"]["losses"], n);
+        let other_losses = read::history(&app, &sb, Some("days=all&outcome=loss"))
+            .await
+            .unwrap();
+        assert_eq!(other_losses["matches"].as_array().unwrap().len(), 1);
+    }
 }

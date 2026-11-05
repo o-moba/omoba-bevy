@@ -20,9 +20,11 @@ use std::{
     time::Duration,
 };
 
+mod fair_play;
+
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 6] = [1, 2, 3, 4, 5, 6];
+pub const SCHEMA_VERSIONS: [i32; 7] = [1, 2, 3, 4, 5, 6, 7];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -304,6 +306,11 @@ impl CareerStore {
                 .execute(&mut *tx)
                 .await?;
         }
+        if !versions.contains(&7) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/007_fair_play.sql"))
+                .execute(&mut *tx)
+                .await?;
+        }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
             .fetch_one(&pool)
@@ -477,7 +484,7 @@ impl CareerStore {
                     .ok_or("Stored result has an inconsistent participant relation.")?;
                 cursor = Some(row.try_get::<i64,_>("seq")? as u64);
                 summaries.push(MatchSummary { result_id: result.result_id.clone(), ended_at_ms: result.ended_at_ms,
-                    duration_ms: result.duration_ms, outcome: result.outcome, won: result.winner.map(|w| w == p.team),
+                    duration_ms: result.duration_ms, outcome: result.outcome, won: result.participant_won(p),
                     hero_class: p.hero_class, avatar: p.avatar.clone(), sprite_character: p.sprite_character.clone(),
                     kills:p.stats.kills, deaths:p.stats.deaths, assists:p.stats.assists,
                     damage_to_heroes:p.stats.damage_to_heroes, rating:p.rating.clone() });
@@ -562,6 +569,17 @@ impl CareerStore {
             .bind(&result.result_id).bind(result.server_epoch.to_string()).bind(result.match_id.to_string())
             .bind(&self.owner).bind(Json(&result)).execute(&mut *tx).await?;
         let profiles = append_participants(&mut tx, &result, &[]).await?;
+        if !recover {
+            // Profile locks serialize admission with settlement on every host.
+            // A stale lobby cache or already accepted ready check cannot race
+            // a newly committed disciplinary cooldown into another match.
+            let ids: Vec<_> = profiles.keys().cloned().collect();
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_play_penalties WHERE profile_id=ANY($1) AND cooldown_until>clock_timestamp())")
+                .bind(&ids).fetch_one(&mut *tx).await?;
+            if blocked {
+                return Err(shared::career::error_code::PLAY_COOLDOWN.into());
+            }
+        }
         if result.rated {
             validate_current_cohort(&profiles)?;
         }
@@ -589,6 +607,7 @@ impl CareerStore {
             tx.commit().await?;
             return Ok(());
         }
+        fair_play::validate_participation_progress(&previous, &result)?;
         append_participants(&mut tx, &result, &previous.participants).await?;
         sqlx::query("UPDATE career_matches SET checkpoint=$2 WHERE result_id=$1")
             .bind(&result.result_id)
@@ -624,6 +643,12 @@ impl CareerStore {
         require_owner(&row, &self.owner)?;
         let previous: Json<MatchResult> = row.try_get("checkpoint")?;
         same_terminal_allocation(&previous, &result)?;
+        if !(result.outcome == MatchOutcome::Abandoned
+            && !result.gameplay_started
+            && result.unrated_reason.as_deref() == Some("prematch_abandoned"))
+        {
+            fair_play::validate_participation_progress(&previous, &result)?;
+        }
         append_participants(&mut tx, &result, &previous.participants).await?;
         sqlx::query("UPDATE career_matches SET intent=$2,status='pending' WHERE result_id=$1")
             .bind(&result.result_id)
@@ -709,6 +734,21 @@ impl CareerStore {
             BTreeMap::new()
         };
         let public_casual = result.ruleset == PUBLIC_CASUAL_RULESET;
+        // An unattended round ended by player absence must not provide a way
+        // to wait out discipline. Host failure and duration caps remain exempt.
+        let abandoned_reaped = result.outcome == MatchOutcome::Interrupted
+            && result.unrated_reason.as_deref() == Some("abandoned_reaped");
+        let allocation: Json<MatchResult> = row.try_get("allocation")?;
+        let ranked_reaped = abandoned_reaped && allocation.rated;
+        let discipline = result.gameplay_started
+            && (result.outcome == MatchOutcome::Completed || abandoned_reaped)
+            && (result.ruleset == RULESET || public_casual);
+        let abandoned_teams: Vec<_> = result
+            .participants
+            .iter()
+            .filter(|p| fair_play::proved_abandon(p))
+            .map(|p| p.team)
+            .collect();
         for participant in &mut result.participants {
             let Some(id) = &participant.profile_id else {
                 continue;
@@ -724,7 +764,8 @@ impl CareerStore {
                 .checked_add(1)
                 .ok_or("Career match counter is full.")?;
             if result.outcome == MatchOutcome::Completed {
-                let won = result.winner == Some(participant.team);
+                let won = result.winner == Some(participant.team)
+                    && !fair_play::proved_abandon(participant);
                 if won {
                     profile.wins = profile
                         .wins
@@ -737,10 +778,14 @@ impl CareerStore {
                         .ok_or("Career loss counter is full.")?;
                 }
                 if result.rated {
-                    let change = changes
-                        .get(&participant.player_id)
-                        .ok_or("Missing rating change.")?
-                        .clone();
+                    let change = fair_play::rating_award(
+                        changes
+                            .get(&participant.player_id)
+                            .ok_or("Missing rating change.")?,
+                        participant,
+                        result.winner.expect("validated winner"),
+                        abandoned_teams.contains(&participant.team),
+                    );
                     profile.rating = change.after;
                     participant.rating = Some(change);
                     profile.rated_matches = profile
@@ -748,7 +793,9 @@ impl CareerStore {
                         .checked_add(1)
                         .ok_or("Rated match counter is full.")?;
                 }
-                participant.progression_xp_gained = if result.rated {
+                participant.progression_xp_gained = if fair_play::reward_ineligible(participant) {
+                    0
+                } else if result.rated {
                     if won { 150 } else { 100 }
                 } else if public_casual {
                     if won { 50 } else { 25 }
@@ -760,6 +807,29 @@ impl CareerStore {
                     .checked_add(u64::from(participant.progression_xp_gained))
                     .filter(|&xp| xp <= i64::MAX as u64)
                     .ok_or("Career progression counter is full.")?;
+            }
+            if ranked_reaped && fair_play::proved_abandon(participant) {
+                let before = profile.rating;
+                let after = before.saturating_sub(32).max(0);
+                participant.rating = Some(shared::career::RatingChange {
+                    before,
+                    after,
+                    delta: after - before,
+                });
+                profile.rating = after;
+                profile.losses = profile
+                    .losses
+                    .checked_add(1)
+                    .ok_or("Career loss counter is full.")?;
+                profile.rated_matches = profile
+                    .rated_matches
+                    .checked_add(1)
+                    .ok_or("Rated match counter is full.")?;
+            }
+            if discipline && fair_play::proved_abandon(participant) {
+                if let Some(total) = fair_play::record_abandon(&mut tx, id, result_id).await? {
+                    profile.abandons = total;
+                }
             }
             sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7 WHERE profile_id=$1")
                 .bind(id).bind(profile.rating).bind(i64::from(profile.rated_matches)).bind(i64::from(profile.matches_played))
@@ -1140,6 +1210,7 @@ fn profile_row(row: &PgRow) -> StoreResult<ProfileSummary> {
         matches_played: counter("matches_played")?,
         wins: counter("wins")?,
         losses: counter("losses")?,
+        abandons: counter("abandons")?,
         progression_xp: u64::try_from(row.try_get::<i64, _>("progression_xp")?)
             .map_err(|_| "Invalid stored progression.")?,
     })
@@ -1249,6 +1320,9 @@ fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
         Some("prematch_abandoned") => {
             !result.gameplay_started && result.outcome != MatchOutcome::Completed
         }
+        Some("abandoned_reaped" | "duration_capped") => {
+            result.gameplay_started && result.outcome == MatchOutcome::Interrupted
+        }
         _ => interrupted_recovery,
     };
     if result.rated
@@ -1325,6 +1399,7 @@ fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
         p.rating = None;
         p.progression_xp_gained = 0;
     }
+    fair_play::validate_participation(&result)?;
     result.saved = false;
     result.participants.sort_by_key(|p| p.player_id);
     if result.ruleset == PUBLIC_CASUAL_RULESET {

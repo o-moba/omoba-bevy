@@ -887,6 +887,7 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
         rt.handle_packet(
             a,
             ClientPacket::Transform {
+                input_active: false,
                 dash_sequence: seq,
                 x: 0.0,
                 y: PLAYER_GROUND_Y,
@@ -909,6 +910,7 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
         rt.handle_packet(
             a,
             ClientPacket::Transform {
+                input_active: false,
                 dash_sequence: seq,
                 x: 0.0,
                 y: PLAYER_GROUND_Y,

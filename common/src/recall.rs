@@ -163,6 +163,7 @@ mod tests {
                 &mut w,
                 address(),
                 &ClientPacket::Transform {
+                    input_active: false,
                     x: 0.0,
                     y: 99.0,
                     z: 0.0,
@@ -184,6 +185,7 @@ mod tests {
             &mut w,
             address(),
             &ClientPacket::Transform {
+                input_active: false,
                 x: 0.0,
                 y: 0.5,
                 z: 0.0,
@@ -202,6 +204,7 @@ mod tests {
             &mut w,
             address(),
             &ClientPacket::Transform {
+                input_active: false,
                 x: 1.0,
                 y: 0.5,
                 z: 0.0,

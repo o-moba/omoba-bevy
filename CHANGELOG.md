@@ -10,8 +10,12 @@ All notable changes are recorded here. The canonical version is
   leavers lose rating and earn no XP; innocent losing teammates receive half
   the normal loss. PostgreSQL settlement records one incident and a persistent
   5-minute / 30-minute / 24-hour cooldown in the same transaction. Local store
-  tests pass; runtime, queue-denial and client verification are still pending.
-  This feature is not deployed and #34 remains partial.
+  tests pass, including all 593 PostgreSQL/API/store/server cases. Native client
+  execution and complete current journeys remain pending. Player-caused
+  unattended shutdown still penalizes proved abandons; host failure and duration
+  caps are exempt. Native and portal history distinguish personal forfeits from
+  team victory; API filtering, profile counters and rating graphs include the
+  same penalty. This feature is not deployed and #34 remains partial.
 
 - Correlate probe ready consent with the current search so a retained old view
   cannot starve search refresh and falsely penalize reconnecting survivors.

@@ -36,6 +36,7 @@ use apply::{
     StagedSnapshot, respawn_players_with_new_store_models, respawn_sandbox_models,
     snapshot_apply_systems,
 };
+pub(crate) use commands::latch_movement_input;
 use commands::{LocalStateSendTimer, send_local_state, send_network_commands};
 use ingest::{PendingServerSnapshotFrame, ingest_server_snapshot_packets};
 use interpolate::{

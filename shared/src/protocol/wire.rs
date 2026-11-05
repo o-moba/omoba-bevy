@@ -104,6 +104,10 @@ pub enum ClientPacket {
         protocol_version: u16,
     },
     Transform {
+        /// Local movement intent, not a reflected authoritative pose. Required
+        /// for AFK reclaim so the AI's own motion cannot count as human input.
+        #[serde(default, skip_serializing_if = "is_false")]
+        input_active: bool,
         #[serde(default)]
         dash_sequence: u64,
         x: f32,
@@ -195,6 +199,10 @@ pub enum ClientPacket {
         match_id: u64,
         server_epoch: u64,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -1069,6 +1077,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&ClientPacket::Transform {
+                input_active: false,
                 dash_sequence: 3,
                 x: 1.5,
                 y: 0.0,
@@ -1134,6 +1143,39 @@ mod tests {
     }
 
     #[test]
+    fn protocol_14_distinguishes_real_input_from_idle_pose_echoes() {
+        let idle = r#"{"type":"transform","x":1.0,"y":0.5,"z":2.0,"yaw":0.0,"dash_sequence":0}"#;
+        let decoded: ClientPacket = serde_json::from_str(idle).unwrap();
+        assert!(matches!(
+            decoded,
+            ClientPacket::Transform {
+                input_active: false,
+                ..
+            }
+        ));
+        assert!(
+            !serde_json::to_string(&decoded)
+                .unwrap()
+                .contains("input_active")
+        );
+        let mut active: serde_json::Value = serde_json::from_str(idle).unwrap();
+        active["input_active"] = true.into();
+        let decoded: ClientPacket = serde_json::from_value(active).unwrap();
+        assert!(matches!(
+            decoded,
+            ClientPacket::Transform {
+                input_active: true,
+                ..
+            }
+        ));
+        assert!(
+            serde_json::to_string(&decoded)
+                .unwrap()
+                .contains("\"input_active\":true")
+        );
+    }
+
+    #[test]
     fn golden_snapshot_decodes_back_to_the_same_bytes() {
         let decoded: ServerPacket = serde_json::from_str(GOLDEN_SNAPSHOT).unwrap();
         assert_eq!(serde_json::to_string(&decoded).unwrap(), GOLDEN_SNAPSHOT);
@@ -1147,7 +1189,7 @@ mod tests {
     #[test]
     fn protocol_12_carries_tier_auras_and_tier_status() {
         use crate::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
-        assert_eq!(crate::protocol::PROTOCOL_VERSION, 13);
+        assert_eq!(crate::protocol::PROTOCOL_VERSION, 14);
         let equip = ClientPacket::Career {
             request: crate::career::CareerRequest::EquipSupporterAura {
                 request_id: 5,

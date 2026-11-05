@@ -44,5 +44,6 @@
   "home.rating.rated": "评分 {rating} · {played} 场排位赛",
   "home.ranked.rating": "排位赛\n评分 {rating}",
   "home.button.leaderboard": "排行榜",
-  "home.leaderboard.error": "无法打开排行榜，请重试。"
+  "home.leaderboard.error": "无法打开排行榜，请重试。",
+  "home.recovery.afk": "你长时间未操作，英雄由AI控制。移动或使用技能可恢复控制。本局的挂机记录将保留。"
 }

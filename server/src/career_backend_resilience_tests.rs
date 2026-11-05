@@ -120,6 +120,7 @@ fn allocation(profile: &ProfileSummary) -> MatchResult {
         unrated_reason: Some("resilience fixture".into()),
         saved: false,
         participants: vec![ParticipantResult {
+            participation: None,
             is_bot: false,
             player_id: 1,
             profile_id: Some(profile.profile_id.clone()),

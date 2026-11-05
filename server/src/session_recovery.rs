@@ -14,6 +14,19 @@ pub(crate) struct SessionRecovery {
     generation: u64,
 }
 impl SessionRecovery {
+    pub(crate) fn is_afk(&self, addr: SocketAddr) -> bool {
+        self.seats
+            .values()
+            .any(|s| s.address == addr && s.afk_peer_seen.is_some())
+    }
+
+    pub(crate) fn network_seen(&self, addr: SocketAddr, fallback: Instant) -> Instant {
+        self.seats
+            .values()
+            .find(|s| s.address == addr)
+            .and_then(|s| s.afk_peer_seen)
+            .unwrap_or(fallback)
+    }
     /// A retained actor is controlled by the server, not an authenticated UDP
     /// endpoint. Only the exact registered identity can keep that exemption.
     pub(crate) fn retains(
@@ -32,6 +45,9 @@ impl SessionRecovery {
     }
 }
 struct DetachedSeat {
+    // AFK may retain the authenticated endpoint so its UI keeps receiving.
+    // AI's last_seen updates must not masquerade as real network packets.
+    afk_peer_seen: Option<Instant>,
     address: SocketAddr,
     session: String,
     generation: u64,
@@ -39,6 +55,71 @@ struct DetachedSeat {
     policy: TakeoverPolicy,
 }
 impl ServerRuntime {
+    pub(crate) fn touch_afk_peer(&mut self, addr: SocketAddr, now: Instant) {
+        if let Some(seat) = self
+            .session_recovery
+            .seats
+            .values_mut()
+            .find(|s| s.address == addr && s.afk_peer_seen.is_some())
+        {
+            seat.afk_peer_seen = Some(now);
+        }
+    }
+
+    pub(crate) fn attach_afk_controller(&mut self, addr: SocketAddr, now: Instant) {
+        if self.session_recovery.is_afk(addr) {
+            return;
+        }
+        let Some(player) = self
+            .world
+            .players
+            .get(&addr)
+            .filter(|p| p.joined && !p.hero.identity.is_bot)
+        else {
+            return;
+        };
+        let Some(session) = player
+            .session_id
+            .clone()
+            .filter(|s| self.career.backend.authenticated_session(addr).as_ref() == Some(s))
+        else {
+            return;
+        };
+        let (id, class) = (player.hero.identity.id, player.hero.identity.hero_class);
+        self.session_recovery.generation = self.session_recovery.generation.saturating_add(1);
+        self.session_recovery.seats.insert(
+            id,
+            DetachedSeat {
+                address: addr,
+                session,
+                afk_peer_seen: Some(now),
+                generation: self.session_recovery.generation,
+                votes: HashMap::new(),
+                policy: TakeoverPolicy::Bot,
+            },
+        );
+        if let Some(player) = self.world.players.get_mut(&addr) {
+            common::recall::cancel(player);
+        }
+        self.bots.attach_existing(addr, class, now);
+    }
+
+    pub(crate) fn reclaim_afk_controller(&mut self, addr: SocketAddr, now: Instant) {
+        let Some(id) = self
+            .session_recovery
+            .seats
+            .iter()
+            .find(|(_, s)| s.address == addr && s.afk_peer_seen.is_some())
+            .map(|(id, _)| *id)
+        else {
+            return;
+        };
+        self.session_recovery.seats.remove(&id);
+        self.bots.detach(addr);
+        if let Some(player) = self.world.players.get_mut(&addr) {
+            player.last_seen = now;
+        }
+    }
     /// Returns false for pre-match/terminal/direct-server seats, whose existing
     /// finite admission and abandonment rules still apply.
     pub(crate) fn detach_running_seat(&mut self, addr: SocketAddr, now: Instant) -> bool {
@@ -58,6 +139,7 @@ impl ServerRuntime {
             return false;
         };
         let address = internal_address(port);
+        self.bots.detach(addr);
         self.disconnect_career_player(addr, now);
         let mut player = self.world.players.remove(&addr).unwrap();
         common::recall::cancel(&mut player);
@@ -73,6 +155,7 @@ impl ServerRuntime {
         self.session_recovery.seats.insert(
             id,
             DetachedSeat {
+                afk_peer_seen: None,
                 address,
                 session,
                 generation: self.session_recovery.generation,
@@ -123,6 +206,7 @@ impl ServerRuntime {
             .iter()
             .filter(|(addr, player)| {
                 !crate::bots::is_bot_address(**addr)
+                    && !self.session_recovery.is_afk(**addr)
                     && player.joined
                     && !player.hero.identity.is_bot
                     && player.hero.identity.team == team

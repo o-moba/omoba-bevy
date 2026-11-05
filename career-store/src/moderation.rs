@@ -81,6 +81,7 @@ pub struct Access {
     /// The profile's current name (a moderator may have reset it).
     pub nickname: Option<String>,
     pub sanctions: Vec<Sanction>,
+    pub play_cooldown: Option<shared::career::PlayCooldown>,
 }
 
 /// The database-wide chat switch.
@@ -217,7 +218,7 @@ impl CareerStore {
             check_id(profile_id)?;
             let row = sqlx::query(&format!(
                 "SELECT EXISTS(SELECT 1 FROM career_keys WHERE public_key=$2 AND profile_id=$1 AND revoked_at IS NULL) AS key_active, \
-                 (SELECT nickname FROM career_profiles WHERE profile_id=$1) AS nickname, {ACTIVE_JSON} AS sanctions"
+                 (SELECT nickname FROM career_profiles WHERE profile_id=$1) AS nickname, {ACTIVE_JSON} AS sanctions, (SELECT jsonb_build_object('until',ceil(extract(epoch FROM cooldown_until))::bigint,'strikes',strikes) FROM career_play_penalties WHERE profile_id=$1 AND cooldown_until>clock_timestamp()) AS play_cooldown"
             ))
             .bind(profile_id)
             .bind(public_key)
@@ -228,6 +229,7 @@ impl CareerStore {
                 key_active: row.try_get("key_active")?,
                 nickname: row.try_get("nickname")?,
                 sanctions,
+                play_cooldown: row.try_get::<Option<Json<shared::career::PlayCooldown>>, _>("play_cooldown")?.map(|v| v.0),
             })
         })
         .await

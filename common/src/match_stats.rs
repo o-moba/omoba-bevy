@@ -88,6 +88,7 @@ impl RoundLedger {
         // Progression and rating are awarded later by result finalization,
         // never inherited from an earlier result supplied as an identity DTO.
         participant.rating = None;
+        participant.participation = None;
         participant.progression_xp_gained = 0;
         self.participants.insert(
             id,
@@ -354,6 +355,7 @@ mod tests {
 
     fn participant(id: u64, team: Team) -> ParticipantResult {
         ParticipantResult {
+            participation: None,
             is_bot: false,
             player_id: id,
             profile_id: Some(format!("{id:064x}")),

@@ -102,6 +102,12 @@ pub(crate) trait CareerPort {
     #[cfg(test)]
     fn test_is_playing(&self, addr: SocketAddr) -> bool;
     #[cfg(test)]
+    fn test_set_play_cooldown(
+        &mut self,
+        addr: SocketAddr,
+        cooldown: Option<shared::career::PlayCooldown>,
+    );
+    #[cfg(test)]
     fn test_set_sanctions(
         &mut self,
         addr: SocketAddr,

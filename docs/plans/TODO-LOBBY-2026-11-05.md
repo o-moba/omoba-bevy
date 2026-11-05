@@ -88,7 +88,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 | 31 | minor | gap | Harness PostgreSQL tests (300-client admission, registration journey) are never run by any automated gate | `.github/workflows/ci.yml:120` | In ci.yml `postgres` job add after the Python step: `cargo build --locked -p server` then `OMOBA_HARNESS_DATABASE_URL=$OMOBA_TEST_DATABASE_URL cargo test --locked -p harness --test admission -- --ignored --test-threads=1` (and the new ranked_journey test). Make admission.rs/registration_journey.rs fall back to OMOBA_TEST_DATABASE_URL when OMOBA_HARNESS_DATABASE_URL is unset, and add a `make test-postgres-harness` target. | done — owner-approved CI gate passes all 13 stages (1097.16 s, e3b0942/run 42005385554), including admission/registration and full Ranked Victory. Artifact inspected: fixture removed and no private-key file uploaded. |
 | 32 | minor | gap | No leaderboard / ranking surface anywhere (portal, API, DB) — rating has no social meaning | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/src/lib.rs:554` | Minimal LR-47 slice. (1) career-store migration 006_ladder.sql: `CREATE INDEX career_profiles_ladder ON career_profiles(rating DESC, rated_matches DESC, profile_id)`. (2) account-api/src/read.rs: `pub async fn leaderboard(app,&Option<Session>,query)` → top 100: `SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.wins,p.losses FROM career_profiles p JOIN portal.profile_settings s USING(profile_id) WHERE s.publi | done — GET /v1/leaderboard, portal page, opt-out (portal schema 11, career schema 6) |
 | 33 | minor | gap | No leaderboard: no index on career_profiles(rating), no API/portal endpoint (LR-47) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/001_career.sql:5` | Migration 006: `CREATE INDEX career_ladder ON career_profiles(rating DESC, profile_id) WHERE rated_matches >= 20` (plus SCHEMA_VERSIONS bump); account-api GET /leaderboard returning top-100 nickname/rating/rated_matches honouring portal.profile_settings.public_profile_enabled (or nickname-only), and a portal page with RU copy; optionally the client Home shows 'Ваше место #N'. | done — see #32 |
-| 34 | minor | gap | Leaver on the winning team gains full rating and 150 XP (LR-33) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/career_store.rs:731` | Minimal: in finish_inner, when `participant.disconnected && won` set progression_xp_gained = 0 and clamp the rating delta to <= 0 (keep the loser's normal loss), and surface this in the receipt (client already has career.player.progress_disconnected). Add a career_store_tests case. Full LR-33 (connected-time tracking, abandon counter + cooldown) is a later L. | partial — local implementation in progress: 90-second participation/AFK policy, individual leaver loss/no XP, teammate half-loss and exactly-once PostgreSQL cooldowns. All 44 store tests pass (real PostgreSQL included); current runtime/client/queue gates and complete process proof pending; not deployed. |
+| 34 | minor | gap | Leaver on the winning team gains full rating and 150 XP (LR-33) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/career_store.rs:731` | Minimal: in finish_inner, when `participant.disconnected && won` set progression_xp_gained = 0 and clamp the rating delta to <= 0 (keep the loser's normal loss), and surface this in the receipt (client already has career.player.progress_disconnected). Add a career_store_tests case. Full LR-33 (connected-time tracking, abandon counter + cooldown) is a later L. | partial — local implementation in progress: 90-second participation/AFK policy, individual leaver loss/no XP, teammate half-loss and exactly-once PostgreSQL cooldowns. All593 PostgreSQL/API/store/server tests pass, including48 store tests and15 AFK cases; full native client/current journey gates pending; not deployed. |
 | 35 | minor | gap | Fixed K=32 with no placement/newcomer K (LR-53) | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/matchmaking.rs:410` | Pass `rated_matches` into rating_changes_for_players and use K=48 while `rated_matches < NEWCOMER_MATCHES` (per player, winner/loser clamped independently as today), update the test expectations and the number in docs/match-progression.md. Tiers/seasons remain LR-53. | partial — K=48 for pre-match rated_matches<20, then K=32 from locked profiles; boundary/mixed-K/bounds and real PostgreSQL 20th→21st/idempotence tests pass. all 42 store tests (real PostgreSQL included) and all-target clippy pass. Current complete-gameplay CI 42024828738 passed: standard-map ten-human victory, exact +24/150 and -24/100 awards for fresh profiles; tiers/seasons remain in P6. |
 | 36 | minor | gap | RU guest home explains the modes but never explains the rating itself | `/Users/wotori/git/ekza/_workspace/worktrees/mm-web/src/components/guest-home.tsx:62` | Add a fourth landing section «Рейтинг» (two sentences from match-progression.md:186-195: старт 1000, меняется только в рейтинговых матчах, первые 20 матчей — группа новичков, обычный PvP и боты дают опыт) with ru/zh entries in landing-translations.ts, and assert it in tests/ru-landing.e2e.mjs. | done — RU landing rating section |
 | 37 | minor | gap | Newcomer/calibration state is a bare tag with no progress or explanation | `/Users/wotori/git/ekza/_workspace/worktrees/mm-web/src/components/portal.tsx:200` | Render `Новичок · {rated_matches}/{newcomer_matches} рейтинговых матчей` with a title/tooltip «Первые 20 рейтинговых матчей играются среди новичков; рейтинг пока калибруется» on /me and as a one-line notice above the chart on /me/stats; keys in ru/en/zh. No tiers, per spec. | done — Новичок · n/20 with tooltip on /me and /me/stats |
@@ -394,35 +394,77 @@ client source, production dependency, schema, protocol or CI configuration chang
 
 ### P6 continuation: participation and durable discipline (in progress)
 
-Implementation contract: `docs/plans/fair-play-2026-11-05.md`. Optional additive
-participation preserves legacy receipts. Protocol 14 separates physical movement
-intent from reflected AI positions; a short input is latched until transmission.
-Schema 7 adds incidents, profile abandon totals and durable cooldowns. No live
-schema or deployment has been changed. Full local store suite: 44 passed,
-including concurrent/replayed settlement, winning abandon, short reconnect,
-losing teammate reduction, invalid time rejection and reopen. Current integration
-checks and further rollback/cross-lobby evidence remain pending. Keep #34/P6 open.
+Contract: `docs/plans/fair-play-2026-11-05.md`. Optional participation preserves
+legacy receipt bytes. Protocol 14 distinguishes deliberate movement from AI pose
+echoes; short taps remain latched until transmission. AFK takeover keeps the same
+authenticated actor and snapshots; meaningful input reclaims it. Grace is 90 s,
+with sticky abandon and final aggregate absence accounting.
 
-CI at committed `94311329`: six ordinary jobs passed; full PostgreSQL public
-journeys were still running at this checkpoint. Release packaging passed for
-that commit. Native debug client/server built successfully; locked Mac prevents
-accepting Home phone screenshots. The prior black release capture is rejected.
+Schema7 adds incidents, profile abandon totals and rolling 24 h cooldowns of
+5min/30min/24h. Settlement and admission share profile locks: repeat results
+cannot duplicate punishment, and an old lobby/accepted ready view cannot race
+an active cooldown into a new allocation. Queue admission refreshes access
+asynchronously, is correlated to sign-in/search sequence, and fails closed.
 
-Latest committed gate `94311329`: **all seven CI jobs passed**, including all
-13 complete-journey stages (3194.98 s). Standard-map Ranked victory completed
-in 2539.88 s, result `01ccac2e39690152af01c6cbbd3d8161`; ten profiles/history
-verified with +24/150 and -24/100. Private enrollment fixture removed. Verified
-artifact 13417265646, SHA256
-`fe5b706ca3d24b59f60631483f27cd3ed8f82bb2e23be1467a6c2be68ff66f4a`;
-reports retained in `.agent/codex-ranked-readiness/ci-943-postgres-harness/`.
-Current P6 code additionally passes client/server test-target type checks; all
-46 store tests pass, including injected terminal-TX rollback and schema6→7
-upgrade with saved rating1234. The newest atomic admission guard passes all four targeted PostgreSQL
-fair-play cases; runtime/UI test execution remains pending. Root free space subsequently fell to18 GiB;
-heavy builds are stopped per the workspace rule until >=20 GiB is available.
+Proved ranked abandons get no XP and an individual loss, including winners;
+innocent losing teammates get half loss. A player-caused unattended shutdown
+still penalizes proved abandons; server failure and duration caps do not. Legacy
+receipts suppress new disconnected win rewards without inventing incidents or
+rewriting an old winner. Native RU/EN/zh-Hans copy explains AFK and cooldowns.
 
-Additional lightweight P6 checks: ten production time-policy tests pass, all
-642 Python tooling tests pass (nine expected skips), UI asset/hash/budget gate
-passes. Current glyph subset retains all prior glyphs and adds 挂/罚 (462616
-bytes). Full native test execution remains withheld at the disk threshold;
-small shared/store checks are tracked separately and cannot certify the UI.
+Current P6 verification:
+
+- All 593 PostgreSQL/API/store/server tests passed across 18 suites, zero failed
+  or ignored, using only disposable `127.0.0.1:55581/omoba_test`. Includes48
+  store tests,440 server tests, real signed UDP gameplay/history, restricted
+  runtime-role grants, injected terminal-TX rollback, concurrent/replayed
+  settlement, saved rating 1234 through schema 6→7, cross-owner cooldown denial
+  and no leaked allocation on refusal. Only this disposable DB was migrated.
+- All 183 shared tests, production time-policy 10/10 and tooling 642 (9expected
+  skips) pass. Native client/server test targets type-check; full current client
+  execution and complete current-process journeys remain pending.
+- All 15 AFK runtime cases pass: exact grace, death/respawn, same actor reclaim,
+  AI pose echoes, real peer timeout, all-AFK worker reaping and old-round reset.
+  Queue refresh correlation/fail-closed and all three queue cooldowns pass.
+- CJK glyph subset 462616 bytes retains all old glyphs and adds挂罚; asset budget
+  and hashes pass. Full workspace clippy and subsequent client all-target/no-QA clippy pass.
+
+The committed baseline 94311329 has green CI 42024828738: all seven jobs and all 13
+complete-journey stages (3194.98s). Standard-map Ranked victory in 2539.88 s,
+result 01ccac2e39690152af01c6cbbd3d8161, all ten profiles/history verify +24/150
+or-24/100 for fresh profiles. Private fixture removed. Artifact 13417265646,
+SHA256`fe5b706ca3d24b59f60631483f27cd3ed8f82bb2e23be1467a6c2be68ff66f4a`
+verified; reports `.agent/codex-ranked-readiness/ci-943-postgres-harness/`.
+This proves newcomer K 48; tiers/seasons still belong to P6.
+
+#34/P6 remain partial until current native-client execution and complete current journeys pass.
+Reviewable local backup: `.agent/codex-ranked-readiness/p6-fair-play-wip.patch`.
+No RU deployment or production roles/schema changed. Native debug binaries
+built successfully, but locked Mac prevents accepting Home phone screenshots;
+the earlier black release capture remains rejected. Root 16GiB is below the
+AGENTS 20 GiB heavy-build threshold, so full Bevy/client builds are stopped.
+Remake/surrender, unique team picks, eligibility and tier/season rules remain
+mandatory, as do P7–P9. Nothing here closes all 68 findings or all 9 critic items.
+
+Additional AFK checkpoint: all 593 PostgreSQL-backed tests pass after fixing
+personal result filtering and the forced-end handoff. A proved ranked penalty
+in an `abandoned_reaped` interruption is a personal loss/rated history entry;
+other players retain no invented winner or reward. API history, rating graph,
+profile counters, native history/details/postmatch and portal presentation share
+that interpretation. Participation durations are decimal strings in the Account
+API; native receipts retain their numeric protocol fields. Server crash recovery
+and duration caps remain exempt. The forced reason reaches settlement, including
+Casual, without being replaced by a generic interruption or bot-fill label.
+
+Portal tests: 242 passed / 3 expected skips; typecheck passed. Focused real
+Next/Chrome render with a synthetic API: RU 390x844 profile and returned-leaver
+match report passed. Inspected images show the profile counter, personal loss
+with a winning team, and a readable full-width AFK notice. These are browser
+fixture images, not physical mobile or real-provider evidence. Files:
+`../mm-web/.agent/browser/fair-play/`.
+
+Frozen AFK patches and hashes are kept under each worktree's
+`.agent/codex-ranked-readiness/p6-afk-frozen.*`. The owner was asked whether full
+CI may follow intermediate commits while root is below the local heavy-build
+threshold; that permission is pending. No feature commit/push bypassed that gate.
+Next independent P6 implementation is remake/surrender; all P7–P9 still required.

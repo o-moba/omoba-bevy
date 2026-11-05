@@ -267,6 +267,7 @@ fn every_bot_level_plays_the_same_online_and_offline() {
         player.hero.max_hp = 2000.0;
         player.hero.hp = 2000.0;
         let row = shared::career::ParticipantResult {
+            participation: None,
             is_bot: true,
             player_id: player.hero.identity.id,
             profile_id: None,

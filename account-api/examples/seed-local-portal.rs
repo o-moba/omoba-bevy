@@ -42,6 +42,7 @@ async fn main() {
         .iter()
         .enumerate()
         .map(|(i, p)| ParticipantResult {
+            participation: None,
             player_id: i as u64 + 1,
             is_bot: false,
             profile_id: Some(p.profile_id.clone()),

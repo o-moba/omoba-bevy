@@ -523,6 +523,7 @@ fn input(
         let delta = direction.normalize() * speed * time.delta_secs().min(0.05);
         let next = position + delta;
         practice.send(ClientPacket::Transform {
+            input_active: true,
             x: next.x,
             y,
             z: next.y,

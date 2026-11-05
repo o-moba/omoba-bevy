@@ -315,9 +315,21 @@ fn result_model(
         None if expects => Cell::Pending,
         _ => Cell::Hidden,
     };
+    let abandoned = participant.is_some_and(|p| p.participation.is_some_and(|p| p.abandoned))
+        && result
+            .zip(participant)
+            .is_some_and(|(r, p)| r.participant_won(p) == Some(false));
     ResultModel {
-        outcome: Outcome::of(winner, local_team),
-        title: outcome_headline(winner, local_team),
+        outcome: if abandoned {
+            Outcome::Defeat
+        } else {
+            Outcome::of(winner, local_team)
+        },
+        title: if abandoned {
+            tr(Outcome::Defeat.key())
+        } else {
+            outcome_headline(winner, local_team)
+        },
         summary,
         stats,
         teams: team_stats(latch, result),
@@ -2131,6 +2143,55 @@ mod tests {
             "disconnected":false,"rating":null,"progression_xp_gained":150
         })).unwrap()).collect();
         result
+    }
+
+    #[test]
+    fn winning_team_receipt_shows_a_personal_loss_for_a_proved_abandon() {
+        let mut receipt = full_receipt();
+        let latch = PostMatchLatch {
+            winner: Some(Team::Green),
+            local_team: Some(Team::Green),
+            namespace: Some((receipt.server_epoch, receipt.match_id)),
+            ..default()
+        };
+        let mut career = CareerClient::default();
+        career.public_profile_id = Some("p-1".into());
+        career.view.storage_enabled = true;
+        career.view.profile = Some(shared::career::ProfileSummary::new(
+            "p-1".into(),
+            "Guest".into(),
+        ));
+        for (abandoned, expected) in [(false, Outcome::Victory), (true, Outcome::Defeat)] {
+            receipt.participants[0].participation = Some(shared::career::Participation {
+                abandoned,
+                ..default()
+            });
+            let model = result_model(&latch, Some(&receipt), &career);
+            assert_eq!(model.outcome, expected);
+            assert_eq!(receipt.winner, Some(shared::map::Team::Green));
+        }
+        receipt.outcome = MatchOutcome::Interrupted;
+        receipt.winner = None;
+        receipt.unrated_reason = Some("abandoned_reaped".into());
+        receipt.participants[0].rating = Some(shared::career::RatingChange {
+            before: 1000,
+            after: 968,
+            delta: -32,
+        });
+        receipt.participants[0].progression_xp_gained = 0;
+        let interrupted = PostMatchLatch {
+            winner: None,
+            ..latch
+        };
+        assert_eq!(
+            result_model(&interrupted, Some(&receipt), &career).outcome,
+            Outcome::Defeat
+        );
+        receipt.unrated_reason = Some("server_interrupted".into());
+        assert_eq!(
+            result_model(&interrupted, Some(&receipt), &career).outcome,
+            Outcome::Complete
+        );
     }
 
     #[test]

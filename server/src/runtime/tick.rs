@@ -91,6 +91,7 @@ impl ServerRuntime {
             tick_match_formation(&mut self.world, self.rules, dt, now);
         }
         self.track_round_start(now);
+        self.observe_fair_play(now, false);
         common::tick::skills(&mut self.world, &mut self.combat_log, now, dt);
         self.simulate_bots(now, dt);
         self.simulate_sandbox(now, dt);

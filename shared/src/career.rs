@@ -84,12 +84,29 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Server-observed participation, independent of the terminal connection flag.
+/// An abandoned seat stays abandoned after reclaim; a short reconnect does not.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Participation {
+    pub connected_ms: u64,
+    pub disconnected_ms: u64,
+    pub afk_ms: u64,
+    pub abandoned: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParticipantResult {
     pub player_id: u64,
     // Preserve rc6 JSON receipts exactly when this additive human default is absent.
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_bot: bool,
+    // Omission preserves old durable receipts and older snapshot consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participation: Option<Participation>,
     pub profile_id: Option<String>,
     pub nickname: String,
     pub team: Team,
@@ -143,6 +160,26 @@ pub struct MatchResult {
     pub saved: bool,
 }
 
+impl MatchResult {
+    /// Personal result can differ from the team's victory after a proved leave.
+    /// Legacy disconnection alone never changes a historical winning receipt.
+    pub fn participant_won(&self, participant: &ParticipantResult) -> Option<bool> {
+        let abandoned = participant.participation.is_some_and(|p| p.abandoned);
+        if self.outcome == MatchOutcome::Completed {
+            self.winner
+                .map(|winner| winner == participant.team && !abandoned)
+        } else if self.outcome == MatchOutcome::Interrupted
+            && self.unrated_reason.as_deref() == Some("abandoned_reaped")
+            && abandoned
+            && participant.rating.is_some()
+        {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MatchSummary {
     pub result_id: String,
@@ -162,6 +199,8 @@ pub struct MatchSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProfileSummary {
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub abandons: u32,
     pub profile_id: String,
     pub nickname: String,
     pub rating: i32,
@@ -174,6 +213,7 @@ pub struct ProfileSummary {
 impl ProfileSummary {
     pub fn new(profile_id: String, nickname: String) -> Self {
         Self {
+            abandons: 0,
             profile_id,
             nickname,
             rating: INITIAL_RATING,
@@ -500,6 +540,8 @@ impl CareerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CareerView {
+    #[serde(skip_serializing_if = "is_false")]
+    pub afk_control: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub takeovers: Vec<crate::match_service::TakeoverSeatView>,
     pub match_service: Option<crate::match_service::MatchServiceView>,
@@ -533,10 +575,21 @@ pub struct CareerView {
     /// Additive: older peers ignore it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sanctions: Vec<crate::moderation::Sanction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub play_cooldown: Option<PlayCooldown>,
+}
+
+/// Durable fair-play cooldown, shared by every lobby using this career store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayCooldown {
+    /// Unix seconds, rounded up so a fractional second never opens early.
+    pub until: i64,
+    pub strikes: u32,
 }
 
 /// Stable codes of [`CareerView::error_code`].
 pub mod error_code {
+    pub const PLAY_COOLDOWN: &str = "play_cooldown";
     /// A new device key from a network that created today's share of new
     /// profiles (LR-16).
     pub const NEW_PROFILE_LIMIT: &str = "new_profile_limit";
@@ -660,7 +713,23 @@ mod tests {
         });
         let participant: ParticipantResult = serde_json::from_value(original.clone()).unwrap();
         assert!(!participant.is_bot);
+        assert!(participant.participation.is_none());
         assert_eq!(serde_json::to_value(&participant).unwrap(), original);
+
+        let mut tracked = participant.clone();
+        tracked.disconnected = true;
+        tracked.participation = Some(Participation {
+            connected_ms: 120_000,
+            disconnected_ms: 5_000,
+            afk_ms: 0,
+            abandoned: false,
+        });
+        assert_eq!(
+            serde_json::from_slice::<ParticipantResult>(&serde_json::to_vec(&tracked).unwrap())
+                .unwrap(),
+            tracked,
+            "a short final disconnect is independent of abandon history"
+        );
 
         let old_result = serde_json::json!({
             "result_id": "rc6-receipt", "server_epoch": 1, "match_id": 2,
@@ -670,7 +739,51 @@ mod tests {
             "unrated_reason": "dev", "participants": [original], "saved": false
         });
         let result: MatchResult = serde_json::from_value(old_result.clone()).unwrap();
-        assert_eq!(serde_json::to_value(result).unwrap(), old_result);
+        assert_eq!(serde_json::to_value(&result).unwrap(), old_result);
+        for (outcome, reason, abandoned, rated_penalty, expected) in [
+            (MatchOutcome::Completed, None, false, false, Some(true)),
+            (MatchOutcome::Completed, None, true, true, Some(false)),
+            (
+                MatchOutcome::Interrupted,
+                Some("abandoned_reaped"),
+                true,
+                true,
+                Some(false),
+            ),
+            (
+                MatchOutcome::Interrupted,
+                Some("abandoned_reaped"),
+                true,
+                false,
+                None,
+            ),
+            (
+                MatchOutcome::Interrupted,
+                Some("server_interrupted"),
+                true,
+                true,
+                None,
+            ),
+        ] {
+            let mut personal = result.clone();
+            personal.outcome = outcome;
+            personal.unrated_reason = reason.map(str::to_owned);
+            let p = &mut personal.participants[0];
+            p.disconnected = true;
+            p.participation = abandoned.then_some(Participation {
+                abandoned,
+                ..Default::default()
+            });
+            p.rating = rated_penalty.then_some(RatingChange {
+                before: 1000,
+                after: 968,
+                delta: -32,
+            });
+            assert_eq!(
+                personal.participant_won(&personal.participants[0]),
+                expected
+            );
+        }
 
         let mut bot = participant;
         bot.is_bot = true;

@@ -38,6 +38,7 @@ pub fn apply(
     }
     match packet {
         Transform {
+            input_active: _,
             x,
             y,
             z,

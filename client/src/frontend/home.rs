@@ -184,12 +184,31 @@ fn layout_home_chrome(
                 }
             }
             HomeChrome::BuildInfo => {
-                node.left = Val::Px(24.0 / scale);
-                node.right = Val::Px(24.0 / scale);
-                node.bottom = Val::Px((footer_gutter + 6.0) / scale);
+                // The compact canvas uses the bottom row for navigation. Keep
+                // build identification in the gap between identity and utilities.
+                node.left = if compact {
+                    Val::Percent(44.0)
+                } else {
+                    Val::Px(24.0 / scale)
+                };
+                node.right = if compact {
+                    Val::Percent(20.0)
+                } else {
+                    Val::Px(24.0 / scale)
+                };
+                node.top = if compact {
+                    Val::Px(16.0 / scale)
+                } else {
+                    Val::Auto
+                };
+                node.bottom = if compact {
+                    Val::Auto
+                } else {
+                    Val::Px((footer_gutter + 6.0) / scale)
+                };
                 node.height = Val::Px(18.0 / scale);
                 if let Some(mut font) = font {
-                    font.font_size = (12.0 / scale).into();
+                    font.font_size = (if compact { 10.0 } else { 12.0 } / scale).into();
                 }
             }
         }
@@ -1905,8 +1924,16 @@ mod tests {
             }
             assert_eq!(node.bottom, Val::Px(52.0 / scale));
             let footer = app.world().get::<Node>(footer).unwrap();
-            assert_eq!(footer.left, footer.right);
-            assert_eq!(footer.bottom, Val::Px(26.0 / scale));
+            if size.y < 600.0 {
+                assert_eq!(footer.top, Val::Px(16.0 / scale));
+                assert_eq!(footer.bottom, Val::Auto);
+                assert_eq!(footer.left, Val::Percent(44.0));
+                assert_eq!(footer.right, Val::Percent(20.0));
+            } else {
+                assert_eq!(footer.top, Val::Auto);
+                assert_eq!(footer.left, footer.right);
+                assert_eq!(footer.bottom, Val::Px(26.0 / scale));
+            }
             assert_eq!(footer.height, Val::Px(18.0 / scale));
             assert_eq!(
                 node.display,

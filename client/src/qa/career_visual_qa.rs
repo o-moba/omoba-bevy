@@ -125,6 +125,7 @@ fn profile(id: char, nickname: &str) -> ProfileSummary {
         matches_played: 12,
         wins: 7,
         losses: 5,
+        abandons: 0,
         progression_xp: 2450,
     }
 }
@@ -141,6 +142,7 @@ fn fixture() -> CareerView {
     let classes = [HeroClass::Warrior, HeroClass::Mage, HeroClass::Ranger];
     let participants: Vec<_> = (0..10)
         .map(|index| ParticipantResult {
+            participation: None,
             is_bot: false,
             player_id: index + 1,
             profile_id: Some(if index == 0 {

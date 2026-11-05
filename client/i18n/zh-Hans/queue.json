@@ -29,5 +29,7 @@
   "queue.ready.found": "已找到对局 · {count}/{needed} 人已确认\n请在 {seconds} 秒内确认",
   "queue.ready.accepted": "你已确认 · {count}/{needed} 人已准备\n等待其他玩家 · {seconds} 秒",
   "queue.ready.accept": "接受对局",
-  "queue.ready.decline": "拒绝"
+  "queue.ready.decline": "拒绝",
+  "queue.failed.play_cooldown": "因离开对局或挂机，暂时无法匹配。",
+  "queue.play_cooldown.remaining": "离开对局或挂机的等待时间：{seconds}秒。"
 }

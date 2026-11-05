@@ -79,6 +79,7 @@ impl Fixture {
 }
 fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> ParticipantResult {
     ParticipantResult {
+        participation: None,
         is_bot: false,
         player_id,
         profile_id: Some(profile.profile_id.clone()),
@@ -1908,6 +1909,339 @@ async fn committed_gameplay_recovers_immediately_but_prematch_cancel_can_win_the
         assert_eq!(
             f.store.history(&a.profile_id, None).await.unwrap().0.len(),
             1
+        );
+    }
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_settlement_is_atomic_idempotent_and_survives_reopen() {
+    use shared::career::Participation;
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let c = f.profile(3).await;
+    let d = f.profile(4).await;
+    for n in 1..=3 {
+        // Expire the preceding cooldown while retaining its 24-hour event.
+        sqlx::query(
+            "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+        )
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE career_profiles SET rating=1000")
+            .execute(&f.store.pool)
+            .await
+            .unwrap();
+        let mut final_result = result(&a, &b, n);
+        final_result.duration_ms = 120_000;
+        final_result.ended_at_ms = 121_000;
+        final_result.participants.extend([
+            participant(&c, 3, Team::Green),
+            participant(&d, 4, Team::Blue),
+        ]);
+        // A winning leaver still loses; its losing-team opponent has a short
+        // reconnect and must receive the normal loss, without a strike.
+        final_result.participants[0].participation = Some(Participation {
+            connected_ms: 30_000,
+            disconnected_ms: 90_000,
+            afk_ms: 0,
+            abandoned: true,
+        });
+        final_result.participants[1].participation = Some(Participation {
+            connected_ms: 119_000,
+            disconnected_ms: 1_000,
+            afk_ms: 0,
+            abandoned: false,
+        });
+        let mut start = starting(&final_result);
+        for p in &mut start.participants {
+            p.participation = None;
+        }
+        f.store.start(start).await.unwrap();
+        let (one, two) = tokio::join!(
+            f.store.settle(final_result.clone()),
+            f.store.settle(final_result.clone())
+        );
+        let saved = one.unwrap();
+        assert_eq!(saved, two.unwrap());
+        assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, -32);
+        assert_eq!(saved.participants[0].progression_xp_gained, 0);
+        assert_eq!(saved.participants[1].rating.as_ref().unwrap().delta, -24);
+        assert_eq!(saved.participants[2].rating.as_ref().unwrap().delta, 24);
+        let reopened = f.another_owner().await;
+        assert_eq!(reopened.settle(final_result).await.unwrap(), saved);
+        let profile = reopened.profile(&a.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                profile.abandons,
+                profile.wins,
+                profile.losses,
+                profile.progression_xp
+            ),
+            (n as u32, 0, n as u32, 0)
+        );
+        assert_eq!(reopened.profile(&b.profile_id).await.unwrap().abandons, 0);
+        let (count, seconds): (i64, f64) = sqlx::query_as("SELECT strikes::bigint,extract(epoch FROM cooldown_until-clock_timestamp())::double precision FROM career_play_penalties WHERE profile_id=$1")
+            .bind(&a.profile_id).fetch_one(&f.store.pool).await.unwrap();
+        let expected = match n {
+            1 => 300.,
+            2 => 1800.,
+            _ => 86400.,
+        };
+        assert_eq!(count, n as i64);
+        assert!(seconds > expected - 10. && seconds <= expected, "{seconds}");
+    }
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_teammate_reduction_and_invalid_time_cannot_settle() {
+    use shared::career::Participation;
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let c = f.profile(3).await;
+    let d = f.profile(4).await;
+    // Both teams mix newcomer K48 and established K32. Apply each coefficient
+    // before the leaver override / teammate reduction, using locked profiles.
+    sqlx::query(
+        "UPDATE career_profiles SET rated_matches=20,matches_played=20 WHERE profile_id=ANY($1)",
+    )
+    .bind(vec![b.profile_id.clone(), c.profile_id.clone()])
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    let mut completed = result(&a, &b, 1);
+    completed.duration_ms = 120_000;
+    completed.ended_at_ms = 121_000;
+    completed.participants.extend([
+        participant(&c, 3, Team::Green),
+        participant(&d, 4, Team::Blue),
+    ]);
+    completed.participants[1].participation = Some(Participation {
+        connected_ms: 120_000,
+        disconnected_ms: 0,
+        afk_ms: 90_000,
+        abandoned: true,
+    });
+    let mut start = starting(&completed);
+    for p in &mut start.participants {
+        p.participation = None;
+    }
+    f.store.start(start).await.unwrap();
+    let mut invalid = completed.clone();
+    invalid.participants[1]
+        .participation
+        .as_mut()
+        .unwrap()
+        .afk_ms = 120_001;
+    assert!(f.store.settle(invalid).await.is_err());
+    assert_eq!(f.store.profile(&b.profile_id).await.unwrap().abandons, 0);
+    let saved = f.store.settle(completed).await.unwrap();
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 24);
+    assert_eq!(saved.participants[2].rating.as_ref().unwrap().delta, 16);
+    assert_eq!(saved.participants[1].rating.as_ref().unwrap().delta, -32);
+    assert_eq!(saved.participants[3].rating.as_ref().unwrap().delta, -12);
+    assert_eq!(saved.participants[3].progression_xp_gained, 100);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_failed_terminal_transaction_rolls_back_incident_and_awards() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut completed = result(&a, &b, 1);
+    completed.duration_ms = 100_000;
+    completed.ended_at_ms = 101_000;
+    completed.participants[0].participation = Some(shared::career::Participation {
+        connected_ms: 10_000,
+        disconnected_ms: 90_000,
+        afk_ms: 0,
+        abandoned: true,
+    });
+    let mut start = starting(&completed);
+    start.participants[0].participation = None;
+    f.store.start(start).await.unwrap();
+    sqlx::raw_sql("CREATE FUNCTION fixture_reject_terminal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status='settled' THEN RAISE EXCEPTION 'fixture terminal failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fixture_terminal BEFORE UPDATE ON career_matches FOR EACH ROW EXECUTE FUNCTION fixture_reject_terminal();")
+        .execute(&f.store.pool).await.unwrap();
+    assert!(f.store.settle(completed.clone()).await.is_err());
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    for table in ["career_abandon_events", "career_play_penalties"] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+    sqlx::raw_sql(
+        "DROP TRIGGER fixture_terminal ON career_matches; DROP FUNCTION fixture_reject_terminal();",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    f.store.settle(completed).await.unwrap();
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap().abandons, 1);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_schema_upgrade_preserves_saved_profile_and_cooldown_is_cross_owner() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    sqlx::raw_sql("UPDATE career_profiles SET rating=1234,rated_matches=25,matches_played=25,wins=15,losses=10,progression_xp=1000; DROP TABLE career_abandon_events,career_play_penalties; ALTER TABLE career_profiles DROP COLUMN abandons; DELETE FROM career_schema_version WHERE version=7;")
+        .execute(&f.store.pool).await.unwrap();
+    let upgraded = f.another_owner().await;
+    let profile = upgraded.profile(&a.profile_id).await.unwrap();
+    assert_eq!(
+        (
+            profile.rating,
+            profile.rated_matches,
+            profile.progression_xp,
+            profile.abandons
+        ),
+        (1234, 25, 1000, 0)
+    );
+    let mut completed = result(&a, &b, 1);
+    completed.duration_ms = 100_000;
+    completed.ended_at_ms = 101_000;
+    completed.participants[0].participation = Some(shared::career::Participation {
+        connected_ms: 100_000,
+        disconnected_ms: 0,
+        afk_ms: 10_000,
+        abandoned: true,
+    });
+    let mut start = starting(&completed);
+    start.participants[0].participation = None;
+    upgraded.start(start).await.unwrap();
+    upgraded.settle(completed).await.unwrap();
+    let access = f
+        .store
+        .access(&format!("{:064x}", 1), &a.profile_id)
+        .await
+        .unwrap();
+    let cooldown = access.play_cooldown.unwrap();
+    assert_eq!(cooldown.strikes, 1);
+    assert!(cooldown.until > 0);
+    let another_match = result(&a, &b, 2);
+    assert_eq!(
+        f.store.start(starting(&another_match)).await.unwrap_err(),
+        shared::career::error_code::PLAY_COOLDOWN
+    );
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_matches WHERE result_id=$1)")
+            .bind(&another_match.result_id)
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    assert!(!exists, "refusal rolls back roster and match reservation");
+
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 2), &b.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    sqlx::query(
+        "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    assert!(
+        upgraded
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_legacy_disconnect_has_no_new_win_rewards_or_inferred_incident() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut completed = result(&a, &b, 1);
+    completed.participants[0].disconnected = true;
+    assert!(completed.participants[0].participation.is_none());
+    f.store.start(starting(&completed)).await.unwrap();
+    let saved = f.store.settle(completed).await.unwrap();
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 0);
+    assert_eq!(saved.participants[0].progression_xp_gained, 0);
+    let profile = f.store.profile(&a.profile_id).await.unwrap();
+    assert_eq!((profile.wins, profile.losses, profile.abandons), (1, 0, 0));
+    assert_eq!(
+        f.store.history(&a.profile_id, None).await.unwrap().0[0].won,
+        Some(true)
+    );
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_only_player_caused_unattended_shutdown_adds_discipline() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for (n, reason, penalized) in [
+        (1, "server_interrupted", false),
+        (2, "duration_capped", false),
+        (3, "abandoned_reaped", true),
+    ] {
+        let mut terminal = result(&a, &b, n);
+        let mut start = starting(&terminal);
+        start.duration_ms = 0;
+        f.store.start(start).await.unwrap();
+        terminal.outcome = MatchOutcome::Interrupted;
+        terminal.rated = false;
+        terminal.winner = None;
+        terminal.unrated_reason = Some(reason.into());
+        terminal.duration_ms = 600_000;
+        terminal.ended_at_ms = 601_000;
+        terminal.participants[0].participation = Some(shared::career::Participation {
+            connected_ms: 90_000,
+            disconnected_ms: 510_000,
+            afk_ms: 0,
+            abandoned: true,
+        });
+        let saved = f.store.settle(terminal.clone()).await.unwrap();
+        assert_eq!(f.store.settle(terminal).await.unwrap(), saved);
+        let profile = f.store.profile(&a.profile_id).await.unwrap();
+        assert_eq!(profile.abandons, u32::from(penalized));
+        assert_eq!(profile.losses, u32::from(penalized));
+        assert_eq!(profile.rated_matches, u32::from(penalized));
+        assert_eq!(profile.rating, if penalized { 968 } else { 1000 });
+        assert_eq!(profile.progression_xp, 0);
+        let other = f.store.profile(&b.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                other.rating,
+                other.abandons,
+                other.losses,
+                other.rated_matches
+            ),
+            (1000, 0, 0, 0)
         );
     }
     f.close().await;
