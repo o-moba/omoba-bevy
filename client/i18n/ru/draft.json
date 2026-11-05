@@ -34,5 +34,8 @@
   "draft.error.start_timeout": "Старт матча занял слишком долго. Подтвердите выбор снова или выйдите.",
   "draft.timer.join_remaining": "Ждём игроков · {seconds} с",
   "draft.error.allocation_cancelled_or_expired": "Игрок не подключился. Возвращаемся в поиск…",
-  "draft.error.durable_start_pending": "Сохраняем начало матча. Подождите…"
+  "draft.error.durable_start_pending": "Сохраняем начало матча. Подождите…",
+  "draft.class_taken": "{hero} · Занят",
+  "draft.error.hero_taken": "Союзник подтвердил этот класс. Выберите другой или дождитесь отмены выбора.",
+  "draft.error.hero_auto_picked": "Ваш класс занят. Доступный класс выбран автоматически."
 }

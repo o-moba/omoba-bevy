@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Enforce distinct hero classes within a public team (C7): reject conflicting
+  Select/Lock and delayed ownership replies, allow opposing mirror picks, and
+  free a class on unlock. Timeout and legacy opt-out paths preserve valid human
+  locks and give other players/bots available canonical classes before asset
+  readiness and durable allocation. Native class tiles show localized Taken
+  state, with disabled controls and stale-action guards. Actual signed ten-human
+  draft-to-play proof,618 real PG/API/server tests and28 harness tests pass.
+  Fixture preparation stays asynchronous so UDP sessions keep heartbeats.
+  Current native and committed full-CI acceptance remains pending.
+
 - Update the Home queue regression's expected Ranked label for its explicitly
   qualified profile: the button includes rating1000. The previous expectation
   described a profile-less screen and would fail with the new eligibility fixture.
@@ -16,8 +26,10 @@ All notable changes are recorded here. The canonical version is
   Remakes, interruptions, custom/offline practice and own proved leaves/AFK do
   not count; ordinary completed surrender does. Local612PG/API/server,184shared,
   27harness and13Python tests pass, with headless/native clippy and installed UI
-  assets checked. Full17-stage CI, real tenth-completion acceptance and fresh
-  native visual proof remain pending. Synthetic warmup receipts in process tests
+  assets checked. Actual public admission proof passes: wire denial0/9,
+  ordinary standard-map play and surrender after600140ms, saved completion10,
+  fresh Ranked acceptance10, with no VK link. Prior nine synthetic receipts are
+  disclosed. Full17-stage CI and fresh native visual proof remain pending. Synthetic warmup receipts in process tests
   are disclosed and restricted to a separate loopback-omoba_test-only helper.
 
 - Fix two server Clippy findings caught by C5 CI: express vote-deadline terminal

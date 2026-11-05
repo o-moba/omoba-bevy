@@ -21,7 +21,7 @@ use crate::{
     persistence::ClientSessionId,
     team::{AvatarThumbnails, CharacterChoice},
     ui::{
-        Activated, TestId, UiAction, UiActionAppExt, UiSet,
+        Activated, Pressable, TestId, UiAction, UiActionAppExt, UiSet,
         action::UiActionT,
         theme::{self, ButtonKind},
         widgets::ButtonStyle,
@@ -263,6 +263,15 @@ fn draft_actions(
             DraftAction::Connect => crate::passport::connect_account(),
             DraftAction::Picker(tab) => state.picker_tab = *tab,
             DraftAction::Lock if draft.phase == PrematchPhase::Draft => {
+                let class = state
+                    .choice
+                    .as_ref()
+                    .map_or(local.hero_class, |c| c.hero_class);
+                if !local.locked && team_class_taken(&draft.players, game.your_id, class) {
+                    state.notice = Some(tr("draft.error.hero_taken").into());
+                    state.desired_lock = None;
+                    continue;
+                }
                 state.notice = None;
                 state.desired_lock = Some(!local.locked);
             }
@@ -282,6 +291,10 @@ fn draft_actions(
                 state.notice = None;
             }
             DraftAction::Class(class) => {
+                if team_class_taken(&draft.players, game.your_id, *class) {
+                    state.notice = Some(tr("draft.error.hero_taken").into());
+                    continue;
+                }
                 if let Some(choice) = &mut state.choice {
                     choice.pick_class(*class);
                 }
@@ -345,6 +358,15 @@ fn send_requests(
         if !local.locked
             && desired
                 .as_ref()
+                .is_some_and(|c| team_class_taken(&draft.players, game.your_id, c.hero_class))
+        {
+            state.desired_lock = None;
+            state.notice = Some(tr("draft.error.hero_taken").into());
+            return;
+        }
+        if !local.locked
+            && desired
+                .as_ref()
                 .is_some_and(|choice| *choice != Choice::from(local))
         {
             let choice = desired.unwrap();
@@ -405,6 +427,19 @@ pub(super) fn error_text(error: &str) -> String {
         .map_or_else(|| error.to_owned(), str::to_owned)
 }
 
+fn team_class_taken(players: &[DraftPlayer], local_id: u64, class: HeroClass) -> bool {
+    let Some(local) = players.iter().find(|p| p.player_id == local_id) else {
+        return false;
+    };
+    players.iter().any(|p| {
+        p.player_id != local_id
+            && p.team == local.team
+            && !p.is_bot
+            && p.locked
+            && p.hero_class == class
+    })
+}
+
 pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> String {
     let Some(local) = players.iter().find(|p| p.player_id == local_id) else {
         return String::new();
@@ -461,7 +496,7 @@ pub(super) fn action_button<T: UiActionT>(
     width: f32,
     primary: bool,
     selected: bool,
-) {
+) -> Entity {
     let style = if selected {
         ButtonStyle {
             kind: ButtonKind::Tile,
@@ -502,7 +537,8 @@ pub(super) fn action_button<T: UiActionT>(
         ))
         .with_children(|button| {
             button.spawn(widgets::label(label, 13.0, theme::IVORY));
-        });
+        })
+        .id()
 }
 
 pub(super) fn avatar_name(slug: Option<&str>) -> String {
@@ -995,15 +1031,31 @@ fn render_draft(
                             })
                             .with_children(|classes| {
                                 for class in HeroClass::ALL {
-                                    action_button(
+                                    let taken =
+                                        team_class_taken(&draft.players, game.your_id, class);
+                                    let label = if taken {
+                                        trf(
+                                            "draft.class_taken",
+                                            &[("hero", &data::hero_name(class))],
+                                        )
+                                    } else {
+                                        data::hero_name(class).to_owned()
+                                    };
+                                    let button = action_button(
                                         classes,
-                                        data::hero_name(class),
+                                        &label,
                                         DraftAction::Class(class),
                                         &format!("DraftClass-{}", class.id()),
                                         (picker_width - 12.0) / 4.0,
                                         false,
                                         choice.is_some_and(|c| c.hero_class == class),
                                     );
+                                    if taken {
+                                        classes.commands().entity(button).insert(Pressable {
+                                            disabled: true,
+                                            ..default()
+                                        });
+                                    }
                                 }
                             });
                         picker
@@ -1213,7 +1265,7 @@ fn render_draft(
                     },
                     Name::new("DraftNotice"),
                 ));
-                action_button(
+                let button = action_button(
                     footer,
                     if state.pending.is_some() {
                         tr("draft.button.syncing")
@@ -1228,6 +1280,16 @@ fn render_draft(
                     !locked,
                     false,
                 );
+                if !locked
+                    && choice.is_some_and(|c| {
+                        team_class_taken(&draft.players, game.your_id, c.hero_class)
+                    })
+                {
+                    footer.commands().entity(button).insert(Pressable {
+                        disabled: true,
+                        ..default()
+                    });
+                }
             });
         });
 }
@@ -1912,7 +1974,7 @@ mod tests {
         assert!(state.pending.is_none() && state.namespace.is_none() && !state.wants_loaded);
     }
     #[test]
-    fn composition_warnings_are_advisory_and_do_not_impose_class_uniqueness() {
+    fn avatar_and_role_warnings_remain_advisory_for_unlocked_picks() {
         let player = |id| DraftPlayer {
             handheld: Default::default(),
             player_id: id,
@@ -2063,6 +2125,76 @@ mod tests {
         assert_eq!(plate[2], "中路");
         assert!(!plate.iter().any(|text| text == "Warrior" || text == "Mid"));
         assert!(!shown.iter().any(|text| text == "Assemble your team"));
+    }
+
+    #[test]
+    fn teammate_lock_disables_tiles_and_lock_and_rechecks_a_stale_press() {
+        use crate::ui::test_id::harness;
+        let (mut app, _) = draft_ui_app(crate::platform::UiProfile::Mobile, 852.0, 393.0);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let players = &mut game.prematch.as_mut().unwrap().players;
+            let mut teammate = players[0].clone();
+            teammate.player_id = 8;
+            teammate.nickname = "Teammate".into();
+            teammate.locked = true;
+            players.push(teammate);
+        }
+        app.world_mut().resource_mut::<DraftClient>().picker_tab = PickerTab::Classes;
+        app.update();
+        for id in ["DraftClass-warrior", "DraftLock"] {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            assert!(
+                app.world().get::<Pressable>(button).unwrap().disabled,
+                "{id}"
+            );
+        }
+        // An action queued before the latest roster arrived must be checked again.
+        for action in [DraftAction::Class(HeroClass::Warrior), DraftAction::Lock] {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
+        let state = app.world().resource::<DraftClient>();
+        assert_eq!(state.desired_lock, None);
+        assert_eq!(
+            state.choice.as_ref().unwrap().hero_class,
+            HeroClass::Warrior
+        );
+        assert_eq!(state.notice.as_deref(), Some(tr("draft.error.hero_taken")));
+        assert!(app.world().resource::<SentRequests>().0.is_empty());
+        // A bot or opposing mirror does not reserve a human's class.
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            game.prematch.as_mut().unwrap().players[1].is_bot = true;
+        }
+        app.update();
+        for id in ["DraftClass-warrior", "DraftLock"] {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            assert!(
+                !app.world().get::<Pressable>(button).unwrap().disabled,
+                "{id}"
+            );
+        }
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let player = &mut game.prematch.as_mut().unwrap().players[1];
+            player.is_bot = false;
+            player.team = shared::map::Team::Blue;
+        }
+        app.update();
+        assert!(!team_class_taken(
+            &app.world()
+                .resource::<GameStateSnapshot>()
+                .prematch
+                .as_ref()
+                .unwrap()
+                .players,
+            7,
+            HeroClass::Warrior
+        ));
     }
 
     #[test]

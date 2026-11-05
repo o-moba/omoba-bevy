@@ -235,3 +235,49 @@ complete client. Final screen/CI proof remains pending. The eligibility probe
 supports ordinary surrender only when the worker offers it after ten minutes;
 standard Ranked base destruction remains an independent stage.
 C5 full CI42074945255 is now green across all seven jobs; native1571 tests pass.
+
+
+C6 public v2 PASS616.87s, resultf2ba22712fd1e68d01f237c7e3f37dbc: denial0/9,
+legal standard-map surrender after600140ms, saved counter9->10, fresh Ranked
+acceptance10 without VK. Nine prior receipts explicitlysynthetic; the real game
+is one completed public loss,25XP. Original20min natural-victory attempt retained
+FAIL, not accepted as proof. Current888d16dc full CI42083864979 runs17 stages;
+obsolete own a733CI42082344781 canceled after888started, a733Release had passed.
+C5CI42074945255 all7/all15green with verified artifact. Native visual stillpending.
+C7 pre-implementation contract frozen; code work now follows C6 local acceptance.
+
+
+### C7 implementation checkpoint — 2026-11-06
+
+The pre-implementation contract is saved at
+`.agent/tasks/RANKED-LAUNCH-READINESS-20261105/c7-spec.md`. Server Select/Lock and
+async ownership completion reject a locked human teammate's class; the opposing
+team may mirror it and unlock frees it. Deadline fallback preserves valid human
+locks, then resolves idle humans before bots with deterministic free canonical
+classes. Loading replacements invalidate only changed assets. The first public
+allocation boundary also checks opt-out clients; existing durable/played rosters
+are not reinterpreted. No schema/protocol/dependency/deployment change.
+
+Native class tiles and Lock now show localized Taken/disabled state and recheck
+stale presses. Headless/probe clients plan available classes from authoritative
+rosters, including a fifth distinct fill class. Twenty-five prematch tests pass
+(including opt-out boundary, bots yielding, delayed ownership race and survivor
+readiness); Node policy tests pass. Actual signed unique-draft rehearsal and
+current native/all-regression checks are still pending. This checkpoint does not
+close C7. The existing CI harness now includes the signed unique-draft journey.
+
+
+C7 public v2 proof now PASS: actual signed ten-human Ranked draft rejected same-team
+Select and Lock, allowed opposing Mage mirrors, freed the class on unlock, then
+started with five distinct classes per team while preserving valid locks.
+Allocation `55db1284051ccd289e2c83d2e82ff6e7`; green Warrior/Mage/Ranger/Cleric/Warden,
+blue Mage/Warrior/Ranger/Cleric/Warden. Ten disclosed synthetic prior Casual
+fixtures satisfy admission; gameplay/validation is ordinary. The first attempt
+is FAIL: synchronous fixture helpers blocked the probe's UDP processing and caused
+expired sessions. Helpers now serialize asynchronously while heartbeats continue;
+no server timeout/authentication policy was relaxed. Both artifacts are retained.
+Current full real PG/API/store/server regression:618 passed/0failed/0ignored in18
+suites. Harness28, Node policy11cases/Python7tests, all-target server/harness clippy,
+format/diff and installed UI assets pass. Native draft tests/final clippy and
+committed18-stage full CI remain pending. Mac is still manually locked; no new
+screenshot is claimed. Evidence `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/c7-evidence.json`.

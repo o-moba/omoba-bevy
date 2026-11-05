@@ -13,3 +13,11 @@ class PublicQueuePolicyTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("queue_policy: PASS (5", result.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "public protocol probe requires Node")
+    def test_draft_follows_human_locks_without_reserving_bot_classes(self):
+        script = Path(__file__).with_name("test_public_mvp.mjs")
+        result = subprocess.run(["node", str(script), "--self-test-draft-policy"],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("draft_policy: PASS (6", result.stdout)

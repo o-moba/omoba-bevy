@@ -615,6 +615,11 @@ impl ServerRuntime {
         Ok(())
     }
 
+    /// Allocation metadata is immutable even while its durable ACK is pending.
+    pub(crate) fn career_roster_is_frozen(&self) -> bool {
+        self.career.round.is_some()
+    }
+
     /// Called at the final formation boundary. Career-backed rounds remain at
     /// Starting(0) until durable allocation ACK; no combat or income runs early.
     pub(crate) fn begin_career_round(&mut self, now: Instant) -> bool {
@@ -628,6 +633,9 @@ impl ServerRuntime {
             return false;
         }
         if !self.allocated_humans_ready() {
+            return false;
+        }
+        if !self.prepare_public_unique_loadouts(now) {
             return false;
         }
         let practice = self.rules.local_results;

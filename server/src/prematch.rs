@@ -20,6 +20,7 @@ use crate::runtime::ServerRuntime;
 use crate::session::reset_player_round;
 
 pub(crate) use common::prematch::DraftState;
+mod unique;
 
 #[derive(Default)]
 pub(super) struct PrematchRuntime {
@@ -36,6 +37,14 @@ impl ServerRuntime {
     #[cfg(test)]
     pub(crate) fn prematch_generation_for_test(&self) -> u64 {
         self.prematch.generation
+    }
+
+    fn all_drafters(&self, test: fn(&DraftState) -> bool) -> bool {
+        self.world
+            .players
+            .values()
+            .filter(|p| p.joined && !p.hero.identity.is_bot && p.draft.capable)
+            .all(|p| test(&p.draft))
     }
 
     pub(crate) fn prematch_required(&self) -> bool {
@@ -119,13 +128,6 @@ impl ServerRuntime {
             RosterPolicy::Present => ready.max(1),
             RosterPolicy::Full => self.rules.roster_size(),
         };
-        let all = |test: fn(&DraftState) -> bool| {
-            self.world
-                .players
-                .values()
-                .filter(|p| p.joined && !p.hero.identity.is_bot && p.draft.capable)
-                .all(|p| test(&p.draft))
-        };
         match self.prematch.phase.unwrap_or(PrematchPhase::Draft) {
             PrematchPhase::Draft => {
                 self.world.game_state = GameState::Forming { ready, needed };
@@ -148,18 +150,9 @@ impl ServerRuntime {
                     || self.world.players.iter().any(|(addr, p)| {
                         p.joined && p.draft.capable && self.passport_admissions.is_pending(*addr)
                     });
-                if !pending_admission && (all(|d| d.locked) || expired) {
-                    if expired {
-                        for player in self
-                            .world
-                            .players
-                            .values_mut()
-                            .filter(|p| p.joined && p.draft.capable && !p.hero.identity.is_bot)
-                        {
-                            // The live identity contains the last accepted
-                            // selection, including the admitted Join defaults.
-                            player.draft.locked = true;
-                        }
+                if !pending_admission && (self.all_drafters(|d| d.locked) || expired) {
+                    if !self.finalize_unique_draft(now) {
+                        return true;
                     }
                     self.prematch.phase = Some(PrematchPhase::Countdown);
                     self.prematch.deadline = Some(now + Duration::from_millis(COUNTDOWN_MS.into()));
@@ -181,8 +174,13 @@ impl ServerRuntime {
                 }
             }
             PrematchPhase::Loading => {
+                // A Casual replacement receives its unique canonical pick
+                // before the client can acknowledge the changed assets.
+                if !self.career_roster_is_frozen() && !self.finalize_unique_draft(now) {
+                    return true;
+                }
                 self.world.game_state = GameState::Forming { ready, needed };
-                let all_loaded = all(|d| d.loaded);
+                let all_loaded = self.all_drafters(|d| d.loaded);
                 if remaining_ms(self.prematch.deadline, now) == 0 {
                     if self.match_service.worker().is_some() {
                         if all_loaded {
@@ -285,6 +283,7 @@ impl ServerRuntime {
         if !self.draft_request_valid(addr, &request) {
             return;
         }
+        let taken = self.prematch_class_taken(addr, &request.action);
         let player = self.world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
         if request.request_id == 0 || request.request_id <= player.draft.request_id {
@@ -294,6 +293,10 @@ impl ServerRuntime {
         player.draft.request_id = request.request_id;
         player.draft.acknowledged_request_id = request.request_id;
         player.draft.error = None;
+        if taken {
+            player.draft.error = Some("hero_taken".into());
+            return;
+        }
         let phase = self.prematch.phase;
         let allowed = match &request.action {
             PrematchAction::Select { .. } => {
@@ -397,7 +400,12 @@ impl ServerRuntime {
         if !self.draft_request_valid(addr, &request) {
             return;
         }
+        let taken = self.prematch_class_taken(addr, &request.action);
         let player = self.world.players.get_mut(&addr).unwrap();
+        if taken {
+            player.draft.error = Some("hero_taken".into());
+            return;
+        }
         match request.action {
             PrematchAction::Select {
                 character,

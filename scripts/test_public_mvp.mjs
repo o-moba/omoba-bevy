@@ -60,6 +60,23 @@ if(process.argv.includes('--self-test-queue-policy')) {
  assert.equal(nextQueueAction(client,2500),null);
  console.log('queue_policy: PASS (5 correlated consent/refresh cases)');process.exit(0);
 }
+function availableDraftClass(players,id) {
+ const me=players.find(p=>p.player_id===id);if(!me)return null;
+ const team=players.filter(p=>p.team===me.team&&!p.is_bot).sort((a,b)=>Number(b.locked)-Number(a.locked)||(a.player_id<b.player_id?-1:a.player_id>b.player_id?1:0));
+ const used=new Set();
+ for(const p of team){const c=!used.has(p.hero_class)?p.hero_class:['warrior','mage','ranger','cleric','warden'].find(c=>!used.has(c));
+  if(!c)return null;used.add(c);if(p.player_id===id)return c;}
+ return null;
+}
+if(process.argv.includes('--self-test-draft-policy')) {
+ const rows=Array.from({length:5},(_,i)=>({player_id:i+1,team:'green',hero_class:'warrior',locked:false,is_bot:false}));
+ rows.push({player_id:10,team:'green',hero_class:'warrior',locked:true,is_bot:true},{player_id:11,team:'blue',hero_class:'warrior',locked:true,is_bot:false});
+ assert.equal(availableDraftClass(rows,1),'warrior');rows[4].locked=true;
+ assert.equal(availableDraftClass(rows,5),'warrior');assert.notEqual(availableDraftClass(rows,1),'warrior');
+ assert.equal(new Set([1,2,3,4,5].map(id=>availableDraftClass(rows,id))).size,5);
+ rows.reverse();assert.equal(availableDraftClass(rows,5),'warrior');assert.notEqual(availableDraftClass(rows,1),'warrior');
+ console.log('draft_policy: PASS (6 human-lock/bot/mirror/order/unique cases)');process.exit(0);
+}
 const opts = Object.fromEntries(process.argv.slice(2).map(s => {const [key,...rest]=s.replace(/^--/, '').split('=');return [key,rest.join('=')];}));
 const QUEUES = ['bot_practice','quick','humans_only'];
 // --mix=queue:count,…: players of several queues, interleaved as they arrive.
@@ -72,8 +89,8 @@ const scenario = opts.scenario || 'load';
 const draftExit=opts['draft-exit']||'leave';
 const exerciseStaleHandoff='exercise-stale-handoff' in opts;
 assert(['leave','disconnect'].includes(draftExit)&&(!opts['draft-exit']||scenario==='party-draft'), '--draft-exit=leave|disconnect is a party-draft option');
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','remake','surrender'].includes(scenario), 'unknown scenario');
-if(['remake','surrender'].includes(scenario)) assert(!mix&&preference==='humans_only'&&clientsCount===10, `${scenario} uses --clients=10 --preference=humans_only`);
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','unique-draft','remake','surrender'].includes(scenario), 'unknown scenario');
+if(['remake','surrender','unique-draft'].includes(scenario)) assert(!mix&&preference==='humans_only'&&clientsCount===10, `${scenario} uses --clients=10 --preference=humans_only`);
 else if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
 else if(['recovery','early-recovery'].includes(scenario)) assert(!mix&&((preference==='humans_only'&&clientsCount===10)||(preference!=='humans_only'&&clientsCount>=1&&clientsCount<=10)), `${scenario} uses one roster (Ranked: ten humans)`);
 else if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
@@ -135,6 +152,31 @@ Object.assign(env, {SERVER_ADDR:`127.0.0.1:${lobbyPort}`, OMOBA_SERVER_ROLE:'lob
  OMOBA_LIMIT_PROBES_PER_IP:'10000', OMOBA_LIMIT_PROBES_PER_NETWORK:'10000', OMOBA_LIMIT_PROBES_GLOBAL:'10000',
  OMOBA_LIMIT_ENDPOINTS_PER_IP:'2048', OMOBA_LIMIT_NEW_PROFILES_PER_IP:'1000000', OMOBA_LIMIT_NEW_PROFILES_TOTAL:'10000000',
  OMOBA_LIMIT_ARENAS_PER_IP:'100', OMOBA_LIMIT_PRACTICE_ABANDONS:'1000'});
+const qualificationChildren=new Set();
+let qualificationTail=Promise.resolve();
+// Keep live UDP heartbeats flowing while the isolated helper writes fixtures.
+// Serialize helpers to avoid ten competing store pools, without blocking Node.
+function qualifyRankedProfile(profile) {
+ const job=qualificationTail.then(()=>new Promise((resolve,reject)=>{
+  if(stopping){reject(new Error('probe stopped before fixture preparation'));return;}
+  const child=spawn(process.env.HARNESS_RANKED_FIXTURE_BIN,[],{
+   env:{...process.env,OMOBA_HARNESS_DATABASE_URL:process.env.OMOBA_TEST_DATABASE_URL},stdio:['pipe','pipe','pipe'],
+  });
+  qualificationChildren.add(child);
+  let stdout='',stderr='',timedOut=false;
+  const timer=setTimeout(()=>{timedOut=true;child.kill('SIGTERM');},60000);
+  child.stdout.on('data',chunk=>{stdout+=chunk;if(stdout.length>1048576)child.kill('SIGTERM');});
+  child.stderr.on('data',chunk=>{stderr=(stderr+chunk).slice(-1200);});
+  child.on('error',error=>{clearTimeout(timer);qualificationChildren.delete(child);reject(error);});
+  child.on('close',code=>{
+   clearTimeout(timer);qualificationChildren.delete(child);
+   if(code!==0||timedOut){reject(new Error(`isolated Ranked fixture failed (${timedOut?'timeout':code}): ${stderr}`));return;}
+   try{resolve(JSON.parse(stdout.trim()));}catch(error){reject(error);}
+  });
+  child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify({profiles:[profile],target:10}));
+ }));
+ qualificationTail=job.catch(()=>{});return job;
+}
 const ownedGroups=new Set();
 // A lobby client is in the queue once its match_service view says so (--queue-only).
 const QUEUED_STATES=['waiting','allocating','assigned'];
@@ -169,7 +211,7 @@ function resourceSample(){
  if(previous&&sample.wall_ms>previous.wall_ms)sample.cpu_percent_interval=Math.max(0,(sample.cpu_seconds-previous.cpu_seconds)*100000/(sample.wall_ms-previous.wall_ms));
  resources.push(sample);
 }
-function cleanup() {if(stopping)return;stopping=true;for(const c of all)c.close();for(const group of ownedGroups){try{process.kill(-group,'SIGTERM')}catch{}}fs.closeSync(logfile);}
+function cleanup() {if(stopping)return;stopping=true;for(const child of qualificationChildren)child.kill('SIGTERM');for(const c of all)c.close();for(const group of ownedGroups){try{process.kill(-group,'SIGTERM')}catch{}}fs.closeSync(logfile);}
 process.on('SIGINT',()=>{cleanup();process.exit(130)});
 process.on('SIGTERM',()=>{cleanup();process.exit(143)});
 class Client {
@@ -236,6 +278,7 @@ class Client {
  tick(now) {
   if(this.staleHandoffFailure)throw new Error('old lobby callback mutated worker authentication');
   if(!this.active)return;
+  if(this.qualificationError)throw this.qualificationError;
   // Retry admission until authentication completes, just like the native Hello
   // loop. A lost proof must not strand a synthetic client forever. Authenticate
   // retries are timer-driven, never echoed for every repeated server view.
@@ -259,16 +302,13 @@ class Client {
   if(this.port===lobbyPort&&this.partyPresence&&now-(this.lastPresence||0)>2000){this.lastPresence=now;this.gameplay({type:'party',command:{command:'presence',nickname:this.nickname,avatar:null}});}
   if(this.port===lobbyPort){
    if(this.preference==='humans_only' && (this.profile?.completed_public_matches??0)<10 && process.env.HARNESS_RANKED_FIXTURE_BIN) {
-    if(!this.qualificationFixture && this.profile) {
-     const run=spawnSync(process.env.HARNESS_RANKED_FIXTURE_BIN,[],{
-      input:JSON.stringify({profiles:[this.profile.profile_id],target:10}),encoding:'utf8',
-      env:{...process.env,OMOBA_HARNESS_DATABASE_URL:process.env.OMOBA_TEST_DATABASE_URL},timeout:60000,
-     });
-     assert.equal(run.status,0,`isolated Ranked fixture failed: ${run.stderr?.slice(-1200)}`);
-     this.qualificationFixture=JSON.parse(run.stdout.trim());
-     report.qualification_fixtures??=[];report.qualification_fixtures.push(this.qualificationFixture);
+    if(!this.qualificationRequested && this.profile) {
+     this.qualificationRequested=true;
+     qualifyRankedProfile(this.profile.profile_id).then(fixture=>{
+      this.qualificationFixture=fixture;report.qualification_fixtures??=[];report.qualification_fixtures.push(fixture);
+     }).catch(error=>{this.qualificationError=error;});
     }
-    if(this.profile && now-(this.lastQualificationRead||0)>1500) {
+    if(this.qualificationFixture && now-(this.lastQualificationRead||0)>1500) {
      this.lastQualificationRead=now;this.account({action:'profile',request_id:900000000+this.index,profile_id:this.profile.profile_id});
     }
     return;
@@ -290,11 +330,11 @@ class Client {
   const s=this.snapshot;
   if(!s?.players?.some(p=>p.id===s.your_id)) {this.join();return;}
   if(s.prematch){const me=s.prematch.players.find(p=>p.player_id===s.your_id);const p=s.prematch;
-   if(this.autoLock&&p.phase==='draft'&&!me?.locked)this.gameplay({type:'prematch',request:{server_epoch:this.epoch,match_id:this.match,generation:p.generation,request_id:++this.prematchSequence,action:{kind:'lock',locked:true}}});
+   if(this.autoLock&&p.phase==='draft'&&me&&!me.locked){const c=availableDraftClass(p.players,s.your_id);if(c)this.gameplay({type:'prematch',request:{server_epoch:this.epoch,match_id:this.match,generation:p.generation,request_id:++this.prematchSequence,action:c===me.hero_class?{kind:'lock',locked:true}:{kind:'select',hero_class:c,character:'ipfs',avatar:null,sprite_character:null,role:me.role,passport_ticket:null}}});}
    if(p.phase==='loading'&&!me?.loaded)this.gameplay({type:'prematch',request:{server_epoch:this.epoch,match_id:this.match,generation:p.generation,request_id:++this.prematchSequence,action:{kind:'loaded'}}});
   }
  }
- join(){this.joinAttempts++;this.gameplay({type:'join',prematch:true,team:'green',character:'ipfs',hero_class:['warrior','mage','ranger','cleric'][this.index%4],avatar:null,sprite_character:null,session_id:this.session,passport_ticket:null});}
+ join(){this.joinAttempts++;this.gameplay({type:'join',prematch:true,team:'green',character:'ipfs',hero_class:['warrior','mage','ranger','cleric','warden'][this.index%5],avatar:null,sprite_character:null,session_id:this.session,passport_ticket:null});}
  close(){this.active=false;try{this.socket.close()}catch{}}
  diagnostic(){return{index:this.index,queue_request_id:this.queueId,match_service_request_id:this.career?.match_service_request_id,stale_ready_checks:this.staleReadyChecks||0,stale_ready_refreshes:this.staleReadyRefreshes||0,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
 }
@@ -322,6 +362,54 @@ function assertRoster(client, expected) {
  assert.deepEqual(ids(client.snapshot),expected,'a fresh identity entered or replaced an allocated participant');
  assert.equal(new Set(ids(client.snapshot)).size,10,'duplicate player identity');
 }
+// Real signed requests exercise both collision boundaries before ordinary play.
+async function uniqueDraftLifecycle() {
+ const peers=Array.from({length:10},(_,i)=>new Client(i,lobbyPort,null,{preference:'humans_only',autoLock:false}));
+ all.push(...peers);
+ await pumpUntil('ten qualified humans enter Draft',()=>peers.every(c=>c.snapshot?.prematch?.phase==='draft'&&c.snapshot.prematch.players.length===10),45000);
+ const roster=peers[0].snapshot.prematch.players;
+ const own=peers[0], row=c=>c.snapshot.prematch.players.find(p=>p.player_id===c.snapshot.your_id);
+ const ally=peers.find(c=>c!==own&&row(c).team===row(own).team);
+ const opponent=peers.find(c=>row(c).team!==row(own).team);
+ const checks=report.unique_draft={checks:[],allocation_id:own.allocation.allocation_id,initial_roster:roster};
+ const action=async(c,value,error=null)=>{
+  const request_id=++c.prematchSequence,p=c.snapshot.prematch;
+  const packet={type:'prematch',request:{server_epoch:c.epoch,match_id:c.match,generation:p.generation,request_id,action:value}};
+  let next=0;
+  await pumpUntil('correlated draft request ACK',()=>c.snapshot?.prematch?.last_request_id===request_id,4000,now=>{
+   if(now>=next){next=now+300;c.gameplay(packet);}
+  });
+  assert.equal(c.snapshot.prematch.error,error);
+ };
+ const select=c=>({kind:'select',hero_class:'mage',character:'ipfs',avatar:null,sprite_character:null,role:row(c).role,passport_ticket:null});
+ for(const c of [own,ally,opponent])await action(c,select(c));
+ await action(own,{kind:'lock',locked:true});
+ await action(ally,select(ally),'hero_taken');
+ assert.equal(row(ally).hero_class,'mage');assert.equal(row(ally).locked,false);
+ await action(ally,{kind:'lock',locked:true},'hero_taken');
+ assert.equal(row(ally).locked,false);
+ await action(opponent,{kind:'lock',locked:true});
+ assert.equal(row(opponent).hero_class,'mage');assert.equal(row(opponent).locked,true);
+ checks.checks.push({name:'select_and_lock_reject_same_team_but_allow_opposing_mirror',status:'PASS'});
+ await action(own,{kind:'lock',locked:false});
+ await action(ally,{kind:'lock',locked:true});
+ await action(own,{kind:'lock',locked:true},'hero_taken');
+ checks.checks.push({name:'unlock_releases_class_and_a_later_lock_reserves_it',status:'PASS'});
+ for(const c of peers)c.autoLock=true;
+ let frozen=null;
+ await pumpUntil('unique drafted roster enters Running',()=>peers.every(c=>c.firstRunning),30000,()=>{
+  for(const c of peers){const p=c.snapshot?.prematch;if(p&&['countdown','loading'].includes(p.phase))frozen=p.players;}
+ });
+ assert(frozen,'no frozen roster observed');
+ for(const team of ['green','blue']){
+  const rows=frozen.filter(p=>p.team===team);assert.equal(rows.length,5);
+  assert.equal(new Set(rows.map(p=>p.hero_class)).size,5,'duplicate class passed into gameplay');
+ }
+ for(const c of [ally,opponent])assert.equal(frozen.find(p=>p.player_id===c.snapshot.your_id).hero_class,'mage','valid lock changed');
+ checks.final_roster=frozen;checks.checks.push({name:'five_distinct_classes_per_team_and_valid_locks_preserved',status:'PASS'});
+ report.scenarios.push('signed_unique_team_draft_to_running');
+}
+
 // One real five-stack plus five solos. Keep the first worker in Draft so a
 // signed solo Leave exercises cancellation, not a played-match abandonment.
 async function partyDraftLifecycle() {
@@ -968,7 +1056,8 @@ try {
  assert(lobby.exitCode===null, 'lobby failed to start');
  // A raw pre-admission ping must not receive any response or allocate an endpoint.
  const stranger=dgram.createSocket('udp4');let reflected=0;stranger.on('message',b=>reflected+=b.length);stranger.send(Buffer.from('{"type":"ping"}'),lobbyPort,'127.0.0.1');await delay(700);stranger.close();assert.equal(reflected,0);report.scenarios.push('raw_ping_no_replication');
- if(scenario==='party-draft')await partyDraftLifecycle();
+ if(scenario==='unique-draft')await uniqueDraftLifecycle();
+ else if(scenario==='party-draft')await partyDraftLifecycle();
  else {
  const start=performance.now();let runningAt=null,nextProgress=0;
  while(performance.now()-start<240000) {

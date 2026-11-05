@@ -13,7 +13,7 @@ use shared::{
         ProfileSummary, authorized_signing_bytes,
     },
     match_service::{MatchAllocation, MatchPreference, MatchServiceView},
-    prematch::{PrematchAction, PrematchPhase, PrematchRequest},
+    prematch::{DraftPlayer, PrematchAction, PrematchPhase, PrematchRequest},
     public_transport::{
         PROBE_PADDING_BYTES, PublicClientDatagram, PublicServerDatagram, SignedCommand, hex,
     },
@@ -76,6 +76,30 @@ fn random_hex() -> String {
     let mut bytes = [0; 16];
     getrandom::fill(&mut bytes).expect("OS entropy for disposable bot session");
     hex(&bytes)
+}
+
+/// Plan unlocked seats in stable identity order, after honoring real human locks.
+/// Bots do not reserve classes; the server fills their remaining kits at freeze.
+fn available_draft_class(players: &[DraftPlayer], id: u64) -> Option<HeroClass> {
+    let local = players.iter().find(|p| p.player_id == id)?;
+    let mut team: Vec<_> = players
+        .iter()
+        .filter(|p| p.team == local.team && !p.is_bot)
+        .collect();
+    team.sort_unstable_by_key(|p| (u8::from(!p.locked), p.player_id));
+    let mut used = Vec::new();
+    for p in team {
+        let class = if !used.contains(&p.hero_class) {
+            p.hero_class
+        } else {
+            HeroClass::ALL.into_iter().find(|c| !used.contains(c))?
+        };
+        used.push(class);
+        if p.player_id == id {
+            return Some(class);
+        }
+    }
+    None
 }
 
 impl PublicSession {
@@ -387,7 +411,21 @@ impl PublicSession {
                 .find(|p| p.player_id == packet.your_id());
             let action = match (draft.phase, me) {
                 (PrematchPhase::Draft, Some(me)) if !me.locked => {
-                    Some(PrematchAction::Lock { locked: true })
+                    available_draft_class(&draft.players, me.player_id).map(|class| {
+                        if class == me.hero_class {
+                            PrematchAction::Lock { locked: true }
+                        } else {
+                            PrematchAction::Select {
+                                handheld: Default::default(),
+                                character: CharacterChoice::Ipfs,
+                                hero_class: class,
+                                avatar: None,
+                                sprite_character: None,
+                                role: class.primary_role(),
+                                passport_ticket: None,
+                            }
+                        }
+                    })
                 }
                 (PrematchPhase::Loading, Some(me)) if !me.loaded => Some(PrematchAction::Loaded),
                 _ => None,
@@ -626,6 +664,34 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
     use shared::public_transport::decode_hex;
+
+    #[test]
+    fn draft_planning_honors_human_locks_and_assigns_five_distinct_classes() {
+        let row = |id, team, locked, is_bot| {
+            serde_json::from_value::<DraftPlayer>(serde_json::json!({
+                "player_id":id,"nickname":"Fixture","team":team,"character":"ipfs",
+                "hero_class":"warrior","avatar":null,"sprite_character":null,"role":"mid",
+                "is_bot":is_bot,"locked":locked,"loaded":false
+            }))
+            .unwrap()
+        };
+        let mut players: Vec<_> = (1..=5).map(|id| row(id, "green", false, false)).collect();
+        players.push(row(10, "green", true, true));
+        players.push(row(11, "blue", true, false));
+        assert_eq!(available_draft_class(&players, 1), Some(HeroClass::Warrior));
+        players[4].locked = true;
+        let mut classes = Vec::new();
+        for id in 1..=5 {
+            let class = available_draft_class(&players, id).unwrap();
+            assert!(!classes.contains(&class));
+            classes.push(class);
+        }
+        assert_eq!(available_draft_class(&players, 5), Some(HeroClass::Warrior));
+        assert_ne!(available_draft_class(&players, 1), Some(HeroClass::Warrior));
+        players.reverse();
+        assert_eq!(available_draft_class(&players, 5), Some(HeroClass::Warrior));
+        assert_ne!(available_draft_class(&players, 1), Some(HeroClass::Warrior));
+    }
 
     fn sockets() -> (UdpSocket, UdpSocket) {
         let peer = UdpSocket::bind("127.0.0.1:0").unwrap();

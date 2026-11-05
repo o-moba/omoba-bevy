@@ -568,8 +568,14 @@ Canonical version: `0.32.0`
 
 Normal Find match assigns a team and map side automatically. Each assigned team
 can inspect accepted avatar/class choices, choose an intended Solo, Jungle, Mid,
-Carry or Support role, and lock or unlock its choice. Duplicate and composition
-warnings inform the team without banning duplicate classes or roles. The shared stage displays up to five teammates.
+Carry or Support role, and lock or unlock its choice. A class locked by a human
+teammate is shown as Taken and cannot be selected or locked by another teammate;
+the opposite team may mirror it. Avatar and role composition warnings remain
+advisory. The shared stage displays up to five teammates. At selection expiry,
+valid human locks are preserved, idle collisions receive available free classes,
+and bots fill the remaining classes. The public formation boundary applies this
+rule even when a client opts out of the draft; existing durable/played rosters
+retain their original metadata.
 
 The shared three-second countdown begins after everyone locks, or after the
 selection deadline expires and pending avatar checks finish. The

@@ -132,7 +132,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 - [major/scale/M] **Daily pg_dump only: a host failure rolls every player's rating and history back up to 24 h; no WAL archiving or point-in-time recovery** — `ops/vps/ru/omoba-backup-ru.timer:7`. Fix: Enable `archive_mode=on` with an `archive_command` that ships WAL segments to the existing off-host backup target (pgBackRest or wal-g; or rsync as a stopgap), keep the nightly base dump, and extend `ru_backup.py check`/the restore drill to replay WAL to the latest point; as a one-line stopgap raise the dump cadence to hourly. — **open — WAL archiving / PITR (daily pg_dump only)**
 - [major/gap/L] **No remake or surrender** — original finding at `server/src/session_recovery.rs:200`. Server-owned remake before180s after90s absence; strict majority of remaining humans, surrender from600s with4/5 (all when fewer remain),30s votes/120s failed cooldown. Innocent remakes are neutral; proved ranked leavers retain their individual penalty. — **partial — implemented/pushed7fd41139+b5a6b9ba; 608 real PG tests, both ten-human real-time process proofs and1571 native CI tests pass. Full15-stage CI42074945255 passes; native visual proof still pending.**
 - [major/gap/S] **Ranked has no eligibility gate** — original finding at `server/src/match_service.rs:892`. Owner decision2026-11-06: ten completed public matches, including Casual/vs Bots; no mandatory VK. Separate authoritative `completed_public_matches` excludes interruptions, remakes, custom/offline practice and own proved leaves/AFK. Fresh search and locked allocation admission; Home progress; existing seats still resume. — **partial — core9/server/Home working-tree implementation; three real PG eligibility cases and native clippy/build pass. Complete regressions, real tenth-game process proof and fresh native capture still pending.**
-- [minor/ux/S] **Draft allows two players on one team to lock the same hero class; no per-team uniqueness or 'taken' feedback** — `server/src/prematch.rs:235`. Fix: In `handle_prematch` refuse `Select`/`Lock` whose `hero_class` is already locked by a joined teammate, setting `player.draft.error = Some("draft.error.hero_taken")` resolved client-side to 'Этого героя уже выбрал союзник'; grey the class card in the client draft when a teammate has locked it (draft snapshot already carries teammates' picks). — **open — duplicate hero per team in the draft**
+- [minor/ux/S] **Draft allows two players on one team to lock the same hero class; no per-team uniqueness or 'taken' feedback** — `server/src/prematch.rs:235`. Fix: In `handle_prematch` refuse `Select`/`Lock` whose `hero_class` is already locked by a joined teammate, setting `player.draft.error = Some("draft.error.hero_taken")` resolved client-side to 'Этого героя уже выбрал союзник'; grey the class card in the client draft when a teammate has locked it (draft snapshot already carries teammates' picks). — **partial — server Select/Lock/async/timeout/opt-out enforcement and localized native Taken/disabled/stale-action guards implemented; signed ten-human draft-to-play proof and618 PG/API/server tests PASS. Current native tests/visual and committed full CI pending.**
 - [minor/scale/S] **nftables lobby rule is 400 pkt/s per source IP: ~250 players behind one carrier-grade NAT saturate it and the kernel drops FindMatch/presence for all of them** — `ops/vps/ru/nftables-omoba.conf:56`. Fix: Raise the lobby limit to e.g. 4000/s burst 8000 (it is a flood guard, not a fairness tool) or key the dynamic set by `ip saddr . udp sport` so each NAT'd client gets its own bucket; document the new figure in README 'Admission limits'. — **done — nftables lobby rule 4000/s burst 8000**
 - [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold, corrupt/oversized/limited-scan alerts, no active-checkpoint false positives; 24 monitor tests pass. RU installation remains part of deployment.**
 
@@ -590,3 +590,56 @@ SHA25655cd68ea379433a178c1d3a483780a2b5759bd12feee835de9f3741c2b75b8a8
 verified before safe extraction, private fixture absent. Reports/provenance retained
 in `.agent/codex-ranked-readiness/ci-b5-postgres-harness/`. C5 native visual
 acceptance remains; C6 full17-stage committed CI and tenth-game proof are pending.
+
+
+### C6 public acceptance — 2026-11-06
+
+Saved/pushed a73368c6 +888d16dc. Actual public v2 PASS616.87s:
+Ranked denial at0 -> nine disclosed synthetic prior Casual receipts -> denial9
+-> ordinary standard-map vs-Bots play -> legal surrender after600140ms gameplay
+-> saved completed counter10 -> fresh lobby Ranked acceptance10. No VK identity,
+custom map or clock/rules override. Result `f2ba22712fd1e68d01f237c7e3f37dbc`;
+rating1000/rated0, played10/XP475 (the real tenth game is a completed loss,+25XP).
+Artifacts `.agent/codex-ranked-readiness/p6-public-eligibility-v2/`; frozen evidence
+`.agent/tasks/RANKED-LAUNCH-READINESS-20261105/c6-evidence.json`.
+The first natural-victory attempt timed out while Running and remains FAIL;
+it is not counted. The independent full Ranked base-victory proof is green.
+All612 real PG/API/server tests, shared184/harness27/Python13 and native/headless
+clippy pass. Current full17-stage CI888d16dc/42083864979 and current native visual
+acceptance remain pending. C6 remains partial until those finish. C7 is next.
+
+
+### C7 implementation checkpoint — 2026-11-06
+
+The pre-implementation contract is saved at
+`.agent/tasks/RANKED-LAUNCH-READINESS-20261105/c7-spec.md`. Server Select/Lock and
+async ownership completion reject a locked human teammate's class; the opposing
+team may mirror it and unlock frees it. Deadline fallback preserves valid human
+locks, then resolves idle humans before bots with deterministic free canonical
+classes. Loading replacements invalidate only changed assets. The first public
+allocation boundary also checks opt-out clients; existing durable/played rosters
+are not reinterpreted. No schema/protocol/dependency/deployment change.
+
+Native class tiles and Lock now show localized Taken/disabled state and recheck
+stale presses. Headless/probe clients plan available classes from authoritative
+rosters, including a fifth distinct fill class. Twenty-five prematch tests pass
+(including opt-out boundary, bots yielding, delayed ownership race and survivor
+readiness); Node policy tests pass. Actual signed unique-draft rehearsal and
+current native/all-regression checks are still pending. This checkpoint does not
+close C7. The existing CI harness now includes the signed unique-draft journey.
+
+
+C7 public v2 proof now PASS: actual signed ten-human Ranked draft rejected same-team
+Select and Lock, allowed opposing Mage mirrors, freed the class on unlock, then
+started with five distinct classes per team while preserving valid locks.
+Allocation `55db1284051ccd289e2c83d2e82ff6e7`; green Warrior/Mage/Ranger/Cleric/Warden,
+blue Mage/Warrior/Ranger/Cleric/Warden. Ten disclosed synthetic prior Casual
+fixtures satisfy admission; gameplay/validation is ordinary. The first attempt
+is FAIL: synchronous fixture helpers blocked the probe's UDP processing and caused
+expired sessions. Helpers now serialize asynchronously while heartbeats continue;
+no server timeout/authentication policy was relaxed. Both artifacts are retained.
+Current full real PG/API/store/server regression:618 passed/0failed/0ignored in18
+suites. Harness28, Node policy11cases/Python7tests, all-target server/harness clippy,
+format/diff and installed UI assets pass. Native draft tests/final clippy and
+committed18-stage full CI remain pending. Mac is still manually locked; no new
+screenshot is claimed. Evidence `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/c7-evidence.json`.
