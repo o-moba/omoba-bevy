@@ -259,3 +259,31 @@ for a full unaccelerated Ranked match. The workflow itself is unchanged pending
 owner approval under the working-style instructions supplied in this chat.
 #31 stays partial until that wiring is approved, applied and green in CI.
 API fixtures do not certify real provider applications or portal browser UI.
+
+
+## Native ready-check visual acceptance (P3 / #11)
+
+The Mac became available again. Built the native client from source commit
+`4b3205a9a88449921a2adbacb0d2a6f7f66ed09a` in the existing cache B
+(11m02s; system free space remained above 20 GiB). Build source hashes are in
+`.agent/codex-ranked-readiness/ready-ui-build-source.json`. Later P5 source
+changes are not part of this executable or claimed by this capture.
+
+The first capture had the correct controls but an unconfigured-storage notice
+covered the ready counter; it is **not** accepted. Repeated only the failed
+state, using the same binary and a disposable loopback PostgreSQL server.
+
+Accepted evidence:
+`.agent/codex-ranked-readiness/product-ready-ui-db-confirmed/05-searching.png`
+and `qa-summary.json`. Russian, Mobile UI profile, 852×393 logical pixels,
+actual Bevy primary-window render. Visual inspection confirms «Матч найден»,
+6/10, 15 seconds and separate acceptance/decline controls, without clipping.
+Geometry confirms a 148×44 Accept and 84×44 Decline inside the viewport.
+Capture is a render fixture, not live-match or manual-input evidence and not
+a physical iPhone. Existing UI-action regressions and the real ready-check
+process scenario separately verify acceptance, timeout, no premature worker,
+stale-answer rejection and replacement search. P3/#11 is now done; mobile
+feedback/foreground checks remain C3, and shared penalties across hosts remain P7.
+
+The complete owner scope also includes rating tiers, placement and season rules
+(LR-53), now explicit under P6 rather than left as a deferred note.

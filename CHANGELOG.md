@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify the native Russian 15-second match confirmation at 852×393: visible
+  acceptance count, countdown and separate Accept/Decline controls. This is a
+  desktop-rendered phone viewport; physical mobile checks remain separate.
+
 - Add `make test-postgres-harness`: fresh API registration/device enrollment,
   300-client restart admission, native signed gameplay/reconnect, all public
   readiness/recovery/party scenarios and a full standard-rules Ranked win.
