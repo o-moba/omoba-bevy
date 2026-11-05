@@ -2226,8 +2226,13 @@ mod tests {
             texts.join(" ")
         };
         for (locale, casual, ranked, bots) in [
-            ("en", "CASUAL PVP", "Ranked", "vs Bots"),
-            ("ru", "ОБЫЧНЫЙ PVP", "Рейтинговый", "Против ботов"),
+            ("en", "CASUAL PVP", "Ranked\nRating 1000", "vs Bots"),
+            (
+                "ru",
+                "ОБЫЧНЫЙ PVP",
+                "Рейтинговый\nРейтинг 1000",
+                "Против ботов",
+            ),
         ] {
             let mut app = home(locale, true);
             assert_eq!(text_of(&mut app, "HomePlay"), casual, "{locale}");

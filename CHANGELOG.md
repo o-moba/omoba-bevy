@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Update the Home queue regression's expected Ranked label for its explicitly
+  qualified profile: the button includes rating1000. The previous expectation
+  described a profile-less screen and would fail with the new eligibility fixture.
+
 - Require ten completed public matches for Ranked, without mandatory VK.
   Track a separate authoritative counter with schema9 historical backfill and
   exactly-once settlement; check fresh search progress and locked new allocation.
