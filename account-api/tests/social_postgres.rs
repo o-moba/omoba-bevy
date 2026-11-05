@@ -110,6 +110,73 @@ fn vk_user() -> String {
     (u64::from_str_radix(&crypto::random::<6>(), 16).unwrap() + 1).to_string()
 }
 
+// Optional private output for the separate real-UDP harness. The API test
+// always performs enrollment; only the test gate requests a seed export.
+fn registration_fixture_path() -> Option<std::path::PathBuf> {
+    let path =
+        std::env::var_os("OMOBA_REGISTRATION_JOURNEY_FIXTURE").map(std::path::PathBuf::from)?;
+    let raw = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").expect("test database required");
+    assert!(
+        !raw.contains(['\r', '\n', '\t']),
+        "invalid test database URL"
+    );
+    let url = reqwest::Url::parse(&raw).expect("test database URL");
+    assert!(
+        matches!(url.scheme(), "postgres" | "postgresql")
+            && matches!(
+                url.host_str(),
+                Some("127.0.0.1" | "localhost" | "[::1]" | "::1")
+            )
+            && url.path() == "/omoba_test"
+            && url.port() != Some(0)
+            && url.query().is_none()
+            && url.fragment().is_none(),
+        "export only against an isolated loopback omoba_test database"
+    );
+    let parent = path.parent().expect("private fixture parent");
+    let allowed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join(".agent")
+        .canonicalize()
+        .expect("ignored .agent directory must exist");
+    assert!(path.is_absolute(), "private fixture must be absolute");
+    let parent = parent
+        .canonicalize()
+        .expect("private fixture parent must exist");
+    assert!(
+        parent.starts_with(allowed),
+        "private fixture must stay in this checkout's .agent"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(parent).unwrap().permissions().mode() & 0o077,
+            0,
+            "private fixture parent permissions"
+        );
+    }
+    Some(path)
+}
+
+fn export_registration_fixture(path: &std::path::Path, accounts: &[Value]) {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .expect("create new private synthetic fixture");
+    let bytes = serde_json::to_vec(accounts).expect("encode private fixture");
+    file.write_all(&bytes).expect("write private fixture");
+    file.sync_all().expect("sync private fixture");
+}
+
 #[tokio::test]
 #[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
 async fn one_tap_root_can_register_and_sign_back_into_the_same_profile() {
@@ -733,13 +800,25 @@ async fn social_routes_are_served_over_http_and_unlink_needs_a_session() {
 #[tokio::test]
 #[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
 async fn website_registration_creates_default_accounts_for_every_entry_method() {
+    let fixture_path = registration_fixture_path();
     let app = app().await;
+    let mut fixtures = Vec::new();
+    let mut octets = [0; 3];
+    getrandom::fill(&mut octets).unwrap();
+    let address = format!("127.{}.{}.{}:42124", octets[0], octets[1], octets[2]);
     let mut profiles = std::collections::HashSet::new();
     for method in ["vkid", "ok_ru", "mail_ru"] {
         let user = vk_user();
-        let first = social::vk_sign_in(&app, &registration(&user, method))
-            .await
-            .unwrap();
+        let (status, first) = http_from(
+            &app,
+            "POST",
+            "/v1/auth/social/vk",
+            None,
+            serde_json::from_slice(&registration(&user, method)).unwrap(),
+            &address,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
         assert_eq!(first["state"], "signed_in");
         let profile = first["profile"]["profile_id"].as_str().unwrap();
         assert!(profiles.insert(profile.to_owned()));
@@ -778,15 +857,8 @@ async fn website_registration_creates_default_accounts_for_every_entry_method() 
         let mut request: Value =
             serde_json::from_slice(&callback(&format!("user-{user}"))).unwrap();
         request["method"] = json!(method);
-        let (status, repeated) = http_from(
-            &app,
-            "POST",
-            "/v1/auth/social/vk",
-            None,
-            request,
-            "127.0.0.42:42124",
-        )
-        .await;
+        let (status, repeated) =
+            http_from(&app, "POST", "/v1/auth/social/vk", None, request, &address).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(repeated["profile"]["profile_id"], profile);
         assert_ne!(repeated["session_token"], first["session_token"]);
@@ -794,6 +866,60 @@ async fn website_registration_creates_default_accounts_for_every_entry_method() 
             .await
             .unwrap();
         assert_eq!(linked["profile"]["profile_id"], profile);
+
+        // The website account initially has no game key. A real signed device
+        // create/preview/approval/complete sequence enrolls the new key.
+        let key = random_key();
+        let e = enrollment(&key);
+        let (status, created) = http_from(
+            &app,
+            "POST",
+            "/v1/auth/devices/create",
+            None,
+            serde_json::from_slice(&signed(&key, &e, DeviceAction::Create, None)).unwrap(),
+            &address,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let token = first["session_token"].as_str().unwrap();
+        let (status, preview) = http_from(
+            &app,
+            "POST",
+            "/v1/me/devices/lookup",
+            Some(token),
+            json!({"code": created["code"]}),
+            &address,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(preview["profile_id"], profile);
+        assert_eq!(preview["public_key"], e.public_key);
+        let (status, _) = http_from(&app, "POST", "/v1/me/devices/approve", Some(token),
+            json!({"profile_id": profile, "enrollment_id": e.enrollment_id, "public_key": e.public_key}), &address).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, completed) = http_from(
+            &app,
+            "POST",
+            "/v1/auth/devices/complete",
+            None,
+            serde_json::from_slice(&signed(&key, &e, DeviceAction::Complete, Some(profile)))
+                .unwrap(),
+            &address,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(completed["profile_id"], profile);
+        assert!(
+            app.career
+                .key_is_active(&public(&key), profile)
+                .await
+                .unwrap()
+        );
+        fixtures.push(json!({"method": method, "profile_id": profile,
+            "seed": crypto::hex(&key.to_bytes())}));
+    }
+    if let Some(path) = fixture_path {
+        export_registration_fixture(&path, &fixtures);
     }
 }
 

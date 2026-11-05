@@ -206,3 +206,56 @@ Final combined probe checks also pass with stale callbacks deliberately injected
 three guarded handoffs, same-seat reconnect and leave/resume for a running match.
 No owned probe processes remain. These are runtime/probe changes; no native
 client source, production dependency, schema, protocol or CI configuration changed.
+
+## PostgreSQL harness automation continuation (#31)
+
+CI for `5750850cea3487d9f93a7830f00adeb6719a1961` (run 41989260292)
+finished successfully in every job, including the previously failing mixed probe.
+
+`make test-postgres-harness` now owns the full opt-in sequence. Existing Account
+API registration tests create fresh VK ID / OK / Mail profiles through the real
+router and loopback provider fixture, then perform signed device creation,
+authenticated profile/key preview and approval, and signed enrollment completion.
+The native harness uses these three newly authorized identities against a real
+lobby/worker and verifies movement and same-seat reconnection. No direct SQL
+account insertion or pre-existing private fixture is required.
+
+This exposed an actual stale test: native registration searched without ever
+accepting the new ready-check, timed out and received dodge cooldown. The peer
+now explicitly accepts only its current request/preference/check identity;
+retry/accepted/stale-view cases have a regression. The original failing log is
+`/tmp/omoba-postgres-registration-ready-red.log` (no keys).
+
+The runner checks an explicit loopback `omoba_test` URL without URI options,
+uses only the assigned existing primary A/B cargo cache, rejects zero/ignored
+filtered tests, validates the bounded private fixture, and deletes its fresh
+keys after native admission and on failure/interruption. Output is private;
+process cleanup uses owned groups and a PID birth identity rather than signalling
+a potentially reused PID. Five script regressions cover unsafe fallback/URL
+overrides, private/distinct fixture validation, filtered-test false positives
+and unrelated-process cleanup protection.
+
+Current first combined run:
+`.agent/codex-ranked-readiness/postgres-harness-gate-first/report.json`.
+All 13 stages passed in 997.33 s, including the silent party disconnect,
+early Ranked crash, SIGTERM and a genuine standard-rules Victory. Saved result
+`767707765737c62a98cb69184fb6acf1` is Completed/rated, verdant-default-v1,
+with ten profile/history checks: five winners +16 Elo /150 XP and five losers
+-16 /100 XP. No custom map override. The private fixture is removed.
+
+Full local `make check` passed: 2493 Rust /95 intentional ignores, 639 script
+tests /9 skips, 62 iOS-tooling tests. Full PostgreSQL gate: 567 passed, no
+ignores. Harness library/registration regressions: 30 passed /1 opt-in ignore;
+that ignored journey ran and passed in the combined gate. A final fresh API
+export repeat confirms tightened checkout/permissions guards, then removes
+all three keys. Five script regressions passed again after logging/cleanup
+follow-ups. Current native RU capture is building now that the UI is available.
+
+The exact proposed CI change is saved in
+`docs/plans/postgres-harness-ci-2026-11-05.patch`; `git apply --check` passes.
+It replaces the shorter duplicated public probe, retains always-uploaded
+diagnostics with an explicit private-key exclusion and extends the job budget
+for a full unaccelerated Ranked match. The workflow itself is unchanged pending
+owner approval under the working-style instructions supplied in this chat.
+#31 stays partial until that wiring is approved, applied and green in CI.
+API fixtures do not certify real provider applications or portal browser UI.

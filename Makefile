@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay verify-public-mvp iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish release-ru-verify-downloads showcase demo-video trailer-clips sdk-pin-check
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay verify-public-mvp iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres test-postgres-harness release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish release-ru-verify-downloads showcase demo-video trailer-clips sdk-pin-check
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -66,6 +66,13 @@ test-scripts: ## Python launcher, packaging, asset-gate and iOS tooling tests
 # CI runs the same script in the `postgres` job.
 test-postgres: ## PostgreSQL-backed tests (set OMOBA_TEST_DATABASE_URL to a disposable database)
 	python3 scripts/postgres_tests.py
+
+# Complete opt-in loopback gate. Uses the existing assigned cargo cache, builds
+# the server/tools, prepares fresh API-enrolled private keys, exercises real
+# admission/registration and public gameplay, then removes those private keys.
+POSTGRES_HARNESS_OUT ?= .agent/postgres-harness-$(shell date +%Y%m%d-%H%M%S)
+test-postgres-harness: ## Opt-in PostgreSQL admission, registration and full Ranked/public journeys
+	python3 scripts/postgres_harness.py --output "$(POSTGRES_HARNESS_OUT)"
 
 # Not part of `check`: reads the SDK's GitHub repository. Cargo fetches the pinned
 # ekza-bevy-sdk commit from there, so a commit only in a local checkout or in

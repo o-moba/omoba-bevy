@@ -233,8 +233,8 @@ fn admit_all(server: SocketAddr, seeds: &[[u8; 32]]) -> (Vec<String>, HashMap<us
 #[test]
 #[ignore = "requires OMOBA_HARNESS_DATABASE_URL (a disposable PostgreSQL database) and `cargo build -p server`"]
 fn three_hundred_clients_reconnecting_after_a_lobby_restart_all_get_in() {
-    let url = std::env::var("OMOBA_HARNESS_DATABASE_URL")
-        .expect("set OMOBA_HARNESS_DATABASE_URL to a disposable PostgreSQL database");
+    let url = harness::database::test_database_url()
+        .expect("set a loopback OMOBA_HARNESS_DATABASE_URL or OMOBA_TEST_DATABASE_URL");
     let migrate = harness::server::prebuilt("migrate-career")
         .expect("build the server first: cargo build -p server");
     let migrated = std::process::Command::new(migrate)

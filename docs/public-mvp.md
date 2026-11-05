@@ -234,6 +234,32 @@ node scripts/test_public_mvp.mjs --scenario=capacity-wait --clients=1 --preferen
 database and runs the lifecycle scenario and the mixed load above (the load with
 `--seconds=5`); CI's `postgres` job runs the same target.
 
+The complete opt-in gate is `make test-postgres-harness`, with the same disposable
+`OMOBA_TEST_DATABASE_URL` (or explicit `OMOBA_HARNESS_DATABASE_URL`) and the assigned
+primary `CARGO_TARGET_DIR` cache A/B. It builds the server, bots and Account API,
+migrates only a loopback `omoba_test` database without URI overrides, then runs:
+
+- the actual 300-client admission/restart test;
+- fresh VK ID / OK / Mail registration through the Account API router with a
+  loopback provider fixture, followed by signed device enrollment;
+- native public admission, ready acceptance, worker gameplay and same-seat
+  reconnect using those three newly enrolled profiles;
+- public lifecycle/mixed load, ready timeout/replacement, party draft Leave and
+  silent disconnect, early Ranked crash/recovery and graceful termination;
+- a genuine ten-human standard-rules Ranked Victory with each participant's
+  saved result, history, Elo and XP checked.
+
+`POSTGRES_HARNESS_OUT=.agent/postgres-harness` selects a new private output
+directory. The report includes stage timings and bounded diagnostics, never
+signing seeds. The temporary `native-private.json` has mode 0600 in a 0700
+directory and is removed after native registration, and again on failure or
+interruption. Rust filters must execute exactly one test rather than silently
+pass with zero tests or an ignored test. The full Ranked phase may take several
+minutes; its default deadline is 3000 seconds with no accelerated game rules.
+This gate exercises the API and real game processes; portal browser UI and real
+provider app certification remain separate checks. CI wiring is prepared in
+`docs/plans/postgres-harness-ci-2026-11-05.patch`, pending owner approval.
+
 `--mix` interleaves players of several queues; `--capacity` sets the lobby's arena count;
 `--max-wait-secs` fails the run when a player needs longer to reach Running;
 `--allow-large` lifts the client cap from 100 to 1000 (capacity stays at the pool's
