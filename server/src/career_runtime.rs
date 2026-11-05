@@ -1472,6 +1472,7 @@ impl ServerRuntime {
         {
             return;
         }
+        self.match_service.refresh_handoff_views(now);
         self.career.last_sent = Some(now);
         self.career.sequence = self.career.sequence.saturating_add(1);
         for (addr, player) in &self.world.players {

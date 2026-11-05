@@ -162,6 +162,7 @@ pub(crate) struct Lobby {
     requests: HashMap<String, (String, u64, Instant)>,
     order: u64,
     last_poll: Option<Instant>,
+    last_handoff_refresh: Option<Instant>,
     /// Per-source limits (LR-16), and what they track in memory only: the IP
     /// of each profile's latest FindMatch, the IPs of each live allocation
     /// this lobby made, and when each IP left a vs Bots allocation unplayed.
@@ -230,6 +231,7 @@ impl Lobby {
             requests: HashMap::new(),
             order: 0,
             last_poll: None,
+            last_handoff_refresh: None,
             limits,
             sources: HashMap::new(),
             arena_sources: HashMap::new(),
@@ -1008,7 +1010,14 @@ impl MatchService {
             return;
         };
         if !lobby.pool.cancel(&id) {
-            return; // Running: the seat stays resumable (LR-13).
+            if let Some(slot) = lobby.pool.slots.get(&id).filter(|s| s.terminal()) {
+                if !slot.ran() {
+                    lobby.requeue_parked(&id, &[profile.to_owned()], now);
+                }
+                lobby.assignments.remove(profile);
+                // The worker already ended: this is no evidence of a dodge.
+            }
+            return; // A running seat stays resumable (LR-13).
         }
         let ranked = lobby
             .pool
@@ -1048,6 +1057,21 @@ impl MatchService {
             None
         }
     }
+    /// Forced extra career broadcasts reuse the same bounded worker snapshot.
+    pub fn refresh_handoff_views(&mut self, now: Instant) {
+        let Self::Lobby(lobby) = self else {
+            return;
+        };
+        if lobby
+            .last_handoff_refresh
+            .is_some_and(|at| now.saturating_duration_since(at) < Duration::from_millis(250))
+        {
+            return;
+        }
+        lobby.last_handoff_refresh = Some(now);
+        lobby.pool.refresh_handoffs();
+    }
+
     pub fn view(&self, profile: &str, session: &str, now: Instant) -> Option<MatchServiceView> {
         let Self::Lobby(lobby) = self else {
             return None;
@@ -1168,6 +1192,7 @@ impl MatchService {
         }
         lobby.last_poll = Some(now);
         lobby.pool.poll();
+        lobby.last_handoff_refresh = Some(now);
         lobby.turnover.observe(lobby.pool.occupied(), now);
         // A match that started keeps its seats (LR-13); its parked entries are
         // no longer needed. One that ended without ever starting puts its
@@ -2393,6 +2418,7 @@ mod tests {
                 joined_sessions: Vec::new(),
             };
             lobby.pool.write_status_for_test(id, &receipt);
+            service.refresh_handoff_views(now + Duration::from_millis(250));
             let Some(MatchServiceView::Assigned { allocation, .. }) =
                 service.view(&entries[0].profile.profile_id, &entries[0].session, now)
             else {
@@ -2445,6 +2471,84 @@ mod tests {
                 .collect(),
             join_deadline_ms: 0,
             cohort: None,
+        }
+    }
+
+    #[test]
+    fn cancellation_after_terminal_receipt_never_invents_a_dodge() {
+        for (phase, played) in [
+            (Phase::Finished, true),
+            (Phase::Failed, false),
+            (Phase::Failed, true),
+        ] {
+            let now = Instant::now();
+            let entries: Vec<_> = (1..=10)
+                .map(|id| w(id, MatchPreference::Ranked, now))
+                .collect();
+            let mut pool = crate::match_pool::Pool::for_test();
+            let directory = pool.test_directory().to_owned();
+            let id = pool
+                .allocate(manifest_for(&entries, MatchPreference::Ranked))
+                .unwrap();
+            pool.adopt_for_test(&id);
+            let mut status = Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms(),
+                phase: if played { Phase::Running } else { Phase::Ready },
+                result_id: played.then(|| "r".repeat(32)),
+                ends_by_ms: None,
+                joined_sessions: entries.iter().map(|w| w.session.clone()).collect(),
+                released_sessions: Vec::new(),
+            };
+            pool.write_status_for_test(&id, &status);
+            pool.refresh_handoffs();
+            // The terminal receipt appears between ordinary pool passes.
+            status.phase = phase;
+            pool.write_status_for_test(&id, &status);
+            let mut service = MatchService::Lobby(Lobby {
+                assignments: entries
+                    .iter()
+                    .map(|w| (w.profile.profile_id.clone(), id.clone()))
+                    .collect(),
+                parked: HashMap::from([(id.clone(), entries.clone())]),
+                ..Lobby::new(pool, Limits::default())
+            });
+            service.cancel(&entries[0].profile.profile_id, now);
+            let MatchService::Lobby(lobby) = &service else {
+                unreachable!()
+            };
+            assert!(
+                lobby.penalties.is_empty(),
+                "terminal receipt is not a dodge"
+            );
+            assert!(lobby.errors.is_empty());
+            assert!(
+                !lobby
+                    .assignments
+                    .contains_key(&entries[0].profile.profile_id)
+            );
+            assert_eq!(lobby.waiting.len(), if played { 0 } else { 9 });
+            assert!(
+                lobby
+                    .waiting
+                    .iter()
+                    .all(|w| w.profile.profile_id != entries[0].profile.profile_id)
+            );
+            if !played {
+                assert_eq!(
+                    lobby.waiting.iter().map(|w| w.order).collect::<Vec<_>>(),
+                    (2..=10).collect::<Vec<_>>()
+                );
+            }
+            assert!(
+                std::fs::read_dir(&directory).unwrap().all(|e| !e
+                    .unwrap()
+                    .path()
+                    .join("cancel.json")
+                    .exists())
+            );
+            std::fs::remove_dir_all(directory).unwrap();
         }
     }
 
@@ -2655,6 +2759,7 @@ mod tests {
             last_poll: Some(now),
             ..Lobby::new(pool, Limits::default())
         });
+        service.refresh_handoff_views(now);
         assert!(
             matches!(
                 service.view(&entry.profile.profile_id, &entry.session, now),
@@ -2665,7 +2770,7 @@ mod tests {
         if let MatchService::Lobby(lobby) = &mut service {
             assert_eq!(
                 lobby.pool.slots[&id].status.as_ref().unwrap().phase,
-                Phase::Running
+                Phase::Settling
             );
             receipt.phase = Phase::Failed;
             lobby.pool.write_status_for_test(&id, &receipt);

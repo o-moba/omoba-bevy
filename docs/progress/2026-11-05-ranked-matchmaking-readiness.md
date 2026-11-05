@@ -281,3 +281,87 @@ suites. Harness28, Node policy11cases/Python7tests, all-target server/harness cl
 format/diff and installed UI assets pass. Native draft tests/final clippy and
 committed18-stage full CI remain pending. Mac is still manually locked; no new
 screenshot is claimed. Evidence `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/c7-evidence.json`.
+
+
+C6 committed CI acceptance now PASS on888d16dc/run42083864979: all seven jobs
+and17 public/PG stages pass (2535.42s). Artifact13445261847 SHA256
+`f6bbf02f0461921ed1eaf98a0b2959707259f4c4db5540e5e66dbd3796711157`
+verified before safe extraction; native-private fixture absent. CI independently
+repeats wire denial0/9 -> real tenth standard-map completion (legal surrender,
+600165ms) -> acceptance10, without VK; result263fdca0847a368acc5b0cbdd3528809.
+Independent ordinary Ranked base victoryc9fdcca6ea0a945e987a5bc162f55ce4 takes
+447.13s including setup/426274ms gameplay. All ten exact ±24 rating,150/100XP,
+profile/counter/history increments and no false AFK independently rechecked.
+Artifacts/provenance `.agent/codex-ranked-readiness/ci-888-postgres-harness/`.
+C6 current native visual acceptance still awaits manual unlock; software/public
+acceptance is now green. C7 full18-stage CI is separate run42090248772.
+
+P7/#53 implementation checkpoint: an observed/reaped terminal child releases its
+port immediately; a live child still holds it and an adopted process without exit
+proof retains the conservative heartbeat hold. Ten pool runtime tests PASS,
+including immediate reuse, adopted hold and live-child protection. Finding53
+remains partial pending broader process/full acceptance. Finding54 caching follows;
+no host/infrastructure/deployment change is made.
+
+
+C7 local native acceptance now passes:13 focused draft tests, including the
+852×393 actual Bevy layout, disabled teammate class/Lock and stale pressed-action
+rechecks; final all-target client clippy PASS. These are executable UI tests, not
+new screenshots. Current C7 CI run42090248772 has Android, headless harness,
+dev-client, Python and bot-difficulty jobs green; full Rust and PG journey jobs
+remain pending. Native visual acceptance still awaits manual Mac unlock.
+
+
+P7/#53–54 targeted acceptance:112 relevant match/runtime tests PASS and all-target
+server clippy PASS. Added shared250ms status/cancel snapshots for all career-view
+recipients, with explicit fresh enqueue/cancel checks and monotonic observed end.
+Between-polls settlement still refuses handoff at the real broadcast refresh
+boundary. The view itself does no filesystem I/O. Tests cover ten cached views,
+no revival by a stale Ready receipt, cached cancellation sessions, immediate exit
+reuse and live/adopted holds. After101 consecutive completed arenas, startup now
+adopts the retained receipts as one occupied physical bind endpoint instead of
+refusing them as101 live arenas; the4096-entry scan/100occupied-port ceilings stay.
+
+Review also found a terminal-cancel race: refreshing Finished/Failed before a
+late Cancel must not invent a dodge. Finished and played Failed never requeue;
+unplayed Failed returns only other parked humans with original FIFO. All three
+regressions pass without changing cooldown rules. Full current PG and signed
+lifecycle/recovery process acceptance remain pending; findings53/54 remain partial.
+No RU/host/infrastructure changes or capacity claims are made.
+
+
+P7 current full real PostgreSQL acceptance:623 tests PASS,0failed/0ignored,
+18 suites. Relevant runtime112, all-target server clippy and Python harness5
+checks pass. New server binary built from current P7 source; the next actual
+signed process check uses capacity1 to prove post-crash durable cleanup and
+reassignment within the new20-second deadline. The same capacity1 constraint
+was added to the existing CI early-crash stage, without adding a workflow/stage.
+P7 public lifecycle/recovery and committed full-CI acceptance are still pending.
+
+Physical-device inventory (read-only): a USB Android device is connected and
+authorized but screen-locked. Installed dev0.44.0/beta0.45.0 builds are from
+October28/29 and predate the VIBRATE patch; they cannot prove current mobile
+feedback. iPhone/iPad are unavailable. No app install, device unlock or physical
+haptic/keep-awake PASS is claimed; existing manual Mac-unlock request remains.
+
+
+P7 pool final local/process acceptance PASS: strict monotonic end-state guard,
+112 match/runtime tests,623 real PG/API/store/server tests in18 suites (no skips),
+all-target server clippy and existing Python harness checks. Final signed
+capacity1 early-crash rehearsal reuses the same physical endpoint in2546.99ms
+after durable cleanup (new20s deadline; terminal heartbeat age must be<35s).
+Original result0e9957815ee8e7d9a55881e0eb98fa5b is Interrupted exactly once,
+original epoch retained; profile/history checked, no Elo/XP, ordinary120s recovery
+gate retained. Final lifecycle also passes queue expiry despite heartbeat, signed
+cancel, stranger denial, stale-handoff isolation, retained identity/progress on
+reconnect and leave/resume. Initial prior-candidate proofs remain separately
+retained; only final artifacts prove the stricter20s and backward-status guard.
+
+Final server SHA256f8cabb3071f6110e534aca9d5e4379c2086e09a2cb7471962a0db0a134b6e39f;
+source/report hashes and exact assertions saved in
+`.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p7-pool-evidence.json`.
+Findings53/54 remain partial until the new committed full-CI repeat passes;
+the existing Ranked early-crash CI stage now uses capacity1 and the stricter20s
+same-port assertion. No workflow YAML, dependencies, schema/protocol or production
+infrastructure/deployment change. Next independent scope is bounded selector21;
+season/cross-play choices still await the owner's O-5/O-18 response.

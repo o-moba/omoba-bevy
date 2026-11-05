@@ -220,7 +220,7 @@ def main(argv=None):
         public("party-leave", party)
         public("party-disconnect", [*party, "--draft-exit=disconnect"])
         public("ranked-early-crash", ["--scenario=early-recovery", "--clients=10",
-                                       "--preference=humans_only", "--seconds=2", "--input-hz=0"])
+                                       "--preference=humans_only", "--capacity=1", "--seconds=2", "--input-hz=0"])
         public("termination", ["--scenario=termination", "--seconds=1"])
         public("remake", ["--scenario=remake", "--clients=10", "--preference=humans_only",
                           "--seconds=1"], timeout=300)

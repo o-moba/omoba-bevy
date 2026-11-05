@@ -5,6 +5,23 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Share bounded worker status/cancellation snapshots across a whole player-view
+  batch (#54), preserving fresh search/cancel admission and monotonic observed
+  settlement. A late cancel after terminal completion creates no dodge penalty;
+  never-played survivors retain FIFO order. Retained terminal receipts sharing
+  a reused port no longer count as extra live arenas at restart. Final623 PG/API/
+  server tests and112 runtime checks pass. Signed crash recovery at capacity1
+  reuses the same port in2.55s; lifecycle/reconnect tests pass. Committed full-CI
+  acceptance remains pending.
+- Release a finished arena's port immediately after this lobby observes its exact
+  child exit (#53). Live children and adopted processes without exit proof keep
+  their safety hold. Tests cover101 consecutive arenas and restart; final actual
+  capacity1 recovery verifies same-port reassignment before the old35s hold.
+  Committed full-CI acceptance remains pending.
+- Verify the committed Ranked access package in full CI: all seven jobs/17 public
+  and PG stages pass, including a real tenth public completion and independent
+  standard-map Ranked base victory with exact awards/history for all ten humans.
+
 - Enforce distinct hero classes within a public team (C7): reject conflicting
   Select/Lock and delayed ownership replies, allow opposing mirror picks, and
   free a class on unlock. Timeout and legacy opt-out paths preserve valid human
@@ -13,7 +30,8 @@ All notable changes are recorded here. The canonical version is
   state, with disabled controls and stale-action guards. Actual signed ten-human
   draft-to-play proof,618 real PG/API/server tests and28 harness tests pass.
   Fixture preparation stays asynchronous so UDP sessions keep heartbeats.
-  Current native and committed full-CI acceptance remains pending.
+  Thirteen focused native draft tests and final all-target client clippy pass;
+  committed full-CI and fresh native visual acceptance remain pending.
 
 - Update the Home queue regression's expected Ranked label for its explicitly
   qualified profile: the button includes rating1000. The previous expectation

@@ -1,5 +1,5 @@
 //! Bounded same-host worker pool. Children outlive a lobby restart; manifests do not.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -13,6 +13,9 @@ pub(crate) struct Slot {
     pub status: Option<Status>,
     directory: PathBuf,
     child: Option<Child>,
+    /// This lobby reaped this exact child; a terminal receipt can release its
+    /// socket immediately. Adopted processes have no such proof.
+    child_exit_observed: bool,
     recovering: bool,
     /// The lobby saw this match running (LR-13). Its later failure ends a
     /// played match; it is not a cancelled or expired allocation.
@@ -20,6 +23,7 @@ pub(crate) struct Slot {
     /// `cancel.json` exists: written by this lobby or by the worker when an
     /// allocated human left before the match started. Refreshed by `poll`.
     cancelled: bool,
+    cancelled_sessions: Vec<String>,
     /// When this lobby spawned the child; `None` for an adopted worker.
     spawned_at: Option<Instant>,
 }
@@ -164,7 +168,12 @@ impl Pool {
             first_port,
             test_map,
         };
-        let entries = fs::read_dir(&pool.root).map_err(|_| "Cannot inspect workers")?;
+        pool.adopt_existing()?;
+        Ok(pool)
+    }
+
+    fn adopt_existing(&mut self) -> Result<(), String> {
+        let entries = fs::read_dir(&self.root).map_err(|_| "Cannot inspect workers")?;
         for (index, entry) in entries.flatten().take(4097).enumerate() {
             if index == 4096 {
                 return Err("Worker directory limit reached; archive completed allocations before starting the lobby".into());
@@ -181,36 +190,43 @@ impl Pool {
                 matches!(s.phase, Phase::Finished | Phase::Failed)
                     && match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) > 35_000
             }) {
-                archive(&pool.root, &directory, &manifest.allocation_id);
+                archive(&self.root, &directory, &manifest.allocation_id);
                 continue;
             }
             let ran = status.as_ref().is_some_and(Status::played);
             let cancelled = directory.join("cancel.json").exists();
-            pool.slots.insert(
+            self.slots.insert(
                 manifest.allocation_id.clone(),
                 Slot {
                     manifest,
                     status,
                     directory,
                     child: None,
+                    child_exit_observed: false,
                     recovering: false,
                     ran,
                     cancelled,
+                    cancelled_sessions: Vec::new(),
                     spawned_at: None,
                 },
             );
         }
-        if pool.slots.len() > 100 {
-            return Err("Too many retained allocations".into());
+        if self.occupied() > 100 {
+            return Err("Too many occupied worker ports".into());
         }
-        Ok(pool)
+        Ok(())
     }
     pub fn full(&self) -> bool {
         self.occupied() >= self.capacity
     }
-    /// Arenas holding their port: live, or retired less than 35 s ago.
+    /// Live arenas and recently retired adopted workers whose exit is unknown.
     pub fn occupied(&self) -> usize {
-        self.slots.values().filter(|s| s.occupies_port()).count()
+        self.slots
+            .values()
+            .filter(|s| s.occupies_port())
+            .map(|s| s.manifest.bind.as_str())
+            .collect::<HashSet<_>>()
+            .len()
     }
     pub fn capacity(&self) -> usize {
         self.capacity
@@ -282,9 +298,11 @@ impl Pool {
                 status: None,
                 directory,
                 child: Some(child),
+                child_exit_observed: false,
                 recovering: false,
                 ran: false,
                 cancelled: false,
+                cancelled_sessions: Vec::new(),
                 spawned_at: Some(Instant::now()),
             },
         );
@@ -294,10 +312,12 @@ impl Pool {
         let Some(slot) = self.slots.get_mut(id) else {
             return true;
         };
-        if slot
-            .status
-            .as_ref()
-            .is_some_and(|s| matches!(s.phase, Phase::Running | Phase::Settling))
+        slot.refresh_status();
+        if slot.terminal()
+            || slot
+                .status
+                .as_ref()
+                .is_some_and(|s| matches!(s.phase, Phase::Running | Phase::Settling))
         {
             return false;
         }
@@ -313,11 +333,16 @@ impl Pool {
     pub fn cancelled_sessions(&self, id: &str) -> Vec<String> {
         self.slots
             .get(id)
-            .and_then(|slot| fs::read(slot.directory.join("cancel.json")).ok())
-            .filter(|bytes| bytes.len() <= 4096)
-            .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
-            .unwrap_or_default()
+            .map_or_else(Vec::new, |slot| slot.cancelled_sessions.clone())
     }
+
+    /// One filesystem snapshot per active worker, shared by a whole view batch.
+    pub fn refresh_handoffs(&mut self) {
+        for slot in self.slots.values_mut().filter(|s| !s.terminal()) {
+            slot.refresh_status();
+        }
+    }
+
     pub fn poll(&mut self) {
         let now = match_allocation::unix_ms();
         let mut recovery_launches = 0;
@@ -349,6 +374,7 @@ impl Pool {
                     .is_some_and(|child| child.try_wait().is_ok_and(|r| r.is_some()));
             if exited {
                 slot.child = None;
+                slot.child_exit_observed = true;
                 if slot.status.is_none() {
                     let status = Status {
                         released_sessions: Vec::new(),
@@ -393,6 +419,7 @@ impl Pool {
                     self.test_map.as_deref(),
                 ) {
                     slot.child = Some(child);
+                    slot.child_exit_observed = false;
                     slot.recovering = true;
                 }
             }
@@ -422,14 +449,32 @@ impl Drop for Pool {
     }
 }
 impl Slot {
-    fn latest_status(&self) -> Option<Status> {
-        read_status(&self.directory, &self.manifest.allocation_id).or_else(|| self.status.clone())
-    }
-
     pub fn refresh_status(&mut self) {
-        self.status = self.latest_status();
+        if let Some(next) = read_status(&self.directory, &self.manifest.allocation_id) {
+            let advances = match self.status.as_ref().map(|s| &s.phase) {
+                Some(Phase::Finished | Phase::Failed) => {
+                    matches!(next.phase, Phase::Finished | Phase::Failed)
+                }
+                Some(Phase::Settling) => matches!(
+                    next.phase,
+                    Phase::Settling | Phase::Finished | Phase::Failed
+                ),
+                _ => true,
+            };
+            // A stale writer cannot step back through Recovering and then Ready.
+            if advances {
+                self.status = Some(next);
+            }
+        }
         self.ran |= self.status.as_ref().is_some_and(Status::played);
-        self.cancelled |= self.directory.join("cancel.json").exists();
+        if let Ok(bytes) = fs::read(self.directory.join("cancel.json")) {
+            self.cancelled = true;
+            if bytes.len() <= 4096
+                && let Ok(sessions) = serde_json::from_slice::<Vec<String>>(&bytes)
+            {
+                self.cancelled_sessions = sessions;
+            }
+        }
     }
 
     /// The lobby saw this match running (LR-13).
@@ -440,12 +485,13 @@ impl Slot {
     pub fn occupies_port(&self) -> bool {
         self.child.is_some()
             || !self.terminal()
-            || self.status.as_ref().is_some_and(|s| {
-                match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) <= 35_000
-            })
+            || (!self.child_exit_observed
+                && self.status.as_ref().is_some_and(|s| {
+                    match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) <= 35_000
+                }))
     }
     pub fn cancelled(&self) -> bool {
-        self.cancelled || self.directory.join("cancel.json").exists()
+        self.cancelled
     }
 
     pub fn terminal(&self) -> bool {
@@ -460,13 +506,13 @@ impl Slot {
 
     /// The worker's latest receipt while the slot is ready: not recovering or
     /// cancelled, `ready`, `forming` or `running`, with a fresh heartbeat. Reads
-    /// the disk: a worker that settled between two lobby passes must never be
-    /// handed out again. Only players in a handoff ask for this.
+    /// the shared snapshot: the send path refreshes it once for all players
+    /// before a due batch; new enqueue/cancel also refresh at admission.
     pub fn ready_status(&self) -> Option<Status> {
         if self.recovering || self.cancelled() {
             return None;
         }
-        self.latest_status().filter(|s| {
+        self.status.clone().filter(|s| {
             matches!(s.phase, Phase::Ready | Phase::Forming | Phase::Running)
                 && match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) < 10_000
         })
@@ -740,10 +786,8 @@ mod tests {
         p.poll();
         assert!(p.slots[&id].terminal());
         assert!(!p.slots[&id].ready());
-        assert!(
-            p.full(),
-            "terminal receipt does not immediately recycle its port"
-        );
+        assert!(p.slots[&id].child_exit_observed);
+        assert!(!p.full(), "reaped terminal child no longer owns its port");
     }
     #[test]
     fn cancellation_blocks_handoff_before_status_update() {
@@ -828,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn retired_worker_frees_its_port_once_its_last_heartbeat_ages() {
+    fn reaped_terminal_worker_frees_its_port_immediately() {
         let mut p = Pool::for_test();
         let id = p.allocate(manifest('a')).unwrap();
         let port = p.slots[&id].manifest.bind.clone();
@@ -854,10 +898,11 @@ mod tests {
         p.write_status_for_test(&id, &retired(1_000));
         p.poll();
         assert!(p.slots[&id].terminal());
-        assert!(p.full(), "the port is held while the exit is recent");
-        p.write_status_for_test(&id, &retired(36_000));
-        p.poll();
-        assert!(!p.full());
+        assert!(p.slots[&id].child_exit_observed);
+        assert!(
+            !p.full(),
+            "the exact child was reaped; its port is free now"
+        );
         let next = p.allocate(manifest('b')).unwrap();
         assert_eq!(p.slots[&next].manifest.bind, port);
         p.slots
@@ -868,6 +913,196 @@ mod tests {
             .unwrap()
             .wait()
             .unwrap();
+    }
+
+    #[test]
+    fn adopted_terminal_worker_keeps_the_heartbeat_hold_without_exit_proof() {
+        let mut p = Pool::for_test();
+        let id = p.allocate(manifest('a')).unwrap();
+        // Simulate a restart: the new lobby has no child handle/exit observation.
+        p.slots
+            .get_mut(&id)
+            .unwrap()
+            .child
+            .take()
+            .unwrap()
+            .wait()
+            .unwrap();
+        let mut status = Status {
+            released_sessions: Vec::new(),
+            allocation_id: id.clone(),
+            server_epoch: 1,
+            heartbeat_ms: match_allocation::unix_ms(),
+            phase: Phase::Finished,
+            result_id: Some("r".repeat(32)),
+            ends_by_ms: None,
+            joined_sessions: Vec::new(),
+        };
+        p.write_status_for_test(&id, &status);
+        p.poll();
+        assert!(!p.slots[&id].child_exit_observed);
+        assert!(
+            p.full(),
+            "terminal status does not prove an adopted process exited"
+        );
+        status.heartbeat_ms -= 36_000;
+        p.write_status_for_test(&id, &status);
+        p.poll();
+        assert!(!p.full());
+    }
+
+    #[test]
+    fn terminal_receipt_never_releases_a_still_live_child() {
+        let mut p = Pool::for_test();
+        let id = p.allocate(manifest('a')).unwrap();
+        p.slots
+            .get_mut(&id)
+            .unwrap()
+            .child
+            .take()
+            .unwrap()
+            .wait()
+            .unwrap();
+        p.slots.get_mut(&id).unwrap().child =
+            Some(Command::new("sleep").arg("30").spawn().unwrap());
+        let status = Status {
+            released_sessions: Vec::new(),
+            allocation_id: id.clone(),
+            server_epoch: 1,
+            heartbeat_ms: match_allocation::unix_ms() - 36_000,
+            phase: Phase::Finished,
+            result_id: Some("r".repeat(32)),
+            ends_by_ms: None,
+            joined_sessions: Vec::new(),
+        };
+        p.write_status_for_test(&id, &status);
+        p.poll();
+        let occupied = p.full();
+        let child = p.slots.get_mut(&id).unwrap().child.as_mut().unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(
+            occupied,
+            "an old terminal receipt cannot free a live child's port"
+        );
+        p.poll();
+        assert!(p.slots[&id].child_exit_observed);
+        assert!(!p.full());
+    }
+
+    #[test]
+    fn handoff_views_share_one_receipt_and_observed_settlement_cannot_regress() {
+        let mut p = Pool::for_test();
+        let id = p.allocate(manifest('a')).unwrap();
+        let mut status = Status {
+            released_sessions: Vec::new(),
+            allocation_id: id.clone(),
+            server_epoch: 1,
+            heartbeat_ms: match_allocation::unix_ms(),
+            phase: Phase::Ready,
+            result_id: None,
+            ends_by_ms: None,
+            joined_sessions: Vec::new(),
+        };
+        p.write_status_for_test(&id, &status);
+        p.refresh_handoffs();
+        assert!(p.slots[&id].ready());
+        // A whole send batch uses one snapshot even if the worker writes during it.
+        status.phase = Phase::Settling;
+        p.write_status_for_test(&id, &status);
+        for _ in 0..10 {
+            assert!(p.slots[&id].ready());
+        }
+        p.refresh_handoffs();
+        for _ in 0..10 {
+            assert!(!p.slots[&id].ready());
+        }
+        // A stale writer cannot revive a handoff after Settling was observed.
+        status.phase = Phase::Ready;
+        status.heartbeat_ms += 1;
+        p.write_status_for_test(&id, &status);
+        p.refresh_handoffs();
+        assert_eq!(p.slots[&id].status.as_ref().unwrap().phase, Phase::Settling);
+        assert!(!p.slots[&id].ready());
+        for phase in [Phase::Recovering, Phase::Ready] {
+            status.phase = phase;
+            p.write_status_for_test(&id, &status);
+            p.refresh_handoffs();
+            assert_eq!(p.slots[&id].status.as_ref().unwrap().phase, Phase::Settling);
+        }
+        // Cancellation sessions are part of the same snapshot, not per-user I/O.
+        let cancel_path = p.slots[&id].directory.join("cancel.json");
+        match_allocation::atomic_json(&cancel_path, &vec!["s1", "s2"]).unwrap();
+        p.refresh_handoffs();
+        fs::remove_file(cancel_path).unwrap();
+        for _ in 0..10 {
+            assert!(p.slots[&id].cancelled());
+            assert_eq!(p.cancelled_sessions(&id), ["s1", "s2"]);
+            assert!(!p.slots[&id].ready());
+        }
+        status.phase = Phase::Failed;
+        p.write_status_for_test(&id, &status);
+        p.refresh_handoffs();
+        status.phase = Phase::Recovering;
+        p.write_status_for_test(&id, &status);
+        p.slots.get_mut(&id).unwrap().refresh_status();
+        assert_eq!(p.slots[&id].status.as_ref().unwrap().phase, Phase::Failed);
+        p.slots
+            .get_mut(&id)
+            .unwrap()
+            .child
+            .as_mut()
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+
+    #[test]
+    fn reused_port_receipts_do_not_become_a_hundred_live_arenas_on_restart() {
+        let mut p = Pool::for_test();
+        for index in 1..=101 {
+            let mut m = manifest('a');
+            m.allocation_id = format!("{index:032x}");
+            let id = p.allocate(m).unwrap();
+            p.slots
+                .get_mut(&id)
+                .unwrap()
+                .child
+                .as_mut()
+                .unwrap()
+                .wait()
+                .unwrap();
+            p.write_status_for_test(
+                &id,
+                &Status {
+                    released_sessions: Vec::new(),
+                    allocation_id: id.clone(),
+                    server_epoch: 1,
+                    heartbeat_ms: match_allocation::unix_ms(),
+                    phase: Phase::Finished,
+                    result_id: Some(format!("{index:032x}")),
+                    ends_by_ms: None,
+                    joined_sessions: Vec::new(),
+                },
+            );
+            p.poll();
+            assert_eq!(p.occupied(), 0);
+        }
+        assert_eq!(p.slots.len(), 101);
+        // Re-read as a coordinator that has no exit observation for adopted slots.
+        p.slots.clear();
+        p.adopt_existing().unwrap();
+        assert_eq!(p.slots.len(), 101);
+        assert_eq!(
+            p.occupied(),
+            1,
+            "retained receipts share one physical bind endpoint"
+        );
+        assert!(
+            p.full(),
+            "one adopted port still keeps the conservative heartbeat hold"
+        );
+        assert!(p.slots.values().all(|s| !s.child_exit_observed));
     }
 
     #[test]

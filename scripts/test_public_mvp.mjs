@@ -955,10 +955,17 @@ async function recoverRoster(originals, early) {
  await pumpUntil('interrupted history is visible to every participant',()=>observers.every(c=>c.lastHistory?.filter(r=>r.result_id===before.result_id).length===1),15000,now=>{
   if(now>=nextHistory){nextHistory=now+1500;observers.forEach(c=>c.account({action:'history',request_id:++query,before:null}));}
  });
+ const requeueAt=performance.now();
  for(const c of observers){c.queueId++;c.lastQueue=0;c.autoQueue=true;}
- await pumpUntil('all recovered participants can search and accept a fresh roster',()=>observers.every(c=>c.allocation&&c.allocation.allocation_id!==allocation.allocation_id),45000);
+ await pumpUntil('all recovered participants can search and accept a fresh roster',()=>observers.every(c=>c.allocation&&c.allocation.allocation_id!==allocation.allocation_id),capacity===1?20000:45000);
+ const reassignmentMs=performance.now()-requeueAt;
+ if(capacity===1){
+  assert(observers.every(c=>c.allocation.endpoint===allocation.endpoint),'single-capacity recovery must reuse the original physical port');
+  assert(reassignmentMs<20000,'a reaped terminal child retained its port');
+  assert(Date.now()-Number(allocationStatus(allocation.allocation_id).heartbeat_ms)<35000,'old heartbeat hold could explain port reuse');
+ }
  if(original.preference==='humans_only')assert.equal(new Set(observers.map(c=>c.allocation.allocation_id)).size,1,'recovered Ranked roster split across workers');
- report.recovery={status:'PASS',queue:original.preference,participants:originals.length,crashed_after_running_seconds:playingFor,early_before_first_checkpoint:early,result_id:before.result_id,server_epoch:before.server_epoch,outcome:saved.outcome,all_profiles_checked:true,all_histories_checked:true,no_elo_or_xp:true,elapsed_seconds:(performance.now()-crashedAt)/1000};
+ report.recovery={status:'PASS',reassignment_ms:reassignmentMs,same_port_reused:observers.every(c=>c.allocation.endpoint===allocation.endpoint),queue:original.preference,participants:originals.length,crashed_after_running_seconds:playingFor,early_before_first_checkpoint:early,result_id:before.result_id,server_epoch:before.server_epoch,outcome:saved.outcome,all_profiles_checked:true,all_histories_checked:true,no_elo_or_xp:true,elapsed_seconds:(performance.now()-crashedAt)/1000};
  report.scenarios.push('full_roster_crash_recovers_played_history_without_elo_or_xp');
 }
 async function restartAndRecover(original, crashWorker) {

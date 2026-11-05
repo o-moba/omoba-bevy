@@ -650,13 +650,25 @@ sequenceDiagram
 - **Widening window (LR-35), parties excepted.** `CohortAllowance::after_wait`: 300 points for 2 minutes, +100 per minute to 600, brackets merge at 5 minutes. The manifest records the window; the store re-checks a rated start against the **maximum** window, not the exact one, so the start record and the wire stay unchanged. A party must itself be one base cohort.
 - **Arena priority by seated humans**, then age: a ready 5v5 before a solo vs Bots game when arenas are short.
 - **Ceilings.** `OMOBA_LOBBY_MAX_WAITING` (default 1024, max 4096) replaces the 128 constant; 4096 recent requests answer `lobby_busy` beyond; 2048 transport endpoints and career clients per lobby; a per-IP refusal answers `server_full`. The RU kit ships 16 arenas, `KillMode=process` (workers survive a lobby restart and are adopted), cgroup limits from a per-arena formula, per-IP limits sized for carrier-grade NAT, and a PostgreSQL `max_connections` check.
+- **Shared worker snapshots (P7/#54, 2026-11-06).** Refresh status/cancellation
+  once per due career-view batch, bounded to four refreshes per second even for
+  forced extra broadcasts. Every player's view uses that cache; new search and
+  cancellation keep a fresh admission check. Observed Settling/terminal state
+  cannot regress to playable. A cancellation after a terminal receipt creates
+  no new marker or dodge penalty; only never-played survivors requeue.
 - **Leaderboard (LR-47).** `GET /v1/leaderboard` over a career partial index (schema 6), listing profiles past the newcomer bracket by rating; opt-out per profile (`portal.profile_settings.leaderboard_listed`, default listed, portal schema 11) because nickname and rating already reach every opponent in match reports.
 - **Codes, not sentences**, for everything the lobby or the prematch tells a player (`not_completed`, `roster_changed`, `loading_timeout`, `start_timeout`, the lobby failure codes, the party error codes).
 
 **Consequences.**
 - A single host still bounds the product: snapshot egress (~250 kB/s per player) and one worker pool per host put ~1000 concurrent players beyond one VPS (LR-57). The software ceilings no longer hide that.
 - Workers of an old release keep running across a lobby upgrade; lobby and workers must stay protocol-compatible across one upgrade (they already must).
-- The port of a finished arena still stays reserved 35 s after its last heartbeat, by the existing design; freeing it on an observed exit was considered and left out.
+- P7 amendment2026-11-06 (#53): a finished arena's port is released immediately
+  when this lobby has observed/reaped that exact child. A still-live child keeps
+  its port; an adopted process without exit proof retains the35 s heartbeat hold.
+  A nonterminal crash still requires ordinary recovery/durable settlement before
+  reuse. Retained terminal receipts sharing one reused bind endpoint count as
+  one physical port on adoption; keep the 4096-entry scan and 100 occupied-port
+  ceilings. This supersedes the initial decision to hold every terminal port.
 - The exact widened window is not persisted in the match receipt; auditing a formed roster's window needs the archived manifest.
 
 **Links:** [../match-progression.md](../match-progression.md#ranked-window-at-low-population-lr-35), [../public-mvp.md](../public-mvp.md), [../party.md](../party.md), [../../ops/vps/ru/README.md](../../ops/vps/ru/README.md), [../../account-api/README.md](../../account-api/README.md).

@@ -74,7 +74,7 @@ export OMOBA_DATABASE_URL='postgres://ADMIN@DB_HOST/omoba'
 ./omoba-account-api migrate
 ```
 
-This prepares career schema v3 and portal schema v3, including optional supporter
+This prepares career schema v9 and portal schema v11, including optional supporter
 tables. The game runtime validates schema and does not perform DDL. The account
 HTTP service is optional for native play; it is needed for the existing portal
 and account recovery/device management. It must remain behind trusted HTTPS
@@ -396,3 +396,14 @@ Add `--exercise-stale-handoff` to a party, lifecycle or mixed-load run to delive
 a real old-lobby callback immediately after worker handoff. The probe must ignore
 it and preserve the new authentication scope. Failures print bounded client and
 worker-status diagnostics, so CI logs remain useful without an artifact upload.
+
+
+Worker handoff status and cancellation use one shared snapshot per due career
+broadcast, bounded to four refreshes per second even when requests force extra
+broadcasts. New search/cancellation admission checks current state. After the
+lobby observes settlement, a stale receipt cannot make that arena playable again.
+A terminal child reaped by its lobby releases its port immediately; an adopted
+process without exit proof retains the conservative 35-second heartbeat hold.
+Retained terminal receipts sharing one reused bind endpoint occupy one port,
+so rapid completed rounds do not become extra live arenas after restart. Startup
+still bounds the scan to 4096 entries and refuses more than 100 occupied ports.
