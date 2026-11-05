@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fix two server Clippy findings caught by C5 CI: express vote-deadline terminal
+  handling with `if let`. Local process proofs remain valid; repeat full CI is
+  required before C5 acceptance.
+
 - Fix the AFK notice QA identifier: the new UI test could not find the rendered
   label by its stable ID. CI caught this after typechecking; the notice now carries
   the ID used by the existing test. All seven repeat CI jobs and all 13 complete

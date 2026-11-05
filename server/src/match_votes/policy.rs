@@ -88,9 +88,8 @@ impl Slot {
         now: Instant,
         deadline: Instant,
     ) -> Decision {
-        match self.tick(eligible, now) {
-            result @ (Decision::Passed(_) | Decision::Failed) => return result,
-            _ => {}
+        if let result @ (Decision::Passed(_) | Decision::Failed) = self.tick(eligible, now) {
+            return result;
         }
         if self.active.is_some()
             || self.cooldown(now) != Duration::ZERO
@@ -122,9 +121,8 @@ impl Slot {
         eligible: &BTreeSet<u64>,
         now: Instant,
     ) -> Decision {
-        match self.tick(eligible, now) {
-            result @ (Decision::Passed(_) | Decision::Failed) => return result,
-            _ => {}
+        if let result @ (Decision::Passed(_) | Decision::Failed) = self.tick(eligible, now) {
+            return result;
         }
         let Some(active) = self.active.as_mut() else {
             return Decision::Ignored;
