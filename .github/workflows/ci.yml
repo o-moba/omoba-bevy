@@ -122,7 +122,7 @@ jobs:
   postgres:
     name: postgres-backed tests
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16
@@ -152,11 +152,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: career-store, account-api and server tests, ignored ones included
         run: python3 scripts/postgres_tests.py
-      # The public-protocol probe against a loopback lobby built from this checkout
-      # (docs/public-mvp.md): the lifecycle scenario, then a short mixed
-      # Ranked/Casual/vs Bots load. Same target as on the Mac; Node is on the runner.
-      - name: Public-protocol probe (lifecycle, then a mixed load)
-        run: make verify-public-mvp
+      # Fresh API-enrolled synthetic keys, public ready checks and real workers.
+      # Includes lifecycle/mixed load and a standard-rules Ranked win, not a
+      # browser/provider certification. Uses the existing primary cargo cache.
+      - name: PostgreSQL harness and complete public Ranked journeys
+        run: make test-postgres-harness POSTGRES_HARNESS_OUT=.agent/postgres-harness
+      - name: Upload public journey diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-harness
+          include-hidden-files: true
+          path: |
+            .agent/postgres-harness/
+            !.agent/postgres-harness/**/native-private.json
+          if-no-files-found: ignore
 
   android:
     name: android compile check

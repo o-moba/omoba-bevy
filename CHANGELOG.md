@@ -15,7 +15,7 @@ All notable changes are recorded here. The canonical version is
   Both native tests accept the general disposable database setting and reject
   unsafe overrides. Registration peers explicitly answer the 15-second ready
   check. Temporary private keys are removed and filtered-out tests cannot pass
-  silently. CI integration is a separate prepared patch pending approval (#31).
+  silently. CI now runs this complete gate and retains diagnostics without private keys (#31).
 
 - Ranked draft exits now persist an exact profile/session cancellation even
   when the account cancellation packet is lost or throttled. Retired unplayed

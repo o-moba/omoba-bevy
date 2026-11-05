@@ -257,8 +257,9 @@ interruption. Rust filters must execute exactly one test rather than silently
 pass with zero tests or an ignored test. The full Ranked phase may take several
 minutes; its default deadline is 3000 seconds with no accelerated game rules.
 This gate exercises the API and real game processes; portal browser UI and real
-provider app certification remain separate checks. CI wiring is prepared in
-`docs/plans/postgres-harness-ci-2026-11-05.patch`, pending owner approval.
+provider app certification remain separate checks. The CI postgres job runs this complete gate, with a 90-minute budget and
+retained failure diagnostics excluding the private fixture. The owner-approved
+review patch is retained in `docs/plans/postgres-harness-ci-2026-11-05.patch`.
 
 `--mix` interleaves players of several queues; `--capacity` sets the lobby's arena count;
 `--max-wait-secs` fails the run when a player needs longer to reach Running;

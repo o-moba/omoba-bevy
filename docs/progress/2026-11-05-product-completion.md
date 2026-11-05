@@ -287,3 +287,13 @@ feedback/foreground checks remain C3, and shared penalties across hosts remain P
 
 The complete owner scope also includes rating tiers, placement and season rules
 (LR-53), now explicit under P6 rather than left as a deferred note.
+
+
+## Approved complete-gameplay CI gate (#31)
+
+The owner explicitly approved the prepared CI patch in this chat. Applied the
+reviewed change to the postgres job: `make test-postgres-harness`, 90-minute
+budget and always-uploaded diagnostics excluding `native-private.json`.
+The exact patch passes reverse-apply validation. The complete gate previously
+passed all 13 stages locally; #31 stays partial until this head passes in CI.
+No production deployment, credentials or host configuration changes are included.
