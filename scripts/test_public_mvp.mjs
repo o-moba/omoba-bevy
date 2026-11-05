@@ -31,6 +31,35 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
 import {performance} from 'node:perf_hooks';
+
+// Match consent must belong to the current search. A retained ready view may
+// still carry the previous request ID while a reconnect starts the next one.
+// Retry FindMatch in that case; repeatedly answering the stale view starves the
+// refresh and turns all innocent survivors into missed confirmations.
+function nextQueueAction(client, now) {
+ const view=client.career, ready=view?.match_service;
+ if(client.autoReady&&view?.match_service_request_id===client.queueId&&ready?.state==='ready_check'&&!ready.accepted&&now-client.lastQueue>500)
+  return {action:'ready_match',request_id:client.queueId,check_id:ready.check_id,accepted:true};
+ if(client.autoQueue&&now-client.lastQueue>2000)
+  return {action:'find_match',request_id:client.queueId,preference:client.preference};
+ return null;
+}
+
+// Deterministic regression before any socket, output directory or DB access;
+// keep the live probe portable as one standalone file on a capacity host.
+if(process.argv.includes('--self-test-queue-policy')) {
+ const client={queueId:2,preference:'humans_only',autoReady:true,autoQueue:true,lastQueue:0,
+  career:{match_service_request_id:1,match_service:{state:'ready_check',check_id:'retained',accepted:false}}};
+ assert.deepEqual(nextQueueAction(client,2500),{action:'find_match',request_id:2,preference:'humans_only'});
+ assert.equal(nextQueueAction(client,1000),null);
+ client.career.match_service_request_id=2;
+ assert.deepEqual(nextQueueAction(client,1000),{action:'ready_match',request_id:2,check_id:'retained',accepted:true});
+ client.career.match_service.accepted=true;
+ assert.deepEqual(nextQueueAction(client,2500),{action:'find_match',request_id:2,preference:'humans_only'});
+ client.autoQueue=false;client.autoReady=false;
+ assert.equal(nextQueueAction(client,2500),null);
+ console.log('queue_policy: PASS (5 correlated consent/refresh cases)');process.exit(0);
+}
 const opts = Object.fromEntries(process.argv.slice(2).map(s => {const [key,...rest]=s.replace(/^--/, '').split('=');return [key,rest.join('=')];}));
 const QUEUES = ['bot_practice','quick','humans_only'];
 // --mix=queue:count,…: players of several queues, interleaved as they arrive.
@@ -225,7 +254,20 @@ class Client {
   }
   if(now-this.lastSend<300)return;this.lastSend=now;this.gameplay({type:'ping'});
   if(this.port===lobbyPort&&this.partyPresence&&now-(this.lastPresence||0)>2000){this.lastPresence=now;this.gameplay({type:'party',command:{command:'presence',nickname:this.nickname,avatar:null}});}
-  if(this.port===lobbyPort){const ready=this.career?.match_service;if(this.autoReady&&ready?.state==='ready_check'&&!ready.accepted&&now-this.lastQueue>500){this.lastQueue=now;this.account({action:'ready_match',request_id:this.queueId,check_id:ready.check_id,accepted:true});}else if(this.autoQueue&&now-this.lastQueue>2000){this.lastQueue=now;this.account({action:'find_match',request_id:this.queueId,preference:this.preference});}return;}
+  if(this.port===lobbyPort){
+   const ready=this.career?.match_service;
+   if(this.exerciseStaleReady&&!this.staleReadyChecks&&this.autoQueue&&this.autoReady&&ready?.state==='ready_check'){
+    // Model a fresh local search while the actual server still reports its
+    // previous request. No server deadline or acceptance is forged/accelerated.
+    this.queueId++;this.staleReadyChecks=1;this.lastQueue=now-2100;
+   }
+   const action=nextQueueAction(this,now);
+   if(action){
+    if(action.action==='find_match'&&ready?.state==='ready_check'&&this.career.match_service_request_id!==this.queueId)this.staleReadyRefreshes=(this.staleReadyRefreshes||0)+1;
+    this.lastQueue=now;this.account(action);
+   }
+   return;
+  }
   if(!this.autoJoin)return;
   const s=this.snapshot;
   if(!s?.players?.some(p=>p.id===s.your_id)) {this.join();return;}
@@ -236,7 +278,7 @@ class Client {
  }
  join(){this.joinAttempts++;this.gameplay({type:'join',prematch:true,team:'green',character:'ipfs',hero_class:['warrior','mage','ranger','cleric'][this.index%4],avatar:null,sprite_character:null,session_id:this.session,passport_ticket:null});}
  close(){this.active=false;try{this.socket.close()}catch{}}
- diagnostic(){return{index:this.index,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
+ diagnostic(){return{index:this.index,queue_request_id:this.queueId,match_service_request_id:this.career?.match_service_request_id,stale_ready_checks:this.staleReadyChecks||0,stale_ready_refreshes:this.staleReadyRefreshes||0,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
 }
 // Keep every owned client alive while awaiting an observable protocol condition.
 async function pumpUntil(label, predicate, timeout=20000, onTick=()=>{}) {
@@ -315,7 +357,7 @@ async function partyDraftLifecycle() {
  for(const c of peers)c.close();
  const survivors=peers.filter(c=>c!==leaver).map(c=>{
   const resumed=new Client(c.index,lobbyPort,c,{preference:'humans_only',autoHandoff:false,partyPresence:true});
-  resumed.queueId=c.queueId+1;return resumed;
+  resumed.queueId=c.queueId+1;resumed.exerciseStaleReady=exerciseStaleHandoff;return resumed;
  });
  const dodger=new Client(leaver.index,lobbyPort,leaver,{preference:'humans_only',autoHandoff:false,autoReady:false,autoQueue:draftExit==='leave'});
  dodger.queueId=leaver.queueId+1;all.push(...survivors,dodger);
@@ -343,7 +385,7 @@ async function partyDraftLifecycle() {
  checks.checks.push({name:'draft_departure_requeues_nine_without_credit',status:'PASS',exit:draftExit,original_queue_ages_secs:queueAges,elapsed_secs:survivors.map(c=>c.career.match_service.elapsed_secs),all_profiles_unchanged:true,all_histories_empty:true,all_survivors_received_return_code:true,dodger_code:dodger.career?.match_service?.code??null});
  const replacement=draftExit==='disconnect'?dodger:new Client(8100,lobbyPort,null,{preference:'humans_only',autoHandoff:false});
  if(replacement!==dodger)all.push(replacement);
- replacement.autoReady=true;replacement.autoQueue=true;replacement.lastQueue=0;
+ replacement.autoReady=true;replacement.autoQueue=true;replacement.lastQueue=0;replacement.exerciseStaleReady=exerciseStaleHandoff;
  const nextRoster=[...survivors,replacement];
  await pumpUntil('fresh full roster accepted after draft cancellation',()=>nextRoster.every(c=>c.allocation&&c.allocation.allocation_id!==allocation.allocation_id),45000);
  const fresh=nextRoster[0].allocation;
@@ -356,6 +398,10 @@ async function partyDraftLifecycle() {
  await pumpUntil('replacement Ranked party roster reaches Running',()=>nextRoster.every(c=>c.stage==='running'),45000);
  await pumpFor(Math.max(1000,soakSecs*1000));
  for(const c of nextRoster){assert.equal(c.allocation.allocation_id,fresh.allocation_id);assert.equal(c.errors.length,0);assert.equal(ids(c.snapshot).length,10);}
+ if(exerciseStaleHandoff){
+  assert(nextRoster.every(c=>c.staleReadyChecks===1&&c.staleReadyRefreshes>=1),'stale ready request was not refreshed before consent');
+  checks.checks.push({name:'stale_ready_search_id_refresh',status:'PASS',clients:nextRoster.length,explicit_current_search_consent:true});
+ }
  checks.checks.push({name:'replacement_party_ranked_running',status:'PASS',allocation_id:fresh.allocation_id,humans:10,bots:0,party_team:nextRoster.find(c=>c.index===0).allocation.team});
  report.arenas=1;report.elapsed_seconds=(performance.now()-searchingAt)/1000;
  report.scenarios.push('signed_five_stack_ranked','draft_departure_requeues_nine_without_credit','fresh_unanimous_party_roster_running');

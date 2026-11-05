@@ -453,3 +453,60 @@ the previously type-checked review fixture (SHA-256
 Seven Android packaging tests and locked cargo metadata pass. Current actual
 Android target compilation remains due in CI; physical vibration is unverified.
 The 15-second acceptance still requires an explicit player action.
+
+
+### Current-search consent regression and repeat
+
+The corrected 60-second intent lifecycle passed in CI 42014873649, every job
+successful. Later d922d32 passed Android compile, every client/code/tooling and
+headless job, and all 568 real PostgreSQL/API/store/server tests. Its combined
+journey gate stopped at party-disconnect replacement. Verified diagnostic artifact
+13409754780 (SHA-256 a573ccff46eb7ab50e8bec772e8be038f56b069231045b9617459e9335f09069)
+shows nine fresh clients penalized after the replacement confirmation timed out.
+The test client answered ready views without checking their search request ID,
+starving the FindMatch refresh that the native client already performs.
+
+The standalone probe now confirms only a ready view correlated to its current
+search; an older view permits the ordinary FindMatch retry. Its five-case CLI
+regression runs before any network/output/database access, also through the
+Python tooling suite. The party process test deterministically restarts every
+replacement client's search while a real server ready view is pending and checks
+that all ten refresh before explicit consent. No acceptance deadline is changed.
+
+The real Mac/PG repeat passed in 81.58 seconds using the verified d922d32 release
+server, explicit protocol 13, and fresh owned loopback ports. All ten resumed
+through a fresh unanimous roster to Running; original FIFO/group and unchanged
+pre-start career/history were verified, with 20 stale-socket callback checks.
+Evidence: `.agent/codex-ranked-readiness/party-current-request-confirmed/report.json`.
+Full corrected CI repeat is required; this does not claim the entire latest
+journey gate has passed.
+
+### Mac artifact and rejected Home render
+
+Release workflow 42017153693 built the Mac/Android/Linux packages; PR runs do not
+publish a release. The Mac artifact was too large to retrieve reliably through
+the connector, so it was downloaded through authenticated gh instead. Exact ZIP
+SHA-256 853ab9f4e3dd7482fe555a155b4b99b9101e50e995c86786c4fcafcf522fb5bf
+matched; only its client/server executables were retained, with provenance in
+`.agent/codex-ranked-readiness/ci-d922-macos/`. The 216 MB ZIP was removed.
+
+The Home capture was REJECTED despite its automated geometry report: its actual
+PNG is entirely black, and a release Mac build correctly keeps the Desktop
+profile (phone preview is development-only). CUA independently confirmed the Mac
+is locked. This is not native phone evidence. Do not change production platform
+policy to make a screenshot pass. QA readback is being hardened to reject black
+or alpha-only pixels; a debug phone build and an unlocked display are still due.
+
+### P6 worktree in progress (not part of the probe correction)
+
+The worktree contains participation DTO/legacy constructors, per-seat time
+accounting, AFK AI attachment/reclaim, network-only liveness for AI-controlled
+endpoints, unattended-worker handling and receipt/checkpoint annotation. The
+first integrated runtime/policy suite passed 14 cases; a later review found that
+reflected AI poses need explicit local-input intent. Protocol 14 now adds that
+additive Transform flag, sourced from a permitted local MovementTarget on the
+native client; synthetic movement and browser controls set it explicitly.
+Server/harness/client test-target type checks pass. Current code still requires
+updated functional/full gates and PostgreSQL reward/abandon/cooldown integration.
+It is not a completed fair-play feature and #34 remains open. The implementation
+contract is `docs/plans/fair-play-2026-11-05.md`.

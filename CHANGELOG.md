@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Correlate probe ready consent with the current search so a retained old view
+  cannot starve search refresh and falsely penalize reconnecting survivors.
+  The party scenario exercises this race for all ten replacement clients.
+
 - Calibrate each player's first 20 rated matches with K=48, then use K=32.
   Choose the coefficient from the locked pre-settlement profile, independently
   for mixed-experience rosters. The full Ranked rehearsal checks exact awards;
