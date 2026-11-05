@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- In progress (#34): account for human connected/disconnected and AI-control
+  time, with 90-second AFK/reconnect grace and sticky abandon status. Winning
+  leavers lose rating and earn no XP; innocent losing teammates receive half
+  the normal loss. PostgreSQL settlement records one incident and a persistent
+  5-minute / 30-minute / 24-hour cooldown in the same transaction. Local store
+  tests pass; runtime, queue-denial and client verification are still pending.
+  This feature is not deployed and #34 remains partial.
+
 - Correlate probe ready consent with the current search so a retained old view
   cannot starve search refresh and falsely penalize reconnecting survivors.
   The party scenario exercises this race for all ten replacement clients.
