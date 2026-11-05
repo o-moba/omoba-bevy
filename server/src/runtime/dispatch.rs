@@ -21,6 +21,21 @@ pub(crate) const CLIENT_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 
 const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 
+fn receive_budget(lobby: bool) -> Duration {
+    Duration::from_millis(if lobby {
+        8
+    } else {
+        shared::public_transport::RECEIVE_BUDGET_MILLIS
+    })
+}
+
+#[test]
+fn only_the_lobby_gets_a_larger_bounded_receive_slice() {
+    assert_eq!(receive_budget(false), Duration::from_millis(2));
+    assert_eq!(receive_budget(true), Duration::from_millis(8));
+    assert_eq!(shared::public_transport::MAX_PACKETS_PER_TICK, 128);
+}
+
 impl ServerRuntime {
     pub(crate) fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
@@ -58,10 +73,11 @@ impl ServerRuntime {
             }
         }
         let receive_started = self.clock.now();
+        // The lobby has no combat simulation; allow its signed search/heartbeat
+        // traffic a larger bounded slice without changing any worker's budget.
+        let receive_budget = receive_budget(self.match_service.is_lobby());
         for _ in 0..shared::public_transport::MAX_PACKETS_PER_TICK {
-            if self.clock.now().saturating_duration_since(receive_started)
-                >= Duration::from_millis(shared::public_transport::RECEIVE_BUDGET_MILLIS)
-            {
+            if self.clock.now().saturating_duration_since(receive_started) >= receive_budget {
                 break;
             }
             match self.transport.recv(&mut self.recv_buf) {

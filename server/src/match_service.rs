@@ -1,9 +1,13 @@
 //! One public lobby schedules independent, immutable game workers.
+mod queue_views;
+mod ranked_selection;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use omoba_career_store::matchmaking::{CohortAllowance, fits_cohort_with, same_cohort_with};
+#[cfg(test)]
+use omoba_career_store::matchmaking::fits_cohort_with;
+use omoba_career_store::matchmaking::{CohortAllowance, same_cohort_with};
 use shared::career::ProfileSummary;
 use shared::match_service::{
     CapacityLine, InMatch, MatchAllocation, MatchPreference, MatchServiceView,
@@ -163,6 +167,7 @@ pub(crate) struct Lobby {
     order: u64,
     last_poll: Option<Instant>,
     last_handoff_refresh: Option<Instant>,
+    last_queue_refresh: Option<Instant>,
     /// Per-source limits (LR-16), and what they track in memory only: the IP
     /// of each profile's latest FindMatch, the IPs of each live allocation
     /// this lobby made, and when each IP left a vs Bots allocation unplayed.
@@ -173,6 +178,10 @@ pub(crate) struct Lobby {
     /// While every arena is busy: each queued profile whose roster is ready,
     /// with its place in the line for the next free arena (LR-09).
     line: HashMap<String, u32>,
+    line_key: Option<queue_views::LineKey>,
+    queue_views: queue_views::Snapshot,
+    #[cfg(test)]
+    line_rebuilds: usize,
     turnover: crate::capacity::Turnover,
     capacity: crate::capacity::CapacityMetric,
     max_waiting: usize,
@@ -232,11 +241,16 @@ impl Lobby {
             order: 0,
             last_poll: None,
             last_handoff_refresh: None,
+            last_queue_refresh: None,
             limits,
             sources: HashMap::new(),
             arena_sources: HashMap::new(),
             abandons: HashMap::new(),
             line: HashMap::new(),
+            line_key: None,
+            queue_views: Default::default(),
+            #[cfg(test)]
+            line_rebuilds: 0,
             turnover: Default::default(),
             capacity: Default::default(),
             max_waiting: max_waiting_from_env(),
@@ -476,49 +490,13 @@ impl Lobby {
         now: Instant,
     ) -> Option<shared::match_service::PartyGathering> {
         let entry = &self.waiting[index];
-        let (party, expected) = entry.party?;
-        let members: Vec<_> = self
-            .waiting
-            .iter()
-            .filter(|w| w.party.is_some_and(|(id, _)| id == party))
-            .collect();
-        let other_queue = members
-            .iter()
-            .filter(|w| w.preference != entry.preference)
-            .count();
-        let present: Vec<_> = members
-            .iter()
-            .filter(|w| w.preference == entry.preference)
-            .collect();
-        let needed = expected
-            .saturating_sub(other_queue)
-            .max(1)
-            .saturating_sub(present.len());
-        let oldest = present.iter().map(|w| w.queued).min()?;
-        let deadline = oldest + PARTY_GATHER_WINDOW;
-        if needed == 0 || now >= deadline {
-            return None;
-        }
-        let missing = self
-            .party_rosters
-            .get(&party)
-            .into_iter()
-            .flatten()
-            .filter(|(id, _)| !members.iter().any(|w| w.profile.profile_id == *id))
-            .filter(|(id, _)| {
-                !self
-                    .party_opt_outs
-                    .get(&party)
-                    .is_some_and(|out| out.contains_key(id))
-            })
-            .map(|(_, name)| name.clone())
-            .take(needed)
-            .collect();
-        Some(shared::match_service::PartyGathering {
-            missing,
-            needed: needed as u32,
-            remaining_secs: deadline.saturating_duration_since(now).as_secs().max(1),
-        })
+        let (party, _) = entry.party?;
+        self.queue_views.gathering(
+            entry,
+            self.party_rosters.get(&party).map(Vec::as_slice),
+            self.party_opt_outs.get(&party),
+            now,
+        )
     }
 
     /// Recomputes the line for a free arena (LR-09), empty unless every
@@ -527,10 +505,21 @@ impl Lobby {
     /// their profiles with its 1-based place. A roster the per-source limits
     /// would refuse takes no place.
     fn refresh_line(&mut self, now: Instant) {
-        self.line.clear();
         if self.pool.occupied() + self.ready.len() < self.pool.capacity() {
+            self.line.clear();
+            self.line_key = None;
             return;
         }
+        let key = queue_views::LineKey::new(self, now);
+        if self.line_key.as_ref() == Some(&key) {
+            return;
+        }
+        self.line_key = Some(key);
+        #[cfg(test)]
+        {
+            self.line_rebuilds += 1;
+        }
+        self.line.clear();
         let mut remaining: Vec<usize> = (0..self.waiting.len()).collect();
         let mut position = 0_u32;
         loop {
@@ -895,6 +884,8 @@ impl MatchService {
             }
         }
         lobby.order = lobby.order.saturating_add(1);
+        // A cached position belongs to the prior search, never a fresh attempt.
+        lobby.line.remove(&profile.profile_id);
         lobby.waiting.push(Waiting {
             profile,
             session,
@@ -905,10 +896,8 @@ impl MatchService {
             party,
             casual_since: (preference == MatchPreference::Casual).then_some(now),
         });
-        // A newcomer to a full lobby learns its place at once.
-        if lobby.pool.full() {
-            lobby.refresh_line(now);
-        }
+        // Capacity positions are recomputed by the bounded scheduling pass,
+        // never once per new player's packet.
     }
     /// Answers a `FindMatch` with a refusal `code` instead of queueing it (a
     /// moderation sanction, LR-15): the profile leaves the queue, and its view
@@ -1057,11 +1046,18 @@ impl MatchService {
             None
         }
     }
-    /// Forced extra career broadcasts reuse the same bounded worker snapshot.
+    /// Forced extra broadcasts reuse bounded worker and queue snapshots.
     pub fn refresh_handoff_views(&mut self, now: Instant) {
         let Self::Lobby(lobby) = self else {
             return;
         };
+        if lobby
+            .last_queue_refresh
+            .is_none_or(|at| now.saturating_duration_since(at) >= Duration::from_millis(250))
+        {
+            lobby.last_queue_refresh = Some(now);
+            lobby.queue_views = queue_views::Snapshot::new(&lobby.waiting, now);
+        }
         if lobby
             .last_handoff_refresh
             .is_some_and(|at| now.saturating_duration_since(at) < Duration::from_millis(250))
@@ -1160,16 +1156,12 @@ impl MatchService {
                 code: PARTY_MEMBER_LEFT.into(),
             });
         }
-        if let Some(index) = lobby
-            .waiting
-            .iter()
-            .position(|w| w.profile.profile_id == profile)
-        {
+        if let Some(index) = lobby.queue_views.index(&lobby.waiting, profile) {
             let line = lobby.line.get(profile).map(|&position| CapacityLine {
                 position,
                 eta_secs: lobby.turnover.eta_secs(position, now),
             });
-            let mut view = waiting_view(&lobby.waiting, index, line, now);
+            let mut view = lobby.queue_views.view(&lobby.waiting, index, line, now);
             if let MatchServiceView::Waiting {
                 party_gathering, ..
             } = &mut view
@@ -1390,6 +1382,7 @@ impl MatchService {
         lobby.turnover.settle(lobby.pool.occupied());
         lobby.refresh_line(now);
         lobby.report_capacity(now);
+        self.refresh_handoff_views(now);
     }
 }
 fn expire_waiting(waiting: &mut Vec<Waiting>, now: Instant) {
@@ -1407,6 +1400,7 @@ fn searches(waiting: &[Waiting], unit: &[usize], queue: MatchPreference) -> bool
 
 /// The searching screen's view of one queued entry. `line` is its place in
 /// the line for a free arena, while every arena is busy (LR-09).
+#[cfg(test)]
 fn waiting_view(
     waiting: &[Waiting],
     index: usize,
@@ -1559,6 +1553,7 @@ fn pack_units(
     allow_fill: bool,
     now: Instant,
 ) -> Option<Vec<usize>> {
+    let eligible = ranked_selection::bounded_packing_units(waiting, eligible, allow_fill, now);
     let slot = |green: usize, blue: usize, due: bool| (green * 6 + blue) * 2 + usize::from(due);
     let due = |unit: &[usize]| {
         unit.iter().any(|&i| {
@@ -1573,17 +1568,33 @@ fn pack_units(
             .cmp(b.iter().map(|&i| waiting[i].order))
             .is_lt()
     };
-    let mut states: Vec<Option<Vec<usize>>> = vec![None; 72];
     let seed = mandatory.cloned().unwrap_or_default();
     if seed.len() > 5 {
         return None;
     }
+    // Solos always split into5+5: preserve the mandatory anchor and take the
+    // oldest remaining seats directly, without running the party-capacity DP.
+    if eligible.iter().all(|unit| unit.len() == 1) && mandatory.is_none_or(|unit| unit.len() == 1) {
+        let mut solos: Vec<_> = eligible
+            .iter()
+            .filter(|unit| mandatory.is_none_or(|m| !std::ptr::eq(m, **unit)))
+            .map(|unit| unit[0])
+            .collect();
+        solos.sort_by_key(|&i| waiting[i].order);
+        solos.truncate(10 - seed.len());
+        let mut selected = seed;
+        selected.extend(solos);
+        selected.sort_by_key(|&i| waiting[i].order);
+        return (!selected.is_empty() && (selected.len() == 10 || (allow_fill && due(&selected))))
+            .then_some(selected);
+    }
+    let mut states: Vec<Option<Vec<usize>>> = vec![None; 72];
     let seed_slot = slot(seed.len(), 0, due(&seed));
     states[seed_slot] = Some(seed);
     let mut earliest: Vec<_> = eligible.iter().flat_map(|u| u.iter().copied()).collect();
     earliest.sort_by_key(|&i| waiting[i].order);
     earliest.truncate(10);
-    for unit in eligible {
+    for unit in &eligible {
         if mandatory.is_some_and(|m| std::ptr::eq(m, *unit)) {
             continue;
         }
@@ -1721,92 +1732,19 @@ fn select(waiting: &[Waiting], now: Instant) -> Option<Selection> {
             cohort: None,
         });
     }
-    let older = |a: &Vec<usize>, b: &Vec<usize>| {
-        a.iter()
-            .map(|&i| waiting[i].order)
-            .cmp(b.iter().map(|&i| waiting[i].order))
-            .is_lt()
-    };
-    for queue in [MatchPreference::Ranked, MatchPreference::Casual] {
-        if queue == MatchPreference::Casual {
-            let eligible: Vec<_> = units
-                .iter()
-                .filter(|u| searches(waiting, u, queue))
-                .collect();
-            if let Some(members) = pack_units(waiting, &eligible, None, true, now) {
-                candidates.push(Selection {
-                    members,
-                    queue,
-                    cohort: None,
-                });
-            }
-            continue;
-        }
-        let mut best: Option<(Vec<usize>, Option<CohortAllowance>)> = None;
-        let mut windows = HashSet::new();
-        for anchor in units.iter().filter(|unit| searches(waiting, unit, queue)) {
-            let low = anchor
-                .iter()
-                .map(|&i| &waiting[i])
-                .min_by_key(|w| w.profile.rating)
-                .expect("units are never empty");
-            // The window the anchor's wait has opened (LR-35): the oldest
-            // member of the unit decides.
-            let waited = anchor
-                .iter()
-                .map(|&i| now.saturating_duration_since(waiting[i].queued))
-                .max()
-                .unwrap_or_default();
-            let allowance = CohortAllowance::after_wait(waited);
-            // Ranked admits a unit only when its every member fits the
-            // cohort that starts at the anchor's lowest rating; a party is
-            // itself one base cohort, whatever the window (LR-08).
-            let fits = |unit: &Vec<usize>| {
-                queue != MatchPreference::Ranked
-                    || (unit
-                        .iter()
-                        .all(|&i| fits_cohort_with(&low.profile, &waiting[i].profile, allowance))
-                        && (unit.len() == 1
-                            || same_cohort_with(
-                                unit.iter().map(|&i| &waiting[i].profile),
-                                CohortAllowance::BASE,
-                            )))
-            };
-            if !fits(anchor)
-                || !windows.insert((
-                    low.profile.rating,
-                    low.profile.newcomer(),
-                    allowance.spread,
-                    allowance.merge_newcomers,
-                    anchor.len(),
-                ))
-            {
-                continue;
-            }
-            // Equal-size anchors in the same window are interchangeable;
-            // forcing the oldest one dominates forcing any later one.
-            let eligible: Vec<_> = units
-                .iter()
-                .filter(|u| searches(waiting, u, queue) && fits(u))
-                .collect();
-            let Some(members) = pack_units(waiting, &eligible, Some(anchor), false, now) else {
-                continue;
-            };
-            let ready = true;
-            if ready && best.as_ref().is_none_or(|(b, _)| older(&members, b)) {
-                best = Some((
-                    members,
-                    (queue == MatchPreference::Ranked).then_some(allowance),
-                ));
-            }
-        }
-        if let Some((members, cohort)) = best {
-            candidates.push(Selection {
-                members,
-                queue,
-                cohort,
-            });
-        }
+    if let Some(ranked) = ranked_selection::select(waiting, &units, now) {
+        candidates.push(ranked);
+    }
+    let casual: Vec<_> = units
+        .iter()
+        .filter(|u| searches(waiting, u, MatchPreference::Casual))
+        .collect();
+    if let Some(members) = pack_units(waiting, &casual, None, true, now) {
+        candidates.push(Selection {
+            members,
+            queue: MatchPreference::Casual,
+            cohort: None,
+        });
     }
     // An opted-in Ranked player belongs to a ready Ranked roster before any
     // Casual roster can take them, even when older Casual players are queued.
@@ -2323,6 +2261,7 @@ mod tests {
         assert!(!view(&service, early).2);
         let offered = now + RANKED_CASUAL_OFFER;
         find(&mut service, true, offered);
+        service.refresh_handoff_views(offered); // Actual pre-broadcast snapshot boundary.
         assert!(view(&service, offered).2);
         let MatchService::Lobby(lobby) = &mut service else {
             unreachable!()
@@ -3257,7 +3196,8 @@ mod tests {
             }
             other => panic!("expected a wait, got {other:?}"),
         };
-        // Known at once, before the next pass.
+        // Positions are produced by the scheduling pass, not a player's packet.
+        tick_accepted(&mut service, at);
         assert_eq!(
             line(&service, &second, at),
             Some(CapacityLine {
@@ -3265,7 +3205,6 @@ mod tests {
                 eta_secs: None
             })
         );
-        tick_accepted(&mut service, at);
         assert_eq!(line(&service, &third, at).unwrap().position, 2);
         assert_eq!(
             line(&service, &ranked, at),
@@ -3817,6 +3756,7 @@ mod tests {
             ],
         );
         enqueue_all(&mut service, std::slice::from_ref(&entry), 1, now);
+        service.refresh_handoff_views(now); // Same snapshot used by the real send path.
         let Some(MatchServiceView::Waiting {
             party_gathering: Some(gathering),
             ..
@@ -3869,6 +3809,101 @@ mod tests {
         };
         (service, entries, directory, check_id)
     }
+    #[test]
+    fn lobby_applies_signed_consent_and_cancel_at_receipt_without_global_maintenance() {
+        use crate::runtime::ports::{ManualClock, MemoryTransport};
+        use ed25519_dalek::Signer;
+        use shared::career::{CareerAction, CareerRequest};
+        let now = Instant::now();
+        let (service, entries, directory, check_id) = ready_fixture(now);
+        let mut runtime = ServerRuntime::for_test(
+            MemoryTransport::new("127.0.0.1:4000".parse().unwrap()),
+            ManualClock::new(now),
+            crate::career_backend::MemoryCareer::test_backend(7),
+            crate::match_rules::MatchConfig::dev(),
+        );
+        runtime.match_service = service;
+        let addr = "127.0.0.1:60210".parse().unwrap();
+        let orphan = "127.0.0.1:60211".parse().unwrap();
+        runtime.career_error(orphan, "maintenance fixture");
+        runtime.career.backend.test_authenticated(
+            addr,
+            entries[0].profile.clone(),
+            &entries[0].session,
+        );
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let request = |sequence, action: CareerAction| {
+            let nonce = "b".repeat(64);
+            let signature = key
+                .sign(&shared::career::authorized_signing_bytes(
+                    7, &nonce, sequence, &action,
+                ))
+                .to_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            CareerRequest::Authorized {
+                session_nonce: nonce,
+                sequence,
+                action,
+                signature,
+            }
+        };
+        let action = CareerAction::ReadyMatch {
+            request_id: 7,
+            check_id: check_id.clone(),
+            accepted: true,
+        };
+        let mut forged = request(1, action.clone());
+        if let CareerRequest::Authorized { signature, .. } = &mut forged {
+            *signature = "00".repeat(64);
+        }
+        let receipt = now + Duration::from_millis(14990);
+        runtime.handle_career_request(addr, forged, receipt);
+        std::thread::sleep(Duration::from_millis(110));
+        runtime.handle_career_request(addr, request(2, action), receipt);
+        let MatchService::Lobby(lobby) = &runtime.match_service else {
+            unreachable!()
+        };
+        assert_eq!(lobby.ready[&check_id].accepted.len(), 1);
+        assert!(
+            lobby.ready[&check_id]
+                .accepted
+                .contains(&entries[0].profile.profile_id)
+        );
+        assert!(
+            runtime.career_view(orphan, receipt).error.is_some(),
+            "per-request global maintenance must stay deferred"
+        );
+        std::thread::sleep(Duration::from_millis(110));
+        runtime.handle_career_request(addr, CareerRequest::CancelQueue, receipt);
+        let MatchService::Lobby(lobby) = &runtime.match_service else {
+            unreachable!()
+        };
+        assert!(
+            lobby.ready.contains_key(&check_id),
+            "unsigned cancel must have no effect"
+        );
+        std::thread::sleep(Duration::from_millis(110));
+        runtime.handle_career_request(addr, request(3, CareerAction::CancelQueue), receipt);
+        let MatchService::Lobby(lobby) = &runtime.match_service else {
+            unreachable!()
+        };
+        assert!(!lobby.ready.contains_key(&check_id));
+        assert_eq!(lobby.waiting.len(), 9);
+        assert!(
+            !lobby
+                .waiting
+                .iter()
+                .any(|w| w.profile.profile_id == entries[0].profile.profile_id)
+        );
+        assert!(runtime.career_view(orphan, receipt).error.is_some());
+        runtime.poll_career(receipt);
+        assert!(runtime.career_view(orphan, receipt).error.is_none());
+        drop(runtime);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn ready_check_never_spawns_before_ten_explicit_answers_and_rejects_stale_answers() {
         let now = Instant::now();

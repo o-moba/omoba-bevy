@@ -44,6 +44,11 @@ const RETENTION_INTERVAL: Duration = Duration::from_secs(3600);
 const RETENTION_BATCH: u32 = 200;
 const MAX_JOBS: usize = 256;
 const COSMETIC_CACHE_TTL: Duration = Duration::from_secs(30);
+const ACCESS_REFRESH_AFTER: Duration = Duration::from_secs(10);
+const ACCESS_REFRESH_STEP: Duration = Duration::from_millis(100);
+const ACCESS_REFRESH_RETRY: Duration = Duration::from_secs(5);
+const ACCESS_REFRESH_BATCH: usize = 16;
+const PRESENCE_BATCH_SIZE: usize = 512;
 const CHALLENGE_TTL: Duration = Duration::from_secs(30);
 /// How often the worker reads the database-wide chat switch (LR-15).
 const CHAT_SWITCH_POLL: Duration = Duration::from_secs(5);
@@ -91,6 +96,7 @@ struct Client {
     playing: bool,
     profile_ready: bool,
     supporter_checked: Option<Instant>,
+    access_refresh_sent: Option<Instant>,
     key_checked: Option<Instant>,
     /// When a Login job for the current challenge went to the worker.
     login_sent: Option<Instant>,
@@ -108,6 +114,7 @@ impl Default for Client {
             playing: false,
             profile_ready: false,
             supporter_checked: None,
+            access_refresh_sent: None,
             key_checked: None,
             login_sent: None,
         }
@@ -438,6 +445,7 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     match_requests: Vec<crate::career_port::MatchRequest>,
     ready_requests: Vec<crate::career_port::ReadyRequest>,
     last_presence: Instant,
+    last_access_refresh: Option<Instant>,
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
     record_generation: u64,
@@ -453,6 +461,52 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
 pub(crate) type MemoryCareer = CareerBackend<MemoryLink>;
 
 impl<L: JobLink> CareerBackend<L> {
+    /// Pace refresh across the bounded link. Oldest due clients get the next
+    /// slot, including after congestion; submission alone never extends auth.
+    fn refresh_access(&mut self, now: Instant) {
+        if !self.link.enabled()
+            || self
+                .last_access_refresh
+                .is_some_and(|at| now.saturating_duration_since(at) < ACCESS_REFRESH_STEP)
+        {
+            return;
+        }
+        self.last_access_refresh = Some(now);
+        let mut due: Vec<_> = self
+            .clients
+            .iter()
+            .filter_map(|(&addr, c)| {
+                c.auth.as_ref()?;
+                c.view.profile.as_ref()?;
+                let checked = match (c.key_checked, c.supporter_checked) {
+                    (Some(key), Some(supporter)) => key.min(supporter),
+                    _ => now - ACCESS_REFRESH_AFTER,
+                };
+                if now.saturating_duration_since(checked) < ACCESS_REFRESH_AFTER
+                    || c.access_refresh_sent
+                        .is_some_and(|at| now.saturating_duration_since(at) < ACCESS_REFRESH_RETRY)
+                {
+                    return None;
+                }
+                Some((c.access_refresh_sent.unwrap_or(checked), checked, addr))
+            })
+            .collect();
+        due.sort_unstable();
+        for (_, _, addr) in due.into_iter().take(ACCESS_REFRESH_BATCH) {
+            let c = self.clients.get_mut(&addr).unwrap();
+            let auth = c.auth.as_ref().unwrap();
+            let profile = c.view.profile.as_ref().unwrap();
+            if !self.link.try_send(Job::RefreshAccess {
+                addr,
+                nonce: auth.nonce.clone(),
+                public_key: auth.public_key.clone(),
+                profile_id: profile.profile_id.clone(),
+            }) {
+                break;
+            }
+            c.access_refresh_sent = Some(now);
+        }
+    }
     fn over(epoch: u64, link: L) -> Self {
         Self {
             epoch,
@@ -467,6 +521,7 @@ impl<L: JobLink> CareerBackend<L> {
             match_requests: Vec::new(),
             ready_requests: Vec::new(),
             last_presence: Instant::now(),
+            last_access_refresh: None,
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
             record_generation: 0,
@@ -695,6 +750,10 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     #[cfg(test)]
     fn test_refresh_now(&mut self) {
         self.last_presence = Instant::now() - Duration::from_secs(10);
+        self.last_access_refresh = None;
+        for c in self.clients.values_mut() {
+            c.supporter_checked = Some(Instant::now() - ACCESS_REFRESH_AFTER);
+        }
     }
     fn enabled(&self) -> bool {
         self.link.enabled()
@@ -1150,6 +1209,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     if c.auth.as_ref().is_none_or(|auth| auth.nonce != nonce) {
                         continue;
                     }
+                    c.access_refresh_sent = None;
                     if let (Some(count), Some(profile)) =
                         (completed_public_matches, c.view.profile.as_mut())
                     {
@@ -1362,33 +1422,28 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         }
         self.clients
             .retain(|_, c| c.touched.elapsed() < Duration::from_secs(120));
+        self.refresh_access(Instant::now());
         if self.last_presence.elapsed() >= Duration::from_secs(10) {
             self.last_presence = Instant::now();
-            let presence = self
-                .clients
-                .values()
-                .filter_map(|c| {
-                    c.view.profile.as_ref().map(|p| {
-                        (
-                            p.profile_id.clone(),
-                            c.playing
-                                .then(|| self.matches.get(&p.profile_id).cloned())
-                                .flatten(),
-                        )
-                    })
-                })
-                .collect();
+            // Multiple device endpoints may represent one profile. Its live
+            // allocation takes precedence over an idle duplicate session.
+            let mut presence = BTreeMap::<String, Option<String>>::new();
+            for c in self.clients.values() {
+                if let Some(profile) = &c.view.profile {
+                    let game = c
+                        .playing
+                        .then(|| self.matches.get(&profile.profile_id).cloned())
+                        .flatten();
+                    let entry = presence.entry(profile.profile_id.clone()).or_default();
+                    if game.is_some() {
+                        *entry = game;
+                    }
+                }
+            }
+            let presence = presence.into_iter().collect();
             if self.link.enabled() {
                 self.link.try_send(Job::Presence(presence));
                 for (addr, c) in &self.clients {
-                    if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
-                        self.link.try_send(Job::RefreshAccess {
-                            addr: *addr,
-                            nonce: auth.nonce.clone(),
-                            public_key: auth.public_key.clone(),
-                            profile_id: profile.profile_id.clone(),
-                        });
-                    }
                     if !c.profile_ready {
                         if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
                             self.link.try_send(Job::Action {
@@ -1773,6 +1828,90 @@ fn action_error_code(error: &str) -> Option<&'static str> {
         .then_some(shared::career::error_code::NAME_LOCKED)
 }
 
+const ACCESS_READ_BATCH: usize = 4;
+
+fn collect_access_reads(first: Job, jobs: &Receiver<Job>, deferred: &mut Option<Job>) -> Vec<Job> {
+    let mut batch = vec![first];
+    while batch.len() < ACCESS_READ_BATCH {
+        match jobs.try_recv() {
+            Ok(job @ (Job::QueueAccess { .. } | Job::RefreshAccess { .. })) => batch.push(job),
+            Ok(barrier) => {
+                *deferred = Some(barrier);
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    batch
+}
+
+async fn answer_access_read(store: CareerStore, job: Job) -> Reply {
+    match job {
+        Job::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            public_key,
+            profile_id,
+        } => Reply::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            access: store.access(&public_key, &profile_id).await.map(Some),
+        },
+        Job::RefreshAccess {
+            addr,
+            nonce,
+            public_key,
+            profile_id,
+        } => {
+            let access = store.access(&public_key, &profile_id).await.ok();
+            let key_active = access.as_ref().map(|a| a.key_active);
+            let supporter = if key_active == Some(true) {
+                store.supporter_status(&profile_id).await.ok()
+            } else {
+                None
+            };
+            let (nickname, sanctions, play_cooldown, completed_public_matches) = access
+                .map(|a| {
+                    (
+                        a.nickname,
+                        Some(a.sanctions),
+                        Some(a.play_cooldown),
+                        Some(a.completed_public_matches),
+                    )
+                })
+                .unwrap_or_default();
+            Reply::RefreshAccess {
+                completed_public_matches,
+                addr,
+                nonce,
+                key_active,
+                supporter,
+                nickname,
+                sanctions,
+                play_cooldown,
+            }
+        }
+        _ => unreachable!("only access reads enter a concurrent batch"),
+    }
+}
+
+async fn answer_access_reads(store: &CareerStore, batch: Vec<Job>) -> Vec<Reply> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for job in batch {
+        tasks.spawn(answer_access_read(store.clone(), job));
+    }
+    let mut replies = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        match result {
+            Ok(reply) => replies.push(reply),
+            Err(_) => eprintln!("Account read task failed; authorization remains fail-closed."),
+        }
+    }
+    replies
+}
+
 fn worker(
     url: String,
     outbox: PathBuf,
@@ -1801,6 +1940,7 @@ fn worker(
     // The first retention run waits out a restart's reconnect storm.
     let mut next_retention = Instant::now() + Duration::from_secs(300);
     let mut last_chat_poll: Option<Instant> = None;
+    let mut deferred_job: Option<Job> = None;
     while connected || !pending.is_empty() {
         if store.is_none() && last_retry.elapsed() >= Duration::from_secs(2) {
             last_retry = Instant::now();
@@ -1816,7 +1956,22 @@ fn worker(
                 }));
             }
         }
-        match jobs.recv_timeout(Duration::from_millis(100)) {
+        // A reconnect drains older parked operations before any fresh read.
+        let next = if store.is_some() && !parked.is_empty() {
+            Err(mpsc::RecvTimeoutError::Timeout)
+        } else {
+            deferred_job
+                .take()
+                .map(Ok)
+                .unwrap_or_else(|| jobs.recv_timeout(Duration::from_millis(100)))
+        };
+        match next {
+            Ok(job @ (Job::QueueAccess { .. } | Job::RefreshAccess { .. })) if store.is_some() => {
+                let batch = collect_access_reads(job, &jobs, &mut deferred_job);
+                for reply in rt.block_on(answer_access_reads(store.as_ref().unwrap(), batch)) {
+                    let _ = replies.try_send(reply);
+                }
+            }
             Ok(Job::Flush(generation)) => {
                 let flushed = pending
                     .values()
@@ -1897,7 +2052,9 @@ fn worker(
             }
             Ok(Job::Presence(presence)) => {
                 if let Some(s) = &store {
-                    let _ = rt.block_on(s.touch_presences(&presence));
+                    for batch in presence.chunks(PRESENCE_BATCH_SIZE) {
+                        let _ = rt.block_on(s.touch_presences(batch));
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => connected = false,
@@ -3133,3 +3290,7 @@ mod tests {
 #[cfg(test)]
 #[path = "career_backend_resilience_tests.rs"]
 mod resilience_tests;
+
+#[cfg(test)]
+#[path = "career_refresh_tests.rs"]
+mod refresh_tests;

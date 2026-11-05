@@ -365,3 +365,86 @@ the existing Ranked early-crash CI stage now uses capacity1 and the stricter20s
 same-port assertion. No workflow YAML, dependencies, schema/protocol or production
 infrastructure/deployment change. Next independent scope is bounded selector21;
 season/cross-play choices still await the owner's O-5/O-18 response.
+
+
+C7 committed final CI PASS on47ee63ae/run42090248772:all7 jobs and18 public/PG
+stages pass in2609.62s. Native1572 PASS/1intentional ignore includes Taken/Lock
+stale-press test. Artifact13446519867 SHA256
+`e2e3b453bc610c40c9727840dd0b68ae6e274d098e31a6d8d3009a83d9f82069`
+verified before safe extraction; private fixture absent. Independently rechecked
+signed unique-draft allocation53bfa15be7cd702d6cf410d3f2934037 (five classes/team),
+Ranked base victory0e369bd233d5a67582b3b67cbc3d8575 (544.82s setup-inclusive,
+523474ms gameplay, all ten exact ±24/150/100XP/profile/history/participation), and
+real tenth public completion6a8f091a936f62aec6c9755455254414 (surrender600100ms,
+wire denial0/9→acceptance10 without VK). Full reports/provenance/summary in
+`.agent/codex-ranked-readiness/ci-47-postgres-harness/`. C7 software/public
+acceptance is green; current native visual still awaits manual unlock.
+
+P7 selector21 core checkpoint:45 matching tests PASS including independent
+subset oracles, mandatory anchors, due bits, parties/cohorts/wait boundaries and
+integer limits. Actual optimized instrumented queue selection measures3.15ms
+for1000 and12.94ms for4096 distinct-rating waiters; same-rating and awkward-party
+cases also obey bounded-work assertions. These are algorithm checks, not a
+1000-playing-client claim. Waiting-view nested scans and enqueue-time repeated
+capacity-line construction are still being replaced; finding21 remains partial.
+
+### P7 pool committed acceptance — 2026-11-06
+
+Commit5c0583ee passes all seven CI jobs and all18 public/PG harness stages in
+[run42097650577](https://github.com/o-moba/omoba-bevy/actions/runs/42097650577).
+Artifact13451811044 SHA-256
+`427648b70648e59cd0c2f90277a96f469184b2dfc95955e97c8bec1cc6693dd7`
+was downloaded, hash/path/private-fixture checked and retained locally under
+`.agent/codex-ranked-readiness/ci-5c-postgres-harness/`. Independent recheck
+confirms all ten exact Ranked awards, profiles/history and no false AFK; actual
+tenth public completion; and ten-human capacity1 crash recovery with the same
+physical port reassigned in2452ms after ordinary durable recovery. Findings53
+and54 are now done. No RU deployment or host-capacity claim follows from CI.
+
+### P7 signed queue load and authorization correction — 2026-11-06
+
+The first1000-target attempt stopped before load on a helper-status publication
+race; the corrected10-client smoke passes. Actual1000-target v2 then ran the
+full240s and FAILed: roughly600 endpoints lost authentication. Preserve both
+failed reports under `.agent/codex-ranked-readiness/p7-queue-1000-{final,v2}/`.
+Periodic access refresh had tried to send every client through a256-job link.
+
+Bound refresh to16 oldest-due requests per100ms, retry missing replies after5s,
+and preserve the original30s fail-closed deadline. Four new fair-load/congestion/
+missing-reply/old-nonce tests and all643 real PG/API/server tests pass. A related
+presence batch exceeded the store's512-entry bound; producer deduplication and
+worker-side bounded calls are now implemented, with a fifth regression and
+actual1000-presence process verification pending. No authentication bypass,
+production load, dependency, schema or protocol change is introduced.
+
+Actual queue v3 also FAILed at240s (373 Waiting); the old serial account read
+stream cannot sustain500 FindMatch checks/s plus periodic refresh. No1000-client
+acceptance is claimed. The next candidate batches at most4 consecutive
+QueueAccess/RefreshAccess reads using the existing current-thread runtime and
+4-connection lobby pool. It stops at all non-read barriers and drains older
+parked operations first after DB reconnect. Strict server clippy passes; full
+PG, live boundary regressions and repeated1000-client load are pending. Earlier
+10-client v4 verifies both wire queue state and ten actual fresh presence rows;
+its12s soak covers the normal10s presence cadence.
+
+### P7 saved queue/runtime checkpoint — 2026-11-06
+
+Current source passes649 real PG/API/server tests in18 suites (0 failures/skips),
+including56 matchmaking cases, immediate near-deadline signed control handling,
+read-batch barriers and real DB revocation. Strict server clippy, formatting and
+three Node policy checks pass. Actual signed ready-check, party-leave/stale
+handoff and unique-draft process journeys pass; reports are under
+`.agent/codex-ranked-readiness/p7-selector-*-final/`. Fresh server SHA-256
+`8d1192b9cfcbc3901d3ccbf44bb572709ee23cfe5141bdb37586c13485e2ce02`.
+
+The ten-client v6 smoke also verifies ten fresh DB presence rows. Actual1000
+v5 reaches all targets Waiting with no authentication loss, but FAILs final
+account-error acceptance:266 profiles still report Busy. Preserve FAIL; this
+checkpoint does not close finding50 or certify capacity. Continue account read
+throughput work from the frozen supporter-read specification. Bounded queue
+selection/view implementation21 still needs committed full CI.
+
+Pool5c's separate release-build workflow42097650568 has Windows/Linux/Android
+success, macOS cancelled and draft-release skipped. Its seven-job CI and all18
+public/PG stages are fully green; the cancelled macOS job is not release proof.
+No RU deployment, production infrastructure/credentials or dependency changes.

@@ -407,3 +407,23 @@ process without exit proof retains the conservative 35-second heartbeat hold.
 Retained terminal receipts sharing one reused bind endpoint occupy one port,
 so rapid completed rounds do not become extra live arenas after restart. Startup
 still bounds the scan to 4096 entries and refuses more than 100 occupied ports.
+
+### Queue-only load evidence
+
+`test_public_mvp.mjs --queue-only --clients=1000 --allow-large --preference=quick
+--capacity=1 --seconds=15 --verify-presence` measures actual signed searchers on an isolated
+loopback `/omoba_test` database. First one ordinary vs-Bots helper reaches Running
+and holds the only arena with bounded signed activity. It is disclosed separately
+and excluded from target-client counts. Every target must remain Waiting, keep
+its current request correlation, receive fresh career views, and receive no world
+snapshots or worker handoff. CPU/RSS cover lobby plus the helper worker, excluding
+the client generator. The optional `--verify-presence` uses `psql` to read all
+target presence rows and checks their current expiry and common lobby owner.
+Use at least12s soak with this DB check to cover the ordinary10s presence
+cadence. Run the ten-client smoke first. Queue-only success does not
+prove1000 playing clients, snapshot egress, remote pools or RU-host capacity.
+
+Lobby queue views share indexed counters at the existing250ms cadence. Immediate
+account responses target their requester without resetting periodic broadcasts.
+Exact capacity-line recomputation occurs from tick only, and heartbeat-only
+renewals reuse it. Party/cohort/FIFO and ready-consent policies are unchanged.

@@ -5,6 +5,26 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Bound Ranked cohort selection to rating sweeps and a fixed set of oldest party
+  sizes, preserving exact5+5 packing, FIFO, shared widening and mandatory anchors
+  (#21). Queue counters use common indexed snapshots; the exact capacity line is
+  recomputed only from tick when membership/policy/source capacity changes.
+  Immediate lobby account replies address their requester without resetting the
+  periodic broadcast clock. Independent brute-force/randomized regressions,
+  56 focused queue tests,649 real PG/API/server tests and server clippy pass.
+  Pace authorization refresh across bounded jobs so congested clients do not
+  lose their session; preserve the original fail-closed deadline. Deduplicate
+  profile presence and submit it in512-entry store batches. Five new refresh/
+  presence regressions and three read-batch/barrier/real-PG revocation tests
+  pass. Consecutive account reads use up to4 existing lobby connections,
+  preserving write barriers and older parked operations. Actual signed
+  ready/party/draft journeys and ten-client queue/presence checks pass.
+  Lobby maintenance runs once per tick while verified consent/cancel remains
+  immediate; lobby receive uses8ms/128 packets and workers retain2ms/128.
+  All1000 probe targets reach Waiting with authentication intact, but final
+  Busy messages still fail acceptance. Full CI and throughput correction remain
+  in progress; no1000-playing or RU capacity claim is made.
+
 - Share bounded worker status/cancellation snapshots across a whole player-view
   batch (#54), preserving fresh search/cancel admission and monotonic observed
   settlement. A late cancel after terminal completion creates no dodge penalty;
@@ -12,12 +32,13 @@ All notable changes are recorded here. The canonical version is
   a reused port no longer count as extra live arenas at restart. Final623 PG/API/
   server tests and112 runtime checks pass. Signed crash recovery at capacity1
   reuses the same port in2.55s; lifecycle/reconnect tests pass. Committed full-CI
-  acceptance remains pending.
+  acceptance passes: all7 jobs/18 public and PG stages, including ten-human
+  capacity1 recovery with same-port reassignment in2.45s.
 - Release a finished arena's port immediately after this lobby observes its exact
   child exit (#53). Live children and adopted processes without exit proof keep
   their safety hold. Tests cover101 consecutive arenas and restart; final actual
   capacity1 recovery verifies same-port reassignment before the old35s hold.
-  Committed full-CI acceptance remains pending.
+  Committed full7-job/18-stage CI42097650577 passes.
 - Verify the committed Ranked access package in full CI: all seven jobs/17 public
   and PG stages pass, including a real tenth public completion and independent
   standard-map Ranked base victory with exact awards/history for all ten humans.
@@ -31,7 +52,8 @@ All notable changes are recorded here. The canonical version is
   draft-to-play proof,618 real PG/API/server tests and28 harness tests pass.
   Fixture preparation stays asynchronous so UDP sessions keep heartbeats.
   Thirteen focused native draft tests and final all-target client clippy pass;
-  committed full-CI and fresh native visual acceptance remain pending.
+  committed full7-job/18-stage CI42090248772 passes; fresh native visual
+  acceptance remains pending.
 
 - Update the Home queue regression's expected Ranked label for its explicitly
   qualified profile: the button includes rating1000. The previous expectation
@@ -47,7 +69,8 @@ All notable changes are recorded here. The canonical version is
   assets checked. Actual public admission proof passes: wire denial0/9,
   ordinary standard-map play and surrender after600140ms, saved completion10,
   fresh Ranked acceptance10, with no VK link. Prior nine synthetic receipts are
-  disclosed. Full17-stage CI and fresh native visual proof remain pending. Synthetic warmup receipts in process tests
+  disclosed. Full7-job/17-stage CI42083864979 passes; fresh native visual
+  proof remains pending. Synthetic warmup receipts in process tests
   are disclosed and restricted to a separate loopback-omoba_test-only helper.
 
 - Fix two server Clippy findings caught by C5 CI: express vote-deadline terminal

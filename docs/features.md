@@ -1608,3 +1608,33 @@ the aura on and off; ongoing bots, jungle and HUD work prevent isolating its GPU
 cost. The earlier 35-element body-glow captures remain historical. See
 [Supporter operations](supporter.md#live-hero-world-verification) for results,
 limits and the reproducible QA scope. No real payment or deployment is implied.
+
+## Bounded lobby selection and views (#21, unreleased)
+
+Ranked candidates are swept through the shared rating/newcomer policy windows.
+Only a bounded oldest set per party size enters exact team packing; mandatory
+anchors, Casual bot-fill eligibility, party integrity and FIFO behavior remain
+preserved. Queue counts use shared250ms indexed snapshots while visible elapsed
+times remain current. The capacity line retains exact roster positions and
+invalidates on membership/policy/source-capacity changes, not heartbeat renewal.
+A private lobby account request immediately replies to its endpoint; the usual
+periodic broadcast continues independently for all players.
+
+Authorization refresh is paced through bounded oldest-due jobs; a missing DB
+reply still expires authority at the original30s boundary. Profile presence is
+deduplicated across devices and written in512-entry store batches. Consecutive
+account reads use a bounded4-task batch on the existing pool/runtime; non-read
+barriers and older parked operations keep their order.
+
+Independent subset oracles, randomized legacy-view comparisons and649 real
+PG/API/server tests pass locally. Algorithm timings at1000/4096 waiters are
+recorded separately from signed process load and do not certify playing capacity
+or the RU host. See the [progress record](progress/2026-11-05-ranked-matchmaking-readiness.md).
+
+The current candidate retains immediate signed ready/cancel effects at packet
+receipt and performs common lobby account maintenance from tick. Its bounded
+receive slice is8ms/128 packets; game workers/private servers retain2ms/128.
+Real signed ready-timeout/FIFO/replacement, party departure and unique-draft
+journeys pass, as does a ten-client queue/presence smoke. The1000-client run
+reaches all targets Waiting but FAILs final Busy-error acceptance; throughput
+work continues. This is not a capacity certification.

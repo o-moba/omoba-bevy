@@ -21,3 +21,11 @@ class PublicQueuePolicyTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("draft_policy: PASS (6", result.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "public protocol probe requires Node")
+    def test_queue_only_requires_an_explicit_isolated_fixture_database(self):
+        script = Path(__file__).with_name("test_public_mvp.mjs")
+        result = subprocess.run(["node", str(script), "--self-test-queue-only-policy"],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("queue_only_policy: PASS (7", result.stdout)
