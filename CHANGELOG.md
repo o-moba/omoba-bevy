@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Ranked draft exits now persist an exact profile/session cancellation even
+  when the account cancellation packet is lost or throttled. Retired unplayed
+  workers repeat the return-to-search signal without simulating gameplay;
+  join deadlines also retire the worker. Nine survivors keep FIFO age and
+  party membership, with no unplayed credit or collateral dodge penalties.
+  Public process probes cover explicit Leave and silent disconnect (#43).
+- The public probe ignores queued replies from its previous lobby socket after
+  worker handoff. A deterministic stale-callback fixture guards authentication;
+  failures print bounded client/draft/worker diagnostics for CI.
+
 - Allocated workers accept an explicit rehearsal map only when both lobby and
   worker bind loopback; exposed listeners ignore it. A fast custom-map objective
   run verifies saved Victory with zero rating/XP, separately from the real

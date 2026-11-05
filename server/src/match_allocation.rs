@@ -488,6 +488,126 @@ pub(crate) mod runtime_tests {
     }
 
     #[test]
+    fn gameplay_leave_cancels_only_its_unstarted_ranked_allocation_and_blocks_rejoin() {
+        let (mut rt, member, join) = fixture();
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.preference = MatchPreference::Ranked;
+        }
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let cancellation = directory.join("cancel.json");
+        let now = Instant::now();
+        let outsider = "127.0.0.1:60303".parse().unwrap();
+        let wrong_session = "127.0.0.1:60304".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            outsider,
+            shared::career::ProfileSummary::new("c".repeat(64), "Other".into()),
+            "seat-a",
+        );
+        rt.career.backend.test_authenticated(
+            wrong_session,
+            shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+            "other-session",
+        );
+        for addr in [outsider, wrong_session] {
+            rt.handle_packet(addr, ClientPacket::Leave, now);
+            assert!(
+                !cancellation.exists(),
+                "a foreign profile/session cancelled the draft"
+            );
+            assert!(!rt.match_service.worker().unwrap().aborted);
+        }
+        rt.handle_packet(member, ClientPacket::Leave, now);
+        rt.handle_packet(member, ClientPacket::Leave, now);
+        let left: Vec<String> = serde_json::from_slice(&fs::read(cancellation).unwrap()).unwrap();
+        assert_eq!(left, ["seat-a"]);
+        assert!(rt.match_service.worker().unwrap().aborted);
+        assert!(
+            !rt.authorize_allocated_join(member, &join),
+            "late Join revived a cancelled allocation"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gameplay_leave_does_not_cancel_a_started_ranked_worker() {
+        let (mut rt, member, _) = fixture();
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.preference = MatchPreference::Ranked;
+        }
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let now = Instant::now();
+        rt.match_started_at = Some(now);
+        rt.handle_packet(member, ClientPacket::Leave, now);
+        assert!(!directory.join("cancel.json").exists());
+        assert!(!rt.match_service.worker().unwrap().aborted);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn aborted_ranked_draft_repeats_return_views_without_simulating_for_leave_or_deadline() {
+        for explicit_leave in [true, false] {
+            let (mut rt, member, mut join) = fixture();
+            rt.rules = crate::match_rules::MatchRules::from(MatchConfig {
+                mode: MatchMode::Release,
+                team_size: 5,
+            });
+            let survivor: SocketAddr = "127.0.0.1:60305".parse().unwrap();
+            let other = shared::career::ProfileSummary::new("c".repeat(64), "Bob".into());
+            rt.career
+                .backend
+                .test_authenticated(survivor, other.clone(), "seat-b");
+            if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+                worker.manifest.preference = MatchPreference::Ranked;
+                worker.manifest.humans.push(AllocatedHuman {
+                    profile_id: other.profile_id,
+                    session_id: "seat-b".into(),
+                    team: Team::Green,
+                });
+            }
+            if let ClientPacket::Join { prematch, .. } = &mut join {
+                *prematch = true;
+            }
+            let mut other_join = join.clone();
+            if let ClientPacket::Join { session_id, .. } = &mut other_join {
+                *session_id = Some("seat-b".into());
+            }
+            let directory = rt.match_service.worker().unwrap().directory.clone();
+            fs::create_dir_all(&directory).unwrap();
+            let now = rt.clock.now();
+            rt.handle_packet(member, join, now);
+            rt.handle_packet(survivor, other_join, now);
+            assert!(rt.world.players[&survivor].joined);
+            if explicit_leave {
+                rt.handle_packet(member, ClientPacket::Leave, now);
+            } else {
+                if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+                    worker.manifest.join_deadline_ms = 0;
+                }
+                rt.tick_match_service(now);
+            }
+            assert!(rt.match_service.worker().unwrap().aborted);
+            let gold = rt.world.players[&survivor].economy.gold;
+            let before = rt.snapshot_tick;
+            for step in 1..=2 {
+                rt.tick(now + Duration::from_millis(100 * step), 0.1);
+                assert_eq!(
+                    rt.world.players[&survivor].draft.error.as_deref(),
+                    Some("allocation_cancelled_or_expired")
+                );
+                assert_eq!(rt.world.players[&survivor].economy.gold, gold);
+                assert!(rt.match_started_at.is_none());
+            }
+            assert!(
+                rt.snapshot_tick >= before + 2,
+                "retired draft stopped publishing its return signal"
+            );
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
     fn allocated_practice_forces_draft_team_and_durable_start() {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now();

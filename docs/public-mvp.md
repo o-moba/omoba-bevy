@@ -344,3 +344,28 @@ allocated worker only if both actual lobby and worker binds are loopback; an
 exposed lobby ignores it and logs why. Ordinary map/targeting/bot-difficulty
 overrides are still stripped. This fast custom proof never substitutes for the
 standard rated match above.
+
+
+## Signed parties and departures during Draft
+
+The owned public-protocol probe can form a five-player party via actual signed
+Presence/Invite/Accept commands, add five solo peers and exercise Ranked Draft:
+
+```sh
+HARNESS_SERVER_BIN="$CARGO_TARGET_DIR/debug/server" \
+  node scripts/test_public_mvp.mjs --scenario=party-draft \
+  --clients=10 --preference=humans_only --seconds=3 \
+  --output=.agent/party-draft
+```
+
+Use the disposable `OMOBA_TEST_DATABASE_URL` from the earlier setup. Add
+`--draft-exit=disconnect` for socket loss instead of an explicit Leave. This
+waits the real worker join deadline. Both variants require preserved FIFO ages,
+restored group membership, no unplayed credit/history, the return signal for all
+nine survivors and a fresh unanimous Ranked roster. Only explicit departure
+incurs one dodge strike; the disconnect case verifies an empty penalty map.
+
+Add `--exercise-stale-handoff` to a party, lifecycle or mixed-load run to deliver
+a real old-lobby callback immediately after worker handoff. The probe must ignore
+it and preserve the new authentication scope. Failures print bounded client and
+worker-status diagnostics, so CI logs remain useful without an artifact upload.

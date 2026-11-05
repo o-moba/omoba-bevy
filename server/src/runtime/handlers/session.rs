@@ -53,6 +53,7 @@ impl ServerRuntime {
         {
             self.match_service.cancel(&profile.profile_id, now);
         }
+        self.cancel_unstarted_ranked_allocation(addr);
         self.leave_match(addr, now);
         ControlFlow::Break(())
     }

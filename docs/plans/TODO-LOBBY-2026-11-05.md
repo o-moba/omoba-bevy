@@ -97,7 +97,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 | 40 | minor | gap | Fill bots cannot join the public signed lobby, so a developer cannot form a 10-human Ranked match on the dev/RU lobby by hand | `harness/src/bot.rs:46` | Give `harness --bin bots` a `--public` mode built on the shared public_client helper (finding 1): generate N throwaway keys, probe/authenticate, FindMatch `humans_only`/`quick`, follow the handoff, auto Lock/Loaded, then hand the running socket to the existing `BotBrain` lane AI. Document `make bots BOTS=9 BOTS_SERVER=127.0.0.1:4000 BOTS_PUBLIC=1`. | done — `bots --public` signs admission/account/gameplay requests, accepts the exact ready roster, follows handoff, locks/loads and plays. Ten distinct authenticated clients in one rated worker verified on loopback/PostgreSQL; reusable rehearsal added. |
 | 41 | minor | gap | Worker-crash recovery is proved only for vs Bots; a rated match that loses its worker has no process-level test | `scripts/test_public_mvp.mjs:36` | Relax line 36 to allow `--scenario=recovery --preference=humans_only --clients=10` (each client is already independent) and extend the recovery check loop (505-515) to iterate over all clients' profiles; reuse the existing `careerProgress` snapshot (220). Also allow `--preference=quick` so the 30 s bot fill path is covered. | done — ten signed Ranked humans, worker killed 2.10 s after Running; durable played interruption, all ten profile/history checks and fresh requeue pass. Initial allocation rated=true, canonical ruleset, zero bots confirmed in PostgreSQL. |
 | 42 | minor | gap | Allocated workers cannot be brought to a legitimate Victory in a test: no sanctioned accelerator survives the worker env scrub | `server/src/match_pool.rs:418` | Add a loopback-only passthrough: when `OMOBA_MATCH_BIND_IP` is loopback (match_pool.rs already distinguishes exposed vs loopback lobbies, test `exposed_lobby_refuses_a_loopback_or_unset_public_worker_host` 608), forward `OMOBA_MATCH_TEST_MAP_CONFIG` to the worker as `OMOBA_MAP_CONFIG`; an exposed lobby ignores it and logs a warning. Add a unit test next to 517 asserting an exposed lobby still strips it. The harness t | done — explicit test-map forwarding requires both lobby and worker loopback binds; IPv4/IPv6/exposed guard tests pass. Ten signed humans completed a custom-map Victory in 33.629 s with zero Elo/XP and saved history; full probe wall time 50.87 s. |
-| 43 | minor | gap | Party Ranked and leave-during-draft have unit tests only; no process-level path exists and the probe cannot form a party | `server/src/match_service.rs:1348` | In the shared `public_client` helper from finding 1 add `invite/accept` via the existing social CareerActions so a 5-stack can queue; add a `--party=5` option to the probe; add one harness scenario where peer #3 stops sending during Draft and assert the other 9 see `PrematchPhase::Draft` restart (today) or the LR-32 re-queue once it lands. | open — party Ranked / draft-leave at process level |
+| 43 | minor | gap | Party Ranked and leave-during-draft have unit tests only; no process-level path exists and the probe cannot form a party | `server/src/match_service.rs:1348` | In the shared `public_client` helper from finding 1 add `invite/accept` via the existing social CareerActions so a 5-stack can queue; add a `--party=5` option to the probe; add one harness scenario where peer #3 stops sending during Draft and assert the other 9 see `PrematchPhase::Draft` restart (today) or the LR-32 re-queue once it lands. | done — signed five-stack plus solos, explicit Leave and silent disconnect, all nine receive the return code, FIFO/group retained, all ten career/history unchanged, only explicit leaver cooled once, fresh unanimous Ranked roster reaches Running. Process evidence below. |
 | 44 | minor | gap | No invite throttle, block or cooldown; a stranger can keep an invite toast on Home | `server/src/party.rs:254` | In PartyState keep `declined: HashMap<(from,to), Instant>` and refuse re-invites for 60 s after a decline, plus at most 10 invites per minute per sender (new PartyError codes surfaced via the error field above). Full block list stays LR-39. | done — decline cooldown 60 s, 10 invites per minute |
 | 45 | minor | gap | Parties and queue vanish silently on every lobby restart/deploy | `server/src/party.rs:5` | Show a one-line notice ('Соединение с лобби было восстановлено, группа распущена') when PartyClient clears a non-empty party on epoch change; persistence of parties (LR-55) stays out of this iteration. | partial — notice only on the party lobby screen |
 | 46 | minor | scale | Settlement needs one Postgres connection per arena; 100 arenas exceed PostgreSQL's default max_connections | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/career_store.rs:1213` | In ops/vps/ru/ru_host.py bootstrap write `max_connections = 256` (and `shared_buffers` accordingly) to a conf.d drop-in, document it in the README 'Arena capacity' table as capacity + 32, and make ru_host.py refuse a kit whose OMOBA_MATCH_CAPACITY + 32 exceeds the configured max_connections. | done — ru_host.py checks max_connections ≥ capacity + 32 (not written by the kit) |
@@ -172,7 +172,7 @@ implementation, relevant verification, an updated finding status and CHANGELOG.
 - [x] P1 Party collection: pending-member names, bounded gathering (#18), exact party packing (#29).
 - [x] P2 Pre-start failure: no career credit/history for unplayed allocations (#27), bounded loading and preserved locks/countdown (#19, #26), Casual replacement seats (#5).
 - [ ] P3 Ready-check: all players explicitly accept within 15 seconds before allocation (#11, #17), persistent escalating dodge cooldown (LR-32).
-- [ ] P4 Ranked journey: real signed match through victory/rating/history, crash recovery, public bots and party/draft cancellation (#14, #31, #40–43).
+- [ ] P4 Ranked journey: gameplay proofs #14 and #40–43 are done (Victory, crash, signed AI, fast terminal and party/draft departure); remaining automation in #31 is still open.
 - [ ] P5 Client: Home rating/placement and ladder link (#39), one hero selection (#65), global reconnect notice (#45), mobile keep-awake and match-found feedback (critic C3).
 - [ ] P6 Fair play: AFK/leaver accounting and reward exclusion (#34), remake/surrender (C5), eligibility (C6), unique locked team picks (C7), newcomer K (#35).
 - [ ] P7 Scale: bounded queue selection and views (#21), worker retirement/status I/O (#53–54), 1000-client evidence (#50), snapshot traffic (#20), multi-lobby directory/worker capacity (#2, #12).
@@ -339,3 +339,55 @@ reactions). Form a five-stack plus five solo peers, hold Draft, make a solo
 leave, verify no unplayed career credit, preserve the other nine searches, and
 accept a fresh full roster with a replacement. Keep #43 open until this real
 lobby/worker process path passes; #31 automation remains separately tracked.
+
+
+### P4 continuation: real parties and both draft-departure paths (#43)
+
+- `test_public_mvp.mjs --scenario=party-draft --clients=10
+  --preference=humans_only --seconds=3` forms a signed five-stack plus five
+  solos, holds nine searches for six seconds, accepts the tenth and verifies
+  one rated ten-human Draft with the stack together.
+- The process test exposed two production-path bugs: gameplay Leave did not
+  write a Ranked cancellation (only account CancelQueue did), and aborted
+  workers stopped sending the draft error that triggers native automatic
+  return. Both are fixed. The deadline path now sets the retirement flag too.
+  Three new server regressions cover exact identity/session, idempotent Leave,
+  late-Join refusal, running-worker preservation and repeated retirement views
+  with no simulation/income.
+- Explicit Leave PASS: all nine receive allocation_cancelled_or_expired,
+  original ages `[6,6,6,6,6,6,6,6,6,0]` are retained (survivor views 15/9 s),
+  all ten fresh profiles/history unchanged, the leaver has exactly one strike
+  and no survivor is penalized. The five-stack is restored after lobby return;
+  a replacement ten-human roster unanimously accepts and reaches Running.
+  Evidence: `.agent/codex-ranked-readiness/party-draft-return-confirmed/report.json`.
+- `--draft-exit=disconnect` PASS: close the peer without Leave, exercise the
+  actual join deadline, keep survivor ages 70/64 s, deliver all nine return
+  signals, leave every penalty map empty, then allow the reconnected player
+  into a fresh unanimously accepted Ranked match. All profiles/history remain
+  unchanged for the unplayed first worker.
+  Evidence: `.agent/codex-ranked-readiness/party-disconnect-return-confirmed/report.json`.
+- Full local gate: 2493 Rust passed /95 intentional ignores; 634 Python tests
+  /9 skips; 62 iOS-tooling tests. Full PostgreSQL gate: 567 passed, no ignores.
+  Current workspace/all-target clippy, formatting and Node syntax pass.
+
+CI head 67683d6 passed unit/platform/client/harness jobs, but its mixed public
+probe stalled ten Ranked synthetic peers. CI did not retain client artifacts.
+A deterministic old-socket callback test reproduced authentication replacement
+in the Node probe (red). Socket-identity guards now reject those callbacks;
+17-peer mixed load with `--exercise-stale-handoff` passes (17 injected stale
+callbacks, every peer Running, max 41.94 s). Failure logs now carry bounded
+client/draft/worker details. This proves the fixed race locally; the next head
+still needs its own Linux CI. No unsupported claim about the old CI root cause.
+Evidence: `.agent/codex-ranked-readiness/stale-handoff-red/report.json` and
+`.agent/codex-ranked-readiness/mixed-stale-handoff-confirmed/report.json`.
+
+#31 automation, P3 native visual evidence and P5–P9 remain in scope and open.
+
+
+Final combined probe checks also pass with stale callbacks deliberately injected:
+`.agent/codex-ranked-readiness/party-final-stale-handoff/report.json` verifies
+20 guarded handoffs across the original and replacement party rosters;
+`.agent/codex-ranked-readiness/lifecycle-party-followup/report.json` verifies
+three guarded handoffs, same-seat reconnect and leave/resume for a running match.
+No owned probe processes remain. These are runtime/probe changes; no native
+client source, production dependency, schema, protocol or CI configuration changed.

@@ -25,10 +25,10 @@ This checkpoint does not close that entire scope or authorize RU deployment.
 
 ## Verification actually completed
 
-- Full local `make check`: 2490 Rust tests passed, 95 intentional ignores;
+- Full local `make check`: 2493 Rust tests passed, 95 intentional ignores;
   634 Python tests with nine skips; 62 iOS-tooling tests. Both readiness
   regressions pass locally. No physical-device installation occurred.
-- Full disposable PostgreSQL 18 gate: 564 tests passed, none ignored. Covers
+- Full disposable PostgreSQL 18 gate: 567 tests passed, none ignored. Covers
   allocation/gameplay commitment, unplayed recovery/history/analytics,
   cooldown restoration, party opt-outs and the outbox barrier.
 - Final workspace/all-target clippy with warnings denied, formatting, diff
@@ -52,7 +52,7 @@ reports the Mac is locked. The fixture ordering fix and both readiness
 regressions passed in CI; no native screenshot is claimed. No further heavy
 native client build is needed for the current harness work.
 
-Full party/draft journeys, AFK/leaver/remake/surrender policy,
+Remaining CI automation, AFK/leaver/remake/surrender policy,
 remaining client findings, multi-host/cross-host penalties, snapshot traffic,
 1000-player evidence, drain, PITR and real RU capacity/deployment remain in TODO.
 The first-ten-seconds crash case is now closed below.
@@ -86,7 +86,7 @@ regressions. The main runner was externally shut down on its first attempt;
 a rerun completed and every CI job for 548d152 is green. Current backend changes
 have not required a new client/native build or any dependency/schema change.
 
-P4 remains open for party/draft process evidence (#43) and remaining CI automation (#31). The native RU screenshot and all other unresolved P5–P9 work remain
+P4 retains only remaining CI automation (#31); party/draft process evidence (#43) is closed below. The native RU screenshot and all other unresolved P5–P9 work remain
 explicitly pending. No production deployment or configuration was changed.
 
 
@@ -152,3 +152,57 @@ The final rebuilt objective binary was rechecked with a fresh owned fixture:
 saved result `e577592f609e17ac2fece91beb6649fc`, 49.05 s wall /33.741 s played,
 all ten profiles/history checked with zero rating/XP. Final workspace/all-target
 clippy passes after that CLI follow-up.
+
+
+## Party/draft continuation and public-probe handoff isolation
+
+Finding #43 is closed with real signed five-stack/solo scenarios. Explicit Leave
+and silent disconnect both preserve nine survivors' FIFO ages and their restored
+five-stack membership, change none of the ten profiles/history, deliver the
+native return code to all nine, then form a fresh unanimous Ranked worker.
+The explicit leaver has exactly one persisted strike; a disconnect penalizes
+nobody and permits the original identity to join the replacement roster.
+
+These process tests exposed two runtime gaps: raw signed gameplay Leave could
+remove a Ranked draft participant without cancelling the allocation, and retired
+unplayed workers stopped publishing the native return signal. One scoped
+cancellation helper now serves account cancel and gameplay Leave; both abort and
+deadline paths stop simulation and repeat return views during retirement. Three
+new regressions cover scope, repeated Leave, late Join, started-match preservation,
+return publication and no income/simulation. No schema/protocol change.
+
+Evidence:
+- `.agent/codex-ranked-readiness/party-draft-return-confirmed/report.json`:
+  explicit departure, six-second initial waiting ages preserved, no collateral
+  penalties and fresh Ranked Running (29.16 s from search).
+- `.agent/codex-ranked-readiness/party-disconnect-return-confirmed/report.json`:
+  real deadline, retained 70/64-second queue ages, no penalties, full rejoin
+  and Running (82.26 s from search).
+
+Current full local validation: 2493 Rust passed /95 intentional ignores,
+634 script tests /9 skips, 62 iOS-tooling tests; 567 full PostgreSQL-backed
+API/store/server tests, none ignored. Workspace/all-target clippy passes.
+
+CI 67683d6 passed its unit/platform/client/harness jobs but failed its mixed
+public probe with ten Ranked peers stalled at Joining; that job had no client
+artifact upload. Investigation found and deterministically reproduced a Node
+probe race: a queued callback from the old lobby socket could overwrite the
+new worker's authentication. Socket-identity guards fix it. A 17-peer mixed
+run with 17 deliberate old-callback deliveries passes (max 41.94 s to Running).
+Bounded failure diagnostics now make any new CI stall inspectable. The old CI
+root cause remains unproven without its lost artifacts; the next head needs CI.
+
+Evidence: `.agent/codex-ranked-readiness/stale-handoff-red/report.json` and
+`.agent/codex-ranked-readiness/mixed-stale-handoff-confirmed/report.json`.
+All 68 findings and all nine critic items retain their full scope. #31, native
+visual capture and P5–P9 remain open. No production deployment or infrastructure,
+secret or CI workflow configuration was changed.
+
+
+Final combined probe checks also pass with stale callbacks deliberately injected:
+`.agent/codex-ranked-readiness/party-final-stale-handoff/report.json` verifies
+20 guarded handoffs across the original and replacement party rosters;
+`.agent/codex-ranked-readiness/lifecycle-party-followup/report.json` verifies
+three guarded handoffs, same-seat reconnect and leave/resume for a running match.
+No owned probe processes remain. These are runtime/probe changes; no native
+client source, production dependency, schema, protocol or CI configuration changed.

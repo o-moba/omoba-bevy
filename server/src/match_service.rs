@@ -1948,6 +1948,11 @@ impl ServerRuntime {
         let MatchService::Worker(worker) = &mut self.match_service else {
             return;
         };
+        // Deadline/file cancellation retires the simulation as well as its
+        // disk receipt. The tick then repeats the draft return code to peers.
+        if abort && !recovery {
+            worker.aborted = true;
+        }
         if worker.recovery
             && now.saturating_duration_since(worker.booted_at) > Duration::from_secs(120)
         {

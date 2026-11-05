@@ -6,6 +6,8 @@
 //
 // --scenario=ready-check verifies nine accepts, a 15 s timeout, FIFO requeue,
 // late-answer rejection and one unanimous replacement roster before spawn.
+// --scenario=party-draft --clients=10 --preference=humans_only proves a five-stack,
+// signed draft Leave, FIFO/no-credit requeue and a fresh unanimous roster.
 // Load options (scenario `load`):
 //   --clients=N --preference=P      N players of one queue (bot_practice, quick, humans_only)
 //   --mix=bot_practice:10,quick:5   players of several queues, interleaved (instead of the two above)
@@ -38,8 +40,12 @@ const preference = mix ? 'mixed' : (opts.preference || 'bot_practice');
 assert(mix || QUEUES.includes(preference), `unknown --preference ${preference}`);
 const preferences = mix ? (() => {const left=mix.map(([queue,count])=>[queue,count]);const out=[];while(out.length<clientsCount)for(const entry of left)if(entry[1]>0){out.push(entry[0]);entry[1]--;}return out;})() : Array(clientsCount).fill(preference);
 const scenario = opts.scenario || 'load';
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery'].includes(scenario), 'unknown scenario');
-if(['recovery','early-recovery'].includes(scenario)) assert(!mix&&((preference==='humans_only'&&clientsCount===10)||(preference!=='humans_only'&&clientsCount>=1&&clientsCount<=10)), `${scenario} uses one roster (Ranked: ten humans)`);
+const draftExit=opts['draft-exit']||'leave';
+const exerciseStaleHandoff='exercise-stale-handoff' in opts;
+assert(['leave','disconnect'].includes(draftExit)&&(!opts['draft-exit']||scenario==='party-draft'), '--draft-exit=leave|disconnect is a party-draft option');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft'].includes(scenario), 'unknown scenario');
+if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
+else if(['recovery','early-recovery'].includes(scenario)) assert(!mix&&((preference==='humans_only'&&clientsCount===10)||(preference!=='humans_only'&&clientsCount>=1&&clientsCount<=10)), `${scenario} uses one roster (Ranked: ten humans)`);
 else if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
 for(const [queue,count] of mix ?? [[preference,clientsCount]])assert(queue!=='humans_only'||count%10===0, 'Ranked (humans_only) forms only full ten-player matches: use a multiple of 10');
 const maxWaitSecs = opts['max-wait-secs'] ? Number(opts['max-wait-secs']) : null;
@@ -47,6 +53,7 @@ assert(maxWaitSecs===null || maxWaitSecs>0, 'max-wait-secs must be positive');
 const allowLarge = 'allow-large' in opts;
 const queueOnly = 'queue-only' in opts;
 assert(!queueOnly || scenario==='load', '--queue-only is a load option');
+assert(!queueOnly||!exerciseStaleHandoff, '--exercise-stale-handoff requires a worker handoff');
 const soakSecs = Number(opts.seconds || (scenario==='early-recovery'?2:15));
 const inputHz = Number(opts['input-hz'] ?? 20);
 assert(Number.isFinite(inputHz)&&inputHz>=0&&inputHz<=60, 'input-hz must be between 0 and 60');
@@ -137,13 +144,17 @@ process.on('SIGINT',()=>{cleanup();process.exit(130)});
 process.on('SIGTERM',()=>{cleanup();process.exit(143)});
 class Client {
  constructor(index, target=lobbyPort, identity=null, mode={}) {
-  this.index=index;this.port=target;this.autoHandoff=mode.autoHandoff!==false;this.autoQueue=mode.autoQueue!==false;this.autoJoin=mode.autoJoin!==false;this.autoReady=mode.autoReady!==false;this.preference=mode.preference || preferences[index] || preferences[0];this.active=true;this.createdAt=performance.now();this.runningBytes=0;this.worldSnapshots=0;this.bootstrapSnapshots=0;this.joinAttempts=0;this.allocationsSeen=[];this.profileResponses=new Map();this.key=identity?.key || crypto.generateKeyPairSync('ed25519').privateKey;
+  this.index=index;this.port=target;this.autoHandoff=mode.autoHandoff!==false;this.autoQueue=mode.autoQueue!==false;this.autoJoin=mode.autoJoin!==false;this.autoReady=mode.autoReady!==false;this.autoLock=mode.autoLock!==false;this.partyPresence=mode.partyPresence===true;this.preference=mode.preference || preferences[index] || preferences[0];this.active=true;this.createdAt=performance.now();this.runningBytes=0;this.worldSnapshots=0;this.bootstrapSnapshots=0;this.joinAttempts=0;this.allocationsSeen=[];this.profileResponses=new Map();this.key=identity?.key || crypto.generateKeyPairSync('ed25519').privateKey;
   this.publicKey=crypto.createPublicKey(this.key).export({type:'spki',format:'der'}).subarray(-32).toString('hex');
   this.session=identity?.session || `mvp-${Date.now()}-${index}`;this.nickname=identity?.nickname || `Probe-${index}`;
   this.packets=0;this.bytes=0;this.sentPackets=0;this.sentBytes=0;this.transforms=0;this.lastInput=0;this.firstTransform=null;this.lastTransform=null;this.snapshots=0;this.gaps=[];this.frames=new Map();this.errors=[];this.stage='probing';this.next=0;this.queueId=1;
   this.bind();
  }
- bind() {this.socket=dgram.createSocket('udp4');this.socket.on('message',b=>this.receive(b));this.socket.on('error',e=>this.errors.push(e.message));this.socket.bind(0,'127.0.0.1');this.nonce=crypto.randomBytes(16).toString('hex');this.epoch=0n;this.match=0;this.path=null;this.auth=null;this.authChallenge=null;this.lastProbe=0;this.accountSequence=0;this.sequence=0;this.prematchSequence=0;this.lastSend=0;this.lastQueue=0;this.next=0;}
+ bind() {
+  const socket=dgram.createSocket('udp4');this.socket=socket;
+  socket.on('message',b=>{if(this.active&&this.socket===socket)this.receive(b);});
+  socket.on('error',e=>{if(this.active&&this.socket===socket)this.errors.push(e.message);});
+  socket.bind(0,'127.0.0.1');this.nonce=crypto.randomBytes(16).toString('hex');this.epoch=0n;this.match=0;this.path=null;this.auth=null;this.authChallenge=null;this.lastProbe=0;this.accountSequence=0;this.sequence=0;this.prematchSequence=0;this.lastSend=0;this.lastQueue=0;this.next=0;}
  send(value) {if(!stopping){const bytes=Buffer.from(wire(value));this.sentPackets++;this.sentBytes+=bytes.length;this.socket.send(bytes,this.port,'127.0.0.1');}}
  bootstrap(payload) {this.send({type:'transport_bootstrap',path_nonce:this.path,payload:wire(payload)});}
  account(action) {if(!this.auth)return;const sequence=++this.accountSequence;this.bootstrap({type:'career',request:{action:'authorized',session_nonce:this.auth,sequence,request:action,signature:sign(this.key,['omoba.career.request.v1',this.epoch,this.auth,sequence,action])}});}
@@ -162,13 +173,24 @@ class Client {
   let packet;try{packet=parse(bytes)}catch(e){this.errors.push('decode:'+e.message);return;}
   if(packet.type==='server_full') {if(packet.client_nonce===this.nonce)this.serverFull=(this.serverFull||0)+1;return;}
   if(packet.type==='transport_challenge') {if(packet.client_nonce!==this.nonce)return;this.path=packet.path_nonce;this.epoch=packet.server_epoch;this.send({type:'transport_proof',server_epoch:this.epoch,path_nonce:this.path});if(!this.auth)this.stage='authenticating';return;}
+  if(packet.type==='party') {this.party=packet.party;return;}
   if(packet.type==='career') {
    this.epoch=packet.server_epoch;const v=packet.career;this.career=v;if(v.response_id!=null&&v.profile){this.profileResponses.set(String(v.response_id),v.profile);if(this.profileResponses.size>16)this.profileResponses.delete(this.profileResponses.keys().next().value);}if(v.history_loaded)this.lastHistory=v.history;if(v.detail)this.lastDetail=v.detail;if(v.visited_profile)this.lastVisited=v.visited_profile;
    if(v.challenge && !v.auth_nonce && !this.auth && this.authChallenge?.nonce!==v.challenge.nonce) {this.authChallenge=v.challenge;this.next=0;}
    if(v.auth_nonce && v.profile){this.auth=v.auth_nonce;this.profile=v.profile;if(this.stage==='authenticating')this.stage=this.port===lobbyPort?(this.autoQueue?'queued':'authenticated'):(this.autoJoin?'joining':'authenticated');}
+   if(this.port===lobbyPort&&v.match_service?.state==='waiting')this.maxQueueElapsed=Math.max(this.maxQueueElapsed||0,v.match_service.elapsed_secs);
    if(this.port===lobbyPort&&!this.queuedAt&&QUEUED_STATES.includes(v.match_service?.state))this.queuedAt=performance.now();
    if(this.port===lobbyPort && v.match_service?.state==='assigned' && v.match_service_request_id===this.queueId) {
-    this.allocation=v.match_service.allocation;this.inMatch=v.match_service.in_match??null;this.allocationsSeen.push(this.allocation);if(!this.autoHandoff)return;this.snapshot=null;this.socket.close();this.port=Number(this.allocation.endpoint.split(':').at(-1));this.stage='probing';this.bind();
+    this.allocation=v.match_service.allocation;this.inMatch=v.match_service.in_match??null;this.allocationsSeen.push(this.allocation);if(!this.autoHandoff)return;
+    const oldSocket=this.socket;this.snapshot=null;oldSocket.close();this.port=Number(this.allocation.endpoint.split(':').at(-1));this.stage='probing';this.bind();
+    if(exerciseStaleHandoff){
+     // Deliver a real old lobby view after the worker context exists. This
+     // models a queued callback, independently of kernel/runner timing.
+     const scope={socket:this.socket,epoch:this.epoch,auth:this.auth};
+     oldSocket.emit('message',Buffer.from(bytes));
+     this.staleHandoffChecks=(this.staleHandoffChecks||0)+1;
+     this.staleHandoffFailure=this.socket!==scope.socket||this.epoch!==scope.epoch||this.auth!==scope.auth;
+    }
    }
    return;
   }
@@ -182,6 +204,7 @@ class Client {
   }
  }
  tick(now) {
+  if(this.staleHandoffFailure)throw new Error('old lobby callback mutated worker authentication');
   if(!this.active)return;
   // Retry admission until authentication completes, just like the native Hello
   // loop. A lost proof must not strand a synthetic client forever. Authenticate
@@ -201,18 +224,19 @@ class Client {
    }
   }
   if(now-this.lastSend<300)return;this.lastSend=now;this.gameplay({type:'ping'});
+  if(this.port===lobbyPort&&this.partyPresence&&now-(this.lastPresence||0)>2000){this.lastPresence=now;this.gameplay({type:'party',command:{command:'presence',nickname:this.nickname,avatar:null}});}
   if(this.port===lobbyPort){const ready=this.career?.match_service;if(this.autoReady&&ready?.state==='ready_check'&&!ready.accepted&&now-this.lastQueue>500){this.lastQueue=now;this.account({action:'ready_match',request_id:this.queueId,check_id:ready.check_id,accepted:true});}else if(this.autoQueue&&now-this.lastQueue>2000){this.lastQueue=now;this.account({action:'find_match',request_id:this.queueId,preference:this.preference});}return;}
   if(!this.autoJoin)return;
   const s=this.snapshot;
   if(!s?.players?.some(p=>p.id===s.your_id)) {this.join();return;}
   if(s.prematch){const me=s.prematch.players.find(p=>p.player_id===s.your_id);const p=s.prematch;
-   if(p.phase==='draft'&&!me?.locked)this.gameplay({type:'prematch',request:{server_epoch:this.epoch,match_id:this.match,generation:p.generation,request_id:++this.prematchSequence,action:{kind:'lock',locked:true}}});
+   if(this.autoLock&&p.phase==='draft'&&!me?.locked)this.gameplay({type:'prematch',request:{server_epoch:this.epoch,match_id:this.match,generation:p.generation,request_id:++this.prematchSequence,action:{kind:'lock',locked:true}}});
    if(p.phase==='loading'&&!me?.loaded)this.gameplay({type:'prematch',request:{server_epoch:this.epoch,match_id:this.match,generation:p.generation,request_id:++this.prematchSequence,action:{kind:'loaded'}}});
   }
  }
  join(){this.joinAttempts++;this.gameplay({type:'join',prematch:true,team:'green',character:'ipfs',hero_class:['warrior','mage','ranger','cleric'][this.index%4],avatar:null,sprite_character:null,session_id:this.session,passport_ticket:null});}
  close(){this.active=false;try{this.socket.close()}catch{}}
- diagnostic(){return{index:this.index,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
+ diagnostic(){return{index:this.index,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
 }
 // Keep every owned client alive while awaiting an observable protocol condition.
 async function pumpUntil(label, predicate, timeout=20000, onTick=()=>{}) {
@@ -237,6 +261,104 @@ function assertRoster(client, expected) {
  assert.equal(ids(client.snapshot).length,10,'running match must retain ten participants');
  assert.deepEqual(ids(client.snapshot),expected,'a fresh identity entered or replaced an allocated participant');
  assert.equal(new Set(ids(client.snapshot)).size,10,'duplicate player identity');
+}
+// One real five-stack plus five solos. Keep the first worker in Draft so a
+// signed solo Leave exercises cancellation, not a played-match abandonment.
+async function partyDraftLifecycle() {
+ const peers=Array.from({length:10},(_,i)=>new Client(i,lobbyPort,null,{preference:'humans_only',autoQueue:false,autoLock:false,partyPresence:true}));
+ all.push(...peers);
+ const checks=report.party_draft={exit:draftExit,checks:[]};
+ await pumpUntil('ten authenticated party subscribers',()=>peers.every(c=>c.auth&&c.party?.you),30000);
+ const leader=peers[0], stack=peers.slice(0,5);
+ for(const member of stack.slice(1)){
+  let nextInvite=0,nextAccept=0;
+  await pumpUntil('signed party invite and acceptance',()=>leader.party?.party?.members.length===stack.indexOf(member)+1&&member.party?.party?.party_id===leader.party?.party?.party_id,15000,now=>{
+   if(now>=nextInvite&&!member.party?.invites?.some(i=>i.from_player_id===leader.party.you)){
+    nextInvite=now+1000;leader.gameplay({type:'party',command:{command:'invite',player_id:member.party.you}});
+   }
+   const invite=member.party?.invites?.find(i=>i.from_player_id===leader.party.you);
+   if(invite&&now>=nextAccept){nextAccept=now+400;member.gameplay({type:'party',command:{command:'accept',party_id:invite.party_id}});}
+  });
+ }
+ const party=leader.party.party;
+ assert.equal(party.members.length,5);
+ assert.deepEqual(party.members.map(m=>String(m.player_id)).sort(),stack.map(c=>String(c.party.you)).sort());
+ checks.checks.push({name:'five_stack_signed_invite_accept',status:'PASS',party_id:party.party_id,members:party.members.map(m=>m.player_id)});
+ leader.gameplay({type:'party',command:{command:'launch',preference:'humans_only'}});
+ const searchingAt=performance.now();
+ // Hold nine real searches long enough to prove FIFO age, then add the tenth.
+ for(const c of peers.slice(0,9)){c.autoQueue=true;c.lastQueue=0;}
+ await pumpUntil('nine queued players before the last arrival',()=>peers.slice(0,9).every(c=>c.career?.match_service?.state==='waiting'),15000);
+ await pumpFor(6000);
+ peers[9].autoQueue=true;peers[9].lastQueue=0;
+ await pumpUntil('party and solos reach one full Draft',()=>peers.every(c=>c.allocation&&c.snapshot?.prematch?.phase==='draft'&&c.snapshot.prematch.players.length===10),45000);
+ const allocation=peers[0].allocation;
+ assert(peers.every(c=>c.allocation.allocation_id===allocation.allocation_id));
+ assert.equal(allocation.human_count,10);assert.equal(allocation.bot_count,0);assert.equal(allocation.rated,true);
+ assert.equal(new Set(stack.map(c=>c.allocation.team)).size,1,'five-stack split across teams');
+ const originalRoster=peers.map(c=>String(c.snapshot.your_id)).sort();
+ assert.equal(new Set(originalRoster).size,10);
+ assert(peers.every(c=>!c.firstRunning),'held Draft unexpectedly entered gameplay');
+ const baselines=peers.map(c=>careerProgress(c));
+ checks.checks.push({name:'ranked_party_team_and_held_draft',status:'PASS',allocation_id:allocation.allocation_id,team:stack[0].allocation.team,humans:10,bots:0});
+ const leaver=peers[7];leaver.autoJoin=false;let nextLeave=0;
+ const queueAges=peers.map(c=>c.maxQueueElapsed||0);
+ assert(queueAges.slice(0,9).every(age=>age>=5),'FIFO rehearsal did not establish a waiting age');
+ if(draftExit==='disconnect')leaver.close();
+ await pumpUntil('draft departure cancels original worker',()=>['failed','settling'].includes(allocationStatus(allocation.allocation_id)?.phase),draftExit==='leave'?10000:Math.max(10000,Number(allocation.join_deadline_ms)-Date.now()+15000),now=>{
+  if(draftExit==='leave'&&now>=nextLeave){nextLeave=now+300;leaver.gameplay({type:'leave'});}
+  assert(peers.every(c=>!c.firstRunning),'cancelled Draft entered gameplay');
+ });
+ await pumpUntil('all nine survivors receive the automatic return code',()=>peers.filter(c=>c!==leaver).every(c=>c.snapshot?.prematch?.error==='allocation_cancelled_or_expired'),5000);
+ // Return to the original lobby with the same device key and session, as the
+ // native handoff flow does. No worker endpoint becomes the saved lobby.
+ for(const c of peers)c.close();
+ const survivors=peers.filter(c=>c!==leaver).map(c=>{
+  const resumed=new Client(c.index,lobbyPort,c,{preference:'humans_only',autoHandoff:false,partyPresence:true});
+  resumed.queueId=c.queueId+1;return resumed;
+ });
+ const dodger=new Client(leaver.index,lobbyPort,leaver,{preference:'humans_only',autoHandoff:false,autoReady:false,autoQueue:draftExit==='leave'});
+ dodger.queueId=leaver.queueId+1;all.push(...survivors,dodger);
+ await pumpUntil('nine retained searches and authenticated departed player',()=>survivors.every(c=>c.career?.match_service?.state==='waiting')&&dodger.auth&&(draftExit==='disconnect'||(dodger.career?.match_service?.state==='failed'&&dodger.career.match_service.code==='dodge_cooldown')),30000);
+ dodger.autoQueue=false;
+ const resumedStack=survivors.filter(c=>c.index<5);
+ await pumpUntil('five-stack membership survives lobby return',()=>resumedStack.every(c=>c.party?.party?.party_id===party.party_id&&c.party.party.members.length===5),10000);
+ assert.deepEqual(resumedStack[0].party.party.members.map(m=>String(m.player_id)).sort(),resumedStack.map(c=>String(c.party.you)).sort());
+ for(const c of survivors){
+  assert(c.career.match_service.elapsed_secs>=queueAges[c.index],'draft cancellation reset FIFO age');
+  assert.deepEqual(careerProgress(c),baselines[c.index],'unplayed draft changed career');
+ }
+ assert.deepEqual(careerProgress(dodger),baselines[leaver.index]);
+ let nextHistory=0;
+ await pumpUntil('all ten unplayed histories remain empty',()=>[...survivors,dodger].every(c=>Array.isArray(c.lastHistory)&&c.lastHistory.length===0),15000,now=>{
+  if(now>=nextHistory){nextHistory=now+1000;for(const c of [...survivors,dodger])c.account({action:'history',request_id:500,before:null});}
+ });
+ const penaltiesFile=path.join(root,'matches','dodge-penalties.json');
+ const penalties=fs.existsSync(penaltiesFile)?parse(fs.readFileSync(penaltiesFile)):{};
+ if(draftExit==='disconnect')assert.equal(Object.keys(penalties).length,0,'a lost connection penalized the departed player or a survivor');
+ else {
+  assert.deepEqual(Object.keys(penalties),[dodger.profile.profile_id],'a survivor received a dodge penalty');
+  assert.equal(penalties[dodger.profile.profile_id].strikes,1,'repeated Leave packets escalated one departure more than once');
+ }
+ checks.checks.push({name:'draft_departure_requeues_nine_without_credit',status:'PASS',exit:draftExit,original_queue_ages_secs:queueAges,elapsed_secs:survivors.map(c=>c.career.match_service.elapsed_secs),all_profiles_unchanged:true,all_histories_empty:true,all_survivors_received_return_code:true,dodger_code:dodger.career?.match_service?.code??null});
+ const replacement=draftExit==='disconnect'?dodger:new Client(8100,lobbyPort,null,{preference:'humans_only',autoHandoff:false});
+ if(replacement!==dodger)all.push(replacement);
+ replacement.autoReady=true;replacement.autoQueue=true;replacement.lastQueue=0;
+ const nextRoster=[...survivors,replacement];
+ await pumpUntil('fresh full roster accepted after draft cancellation',()=>nextRoster.every(c=>c.allocation&&c.allocation.allocation_id!==allocation.allocation_id),45000);
+ const fresh=nextRoster[0].allocation;
+ assert(nextRoster.every(c=>c.allocation.allocation_id===fresh.allocation_id));
+ assert.equal(new Set(nextRoster.filter(c=>c.index<5).map(c=>c.allocation.team)).size,1,'requeued party split');
+ assert.equal(allocationManifests().length,2,'unexpected duplicate worker');
+ // Enable handoff only after inspecting all recipient allocations. Repeated
+ // Assigned views carry the same correlated search, so no extra FindMatch is needed.
+ for(const c of nextRoster)c.autoHandoff=true;
+ await pumpUntil('replacement Ranked party roster reaches Running',()=>nextRoster.every(c=>c.stage==='running'),45000);
+ await pumpFor(Math.max(1000,soakSecs*1000));
+ for(const c of nextRoster){assert.equal(c.allocation.allocation_id,fresh.allocation_id);assert.equal(c.errors.length,0);assert.equal(ids(c.snapshot).length,10);}
+ checks.checks.push({name:'replacement_party_ranked_running',status:'PASS',allocation_id:fresh.allocation_id,humans:10,bots:0,party_team:nextRoster.find(c=>c.index===0).allocation.team});
+ report.arenas=1;report.elapsed_seconds=(performance.now()-searchingAt)/1000;
+ report.scenarios.push('signed_five_stack_ranked','draft_departure_requeues_nine_without_credit','fresh_unanimous_party_roster_running');
 }
 async function gracefulTermination(original) {
  const allocation=original.allocation, progress=careerProgress(original);
@@ -661,6 +783,8 @@ try {
  assert(lobby.exitCode===null, 'lobby failed to start');
  // A raw pre-admission ping must not receive any response or allocate an endpoint.
  const stranger=dgram.createSocket('udp4');let reflected=0;stranger.on('message',b=>reflected+=b.length);stranger.send(Buffer.from('{"type":"ping"}'),lobbyPort,'127.0.0.1');await delay(700);stranger.close();assert.equal(reflected,0);report.scenarios.push('raw_ping_no_replication');
+ if(scenario==='party-draft')await partyDraftLifecycle();
+ else {
  const start=performance.now();let runningAt=null,nextProgress=0;
  while(performance.now()-start<240000) {
   const now=performance.now();
@@ -695,6 +819,7 @@ try {
  const gaps=all.flatMap(c=>c.gaps).sort((a,b)=>a-b);report.snapshot_gap_ms={p50:gaps[Math.floor(gaps.length*.5)],p95:gaps[Math.floor(gaps.length*.95)],p99:gaps[Math.floor(gaps.length*.99)],max:gaps.at(-1)};
  measure(allocations, runningAt);
  }
+ }
  if(scenario==='termination')await gracefulTermination(all[0]);
  if(scenario==='ready-check')await readyCheckLifecycle();
  if(scenario==='lifecycle')await lifecycle(all[0]);
@@ -706,9 +831,22 @@ try {
  report.total_sent_datagrams=all.reduce((n,c)=>n+c.sentPackets,0);
  report.total_sent_bytes=all.reduce((n,c)=>n+c.sentBytes,0);
  if(inputHz>0&&soakSecs>0&&!queueOnly)assert(all.filter(c=>c.firstRunning).every(c=>c.transforms>0),'running clients did not exercise signed input');
+ if(exerciseStaleHandoff){
+  const handed=all.filter(c=>c.allocation);
+  assert(handed.length>0&&handed.every(c=>c.staleHandoffChecks>0&&!c.staleHandoffFailure),'stale handoff fixture did not execute for every handed client');
+  report.stale_handoff_checks=handed.reduce((n,c)=>n+c.staleHandoffChecks,0);
+ }
  report.resources=resources;
  report.status='PASS';
-} catch(error){report.status='FAIL';report.error=error.stack;process.exitCode=1;} finally {
+} catch(error){
+ report.status='FAIL';report.error=error.stack;process.exitCode=1;
+ // CI may have no artifact upload: keep bounded admission/draft evidence in
+ // its log, without device keys, signatures or transport/session nonces.
+ report.failed_clients=all.filter(c=>c.stage!=='running'||c.staleHandoffFailure).slice(0,25).map(c=>c.diagnostic());
+ try {report.worker_statuses=allocationManifests().slice(0,25).map(m=>{
+  const s=allocationStatus(m.allocation_id);return {allocation_id:m.allocation_id,preference:m.preference,phase:s?.phase,result_id:s?.result_id,joined:s?.joined_sessions?.length,released:s?.released_sessions?.length};
+ });}catch{report.worker_statuses=[];}
+} finally {
  report.resources=resources;
  fs.writeFileSync(path.join(root,'report.json'),wire(report));fs.writeFileSync(path.join(root,'clients.json'),wire(all.map(c=>c.diagnostic())));console.log(wire(report));cleanup();
 }

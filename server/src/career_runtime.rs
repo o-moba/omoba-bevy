@@ -918,6 +918,47 @@ impl ServerRuntime {
         }
     }
 
+    /// Both signed account cancellation and gameplay Leave use this path.
+    /// Gameplay Leave is independent of the account-action throttle, but must
+    /// identify the exact allocated profile/session before aborting a draft.
+    pub(crate) fn cancel_unstarted_ranked_allocation(&mut self, addr: SocketAddr) {
+        if self.match_started_at.is_some() {
+            return;
+        }
+        let Some(worker) = self.match_service.worker() else {
+            return;
+        };
+        if !worker.manifest.preference.rated() {
+            return;
+        }
+        let Some((_, session)) = self
+            .career
+            .backend
+            .profile(addr)
+            .zip(self.career.backend.authenticated_session(addr))
+            .filter(|(profile, session)| {
+                worker.manifest.team(&profile.profile_id, session).is_some()
+            })
+        else {
+            return;
+        };
+        let path = worker.directory.join("cancel.json");
+        let mut left: Vec<String> = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        if !left.contains(&session) {
+            left.push(session);
+        }
+        if crate::match_allocation::atomic_json(&path, &left).is_ok() {
+            if let crate::match_service::MatchService::Worker(worker) = &mut self.match_service {
+                worker.aborted = true;
+            }
+        } else {
+            eprintln!("Cannot persist Ranked draft cancellation");
+        }
+    }
+
     /// A running allocated seat changes controller and remains reclaimable.
     /// Other seats and any queue entry are released at once,
     /// so a guest can join again straight away with a new hero. Signed profiles
@@ -1181,32 +1222,7 @@ impl ServerRuntime {
                 self.leave_match(addr, now);
                 continue;
             }
-            if let Some(worker) = self.match_service.worker() {
-                let member = self
-                    .career
-                    .backend
-                    .profile(addr)
-                    .zip(self.career.backend.authenticated_session(addr))
-                    .filter(|(profile, session)| {
-                        worker.manifest.team(&profile.profile_id, session).is_some()
-                    })
-                    .map(|(_, session)| session);
-                if self.match_started_at.is_none()
-                    && let Some(session) = member
-                {
-                    // Name who left (LR-32): the lobby re-queues the other
-                    // humans of this allocation and leaves these out.
-                    let path = worker.directory.join("cancel.json");
-                    let mut left: Vec<String> = std::fs::read(&path)
-                        .ok()
-                        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-                        .unwrap_or_default();
-                    if !left.contains(&session) {
-                        left.push(session);
-                    }
-                    let _ = crate::match_allocation::atomic_json(&path, &left);
-                }
-            }
+            self.cancel_unstarted_ranked_allocation(addr);
             if let Some(player) = self.world.players.get(&addr) {
                 if player.joined && matches!(self.world.game_state, GameState::Running) {
                     continue;
