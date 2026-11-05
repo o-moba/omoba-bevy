@@ -1,5 +1,21 @@
 # Feature Inventory
 
+## Ranked matchmaking readiness (2026-11-05)
+
+A found match that falls apart before it starts no longer drops everyone: the
+lobby returns the other humans to the queue with their place and the client
+searches again with a notice; the member who cancelled a found Ranked match waits
+a minute. The Ranked window widens with the wait (300 → 600 points over four
+minutes, newcomer and veteran brackets merge after five) so ten humans across
+cohorts can meet; parties stay one cohort. Ready 5v5 rosters take a scarce arena
+before solo bot games. Lobby ceilings are sized for ~1000 players (configurable
+queue, 2048 endpoints, carrier-grade-NAT per-IP limits, `server_full`/`lobby_busy`
+instead of silence), the party lobby stops broadcasting on every heartbeat, party
+refusals and all lobby/prematch messages reach players as localized text, and the
+portal gains a leaderboard with an opt-out. See
+[match progression](match-progression.md#ranked-window-at-low-population-lr-35),
+[the plan](plans/ranked-launch-readiness-2026-11-05.md) and ADR-027.
+
 ## Classic hero design authoring foundation
 
 The existing game-contract exporter also publishes a versioned hero design

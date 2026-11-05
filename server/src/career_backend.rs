@@ -25,7 +25,9 @@ use shared::moderation::{Sanction, SanctionKind};
 use crate::admission::{Limits, SourceIp};
 use crate::career_port::CareerPort;
 
-const MAX_CLIENTS: usize = 512;
+/// Career clients one lobby keeps (its player ceiling together with
+/// `public_transport::MAX_ENDPOINTS`); a newcomer beyond it gets `server_full`.
+pub(crate) const MAX_CLIENTS: usize = 2048;
 /// The English fallback of [`shared::career::error_code::SERVER_FULL`].
 const SERVER_FULL_TEXT: &str = "The server is full right now. Signing in again shortly.";
 /// A client of an IP at its limit gives way to a newcomer from that IP once
@@ -472,7 +474,11 @@ impl CareerBackend {
     }
     #[cfg(test)]
     fn with_config(epoch: u64, url: Option<String>, outbox: PathBuf) -> Self {
-        Self::with_recovery(epoch, url, outbox, RecoveryScope::Global, Limits::default())
+        let limits = Limits {
+            new_profiles: Admission::for_test().new_profiles,
+            ..Limits::default()
+        };
+        Self::with_recovery(epoch, url, outbox, RecoveryScope::Global, limits)
     }
     fn with_recovery(
         epoch: u64,
@@ -1407,7 +1413,13 @@ pub(crate) struct Admission {
 impl Admission {
     pub(crate) fn for_test() -> Self {
         Self {
-            new_profiles: Limits::default().new_profiles,
+            // Live fixtures share a reusable loopback database with load
+            // probes. Their synthetic identities must not exhaust the real
+            // network's daily signup quota; quota behavior has store tests.
+            new_profiles: omoba_career_store::career_store::NewProfileLimits {
+                per_source: 1_000_000,
+                total: 10_000_000,
+            },
             retention_days: None,
         }
     }

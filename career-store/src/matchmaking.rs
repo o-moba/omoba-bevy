@@ -1,6 +1,10 @@
 //! Bounded, server-owned queue policy. Networking, authentication, match
 //! eligibility and durable settlement belong to the runtime/storage layer.
-use std::{collections::HashSet, fmt, time::Instant};
+use std::{
+    collections::HashSet,
+    fmt,
+    time::{Duration, Instant},
+};
 
 use shared::{
     career::{MAX_PARTICIPANTS, ProfileSummary, QueueView, RatingChange, valid_profile_id},
@@ -9,28 +13,112 @@ use shared::{
 
 pub const MAX_WAITING: usize = 128;
 pub const MAX_RATING_SPREAD: i32 = 300;
+/// The widest rating spread a Ranked roster may ever have (LR-35): the base
+/// spread grows while players wait, never past this.
+pub const MAX_WIDENED_SPREAD: i32 = 600;
 pub const MAX_RATING: i32 = 5000;
 pub const ELO_K: i32 = 32;
+
+/// How far a Ranked search may reach beyond the base cohort (LR-35, owner
+/// default O-1 amended 2026-11-05): the allowance a roster was formed with.
+/// [`CohortAllowance::BASE`] is the strict LR-08 cohort; [`CohortAllowance::MAX`]
+/// is the most the public lobby ever grants and the most the store accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CohortAllowance {
+    /// Largest rating distance between the roster's lowest and highest rating.
+    pub spread: i32,
+    /// Newcomers (fewer than 20 rated matches) and veterans may share the roster.
+    pub merge_newcomers: bool,
+}
+
+impl CohortAllowance {
+    pub const BASE: Self = Self {
+        spread: MAX_RATING_SPREAD,
+        merge_newcomers: false,
+    };
+    pub const MAX: Self = Self {
+        spread: MAX_WIDENED_SPREAD,
+        merge_newcomers: true,
+    };
+    /// Widening starts after this wait.
+    pub const WIDEN_AFTER: Duration = Duration::from_secs(120);
+    /// Every further period adds [`Self::WIDEN_STEP`] to the spread.
+    pub const WIDEN_EVERY: Duration = Duration::from_secs(60);
+    pub const WIDEN_STEP: i32 = 100;
+    /// The newcomer bracket merges with veterans after this wait.
+    pub const MERGE_NEWCOMERS_AFTER: Duration = Duration::from_secs(300);
+
+    /// The allowance for a unit that has searched Ranked for `waited`:
+    /// 300 up to 2 min, then +100 per minute (400 at 2 min, 500 at 3 min,
+    /// 600 at 4 min and beyond); newcomers merge at 5 min.
+    pub fn after_wait(waited: Duration) -> Self {
+        let spread = if waited < Self::WIDEN_AFTER {
+            MAX_RATING_SPREAD
+        } else {
+            let steps = 1 + (waited - Self::WIDEN_AFTER).as_secs() / Self::WIDEN_EVERY.as_secs();
+            let steps = i32::try_from(steps).unwrap_or(i32::MAX);
+            MAX_RATING_SPREAD.saturating_add(steps.saturating_mul(Self::WIDEN_STEP))
+        };
+        Self {
+            spread: spread.min(MAX_WIDENED_SPREAD),
+            merge_newcomers: waited >= Self::MERGE_NEWCOMERS_AFTER,
+        }
+        .clamped()
+    }
+
+    /// Never wider than [`Self::MAX`], never narrower than [`Self::BASE`].
+    pub fn clamped(self) -> Self {
+        Self {
+            spread: self.spread.clamp(MAX_RATING_SPREAD, MAX_WIDENED_SPREAD),
+            merge_newcomers: self.merge_newcomers,
+        }
+    }
+}
+
+impl Default for CohortAllowance {
+    fn default() -> Self {
+        Self::BASE
+    }
+}
 
 /// The one rated cohort policy (LR-08): `candidate` belongs to a cohort whose
 /// lowest rating is `low`'s, in the same newcomer bracket and at most
 /// [`MAX_RATING_SPREAD`] above it. The career queue, the public lobby's Ranked
 /// search and the store's rated-start check all use it.
 pub fn fits_cohort(low: &ProfileSummary, candidate: &ProfileSummary) -> bool {
-    candidate.newcomer() == low.newcomer()
+    fits_cohort_with(low, candidate, CohortAllowance::BASE)
+}
+
+/// [`fits_cohort`] under a widened `allowance` (LR-35): the same shape with the
+/// allowance's spread, and across newcomer brackets when it merges them.
+pub fn fits_cohort_with(
+    low: &ProfileSummary,
+    candidate: &ProfileSummary,
+    allowance: CohortAllowance,
+) -> bool {
+    let allowance = allowance.clamped();
+    (allowance.merge_newcomers || candidate.newcomer() == low.newcomer())
         && candidate.rating >= low.rating
-        && rating_distance(low.rating, candidate.rating) <= MAX_RATING_SPREAD as i64
+        && rating_distance(low.rating, candidate.rating) <= i64::from(allowance.spread)
 }
 
 /// These profiles form one rated cohort: one newcomer bracket and at most
 /// [`MAX_RATING_SPREAD`] between the lowest and the highest rating. An empty
 /// set is no cohort.
 pub fn same_cohort<'a>(profiles: impl IntoIterator<Item = &'a ProfileSummary>) -> bool {
+    same_cohort_with(profiles, CohortAllowance::BASE)
+}
+
+/// [`same_cohort`] under a widened `allowance` (LR-35).
+pub fn same_cohort_with<'a>(
+    profiles: impl IntoIterator<Item = &'a ProfileSummary>,
+    allowance: CohortAllowance,
+) -> bool {
     let profiles: Vec<_> = profiles.into_iter().collect();
     let Some(low) = profiles.iter().copied().min_by_key(|p| p.rating) else {
         return false;
     };
-    profiles.iter().all(|p| fits_cohort(low, p))
+    profiles.iter().all(|p| fits_cohort_with(low, p, allowance))
 }
 
 #[derive(Clone, Debug)]
@@ -806,5 +894,59 @@ mod tests {
             &newcomer,
             &profile(5, 1400, NEWCOMER_MATCHES)
         ]));
+    }
+
+    /// LR-35: the allowance grows with the wait and never past the maximum;
+    /// the widened policy admits what the base refuses and nothing beyond.
+    #[test]
+    fn the_ranked_window_widens_with_the_wait_up_to_the_maximum() {
+        let at = |secs| CohortAllowance::after_wait(Duration::from_secs(secs));
+        assert_eq!(at(0), CohortAllowance::BASE);
+        assert_eq!(at(119), CohortAllowance::BASE);
+        assert_eq!(at(120).spread, 400);
+        assert_eq!(at(179).spread, 400);
+        assert_eq!(at(180).spread, 500);
+        assert_eq!(at(240).spread, 600);
+        assert_eq!(at(3600).spread, MAX_WIDENED_SPREAD);
+        assert!(!at(299).merge_newcomers);
+        assert!(at(300).merge_newcomers);
+        assert_eq!(at(86_400), CohortAllowance::MAX);
+        assert_eq!(
+            CohortAllowance {
+                spread: 9000,
+                merge_newcomers: true
+            }
+            .clamped(),
+            CohortAllowance::MAX
+        );
+        assert_eq!(
+            CohortAllowance {
+                spread: 10,
+                merge_newcomers: false
+            }
+            .clamped(),
+            CohortAllowance::BASE
+        );
+
+        let newcomer = profile(1, 1000, 0);
+        let veteran = profile(2, 1000, NEWCOMER_MATCHES);
+        let far = profile(3, 1500, 0);
+        let too_far = profile(4, 1601, 0);
+        assert!(!fits_cohort_with(&newcomer, &far, at(0)));
+        assert!(!fits_cohort_with(&newcomer, &far, at(120)));
+        assert!(fits_cohort_with(&newcomer, &far, at(180)));
+        assert!(!fits_cohort_with(&newcomer, &too_far, CohortAllowance::MAX));
+        assert!(!fits_cohort_with(&newcomer, &veteran, at(299)));
+        assert!(fits_cohort_with(&newcomer, &veteran, at(300)));
+        assert!(same_cohort_with([&newcomer, &far], at(180)));
+        assert!(!same_cohort_with([&newcomer, &far], at(0)));
+        assert!(same_cohort_with(
+            [&newcomer, &veteran, &far],
+            CohortAllowance::MAX
+        ));
+        assert!(!same_cohort_with(
+            [&newcomer, &too_far],
+            CohortAllowance::MAX
+        ));
     }
 }

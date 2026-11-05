@@ -29,8 +29,11 @@ Environment=OMOBA_TEAM_SIZE=5
 Environment=OMOBA_MATCH_ROOT=/var/lib/omoba-ru/matches
 Environment=OMOBA_CAREER_OUTBOX=/var/lib/omoba-ru/lobby-outbox
 Environment=OMOBA_MATCH_BIND_IP=0.0.0.0
+# 16 arenas on UDP 41000-41015 (README "Arena capacity"); nftables-omoba.conf's
+# OMOBA_ARENA_PORTS must cover the same range, and ru_host.py refuses a kit where
+# they differ.
 Environment=OMOBA_MATCH_FIRST_PORT=41000
-Environment=OMOBA_MATCH_CAPACITY=2
+Environment=OMOBA_MATCH_CAPACITY=16
 Environment=OMOBA_MATCH_EXECUTABLE=/opt/omoba-ru/current/omoba-server
 # Text chat off at launch (owner default O-9, LR-15); reactions stay. Match workers
 # inherit it. Turning it on needs the owner's legal check (ОРИ, 149-FZ) and changes
@@ -39,12 +42,19 @@ Environment=OMOBA_CHAT=off
 ExecStart=/opt/omoba-ru/current/omoba-server
 Restart=always
 RestartSec=5
-KillMode=control-group
+# A stop or restart signals the lobby only: live match workers keep running in the
+# unit's cgroup and the next lobby adopts them from their manifests (README "Install
+# and update"). They stay under the limits below.
+KillMode=process
+SendSIGHUP=no
 TimeoutStopSec=20
-MemoryHigh=600M
-MemoryMax=700M
-CPUQuota=150%
-TasksMax=128
+# Formula values for 16 arenas, pending the LR-09 measurement (README "Arena
+# capacity"): MemoryMax = 16 MiB x arenas + 200 MiB, MemoryHigh = MemoryMax - 50 MiB,
+# TasksMax >= 3 x arenas + 16 (set with headroom), CPUQuota = 190% of the 2 vCPU.
+MemoryHigh=450M
+MemoryMax=500M
+CPUQuota=190%
+TasksMax=96
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

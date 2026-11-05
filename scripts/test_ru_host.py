@@ -606,6 +606,9 @@ class RuKitTest(unittest.TestCase):
                                                            "https://registry.ekza.io\n"),
             "overlap": lobby.replace("OMOBA_MATCH_FIRST_PORT=41000", "OMOBA_MATCH_FIRST_PORT=3999"),
             "OMOBA_CHAT": lobby.replace("Environment=OMOBA_CHAT=off", "Environment=OMOBA_CHAT=on"),
+            # Workers must survive a lobby restart: the next lobby adopts them (LR-09).
+            "KillMode": lobby.replace("KillMode=process", "KillMode=control-group"),
+            "SendSIGHUP": lobby.replace("SendSIGHUP=no\n", ""),
         }
         for needle, text in cases.items():
             problems = ru_host.unit_problems("lobby", text)
@@ -750,10 +753,10 @@ class RuKitTest(unittest.TestCase):
         self.assertLess(len(ru_host.encode_payload(payload)), 100_000)
 
     def test_the_arena_range_comes_from_the_lobby_unit(self):
-        self.assertEqual(ru_host.arena_ports(KIT["units"]["lobby"]), (41000, 41001))
+        self.assertEqual(ru_host.arena_ports(KIT["units"]["lobby"]), (41000, 41015))
         rules = ru_host.firewall_rules(KIT["units"]["lobby"], {22})
-        self.assertEqual([spec for _, spec, _ in rules], ["22/tcp", "443/tcp", "4000/udp", "41000:41001/udp"])
-        wider = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=2", "OMOBA_MATCH_CAPACITY=6")
+        self.assertEqual([spec for _, spec, _ in rules], ["22/tcp", "443/tcp", "4000/udp", "41000:41015/udp"])
+        wider = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=16", "OMOBA_MATCH_CAPACITY=6")
         self.assertEqual(ru_host.firewall_rules(wider, {2222})[-1][1], "41000:41005/udp")
         self.assertEqual(ru_host.firewall_rules(wider, {2222})[0][1], "2222/tcp")
 
@@ -761,7 +764,7 @@ class RuKitTest(unittest.TestCase):
         self.assertEqual(ru_host.nftables_problems(KIT["nftables"], KIT["units"]["lobby"]), [])
         self.assertEqual(ru_host.limits_unit_problems(KIT["limits_unit"]), [])
         cases = {
-            "OMOBA_ARENA_PORTS": KIT["nftables"].replace("41000-41001", "41000-41002"),
+            "OMOBA_ARENA_PORTS": KIT["nftables"].replace("41000-41015", "41000-41002"),
             "OMOBA_LOBBY_PORT": KIT["nftables"].replace("OMOBA_LOBBY_PORT = 4000", "OMOBA_LOBBY_PORT = 4001"),
             "flushes rules": KIT["nftables"].replace("delete table inet omoba_limits", "flush ruleset"),
             "only table inet omoba_limits": KIT["nftables"] + "\ntable inet filter {\n}\n",
@@ -771,15 +774,24 @@ class RuKitTest(unittest.TestCase):
         for needle, text in cases.items():
             problems = ru_host.nftables_problems(text, KIT["units"]["lobby"])
             self.assertTrue(any(needle in problem for problem in problems), (needle, problems))
-        single = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=2", "OMOBA_MATCH_CAPACITY=1")
-        self.assertEqual(ru_host.nftables_problems(KIT["nftables"].replace("41000-41001", "41000"), single), [])
+        single = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=16", "OMOBA_MATCH_CAPACITY=1")
+        self.assertEqual(ru_host.nftables_problems(KIT["nftables"].replace("41000-41015", "41000"), single), [])
         self.assertTrue(ru_host.limits_unit_problems(KIT["limits_unit"].replace("RemainAfterExit=yes", "")))
 
     def test_env_examples_are_complete_placeholders(self):
         for kind, text in KIT["examples"].items():
             self.assertEqual(ru_host.example_problems(kind, text), [], kind)
         lobby = ru_host.parse_env(KIT["examples"]["lobby"])[0]
-        self.assertEqual(set(lobby), {"OMOBA_DATABASE_URL", "OMOBA_MATCH_PUBLIC_HOST"})
+        # The per-source limits sized for carrier-grade NAT (README "Admission limits") are
+        # fixed values of the kit; every other setting is a placeholder bootstrap fills.
+        self.assertEqual(set(lobby), {"OMOBA_DATABASE_URL", "OMOBA_MATCH_PUBLIC_HOST",
+                                      "OMOBA_LIMIT_ENDPOINTS_PER_IP", "OMOBA_LIMIT_ARENAS_PER_IP",
+                                      "OMOBA_LIMIT_PROBES_PER_IP", "OMOBA_LIMIT_PROBES_PER_NETWORK",
+                                      "OMOBA_LIMIT_PROBES_GLOBAL", "OMOBA_LIMIT_PROBES_NEW_RESERVE",
+                                      "OMOBA_LIMIT_NEW_PROFILES_PER_IP"})
+        self.assertEqual(lobby["OMOBA_LIMIT_ENDPOINTS_PER_IP"], "256")
+        self.assertEqual(lobby["OMOBA_LIMIT_ARENAS_PER_IP"], "8")
+        self.assertLess(int(lobby["OMOBA_LIMIT_PROBES_NEW_RESERVE"]), int(lobby["OMOBA_LIMIT_PROBES_GLOBAL"]))
         # The env files must not override what the units set.
         for kind in ru_host.KINDS:
             unit_env = ru_host.parse_unit(KIT["units"][kind])[1]
@@ -866,7 +878,7 @@ To                         Action      From
 22/tcp                     ALLOW IN    Anywhere                   # omoba-ru ssh (key-only)
 443/tcp                    ALLOW IN    Anywhere                   # omoba-ru https (Caddy)
 4000/udp                   ALLOW IN    Anywhere                   # omoba-ru lobby
-41000:41001/udp            ALLOW IN    Anywhere                   # omoba-ru match workers
+41000:41015/udp            ALLOW IN    Anywhere                   # omoba-ru match workers
 80/tcp                     ALLOW IN    Anywhere
 22/tcp (v6)                ALLOW IN    Anywhere (v6)              # omoba-ru ssh (key-only)
 80/tcp (v6)                ALLOW IN    Anywhere (v6)
@@ -876,7 +888,7 @@ To                         Action      From
         status = ru_host.parse_ufw(self.UFW)
         self.assertTrue(status["active"])
         self.assertEqual(status["incoming"], "deny")
-        self.assertEqual(status["rules"][3]["to"], "41000:41001/udp")
+        self.assertEqual(status["rules"][3]["to"], "41000:41015/udp")
         self.assertEqual(status["rules"][3]["comment"], "omoba-ru match workers")
         self.assertTrue(status["rules"][5]["v6"])
         rules = ru_host.firewall_rules(KIT["units"]["lobby"], {22})
@@ -968,6 +980,24 @@ To                         Action      From
         self.assertIn("older than 16", problems[0])
         self.assertIn('"und-x-icu"', problems[1])
         self.assertIn("loopback only", problems[2])
+
+    def test_postgres_max_connections_must_cover_the_arena_capacity(self):
+        # One connection per match worker (16 arenas) + 32 for the lobby's and the Account
+        # API's pools, backups and the superuser reserve (README "Arena capacity").
+        self.assertEqual(ru_host.connections_needed(KIT["units"]["lobby"]), 48)
+        good = {"version": 160004, "icu": True, "listen": "localhost", "port": 5432, "database_owner": None,
+                "max_connections": 100}
+        self.assertEqual(ru_host.postgres_problems(good, 48), [])
+        self.assertEqual(ru_host.postgres_problems(good), [], "not checked without a lobby unit")
+        self.assertEqual(ru_host.postgres_problems({**good, "max_connections": None}, 48), [])
+        problems = ru_host.postgres_problems({**good, "max_connections": 40}, 48)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("max_connections is 40", problems[0])
+        self.assertIn("at least 48", problems[0])
+        wider = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=16", "OMOBA_MATCH_CAPACITY=64")
+        self.assertEqual(ru_host.connections_needed(wider), 96)
+        self.assertTrue(ru_host.postgres_problems(good, ru_host.connections_needed(wider)) == [])
+        self.assertTrue(ru_host.postgres_problems({**good, "max_connections": 90}, ru_host.connections_needed(wider)))
 
     def test_dns_must_point_at_the_ru_host_without_aaaa_for_the_lobby(self):
         dns = {NAMES[key]: {socket.AF_INET: {RU_IP}, socket.AF_INET6: set()} for key in ru_host.HOST_KEYS}
@@ -1111,7 +1141,7 @@ class BootstrapTest(HostCase):
         self.assertEqual(Path(fake.p(ru_host.SSHD_DROPIN)).read_text(), ru_host.SSHD_TEXT)
         self.assertTrue(fake.ufw["active"])
         self.assertEqual(fake.ufw["incoming"], "deny")
-        self.assertEqual([rule[1] for rule in fake.ufw["rules"]], ["22/tcp", "443/tcp", "4000/udp", "41000:41001/udp"])
+        self.assertEqual([rule[1] for rule in fake.ufw["rules"]], ["22/tcp", "443/tcp", "4000/udp", "41000:41015/udp"])
         for kind in ru_host.KINDS:
             self.assertEqual(Path(fake.p(ru_host.unit_path(kind))).read_text(), KIT["units"][kind])
         self.assertIn(["systemctl", "daemon-reload"], fake.calls)
@@ -1173,6 +1203,27 @@ class BootstrapTest(HostCase):
         for secret in secrets:
             self.assertNotIn(secret, blob)
 
+    def test_bootstrap_adds_settings_the_example_gained(self):
+        # A host whose lobby.env predates the per-source limits gets them appended, with the
+        # kit's values; nothing already set changes (README "Admission limits").
+        self.bootstrap()
+        path = Path(self.fake.p(ru_host.ENV_PATHS["lobby"]))
+        before = ru_host.parse_env(path.read_text())[0]
+        old = "\n".join(line for line in path.read_text().splitlines() if "OMOBA_LIMIT_" not in line) + "\n"
+        path.write_text(old)
+        problems = ru_host.env_problems("lobby", old, KIT["examples"]["lobby"], RU_IP)[0]
+        self.assertIn("OMOBA_LIMIT_ENDPOINTS_PER_IP is missing", problems)
+        result = self.bootstrap()
+        self.assertEqual(result["done"], ["add /opt/omoba-ru/lobby.env (OMOBA_LIMIT_ARENAS_PER_IP, "
+                                          "OMOBA_LIMIT_ENDPOINTS_PER_IP, OMOBA_LIMIT_NEW_PROFILES_PER_IP, "
+                                          "OMOBA_LIMIT_PROBES_GLOBAL, OMOBA_LIMIT_PROBES_NEW_RESERVE, "
+                                          "OMOBA_LIMIT_PROBES_PER_IP, OMOBA_LIMIT_PROBES_PER_NETWORK)"])
+        after = ru_host.parse_env(path.read_text())[0]
+        self.assertEqual(after, before)
+        self.assertIn("# Added by ru_host.py bootstrap", path.read_text())
+        self.assertEqual(ru_host.env_problems("lobby", path.read_text(), KIT["examples"]["lobby"], RU_IP), ([], []))
+        self.assertEqual(self.bootstrap()["done"], [])
+
     def test_bootstrap_is_idempotent_and_never_replaces_a_secret(self):
         self.fresh().bootstrap(self.payload(kind="bootstrap", vkid=None))
         api = self.env("account-api")
@@ -1225,19 +1276,19 @@ class BootstrapTest(HostCase):
 
     def test_firewall_drops_its_own_stale_arena_rule(self):
         self.bootstrap()
-        wider = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=2", "OMOBA_MATCH_CAPACITY=4")
+        wider = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=16", "OMOBA_MATCH_CAPACITY=4")
         payload = self.payload(kind="bootstrap", vkid=VK_ID)
         payload["units"]["lobby"] = wider
         # The per-source limits must cover the same range: the kit edits both files.
         with self.assertRaises(ru_host.Refused) as refused:
             self.fresh().bootstrap(payload)
-        self.assertIn("OMOBA_ARENA_PORTS is '41000-41001', not the lobby unit's 41000-41003",
+        self.assertIn("OMOBA_ARENA_PORTS is '41000-41015', not the lobby unit's 41000-41003",
                       refused.exception.message)
-        payload["nftables"] = KIT["nftables"].replace("41000-41001", "41000-41003")
+        payload["nftables"] = KIT["nftables"].replace("41000-41015", "41000-41003")
         result = self.fresh().bootstrap(payload)
         self.assertEqual([rule[1] for rule in self.fake.ufw["rules"]],
                          ["22/tcp", "443/tcp", "4000/udp", "41000:41003/udp"])
-        self.assertIn(["ufw", "--force", "delete", "allow", "41000:41001/udp"], self.fake.calls)
+        self.assertIn(["ufw", "--force", "delete", "allow", "41000:41015/udp"], self.fake.calls)
         self.assertIn("systemctl restart omoba-limits-ru", result["done"])
         self.assertIn("41000-41003", Path(self.fake.p(ru_host.NFT_RULES)).read_text())
 
@@ -1245,7 +1296,7 @@ class BootstrapTest(HostCase):
         self.bootstrap()
         self.fake.fail_nft_check = True
         payload = self.payload(kind="bootstrap", vkid=VK_ID)
-        payload["nftables"] = KIT["nftables"].replace("burst 800 packets", "burst 900 packets")
+        payload["nftables"] = KIT["nftables"].replace("burst 8000 packets", "burst 9000 packets")
         with self.assertRaises(SystemExit) as refused:
             self.fresh().bootstrap(payload)
         self.assertIn("nft -c refused", str(refused.exception))

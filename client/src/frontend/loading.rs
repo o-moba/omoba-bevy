@@ -11,7 +11,8 @@
 //! every frame.
 //!
 //! Text comes from the `loading` dictionary; the render key includes the
-//! locale generation. Server-authored draft errors stay English.
+//! locale generation. A server prematch error only re-keys the render here;
+//! the draft footer shows it (`frontend::draft::error_text`).
 // i18n-strict
 use bevy::{
     asset::RecursiveDependencyLoadState,

@@ -161,9 +161,10 @@ Ops (`ops/vps/ru/*`, docs):
   Failed slot re-queues; party cancel yields `party_member_left`; priority
   seats a 10-human roster before a solo vs Bots when one arena is free;
   `lobby_busy` and the configurable waiting cap.
-- AC2 `cargo test -p omoba-career-store` covers the widening allowance: a
-  roster with a 500-point spread is accepted with allowance 500 and rejected
-  without; the store never accepts more than the caps.
+- AC2 `cargo test -p omoba-career-store` covers the widening allowance: the
+  base policy rejects a 500-point spread; the widened policy and the store
+  accept it, including mixed newcomer/veteran rosters. The store re-checks
+  against the documented maximum: 600 points accepted, 601 rejected.
 - AC3 Party unit tests: a presence does not trigger an immediate broadcast to
   other subscribers; errors reach the issuer; invite throttle.
 - AC4 Client tests: a pre-start worker loss re-queues with a localized notice;

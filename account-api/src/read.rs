@@ -68,10 +68,11 @@ impl Filter {
         } else {
             sqlx::query_scalar("SELECT extract(epoch FROM ((date_trunc('day',clock_timestamp() AT TIME ZONE coalesce((SELECT timezone FROM portal.profile_settings WHERE profile_id=$1),'UTC'))-make_interval(days=>$2-1)) AT TIME ZONE coalesce((SELECT timezone FROM portal.profile_settings WHERE profile_id=$1),'UTC')))::double precision").bind(&s.profile_id).bind(days).fetch_one(&app.pool).await?
         };
+        // Every playable class, by its wire id (the `hero_class` the facts store).
         let class = q.get("hero_class").filter(|v| v.as_str() != "all").cloned();
         if class
             .as_ref()
-            .is_some_and(|v| !matches!(v.as_str(), "warrior" | "ranger" | "mage" | "cleric"))
+            .is_some_and(|v| shared::HeroClass::from_id(v).is_none())
         {
             return Err(invalid());
         }

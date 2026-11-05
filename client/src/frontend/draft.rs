@@ -1,8 +1,9 @@
 //! Shared pre-match choices. The server owns accepted selections and lock state.
 //!
 //! Text comes from the `draft` dictionary (hero, role and avatar names through
-//! `i18n::data`); the render key includes the locale generation. Server-authored
-//! draft errors stay English.
+//! `i18n::data`); the render key includes the locale generation. A server
+//! prematch error that is a stable code (`roster_changed`) shows its
+//! `draft.error.<code>` text; server-authored sentences stay English.
 // i18n-strict
 use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{
@@ -191,7 +192,7 @@ fn sync_draft(
         state.namespace = Some(namespace);
         state.next_request_id = draft.last_request_id;
         state.choice = local.map(Choice::from);
-        state.notice = draft.error.clone();
+        state.notice = draft.error.as_deref().map(error_text);
     }
     let acknowledged = state
         .pending
@@ -202,7 +203,7 @@ fn sync_draft(
         if let Some(error) = &draft.error {
             state.choice = local.map(Choice::from);
             state.desired_lock = None;
-            state.notice = Some(error.clone());
+            state.notice = Some(error_text(error));
         }
     }
     state.next_request_id = state.next_request_id.max(draft.last_request_id);
@@ -389,6 +390,19 @@ fn send_requests(
     {
         writer.write(NetworkCommand::Prematch(request));
     }
+}
+
+/// A server prematch error as the footer shows it: a stable code
+/// (`roster_changed`, `loading_timeout`, `start_timeout`) in the player's
+/// language when the `draft` dictionary has it, otherwise the text as sent.
+pub(super) fn error_text(error: &str) -> String {
+    let code = !error.is_empty()
+        && error
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_');
+    code.then(|| crate::i18n::lookup(&format!("draft.error.{error}")))
+        .flatten()
+        .map_or_else(|| error.to_owned(), str::to_owned)
 }
 
 pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> String {
@@ -1711,6 +1725,58 @@ mod tests {
         assert_eq!(
             (choice.hero_class, choice.role),
             (HeroClass::Warrior, Role::Support)
+        );
+    }
+
+    /// A prematch reset code shows its text in the player's language; a
+    /// server-authored sentence stays as sent.
+    #[test]
+    fn server_error_codes_are_localized_and_sentences_stay() {
+        if crate::i18n::testing::isolated(
+            "frontend::draft::tests::server_error_codes_are_localized_and_sentences_stay",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        assert_eq!(
+            error_text("roster_changed"),
+            "The roster changed. Check your team and lock in again."
+        );
+        assert_eq!(error_text("Selection unavailable"), "Selection unavailable");
+        assert_eq!(error_text("unknown_code"), "unknown_code");
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        assert_eq!(
+            error_text("loading_timeout"),
+            "Не все игроки загрузились вовремя. Подтвердите выбор снова или выйдите."
+        );
+        assert_eq!(
+            error_text("start_timeout"),
+            "Старт матча занял слишком долго. Подтвердите выбор снова или выйдите."
+        );
+        // The footer shows the code's text once the server answers with it.
+        let mut app = request_app();
+        app.world_mut()
+            .resource_mut::<DraftClient>()
+            .choice
+            .as_mut()
+            .unwrap()
+            .hero_class = HeroClass::Mage;
+        app.update();
+        let sent = drain_requests(&mut app);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.last_request_id = sent[0].request_id;
+            draft.error = Some("roster_changed".into());
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<DraftClient>().notice.as_deref(),
+            Some("Состав изменился. Проверьте команду и подтвердите выбор снова.")
         );
     }
 

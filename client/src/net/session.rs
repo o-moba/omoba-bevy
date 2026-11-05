@@ -14,6 +14,7 @@ use crate::player::Player;
 use crate::session_config::{T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX, is_stale};
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
+use super::GameState;
 use super::components::{
     GameStateSnapshot, NetworkMinion, NetworkNeutral, NetworkProjectile, NetworkState,
     NetworkStructure, RemotePlayer,
@@ -137,14 +138,32 @@ pub struct ReconnectState {
     pub last_attempt: Option<Instant>,
     /// Wall-clock start of lost contact; retained across transport retries.
     pub started_at: Option<Instant>,
+    /// Contact was lost before the match ran (draft, countdown, loading). A
+    /// worker that vanishes then does not come back: the lobby marks it Failed
+    /// within about a second and re-queues the remaining humans, so the
+    /// reconnect gives up after [`PRESTART_RECLAIM_WINDOW`] instead of the
+    /// 180 s seat reclaim of a running match.
+    pub before_start: bool,
 }
 
+/// How long a joined client keeps reconnecting to a worker whose match had
+/// not started yet, before it returns to the lobby and queues again.
+pub(crate) const PRESTART_RECLAIM_WINDOW: Duration = Duration::from_secs(20);
+
 impl ReconnectState {
+    fn window(&self) -> Duration {
+        if self.before_start {
+            PRESTART_RECLAIM_WINDOW
+        } else {
+            common::balance::SESSION_RECLAIM_WINDOW
+        }
+    }
+
     fn expired(&self, now: Instant) -> bool {
         self.active
-            && self.started_at.is_some_and(|since| {
-                now.saturating_duration_since(since) >= common::balance::SESSION_RECLAIM_WINDOW
-            })
+            && self
+                .started_at
+                .is_some_and(|since| now.saturating_duration_since(since) >= self.window())
     }
 }
 
@@ -346,9 +365,26 @@ impl ClientSession {
                 attempts: 0,
                 last_attempt: None,
                 started_at: Some(Instant::now()),
+                before_start: false,
             },
             ..default()
         }
+    }
+
+    /// A joined session whose worker transport was lost before the match ran
+    /// (draft, countdown or loading): past the pre-start window when
+    /// `expired`, a quarter into it otherwise.
+    #[cfg(test)]
+    pub(crate) fn lost_before_start_for_test(expired: bool) -> Self {
+        let mut session = Self::reconnecting_for_test();
+        session.reconnect.before_start = true;
+        let since = if expired {
+            PRESTART_RECLAIM_WINDOW
+        } else {
+            PRESTART_RECLAIM_WINDOW / 4
+        };
+        session.reconnect.started_at = Some(Instant::now() - since);
+        session
     }
 
     /// Locked in, waiting for the server: what the picker leaves behind.
@@ -465,6 +501,12 @@ impl ClientSession {
     /// server rejected it, or the retry budget is spent.
     pub fn join_blocked(&self) -> bool {
         self.join_error.is_some() || self.join_exhausted
+    }
+
+    /// The transport to a match that had not started was lost for longer
+    /// than [`PRESTART_RECLAIM_WINDOW`]: that worker is gone for good.
+    pub(crate) fn reconnect_expired_before_start(&self) -> bool {
+        self.reconnect.before_start && self.reconnect.expired(Instant::now())
     }
 
     pub(crate) fn is_choosing_loadout(&self) -> bool {
@@ -756,6 +798,12 @@ pub(in crate::net) fn perform_network_teardown(
     );
     despawn_local_players(commands, player_query);
 
+    // Decided before the snapshot is cleared: a match that never ran is not
+    // waiting for this player, and its worker does not come back.
+    let match_started = matches!(
+        game_state_snapshot.state,
+        GameState::Running | GameState::Victory { .. }
+    );
     *game_state_snapshot = GameStateSnapshot::default();
     cam_state.locked = false;
 
@@ -780,6 +828,7 @@ pub(in crate::net) fn perform_network_teardown(
                     .last_qualifying_snapshot_wall
                     .unwrap_or_else(Instant::now),
             ),
+            before_start: !match_started,
         };
     }
 
@@ -1664,6 +1713,51 @@ mod tests {
         assert!(!reconnect.active);
         assert!(reconnect.started_at.is_none());
         assert!(!reconnect.expired(now + budget));
+    }
+
+    /// A worker lost before its match ran is given up after the short
+    /// pre-start window; a running match keeps the full seat reclaim window.
+    #[test]
+    fn a_match_that_never_ran_is_given_up_after_the_short_prestart_window() {
+        for (state, before_start, window) in [
+            (GameState::Lobby, true, PRESTART_RECLAIM_WINDOW),
+            (
+                GameState::Starting {
+                    countdown_ms: 3_000,
+                },
+                true,
+                PRESTART_RECLAIM_WINDOW,
+            ),
+            (
+                GameState::Running,
+                false,
+                common::balance::SESSION_RECLAIM_WINDOW,
+            ),
+        ] {
+            let (mut app, _) = snapshot_app();
+            {
+                let mut session = app.world_mut().resource_mut::<ClientSession>();
+                session.last_join = Some(CommittedJoin::for_test());
+                session.last_qualifying_snapshot_wall = Some(Instant::now());
+            }
+            app.world_mut().resource_mut::<GameStateSnapshot>().state = state.clone();
+            tear_down(&mut app, TeardownReason::TransportFailure);
+            let session = app.world().resource::<ClientSession>();
+            let reconnect = session.reconnect;
+            assert!(reconnect.active, "{state:?}");
+            assert_eq!(reconnect.before_start, before_start, "{state:?}");
+            let since = reconnect.started_at.unwrap();
+            assert!(!reconnect.expired(since + window - Duration::from_millis(1)));
+            assert!(reconnect.expired(since + window));
+            assert!(!session.reconnect_expired_before_start(), "{state:?}");
+        }
+        // The pre-start window is well below the seat reclaim, and the
+        // lobby's own pre-start cleanup (about a second) is well below it.
+        assert!(PRESTART_RECLAIM_WINDOW < common::balance::SESSION_RECLAIM_WINDOW / 4);
+        assert!(PRESTART_RECLAIM_WINDOW >= Duration::from_secs(10));
+        assert!(ClientSession::lost_before_start_for_test(true).reconnect_expired_before_start());
+        assert!(!ClientSession::lost_before_start_for_test(false).reconnect_expired_before_start());
+        assert!(!ClientSession::reconnecting_for_test().reconnect_expired_before_start());
     }
 
     #[test]

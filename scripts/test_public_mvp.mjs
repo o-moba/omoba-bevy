@@ -13,6 +13,10 @@
 //                                   MemoryHigh/MemoryMax/CPUQuota/TasksMax (Linux, systemd-run --scope);
 //                                   --memory-high/--memory-max/--cpu-quota/--tasks-max override one
 //   --protocol-version=N | --contract=compatibility.json   when shared/src/protocol.rs is not beside it
+//   --allow-large                   lift the 100-client cap to 1000 (capacity stays 1-100, the pool's maximum)
+//   --queue-only                    sign in and FindMatch only, no handoff to a worker: a lobby-side load
+//                                   (every player must reach the queue; use --capacity=1 so no arenas form;
+//                                   QUEUE_RESULT summarizes sign-in times, lobby states, CPU and RSS)
 // The report (report.json) records, per arena type: snapshot gap p50/p95/p99, time to Running,
 // snapshot bytes per second per player, and the lobby + workers' CPU and RSS while all play.
 import assert from 'node:assert/strict';
@@ -37,6 +41,9 @@ if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `$
 for(const [queue,count] of mix ?? [[preference,clientsCount]])assert(queue!=='humans_only'||count%10===0, 'Ranked (humans_only) forms only full ten-player matches: use a multiple of 10');
 const maxWaitSecs = opts['max-wait-secs'] ? Number(opts['max-wait-secs']) : null;
 assert(maxWaitSecs===null || maxWaitSecs>0, 'max-wait-secs must be positive');
+const allowLarge = 'allow-large' in opts;
+const queueOnly = 'queue-only' in opts;
+assert(!queueOnly || scenario==='load', '--queue-only is a load option');
 const soakSecs = Number(opts.seconds || 15);
 const inputHz = Number(opts['input-hz'] ?? 20);
 assert(Number.isFinite(inputHz)&&inputHz>=0&&inputHz<=60, 'input-hz must be between 0 and 60');
@@ -57,9 +64,9 @@ const root = path.resolve(opts.output || `.agent/tasks/TASK-PUBLIC-MVP-2026-09-2
 fs.mkdirSync(root, {recursive:true});
 assert(process.env.OMOBA_TEST_DATABASE_URL, 'Use a disposable OMOBA_TEST_DATABASE_URL');
 assert(process.env.HARNESS_SERVER_BIN, 'Build server and set HARNESS_SERVER_BIN');
-assert(clientsCount >= 1 && clientsCount <= 100);
-const capacity = scenario==='capacity-wait' ? 1 : Number(opts.capacity || Math.max(16,clientsCount));
-assert(Number.isInteger(capacity)&&capacity>=1&&capacity<=100, 'capacity must be 1-100');
+assert(clientsCount >= 1 && clientsCount <= (allowLarge ? 1000 : 100), allowLarge ? 'clients must be 1-1000' : 'clients must be 1-100 (--allow-large lifts the cap to 1000)');
+const capacity = scenario==='capacity-wait' ? 1 : Number(opts.capacity || Math.min(100, Math.max(16,clientsCount)));
+assert(Number.isInteger(capacity)&&capacity>=1&&capacity<=100, 'capacity must be 1-100 (the server pool maximum)');
 // The lobby unit's cgroup limits (LR-09): the lobby and every worker share them, as on the host.
 const LIMIT_KEYS = {MemoryHigh:'memory-high', MemoryMax:'memory-max', CPUQuota:'cpu-quota', TasksMax:'tasks-max'};
 const limits = {};
@@ -86,9 +93,13 @@ Object.assign(env, {SERVER_ADDR:`127.0.0.1:${lobbyPort}`, OMOBA_SERVER_ROLE:'lob
  // Every synthetic player comes from 127.0.0.1: lift the per-source limits (LR-16), which
  // would otherwise refuse the second arena, the ninth endpoint and the eleventh profile.
  OMOBA_LIMIT_PROBES_PER_IP:'10000', OMOBA_LIMIT_PROBES_PER_NETWORK:'10000', OMOBA_LIMIT_PROBES_GLOBAL:'10000',
- OMOBA_LIMIT_ENDPOINTS_PER_IP:'512', OMOBA_LIMIT_NEW_PROFILES_PER_IP:'1000000', OMOBA_LIMIT_NEW_PROFILES_TOTAL:'10000000',
+ OMOBA_LIMIT_ENDPOINTS_PER_IP:'2048', OMOBA_LIMIT_NEW_PROFILES_PER_IP:'1000000', OMOBA_LIMIT_NEW_PROFILES_TOTAL:'10000000',
  OMOBA_LIMIT_ARENAS_PER_IP:'100', OMOBA_LIMIT_PRACTICE_ABANDONS:'1000'});
 const ownedGroups=new Set();
+// A lobby client is in the queue once its match_service view says so (--queue-only).
+const QUEUED_STATES=['waiting','allocating','assigned'];
+const queued=c=>Boolean(c.auth&&QUEUED_STATES.includes(c.career?.match_service?.state));
+const percentile=(sorted,q)=>sorted[Math.min(sorted.length-1,Math.floor(sorted.length*q))];
 // With limits, `systemd-run --scope` execs the server in a transient scope (same PID), so the
 // lobby and the workers it spawns share them like the lobby unit's cgroup.
 function launchLobby(){
@@ -96,7 +107,7 @@ function launchLobby(){
  const child=spawn(scope[0], scope.slice(1), {env, detached:true, stdio:['ignore',logfile,logfile]});if(child.pid)ownedGroups.add(child.pid);return child;
 }
 let lobby=launchLobby();
-const all=[]; const report={scenario,clients:clientsCount,preference,mix:mix?Object.fromEntries(mix):undefined,capacity,limits,max_wait_secs:maxWaitSecs,protocol:protocolVersion,host:{platform:process.platform,cpus:os.cpus().length,cpu_model:os.cpus()[0]?.model,memory_gib:Math.round(os.totalmem()/2**30*10)/10},input_hz_requested:inputHz,input_model:'signed_current_pose_transform',soak_seconds:soakSecs,started_at:new Date().toISOString(),scenarios:[],status:'RUNNING'};
+const all=[]; const report={scenario,queue_only:queueOnly||undefined,clients:clientsCount,preference,mix:mix?Object.fromEntries(mix):undefined,capacity,limits,max_wait_secs:maxWaitSecs,protocol:protocolVersion,host:{platform:process.platform,cpus:os.cpus().length,cpu_model:os.cpus()[0]?.model,memory_gib:Math.round(os.totalmem()/2**30*10)/10},input_hz_requested:inputHz,input_model:'signed_current_pose_transform',soak_seconds:soakSecs,started_at:new Date().toISOString(),scenarios:[],status:'RUNNING'};
 const resources=[];
 let stopping=false;
 // A process's CPU time in seconds: /proc/<pid>/stat utime+stime on Linux (10 ms ticks; ps
@@ -152,6 +163,7 @@ class Client {
    this.epoch=packet.server_epoch;const v=packet.career;this.career=v;if(v.response_id!=null&&v.profile){this.profileResponses.set(String(v.response_id),v.profile);if(this.profileResponses.size>16)this.profileResponses.delete(this.profileResponses.keys().next().value);}if(v.history_loaded)this.lastHistory=v.history;if(v.detail)this.lastDetail=v.detail;if(v.visited_profile)this.lastVisited=v.visited_profile;
    if(v.challenge && !v.auth_nonce && !this.auth && this.authChallenge?.nonce!==v.challenge.nonce) {this.authChallenge=v.challenge;this.next=0;}
    if(v.auth_nonce && v.profile){this.auth=v.auth_nonce;this.profile=v.profile;if(this.stage==='authenticating')this.stage=this.port===lobbyPort?(this.autoQueue?'queued':'authenticated'):(this.autoJoin?'joining':'authenticated');}
+   if(this.port===lobbyPort&&!this.queuedAt&&QUEUED_STATES.includes(v.match_service?.state))this.queuedAt=performance.now();
    if(this.port===lobbyPort && v.match_service?.state==='assigned' && v.match_service_request_id===this.queueId) {
     this.allocation=v.match_service.allocation;this.inMatch=v.match_service.in_match??null;this.allocationsSeen.push(this.allocation);if(!this.autoHandoff)return;this.snapshot=null;this.socket.close();this.port=Number(this.allocation.endpoint.split(':').at(-1));this.stage='probing';this.bind();
    }
@@ -538,13 +550,28 @@ try {
  const start=performance.now();let runningAt=null,nextProgress=0;
  while(performance.now()-start<240000) {
   const now=performance.now();
-  if(all.length<clientsCount && now-start>all.length*50)all.push(new Client(all.length));
+  if(all.length<clientsCount && now-start>all.length*50)all.push(new Client(all.length,lobbyPort,null,queueOnly?{autoHandoff:false}:{}));
   for(const c of all)c.tick(now);
-  if(now>=nextProgress){nextProgress=now+5000;resourceSample();const states={};for(const c of all)states[c.stage]=(states[c.stage]||0)+1;console.log(wire({elapsed:Math.round((now-start)/1000),states}));fs.writeFileSync(path.join(root,'clients.json'),wire(all.map(c=>c.diagnostic())));}
-  if(all.length===clientsCount && all.every(c=>c.stage==='running')){if(!runningAt){runningAt=now;resourceSample();}if(now-runningAt>=soakSecs*1000)break;}
+  if(now>=nextProgress){nextProgress=now+5000;resourceSample();const states={};for(const c of all){const s=queueOnly?(c.career?.match_service?.state||c.stage):c.stage;states[s]=(states[s]||0)+1;}console.log(wire({elapsed:Math.round((now-start)/1000),states}));fs.writeFileSync(path.join(root,'clients.json'),wire(all.map(c=>c.diagnostic())));}
+  // Everyone is where this run wants them (in the queue, or Running): soak, then stop.
+  if(all.length===clientsCount && all.every(queueOnly?queued:(c=>c.stage==='running'))){if(!runningAt){runningAt=now;resourceSample();}if(now-runningAt>=soakSecs*1000)break;}
   await delay(20);
  }
  resourceSample();
+ if(queueOnly){
+  assert(all.length===clientsCount && all.every(queued),'not all clients reached the queue; inspect clients.json');
+  for(const c of all)assert.equal(c.errors.length,0);
+  const states={};for(const c of all){const s=c.career.match_service.state;states[s]=(states[s]||0)+1;}
+  const signIn=all.map(c=>(c.queuedAt-c.createdAt)/1000).sort((a,b)=>a-b);
+  const soak=resources.filter(r=>r.wall_ms>=runningAt&&r.cpu_percent_interval!==undefined);
+  report.queue={states,server_full_replies:all.reduce((n,c)=>n+(c.serverFull||0),0),
+   sign_in_to_queue_secs:{p50:percentile(signIn,.5),p95:percentile(signIn,.95),max:signIn.at(-1)},
+   lobby_cpu_percent_mean:soak.length?soak.reduce((s,r)=>s+r.cpu_percent_interval,0)/soak.length:null,
+   lobby_rss_mib_peak:Math.max(...resources.map(r=>r.rss_mib)),
+   datagrams_received:all.reduce((n,c)=>n+c.packets,0),datagrams_sent:all.reduce((n,c)=>n+c.sentPackets,0)};
+  report.scenarios.push('sign_in_and_queue_only');
+  console.log(`QUEUE_RESULT clients=${clientsCount} capacity=${capacity} states=${JSON.stringify(states)} server_full=${report.queue.server_full_replies} sign_in_p95_s=${report.queue.sign_in_to_queue_secs.p95?.toFixed(2)} sign_in_max_s=${report.queue.sign_in_to_queue_secs.max?.toFixed(2)} cpu_mean=${report.queue.lobby_cpu_percent_mean?.toFixed(1)} rss_peak_mib=${report.queue.lobby_rss_mib_peak.toFixed(1)}`);
+ } else {
  assert(all.length===clientsCount && all.every(c=>c.stage==='running'),'not all clients reached Running; inspect clients.json');
  const allocations=new Map();for(const c of all){const id=c.allocation.allocation_id;if(!allocations.has(id))allocations.set(id,[]);allocations.get(id).push(c);assert.equal(ids(c.snapshot).length,10);assert.equal(c.errors.length,0);assert(performance.now()-c.lastSnapshot<2000,'active match stopped delivering snapshots');}
  assert.equal(new Set([...allocations.values()].map(cs=>cs[0].port)).size,allocations.size,'distinct arenas require distinct ports');
@@ -553,6 +580,7 @@ try {
  report.arenas=allocations.size;report.total_bytes=all.reduce((n,c)=>n+c.bytes,0);report.total_datagrams=all.reduce((n,c)=>n+c.packets,0);report.elapsed_seconds=(performance.now()-start)/1000;
  const gaps=all.flatMap(c=>c.gaps).sort((a,b)=>a-b);report.snapshot_gap_ms={p50:gaps[Math.floor(gaps.length*.5)],p95:gaps[Math.floor(gaps.length*.95)],p99:gaps[Math.floor(gaps.length*.99)],max:gaps.at(-1)};
  measure(allocations, runningAt);
+ }
  if(scenario==='lifecycle')await lifecycle(all[0]);
  if(scenario==='abandoned')await abandoned(all[0]);
  if(scenario==='capacity-wait')await capacityWait();
@@ -560,7 +588,7 @@ try {
  report.total_transforms_sent=all.reduce((n,c)=>n+c.transforms,0);
  report.total_sent_datagrams=all.reduce((n,c)=>n+c.sentPackets,0);
  report.total_sent_bytes=all.reduce((n,c)=>n+c.sentBytes,0);
- if(inputHz>0&&soakSecs>0)assert(all.filter(c=>c.firstRunning).every(c=>c.transforms>0),'running clients did not exercise signed input');
+ if(inputHz>0&&soakSecs>0&&!queueOnly)assert(all.filter(c=>c.firstRunning).every(c=>c.transforms>0),'running clients did not exercise signed input');
  report.resources=resources;
  report.status='PASS';
 } catch(error){report.status='FAIL';report.error=error.stack;process.exitCode=1;} finally {

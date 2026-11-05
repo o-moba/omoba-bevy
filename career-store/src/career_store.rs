@@ -1205,8 +1205,15 @@ fn validate_current_cohort(profiles: &BTreeMap<String, ProfileSummary>) -> Store
     if profiles.is_empty() {
         return Err("Rated allocation requires profiles.".into());
     }
-    // The same policy the queue and the lobby's Ranked search select with.
-    if !crate::matchmaking::same_cohort(profiles.values()) {
+    // The same policy family the queue and the lobby's Ranked search select
+    // with. The lobby widens its window while players wait (LR-35), up to
+    // `CohortAllowance::MAX`; the store re-checks the roster against that
+    // maximum with the ratings it holds now, so a roster whose ratings drifted
+    // beyond anything the lobby could have formed is still refused.
+    if !crate::matchmaking::same_cohort_with(
+        profiles.values(),
+        crate::matchmaking::CohortAllowance::MAX,
+    ) {
         // Queue snapshots on another process can outlive a completed match.
         // Locks are held through allocation commit, so current classification
         // cannot change after this check and before seats become authoritative.

@@ -51,7 +51,7 @@ impl ServerRuntime {
             && self.career.backend.authenticated_session(addr).is_some()
             && let Some(profile) = self.career.backend.profile(addr)
         {
-            self.match_service.cancel(&profile.profile_id);
+            self.match_service.cancel(&profile.profile_id, now);
         }
         self.leave_match(addr, now);
         ControlFlow::Break(())

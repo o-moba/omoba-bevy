@@ -28,5 +28,8 @@
   "draft.timer.gathering": "等待队伍…",
   "draft.stage.rotate": "拖动旋转",
   "draft.tab.avatars": "角色",
-  "draft.tab.classes": "职业"
+  "draft.tab.classes": "职业",
+  "draft.error.roster_changed": "阵容已变化。请确认队伍后重新锁定。",
+  "draft.error.loading_timeout": "有玩家未能及时加载完成。请重新锁定或退出。",
+  "draft.error.start_timeout": "对局启动时间过长。请重新锁定或退出。"
 }

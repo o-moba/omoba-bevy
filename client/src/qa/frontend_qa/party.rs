@@ -178,6 +178,7 @@ fn party_fixture(stage: usize) -> PartyView {
                 invited: id == 14,
             })
             .collect(),
+        error: None,
     }
 }
 fn prematch_fixture(stage: usize) -> PrematchSnapshot {

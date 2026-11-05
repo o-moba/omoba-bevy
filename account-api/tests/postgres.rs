@@ -355,7 +355,7 @@ async fn portal_postgres_contract_and_security() {
         .is_err()
     );
     let settings = bytes(
-        json!({"public_profile_enabled":true,"public_stats_enabled":false,"discoverable":true,"locale":"en","timezone":"Asia/Shanghai","expected_version":"1"}),
+        json!({"public_profile_enabled":true,"public_stats_enabled":false,"discoverable":true,"leaderboard_listed":true,"locale":"en","timezone":"Asia/Shanghai","expected_version":"1"}),
     );
     accounts::mutate(
         &app,
@@ -837,5 +837,247 @@ async fn player_handles_defaults_uniqueness_rename_lookup_and_friend_identity() 
     );
     println!(
         "PASS: random default, stable account, exact Unicode/case-insensitive lookup, explicit tag edit, collision rollback, concurrent uniqueness and preserved friendship."
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn leaderboard_orders_ties_hides_newcomers_and_opt_outs_and_ranks_caller() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    migrate(&url).await.unwrap();
+    let app = App::connect(
+        &url,
+        Config {
+            origin: "https://players.example".into(),
+            secret: [47; 32],
+            trust_loopback_proxy: false,
+            release_file: None,
+        },
+    )
+    .await
+    .unwrap();
+    let fresh = || {
+        let mut seed = [0; 32];
+        getrandom::fill(&mut seed).unwrap();
+        SigningKey::from_bytes(&seed)
+    };
+    // Ratings near the 5000 cap keep this ladder above every other fixture's
+    // profile in the shared database; a previous run's profiles are demoted
+    // first. The game role owns these columns; the test seeds them as the
+    // migration owner.
+    sqlx::query("UPDATE career_profiles SET rating=1000 WHERE nickname LIKE 'Ladder-%'")
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let seed = |nickname: &'static str, rating: i32, rated: i64, wins: i64| {
+        let key = fresh();
+        let app = &app;
+        async move {
+            let profile = app
+                .career
+                .authenticate(&crypto::hex(key.verifying_key().as_bytes()), nickname)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$3,wins=$4,losses=$3-$4 WHERE profile_id=$1")
+                .bind(&profile.profile_id).bind(rating).bind(rated).bind(wins)
+                .execute(&app.pool).await.unwrap();
+            (profile.profile_id, key)
+        }
+    };
+    let (first, _) = seed("Ladder-first", 4990, 40, 30).await;
+    let (second, _) = seed("Ladder-second", 4980, 30, 20).await;
+    let (third, _) = seed("Ladder-third", 4980, 25, 12).await;
+    let (tie_a, key_a) = seed("Ladder-tie-a", 4970, 25, 13).await;
+    let (tie_b, key_b) = seed("Ladder-tie-b", 4970, 25, 14).await;
+    let (newcomer, newcomer_key) = seed("Ladder-newcomer", 5000, 19, 19).await;
+    let (hidden, hidden_key) = seed("Ladder-hidden", 5000, 50, 50).await;
+    let (fourth, fifth, fourth_key, fifth_key) = if tie_a < tie_b {
+        (tie_a, tie_b, key_a, key_b)
+    } else {
+        (tie_b, tie_a, key_b, key_a)
+    };
+    let (fourth_session, _) = login(&app, &fourth_key).await;
+    let (fifth_session, _) = login(&app, &fifth_key).await;
+    let (newcomer_session, _) = login(&app, &newcomer_key).await;
+    let (hidden_session, _) = login(&app, &hidden_key).await;
+
+    // Opting out: the default is listed, the flag flips with the version check.
+    let me = accounts::me(&app, &hidden_session).await.unwrap();
+    assert_eq!(me["settings"]["leaderboard_listed"], true);
+    assert_eq!(me["settings"]["version"], "1");
+    let hide = |version: &str| {
+        bytes(
+            json!({"public_profile_enabled":false,"public_stats_enabled":false,"discoverable":false,"leaderboard_listed":false,"locale":"ru","timezone":"UTC","expected_version":version}),
+        )
+    };
+    accounts::mutate(
+        &app,
+        &hidden_session,
+        "me/settings",
+        &header("leaderboard-hide-000001"),
+        &hide("1"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        accounts::mutate(
+            &app,
+            &hidden_session,
+            "me/settings",
+            &header("leaderboard-hide-000002"),
+            &hide("1"),
+        )
+        .await
+        .unwrap_err()
+        .0,
+        StatusCode::CONFLICT
+    );
+    let me = accounts::me(&app, &hidden_session).await.unwrap();
+    assert_eq!(me["settings"]["leaderboard_listed"], false);
+    assert_eq!(me["settings"]["version"], "2");
+    assert!(
+        accounts::mutate(
+            &app,
+            &hidden_session,
+            "me/settings",
+            &header("leaderboard-hide-000003"),
+            &bytes(json!({"public_profile_enabled":false,"public_stats_enabled":false,"discoverable":false,"locale":"ru","timezone":"UTC","expected_version":"2"})),
+        )
+        .await
+        .is_err(),
+        "leaderboard_listed is a required field"
+    );
+
+    // Order: rating, then rated matches, then profile id; newcomers and
+    // opted-out profiles are absent, and unknown parameters are refused.
+    let board = accounts::leaderboard(&app, &fourth_session, None)
+        .await
+        .unwrap();
+    let entries = board["entries"].as_array().unwrap();
+    let ids: Vec<&str> = entries
+        .iter()
+        .map(|e| e["profile_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        &ids[..5],
+        &[
+            first.as_str(),
+            second.as_str(),
+            third.as_str(),
+            fourth.as_str(),
+            fifth.as_str()
+        ]
+    );
+    assert!(!ids.contains(&newcomer.as_str()));
+    assert!(!ids.contains(&hidden.as_str()));
+    for (index, entry) in entries.iter().enumerate() {
+        assert_eq!(entry["rank"], index as i64 + 1);
+        assert!(entry["rated_matches"].as_i64().unwrap() >= 20);
+    }
+    assert_eq!(
+        entries[0],
+        json!({"rank":1,"profile_id":first,"nickname":entries[0]["nickname"],"rating":4990,"rated_matches":40,"wins":30,"losses":10})
+    );
+    assert_eq!(
+        board["me"],
+        json!({"rank":4,"rating":4970,"rated_matches":25,"listed":true})
+    );
+    assert_eq!(board["min_rated_matches"], NEWCOMER_MATCHES);
+    assert!(board["data_as_of"].as_str().unwrap().ends_with('Z'));
+    for bad in [
+        "limit=0",
+        "limit=101",
+        "limit=x",
+        "page=1",
+        "limit=2&limit=3",
+    ] {
+        assert_eq!(
+            accounts::leaderboard(&app, &fourth_session, Some(bad))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+
+    // The caller's rank is computed outside the page it asked for.
+    let page = accounts::leaderboard(&app, &fifth_session, Some("limit=2"))
+        .await
+        .unwrap();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(page["entries"][1]["profile_id"], second);
+    assert_eq!(page["me"]["rank"], 5);
+    assert_eq!(page["me"]["listed"], true);
+
+    // A newcomer and an opted-out profile have no rank, their numbers are shown.
+    let mine = accounts::leaderboard(&app, &newcomer_session, Some("limit=1"))
+        .await
+        .unwrap()["me"]
+        .clone();
+    assert_eq!(
+        mine,
+        json!({"rank":null,"rating":5000,"rated_matches":19,"listed":true})
+    );
+    let mine = accounts::leaderboard(&app, &hidden_session, None)
+        .await
+        .unwrap()["me"]
+        .clone();
+    assert_eq!(
+        mine,
+        json!({"rank":null,"rating":5000,"rated_matches":50,"listed":false})
+    );
+
+    // The restricted portal role can serve the same read (SELECT on
+    // career_profiles, portal.profile_settings) when the local roles exist.
+    if let Ok(role_url) = std::env::var("OMOBA_PORTAL_ROLE_TEST_URL") {
+        let limited = App::connect(
+            &role_url,
+            Config {
+                origin: "https://players.example".into(),
+                secret: [47; 32],
+                trust_loopback_proxy: false,
+                release_file: None,
+            },
+        )
+        .await
+        .unwrap();
+        let board = accounts::leaderboard(&limited, &fourth_session, Some("limit=3"))
+            .await
+            .unwrap();
+        assert_eq!(board["entries"][2]["profile_id"], third);
+        assert_eq!(board["me"]["rank"], 4);
+    }
+
+    // History and statistics filters accept every playable class, nothing else.
+    for class in HeroClass::ALL {
+        let filter = format!("days=all&hero_class={}", class.id());
+        read::history(&app, &fourth_session, Some(&filter))
+            .await
+            .unwrap();
+        read::statistics(&app, &fourth_session, Some(&filter))
+            .await
+            .unwrap();
+    }
+    assert_eq!(HeroClass::ALL.len(), 17);
+    for bad in ["days=all&hero_class=paladin", "days=all&hero_class=Warrior"] {
+        assert_eq!(
+            read::history(&app, &fourth_session, Some(bad))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            read::statistics(&app, &fourth_session, Some(bad))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    println!("SAMPLE leaderboard limit=2: {page}");
+    println!(
+        "PASS: ladder order with both tie-breakers, newcomer and opt-out exclusion, own rank beyond the page, null rank when ineligible or hidden, versioned opt-out, strict query, 17-class filters."
     );
 }

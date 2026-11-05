@@ -114,6 +114,12 @@ pub struct PartyView {
     /// Other players on this server, friends first.
     #[serde(default)]
     pub online: Vec<OnlinePlayer>,
+    /// Why the command this view answers was refused: a stable snake_case
+    /// code (`not_online`, `party_full`, `invite_declined`, …) the client
+    /// shows in its own words. Only on the immediate reply to the issuer,
+    /// never in the periodic broadcast. Additive: older peers ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl PartyView {
@@ -212,6 +218,7 @@ mod tests {
                 in_match: false,
                 invited: false,
             }],
+            error: Some("party_full".into()),
         };
         let bytes = serde_json::to_vec(&ServerPacket::Party {
             server_epoch: 5,
@@ -233,6 +240,10 @@ mod tests {
         let minimal: PartyView = serde_json::from_str(r#"{"you":3}"#).unwrap();
         assert_eq!(minimal.you, 3);
         assert!(minimal.can_launch());
+        assert_eq!(minimal.error, None);
+        // A view without an error carries no `error` key at all.
+        let plain = serde_json::to_string(&PartyView::default()).unwrap();
+        assert!(!plain.contains("error"), "{plain}");
     }
 
     #[test]

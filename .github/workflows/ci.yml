@@ -152,6 +152,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: career-store, account-api and server tests, ignored ones included
         run: python3 scripts/postgres_tests.py
+      # The public-protocol probe against a loopback lobby built from this checkout
+      # (docs/public-mvp.md): the lifecycle scenario, then a short mixed
+      # Ranked/Casual/vs Bots load. Same target as on the Mac; Node is on the runner.
+      - name: Public-protocol probe (lifecycle, then a mixed load)
+        run: make verify-public-mvp
 
   android:
     name: android compile check

@@ -49,7 +49,7 @@ findings). Decision record: ADR-027.
 
 ## Checks
 
-See the PR descriptions for the exact commands and results: `make check`,
+The required gate (results below supersede the initial handoff claims): `make check`,
 `scripts/postgres_tests.py` on a disposable PostgreSQL 18, `make
 verify-public-mvp` (lifecycle and a mixed Ranked/Casual/vs Bots load on real
 lobby + workers), portal `npm test`, typecheck and RU/global builds.
@@ -64,9 +64,97 @@ lobby + workers), portal `npm test`, typecheck and RU/global builds.
   player) and the one-host worker pool bound a VPS to tens of arenas (LR-57).
   The RU kit's 16 arenas and cgroup values are formula values pending the LR-09
   measurement on the host.
-- The portal leaderboard and settings toggle were not browser-verified against
-  a live Account API in this iteration; the API is covered by PostgreSQL tests.
+- The portal leaderboard, own rank, opt-out and newcomer line passed a real
+  browser check against a loopback Account API and PostgreSQL (Russian,
+  390 × 844 viewport). This is local browser evidence, not a physical-device
+  test or a check of the RU production API.
 - Protocol: no bump. New fields are additive (`Manifest.cohort`,
   `Status.joined_sessions`, `PartyView.error`); a protocol 11 production client
   is unaffected by the lobby changes but must not be mixed with dev's protocol 12
   servers (unchanged rule).
+
+## Codex continuation — 2026-11-05
+
+The inherited worktree was uncommitted. The first full gate found that a new
+frontend test tried to initialize private matchmaking fields; it now uses the
+public test-facing fields on a default value. Additional regression fixes:
+
+- Automatic client returns preserve the retry across Searching/Draft/Loading
+  until the shell reaches Home, and do not send a cancellation as if the
+  player had deliberately dodged.
+- `lobby_busy` retains the rejected search's session and request id so the
+  client can actually display the correlated refusal, including on retries.
+- A full Ranked roster retains an opted-in player when an older Casual roster
+  could also seat them; human-count/age priority still applies to disjoint rosters.
+- A worker that fails before its first receipt re-queues all parked humans with
+  their original places, since it has no evidence of a player no-show.
+- Explicit Ranked draft cancellation at the worker applies the same 60 s
+  cooldown as cancellation at the lobby. Re-reading the failed slot does not
+  extend the penalty; mere no-shows do not receive an explicit-dodge penalty.
+- Existing account settings are read without an unconditional INSERT on every
+  `/v1/me` poll; first-visit creation remains safe across replicas.
+- The PostgreSQL cohort boundary test now checks 600/601 instead of the old
+  300/301 rule, with a separate widened mixed-bracket allocation test.
+- The Chinese display subset now includes 因/执/散/那 required by the new
+  translations, preserving every previous glyph. Only the game font and its
+  size manifest change; the sibling UI worktree is left untouched.
+- Repeated live-UDP fixtures use test-only signup budgets, so previous load
+  probes in the same disposable database cannot consume their daily quota.
+- The portal browser test accepts explicit loopback origins and captures one
+  Russian mobile viewport, allowing isolated services beside an existing stack.
+
+No remote host, production configuration, secrets or deployment was changed.
+The inherited RU kit and CI changes are reviewed as repository content only.
+The remaining findings below and in the TODO are still open; this continuation
+finishes the scoped readiness iteration, not the entire launch backlog.
+
+### Verified evidence
+
+- `make check` **PASS** in the CI-equivalent environment described below:
+  formatting, workspace clippy with warnings denied, no-QA client clippy,
+  **2476 Rust tests passed** (92 normal-gate ignores; database tests run
+  separately), **625 script tests** (9 expected skips), **62 iOS-tooling
+  tests**. In particular the transient-screen re-queue and complete Chinese
+  dictionary glyph coverage tests pass.
+- Portal branch `298f9f6` (feature `7c06633`): `npm test` **240 passed,
+  3 skipped**; `npm run typecheck` **PASS**; builds with `OMOBA_MARKET=ru`
+  and `OMOBA_MARKET=global` **PASS**.
+- `npm run test:leaderboard` **PASS**, real loopback Account API + PostgreSQL
+  18, Russian Chrome viewport 390 × 844. Explicit fixture origins:
+  `OMOBA_E2E_PORTAL_ORIGIN=http://localhost:3010`,
+  `OMOBA_E2E_ACCOUNT_API_URL=http://127.0.0.1:40551`. Screenshots and report:
+  `../mm-web/.agent/browser/leaderboard/`. Not a physical phone or RU API test.
+- `python3 scripts/postgres_tests.py` **PASS**: 549 tests across 18 result
+  suites, zero failures and zero ignored tests, using real PostgreSQL 18.
+  Includes widened-cohort allocation, the 600/601 boundary, ladder privacy
+  and ordering, signed live-UDP gameplay/settlement and all new lobby
+  regression tests.
+- `make verify-public-mvp` **PASS**: lifecycle (including signed cancellation,
+  queue expiry, stranger rejection, reconnect and Resume), then a mixed load
+  with 10 Ranked + 5 Casual + 2 vs Bots players in four workers. Every player
+  reached Running; worst time to Running was 40.66 s (Casual includes the
+  real 30 s bot-fill wait). Raw reports:
+  `.agent/codex-ranked-readiness/public-mvp/{lifecycle,mixed}/report.json`.
+  The reported egress and timings are local Mac measurements, not RU capacity
+  measurements or evidence for 1000 simultaneous players.
+- `cargo test --locked -p harness --test admission -- --ignored
+  --test-threads=1 --nocapture` **PASS**: 300 fresh profiles signed in in
+  10.79 s; the same 300 reconnected after a lobby restart in 10.81 s, retaining
+  their identities. This exercises admission, not 300 simultaneous matches.
+
+All Rust checks use the existing primary checkout's cache B
+(`/Users/wotori/git/ekza/omoba-bevy/target-b`, the existing Orico symlink).
+The disposable database is `127.0.0.1:55581/omoba_test`.
+
+The local shell originally selected Apple's Python 3.9 and a proxy intercepted
+some loopback failure cases. Verification uses installed Homebrew Python 3.14
+and both `NO_PROXY` and `no_proxy` set to `127.0.0.1,localhost,::1`. The sibling `omoba-ui/handoff`
+has an older Noto Serif SC subset (455528 bytes). The game subset was
+456860 bytes before this continuation; its rebuilt superset is 458764 bytes,
+including every previous glyph and all new dictionary characters. Total
+shipped UI assets remain 6900744 bytes, below the 6.6 MiB budget. Syncing the
+sibling handoff would drop the newly required glyphs. CI-equivalent verification
+sets `OMOBA_UI_HANDOFF=/tmp/omoba-mm-no-external-handoff`, which verifies the
+game's committed token hashes, installed assets and size budget without that
+unversioned sibling comparison. The normal sibling comparison remains a
+reported local mismatch; it was not repaired or counted as passing.

@@ -121,7 +121,19 @@ and run 900 AI heroes. Configure hardware, worker count, database connections an
 egress for the intended mode mix. Each public match worker uses one PostgreSQL
 connection. The lobby and standalone game career workers use pools of up to four
 connections each; budget the optional portal/API pool, monitoring and administration
-separately. Do not claim 100-player readiness solely from setting capacity to 100.
+separately (the RU host checks `max_connections ≥ capacity + 32`). Do not claim
+100-player readiness solely from setting capacity to 100.
+
+The RU host runs 16 arenas (UDP 41000–41015) under cgroup limits from a per-arena
+formula pending the LR-09 measurement: `MemoryMax = 16 MiB × arenas + 200 MiB`
+(500M, `MemoryHigh` 450M), `TasksMax ≥ 3 × arenas + 16` (96), `CPUQuota` 190 % of
+its 2 vCPU. Egress is the other budget: `arenas × 10 players × 250 kB/s` of
+snapshots must stay under 60 % of the port, so 16 arenas (≈ 40 MB/s ≈ 320 Mbit/s)
+need a ≥ 500 Mbit/s uplink and a 100 Mbit/s port carries about six full PvP
+arenas; about 1000 concurrent players (100 arenas) need ≈ 2 Gbit/s and more than
+one host (LR-57). A lobby restart there leaves the workers running
+(`KillMode=process`) and the next lobby adopts them ([ops/vps/ru/README.md › Arena
+capacity](../ops/vps/ru/README.md#arena-capacity-lr-09), › Upgrades and live matches).
 
 Local capacity evidence on 2026-09-22 used an Apple M4 Pro (14 CPU cores, 48 GiB
 RAM), a development build, loopback PostgreSQL and a 30-second observation after
@@ -145,8 +157,10 @@ its place and, once arenas have freed recently, an estimated wait, and the searc
 screen offers Offline practice in one tap (it leaves the queue). The lobby rewrites
 `<match root>/capacity.json` every 5 s and logs `CAPACITY_METRIC` lines when the line
 forms, every minute while it lasts and when it clears; the RU host monitor alerts on a
-2-minute wait. At 512 endpoints or 512 career clients the lobby answers a newcomer
-"server full" instead of staying silent, and the game keeps trying. A 100-arena configuration is a tested stress
+2-minute wait. At 2048 endpoints or 2048 career clients the lobby answers a newcomer
+"server full" instead of staying silent, as it does a new source of an IP that already
+holds its `OMOBA_LIMIT_ENDPOINTS_PER_IP` share, and the game keeps trying; 2048 is the
+lobby's player ceiling, the arenas run out first. A 100-arena configuration is a tested stress
 case, not a recommended launch setting. Payload totals include startup/ramp-up
 and exclude IP/UDP overhead; they also show that egress capacity matters. Raw
 reports are in the task proof under `raw/capacity-human-100-v2` and
@@ -170,10 +184,13 @@ UDP admission validates return path before creating a gameplay endpoint, and
 world replication requires authenticated manifest membership. Empty bootstrap
 snapshots carry connection metadata only. Commands bind the
 saved Ed25519 key, transport nonce, authentication nonce, epoch, match and monotonic
-sequence. Per process, admission retains at most 512 endpoint records (8 per source
-IP; a new source beyond 512 is answered `server_full`), accepts up to 64 probes per second after per-IP (8) and per-network (32)
+sequence. Per process, admission retains at most 2048 endpoint records (8 per source
+IP by default, up to 2048 with `OMOBA_LIMIT_ENDPOINTS_PER_IP`; a new source beyond
+2048, or beyond its IP's share, is answered `server_full`, never with more bytes than
+its probe), accepts up to 64 probes per second after per-IP (8) and per-network (32)
 budgets with 16 kept for new sources, and limits each endpoint to 120 packets per
-second. New profiles, arenas held by one IP and abandoned vs Bots allocations are
+second. Expired records are swept every 250 ms and the sender's own record is checked
+on every datagram, so a full table costs no pass per packet. New profiles, arenas held by one IP and abandoned vs Bots allocations are
 limited per source too (LR-16, `ops/vps/ru/README.md` "Admission limits").
 Challenges expire after five seconds; validated paths expire after 30 seconds
 without traffic. Public datagrams are capped at 12 KiB, with signed command payloads
@@ -213,8 +230,17 @@ node scripts/test_public_mvp.mjs --mix=bot_practice:5,quick:5,humans_only:10 --m
 node scripts/test_public_mvp.mjs --scenario=capacity-wait --clients=1 --preference=bot_practice
 ```
 
+`make verify-public-mvp` (with `OMOBA_TEST_DATABASE_URL`) builds the server, migrates the
+database and runs the lifecycle scenario and the mixed load above (the load with
+`--seconds=5`); CI's `postgres` job runs the same target.
+
 `--mix` interleaves players of several queues; `--capacity` sets the lobby's arena count;
 `--max-wait-secs` fails the run when a player needs longer to reach Running;
+`--allow-large` lifts the client cap from 100 to 1000 (capacity stays at the pool's
+maximum of 100); `--queue-only` makes every player sign in and FindMatch without a
+handoff, so a thousand lobby clients run from one machine
+(`--queue-only --allow-large --clients=1000 --capacity=1`; the `QUEUE_RESULT` line and
+`report.queue` give sign-in times, lobby states, `server_full` replies, CPU and RSS);
 `--limits-from=<unit>` (Linux) runs the lobby and its workers under a systemd unit's
 memory, CPU and task limits. The report records, per arena type, the snapshot gaps, the
 time to Running and the snapshot bytes per second per player, and the lobby's and

@@ -71,7 +71,7 @@ Sources: `server/src/match_service.rs`, `server/src/match_pool.rs`, `server/src/
 
 - The lobby polls the pool at most once per second and launches at most 4 new workers per pass (`Lobby::tick`). Each poll also relaunches at most 4 recovery workers (`Pool::poll`).
 - The queue holds at most 128 entries (`MAX_WAITING`, error `queue_full`). An entry expires 15 s after its last explicit `FindMatch` retry. A Home heartbeat does not renew it.
-- The lobby tracks at most 512 requests. A request is dropped 120 s after its last touch unless it is queued or assigned.
+- The lobby holds at most `OMOBA_LOBBY_MAX_WAITING` queue entries (default 1024, at most 4096; `queue_full` beyond) and tracks at most 4096 recent requests (`lobby_busy` beyond). A request is dropped 30 s after its last touch unless it is queued or assigned. The queue entries of every allocation stay parked until its match starts, so an allocation that ends before that re-queues its humans (ADR-027).
 - `capacity_busy` means every worker port is in use. While it is, each ready roster gets its place in the line for the next free arena and an estimate (LR-09, [protocols.md §5](protocols.md#5-lobby--worker-allocation-handoff)); the lobby writes `<match root>/capacity.json` every 5 s and logs `CAPACITY_METRIC event=busy|still_busy|clear` (`server/src/capacity.rs`). An allocation that fails before its match ran is reported to its players as `allocation_cancelled_or_expired`. When a match the lobby saw running ends, its seats free without an error and the next `FindMatch` queues (LR-13).
 - The lobby refuses to start with more than 100 retained allocations or 4096 entries in the match root (`Pool::from_env`).
 - The pool settings (`OMOBA_MATCH_ROOT`, `OMOBA_MATCH_CAPACITY`, `OMOBA_MATCH_FIRST_PORT`, `OMOBA_MATCH_BIND_IP`, `OMOBA_MATCH_PUBLIC_HOST`, `OMOBA_MATCH_EXECUTABLE`) and their defaults are in [protocols.md §5](protocols.md#5-lobby--worker-allocation-handoff). The deployed values per host are in the [port summary](#port-summary).
@@ -106,7 +106,7 @@ Source: `server/src/runtime/`.
 All game traffic is UDP, and datagrams are JSON-encoded (`serde_json`; `server/src/runtime/dispatch.rs`, `client/src/net/transport.rs`).
 
 - **Public roles.** Commands are wrapped in `PublicClientDatagram`, with a return-path probe and an Ed25519 `SignedCommand` (`shared/src/public_transport.rs`).
-- **Admission limits.** Public admission tracks at most 512 endpoints, at most 8 per source IP; at 512 a new source's probe is answered `server_full` (LR-09). Probes are budgeted per second per source IP, per network and in all, with a reserve for new sources (LR-16, `server/src/admission.rs`). The challenge TTL is 5 s, the validated-path TTL is 30 s, and each endpoint may send at most 120 packets per second (`server/src/public_transport.rs`). Public datagrams are at most 12 KiB, and signed commands at most 8 KiB. On the RU host the kernel drops a source's datagrams beyond a per-address rate first (`ops/vps/ru/nftables-omoba.conf`). Every limit and its setting: [ops/vps/ru/README.md › Admission limits](../../ops/vps/ru/README.md#admission-limits-lr-16).
+- **Admission limits.** Public admission tracks at most 2048 endpoints, at most 8 per source IP by default (the RU kit sets 256 for carrier-grade NAT); at the ceiling, or at an IP's share, a new source's probe is answered `server_full` (LR-09, ADR-027). Probes are budgeted per second per source IP, per network and in all, with a reserve for new sources (LR-16, `server/src/admission.rs`). The challenge TTL is 5 s, the validated-path TTL is 30 s, and each endpoint may send at most 120 packets per second (`server/src/public_transport.rs`). Public datagrams are at most 12 KiB, and signed commands at most 8 KiB. On the RU host the kernel drops a source's datagrams beyond a per-address rate first (`ops/vps/ru/nftables-omoba.conf`). Every limit and its setting: [ops/vps/ru/README.md › Admission limits](../../ops/vps/ru/README.md#admission-limits-lr-16).
 - **Moderation (LR-15).** Every server process enforces sanctions from the career database: an account ban at sign-in and at each 10-second access refresh, matchmaking and ranked bans at `FindMatch` (lobby), a chat mute in the match worker's chat, and account and matchmaking bans in party presence. The career worker polls the database chat switch every 5 s; `OMOBA_CHAT=off` turns text chat off in a process whatever the switch says (the RU lobby unit sets it; workers inherit it). Operators use the `omoba-account-api` moderation commands ([RUNBOOK.md › Moderation](../../RUNBOOK.md#moderation-lr-15)).
 - **Snapshots.** For clients that negotiated framing, snapshots are split into `OMB1` frames of at most 1200 bytes (`shared/src/transport.rs`, `server/src/snapshot.rs`).
 - **Compatibility probes.** Every role answers them, standalone included, from a per-second budget per process: 8 per source IP, 32 per network, 64 in all with 16 kept for new sources ([release-compatibility.md](../release-compatibility.md), LR-16).
@@ -180,7 +180,7 @@ Each market has its own database, accounts and device keys. The settings folder 
 | Service | Production (global) | Dev VPS | RU VPS (planned) | Local default |
 | --- | --- | --- | --- | --- |
 | Lobby | UDP 4000 | UDP 4100 | UDP 4000 | UDP 4000 |
-| Match workers | UDP 41000–41001 (capacity 2) | UDP 41100 (capacity 1) | UDP 41000–41001 (capacity 2) | From UDP 41000 (capacity 16), bound to 127.0.0.1 |
+| Match workers | UDP 41000–41001 (capacity 2) | UDP 41100 (capacity 1) | UDP 41000–41015 (capacity 16, formula values pending the LR-09 measurement) | From UDP 41000 (capacity 16), bound to 127.0.0.1 |
 | Worker public host | `77.246.105.57` | `lobby.dev.omoba.io` (A record only, no AAAA) | Host IPv4 from `lobby.env` | `127.0.0.1` |
 | Account API | Not a service (only `migrate` runs) | `127.0.0.1:40550` behind Caddy as `account.dev.omoba.io` | `127.0.0.1:40550` behind Caddy as `account.omoba.ru` | `127.0.0.1:40550` |
 | Portal | Vercel, `app.omoba.io` | Vercel, `app.dev.omoba.io` | `127.0.0.1:3010` behind Caddy as `omoba.ru` | `127.0.0.1:3010` |
@@ -194,7 +194,7 @@ One VPS runs the lobby and its bounded worker pool. It shares the host with Ekza
 | Item | Value | Source |
 | --- | --- | --- |
 | Unit | `omoba-lobby.service`, user `omoba`. It sets `OMOBA_SERVER_ROLE=lobby`, `OMOBA_MATCH_MODE=release` and `OMOBA_REGISTRY_URL=https://registry.ekza.io` (workers inherit it). It runs `/opt/omoba/current/server`, which is also `OMOBA_MATCH_EXECUTABLE`. It has `Requires=docker.service`. | [omoba-lobby.service](../../ops/vps/omoba-lobby.service) |
-| Limits | The lobby and its workers share one cgroup: `MemoryHigh=600M`, `MemoryMax=700M`, `CPUQuota=150%`, `TasksMax=128`. With `KillMode=control-group`, a service restart restarts the whole group and relies on durable interrupted-match recovery. | Same |
+| Limits | The lobby and its workers share one cgroup: `MemoryHigh=600M`, `MemoryMax=700M`, `CPUQuota=150%`, `TasksMax=128`. With `KillMode=control-group`, a service restart restarts the whole group and relies on durable interrupted-match recovery. | RU: `MemoryHigh=450M`, `MemoryMax=500M`, `CPUQuota=190%`, `TasksMax=96` from the per-arena formula ([README › Arena capacity](../../ops/vps/ru/README.md#arena-capacity-lr-09)); `KillMode=process`, so a lobby restart leaves live workers running and the new lobby adopts them from their manifests (ADR-027). |
 | Binaries | Linux `server` and `omoba-account-api`, built with Rust 1.95.0 and `--release --locked`. Installed in `/opt/omoba/releases/<source>/` with a `current` symlink. | [ops/vps/README.md](../../ops/vps/README.md) |
 | Durable files | `/var/lib/omoba/matches` and `/var/lib/omoba/lobby-outbox` (owner-only) | Same |
 | Database | `omoba`, with three roles: `omoba_owner` (migrations; its login is disabled afterwards), `omoba_game` (runtime) and `omoba_portal` (reserved, NOLOGIN). Grants come from `account-api/ops/grants.sql`. | Same |
@@ -210,7 +210,7 @@ flowchart LR
   browser["Web browser"]
   subgraph vps["Production VPS 77.246.105.57"]
     lobby["server, role lobby<br/>UDP 4000"]
-    workers["server, role match x2<br/>UDP 41000-41001"]
+    workers["server, role match x16<br/>UDP 41000-41015"]
     files[("/var/lib/omoba<br/>manifests, status, outboxes")]
     pg[("PostgreSQL 16<br/>database omoba")]
   end
@@ -280,7 +280,7 @@ flowchart LR
   subgraph ru["RU VPS, planned, hosted in Russia"]
     caddy["Caddy TCP 443<br/>account.omoba.ru, omoba.ru"]
     lobby["omoba-lobby-ru<br/>server role lobby, UDP 4000"]
-    workers["match workers<br/>UDP 41000-41001"]
+    workers["match workers<br/>UDP 41000-41015"]
     api["omoba-account-api-ru<br/>127.0.0.1:40550"]
     portal["omoba-portal-ru, standalone<br/>127.0.0.1:3010"]
     pg[("PostgreSQL<br/>database omoba_ru")]

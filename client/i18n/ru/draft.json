@@ -28,5 +28,8 @@
   "draft.timer.gathering": "Ожидаем команду…",
   "draft.stage.rotate": "Потяни, чтобы повернуть",
   "draft.tab.avatars": "Аватары",
-  "draft.tab.classes": "Классы"
+  "draft.tab.classes": "Классы",
+  "draft.error.roster_changed": "Состав изменился. Проверьте команду и подтвердите выбор снова.",
+  "draft.error.loading_timeout": "Не все игроки загрузились вовремя. Подтвердите выбор снова или выйдите.",
+  "draft.error.start_timeout": "Старт матча занял слишком долго. Подтвердите выбор снова или выйдите."
 }

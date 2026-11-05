@@ -26,6 +26,7 @@
   "career.unrated.allocated_bots": "Bots filled open seats, so this match is unrated.",
   "career.unrated.server_interrupted": "The server stopped before the match finished, so this match is unrated.",
   "career.unrated.casual_queue": "Casual PvP matches never change rating.",
+  "career.unrated.not_completed": "The match did not finish normally, so it is unrated.",
   "career.queue.waiting": "Finding a fair match · {compatible}/{needed} compatible players · {elapsed}\n{hint}",
   "career.queue.hint_newcomer": "New players are matched with other newcomers.",
   "career.queue.hint_rating": "Waiting for players with similar experience and rating.",

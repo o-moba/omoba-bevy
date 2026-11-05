@@ -138,7 +138,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 
 ## Next steps, in order
 
-1. Land the game PR after `make check` + `scripts/postgres_tests.py` + `make verify-public-mvp` (lifecycle PASS and the mixed load PASS were recorded on 2026-11-05; the full client gate ran after the client agent finished).
+1. Finish the game PR into `dev` after `make check` + `scripts/postgres_tests.py` + `make verify-public-mvp`. Use the actual continuation results in [the progress record](../progress/2026-11-05-ranked-matchmaking-readiness.md); the initial full-client-gate claim was not reproducible (a private-field test initializer failed to compile and was fixed).
 2. Deploy order on RU: `omoba-account-api migrate` (career 6, portal 11) → Account API → portal (omoba-web#33) → lobby kit (`ru_host.py ship`; the unit now has 16 arenas, KillMode=process, new limits; bootstrap appends the new `OMOBA_LIMIT_*` lines).
 3. LR-09: run `scripts/test_public_mvp.mjs` on the RU host (`--limits-from omoba-lobby-ru.service`, `--mix`), fill the README table, set capacity/cgroup from the measurement.
 4. LR-32 accept step («Матч найден · Принять», 10–15 s) on top of the re-queue; persist the dodge cooldown.
@@ -146,3 +146,17 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 6. Scale beyond one host: LR-57 game directory; LR-28 snapshot egress (~250 kB/s per player today).
 7. Harness: end-to-end Ranked journey with a rating delta asserted (#14), harness bots on the signed public lobby (#40), party at process level (#43).
 
+
+## Codex continuation — 2026-11-05
+
+The scoped readiness iteration is completed and locally verified from the inherited worktree.
+Regression fixes and exact evidence are recorded in
+[the progress record](../progress/2026-11-05-ranked-matchmaking-readiness.md#codex-continuation--2026-11-05).
+In particular: `lobby_busy` request correlation, Ranked priority for shared
+players, first-receipt worker-failure re-queue, worker-side draft dodge cooldown,
+read-only polling of existing settings, and repeatable database fixtures.
+The portal ladder and opt-out passed a Russian 390 × 844 browser check against
+a real loopback API; this removes the earlier browser-verification limitation.
+RU deployment and capacity measurement remain pending owner authorization.
+No open/deferred feature is marked done merely because its supporting
+prerequisites passed.

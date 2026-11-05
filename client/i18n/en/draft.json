@@ -28,5 +28,8 @@
   "draft.timer.gathering": "Waiting for team…",
   "draft.stage.rotate": "Drag to rotate",
   "draft.tab.avatars": "Avatars",
-  "draft.tab.classes": "Classes"
+  "draft.tab.classes": "Classes",
+  "draft.error.roster_changed": "The roster changed. Check your team and lock in again.",
+  "draft.error.loading_timeout": "Not every player loaded in time. Lock in again or leave.",
+  "draft.error.start_timeout": "The match took too long to start. Lock in again or leave."
 }

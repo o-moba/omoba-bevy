@@ -13,5 +13,15 @@
   "queue.also_casual": "同时进行匹配对战 · 保留排位队列位置",
   "queue.failed.ranked_party_cohort": "队伍成员的排位分差距过大，无法进行排位赛。\n请取消后一起进行匹配对战。",
   "queue.failed.arena_limit": "你的网络已有一场对局正在进行。\n请先完成该对局，或与其他玩家进行匹配对战。",
-  "queue.failed.practice_cooldown": "多场人机对战已开始却未进行。\n请几分钟后再试。"
+  "queue.failed.practice_cooldown": "多场人机对战已开始却未进行。\n请几分钟后再试。",
+  "queue.failed.queue_full": "队列已满。仍在匹配中，系统会自动重试…",
+  "queue.failed.already_queued": "此账号正在另一台设备上匹配。正在重试…",
+  "queue.failed.allocation_cancelled_or_expired": "有玩家在对局开始前退出。正在重新匹配…",
+  "queue.failed.profile_has_another_session": "此账号正在另一台设备上进行对局。\n请先在那台设备上完成对局，或取消匹配稍后再试。",
+  "queue.failed.worker_spawn_failed": "服务器无法启动竞技场。正在重试…",
+  "queue.failed.lobby_busy": "服务器负载过高。正在重试…",
+  "queue.failed.dodge_cooldown": "你退出了已找到的排位对局。一分钟后可再次匹配。\n请取消匹配，稍后重新开始。",
+  "queue.failed.party_member_left": "有队伍成员退出了匹配。请重新开始匹配。",
+  "queue.failed.capacity_busy": "所有竞技场均已占用。正在重试…",
+  "queue.requeue.worker_lost": "对局未能开始：有玩家未连接。正在重新匹配…"
 }

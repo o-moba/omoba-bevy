@@ -20,6 +20,19 @@ const PRESENCE_EVERY: Duration = Duration::from_secs(2);
 /// Without a fresh view (another server, a match worker) the party UI shows
 /// nothing rather than a stale roster.
 const VIEW_STALE_AFTER: Duration = Duration::from_secs(6);
+/// A refusal or a notice stays on the lobby screen this long.
+pub(crate) const NOTICE_FOR: Duration = Duration::from_secs(5);
+
+/// Something the lobby tells the player for a few seconds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PartyNotice {
+    /// The server refused a command: a stable code (`PartyView::error`),
+    /// shown as `party.error.<code>`.
+    Error(String),
+    /// The lobby restarted (a new server epoch) while the player was in a
+    /// party; the party is gone with it.
+    LobbyRestarted,
+}
 
 #[derive(Resource, Default)]
 pub(crate) struct PartyClient {
@@ -33,16 +46,26 @@ pub(crate) struct PartyClient {
     seen_party: Option<u64>,
     seen_launch: u64,
     pending_launch: Option<PartyLaunch>,
+    notice: Option<(PartyNotice, Instant)>,
 }
 
 impl PartyClient {
-    pub fn apply_view(&mut self, server_epoch: u64, sequence: u64, view: PartyView, now: Instant) {
+    pub fn apply_view(
+        &mut self,
+        server_epoch: u64,
+        sequence: u64,
+        mut view: PartyView,
+        now: Instant,
+    ) {
         if server_epoch == 0 {
             return;
         }
         if server_epoch != self.server_epoch {
             // Another server (or a restart): sequences start over and nothing
             // it launched before is ours to follow.
+            if self.server_epoch != 0 && self.view.party.is_some() {
+                self.notice = Some((PartyNotice::LobbyRestarted, now));
+            }
             self.server_epoch = server_epoch;
             self.sequence = 0;
             self.seen_party = None;
@@ -53,6 +76,10 @@ impl PartyClient {
         }
         self.sequence = sequence;
         self.received_at = Some(now);
+        // The refusal is a notice, not part of the roster.
+        if let Some(code) = view.error.take() {
+            self.notice = Some((PartyNotice::Error(code), now));
+        }
         let party_id = view.party.as_ref().map(|p| p.party_id);
         let launch = view.party.as_ref().and_then(|p| p.launch);
         if party_id != self.seen_party {
@@ -88,6 +115,14 @@ impl PartyClient {
 
     pub fn in_party(&self) -> bool {
         self.view.party.is_some()
+    }
+
+    /// The notice to show at `now`, if one is still fresh.
+    pub fn notice(&self, now: Instant) -> Option<&PartyNotice> {
+        self.notice
+            .as_ref()
+            .filter(|(_, at)| now.saturating_duration_since(*at) < NOTICE_FOR)
+            .map(|(notice, _)| notice)
     }
 }
 
@@ -231,6 +266,43 @@ mod tests {
         assert!(client.in_party() && client.is_live(now));
         client.expire(now + VIEW_STALE_AFTER);
         assert!(!client.in_party());
+    }
+
+    #[test]
+    fn a_refusal_is_shown_briefly_and_kept_out_of_the_roster() {
+        let now = Instant::now();
+        let mut client = PartyClient::default();
+        client.apply_view(9, 1, view(None, None), now);
+        assert_eq!(client.notice(now), None);
+        let mut refused = view(None, None);
+        refused.error = Some("party_full".into());
+        client.apply_view(9, 2, refused, now);
+        assert_eq!(
+            client.notice(now),
+            Some(&PartyNotice::Error("party_full".into()))
+        );
+        assert_eq!(client.view.error, None);
+        // The periodic view that follows does not clear it early.
+        client.apply_view(9, 3, view(None, None), now + Duration::from_secs(1));
+        assert!(client.notice(now + Duration::from_secs(1)).is_some());
+        assert_eq!(client.notice(now + NOTICE_FOR), None);
+    }
+
+    #[test]
+    fn a_lobby_restart_that_dissolves_the_party_is_announced() {
+        let now = Instant::now();
+        let mut client = PartyClient::default();
+        // The first server seen is not a restart.
+        client.apply_view(9, 1, view(Some(4), None), now);
+        assert_eq!(client.notice(now), None);
+        // A new epoch while in a party: the party is gone, say so.
+        client.apply_view(11, 1, view(None, None), now);
+        assert_eq!(client.notice(now), Some(&PartyNotice::LobbyRestarted));
+        assert!(!client.in_party());
+        // A new epoch while not in a party says nothing.
+        let later = now + NOTICE_FOR;
+        client.apply_view(12, 1, view(None, None), later);
+        assert_eq!(client.notice(later), None);
     }
 
     #[test]

@@ -334,7 +334,13 @@ fn refresh_status(
             // A matchmaking or ranked ban (LR-15), with its end.
             text
         } else {
-            crate::match_service::status_text(view)
+            let status = crate::match_service::status_text(view);
+            // A search the client started on its own (the found match never
+            // began) says why above the queue status.
+            match flow.as_deref().and_then(|flow| flow.notice()) {
+                Some(notice) => format!("{}\n{status}", tr(notice)),
+                None => status,
+            }
         }
     } else {
         status_text(&career.view.queue, &game.state, &session)
@@ -668,6 +674,55 @@ mod tests {
         assert_eq!(
             status(&mut app),
             "Ваш аккаунт заблокирован до 2030-01-01 00:00 UTC."
+        );
+    }
+
+    /// A search the client restarted after a found match never began says so
+    /// above the queue status, in the player's language.
+    #[test]
+    fn a_restarted_search_says_that_a_player_did_not_connect() {
+        if crate::i18n::testing::isolated(
+            "frontend::searching::tests::a_restarted_search_says_that_a_player_did_not_connect",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+            .insert_state(AppScreen::Searching)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .init_resource::<TeamSelection>()
+            .init_resource::<CareerClient>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<SessionUiCommand>()
+            .add_plugins(SearchingScreenPlugin);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        app.insert_resource(session);
+        let mut flow = MatchServiceClient::default();
+        flow.active = true;
+        flow.set_worker_lost_notice_for_test();
+        app.insert_resource(flow);
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .match_service = Some(MatchServiceView::Allocating);
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        app.update();
+        app.update();
+        let status = app
+            .world_mut()
+            .query_filtered::<&Text, With<SearchingStatus>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        assert_eq!(
+            status,
+            "Матч не начался: один из игроков не подключился. Ищем матч снова…\nМатч найден · подготовка арены…"
         );
     }
 

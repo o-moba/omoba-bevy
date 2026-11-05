@@ -37,6 +37,11 @@ pub(crate) struct Manifest {
     pub preference: MatchPreference,
     pub humans: Vec<AllocatedHuman>,
     pub join_deadline_ms: u64,
+    /// The widened rated cohort a Ranked roster was formed with (LR-35):
+    /// `[spread, merge_newcomers]`, absent for the base cohort and for every
+    /// other queue. Additive: older manifests on disk read as the base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cohort: Option<(i32, bool)>,
 }
 impl Manifest {
     pub fn validate(&self) -> Result<(), String> {
@@ -62,6 +67,13 @@ impl Manifest {
                 .any(|t| self.humans.iter().filter(|h| h.team == *t).count() > 5)
             // Ranked is ten humans; it is never filled with bots.
             || (self.preference == MatchPreference::Ranked && self.humans.len() != 10)
+            // A widened cohort belongs to Ranked and stays within the policy's caps.
+            || self.cohort.is_some_and(|(spread, _)| {
+                self.preference != MatchPreference::Ranked
+                    || !(omoba_career_store::matchmaking::MAX_RATING_SPREAD
+                        ..=omoba_career_store::matchmaking::MAX_WIDENED_SPREAD)
+                        .contains(&spread)
+            })
             // Bot practice seats one player or one party, all on one team.
             || (self.preference == MatchPreference::BotPractice
                 && (self.humans.len() > shared::party::MAX_PARTY_SIZE
@@ -121,6 +133,11 @@ pub(crate) struct Status {
     /// abandoned-match reaping. The lobby shows it to a player who left (LR-13).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ends_by_ms: Option<u64>,
+    /// Sessions of the allocated humans who have joined this worker. Before
+    /// the match starts, the lobby re-queues these when the allocation ends
+    /// (LR-32); a human who never came is not re-queued. Additive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub joined_sessions: Vec<String>,
 }
 impl Status {
     /// The match was played: it is running or ended with a winner.
@@ -156,6 +173,9 @@ pub(crate) struct Worker {
     pub booted_at: Instant,
     pub last_status: Option<Instant>,
     pub terminal_at: Option<Instant>,
+    /// An allocated human joined at least once. A worker nobody ever reached
+    /// aborts early instead of holding its arena for the whole join deadline.
+    pub saw_human: bool,
 }
 impl Worker {
     pub fn cancelled(&self) -> bool {
@@ -239,6 +259,7 @@ mod tests {
                 team: shared::map::Team::Green,
             }],
             join_deadline_ms: 1,
+            cohort: None,
         }
     }
     #[test]
@@ -332,6 +353,7 @@ pub(crate) mod runtime_tests {
                     team: shared::map::Team::Blue,
                 }],
                 join_deadline_ms: unix_ms() + 180_000,
+                cohort: None,
             },
             directory: std::env::temp_dir().join(format!(
                 "omoba-allocation-test-{}-{}",
@@ -344,6 +366,7 @@ pub(crate) mod runtime_tests {
             booted_at: Instant::now(),
             last_status: None,
             terminal_at: None,
+            saw_human: false,
         });
         let join = ClientPacket::Join {
             handheld: Default::default(),
@@ -466,6 +489,7 @@ pub(crate) mod runtime_tests {
                 preference,
                 humans: humans.clone(),
                 join_deadline_ms: unix_ms() + 180_000,
+                cohort: None,
             };
             assert_eq!(manifest.validate(), Ok(()));
             let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -493,6 +517,7 @@ pub(crate) mod runtime_tests {
                 booted_at: Instant::now(),
                 last_status: None,
                 terminal_at: None,
+                saw_human: false,
             });
             let now = Instant::now();
             for (i, human) in humans.iter().enumerate() {
@@ -1359,5 +1384,58 @@ pub(crate) mod runtime_tests {
         assert_eq!(rt.server_epoch, epoch);
         assert_eq!(rt.match_id, match_id);
         assert!(rt.match_service.worker().unwrap().aborted);
+    }
+
+    /// LR-32: a worker no allocated human ever reached frees its arena 60 s
+    /// after boot instead of holding it for the whole join deadline; one a
+    /// human did reach keeps waiting for the rest.
+    #[test]
+    fn a_worker_nobody_reached_aborts_a_minute_after_boot() {
+        let (mut rt, _addr, _join) = fixture();
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let now = Instant::now();
+        let status = || -> Status {
+            serde_json::from_slice(&fs::read(directory.join("status.json")).unwrap()).unwrap()
+        };
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.booted_at = now - Duration::from_secs(59);
+        }
+        rt.tick_match_service(now);
+        assert_eq!(status().phase, Phase::Ready, "still waiting at 59 s");
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.booted_at = now - Duration::from_secs(60);
+            worker.last_status = None;
+        }
+        rt.tick_match_service(now);
+        assert!(
+            matches!(status().phase, Phase::Failed | Phase::Settling),
+            "nobody came: the arena is given up"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A worker's receipt names the humans who joined, so the lobby knows
+    /// whom to re-queue when the allocation ends before its match (LR-32).
+    #[test]
+    fn the_receipt_names_the_humans_who_joined() {
+        let (mut rt, addr, join) = fixture();
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let now = Instant::now();
+        rt.tick_match_service(now);
+        let before: Status =
+            serde_json::from_slice(&fs::read(directory.join("status.json")).unwrap()).unwrap();
+        assert!(before.joined_sessions.is_empty());
+        rt.handle_packet(addr, join, now);
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.last_status = None;
+        }
+        rt.tick_match_service(now + Duration::from_secs(1));
+        let after: Status =
+            serde_json::from_slice(&fs::read(directory.join("status.json")).unwrap()).unwrap();
+        assert_eq!(after.joined_sessions, vec!["seat-a".to_owned()]);
+        assert!(rt.match_service.worker().unwrap().saw_human);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

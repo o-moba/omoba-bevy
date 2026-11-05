@@ -149,10 +149,55 @@ Rated/Unrated badge.
 and the head count alone never makes a match rated. A rated cohort is one
 newcomer bracket with at most 300 points between its lowest and highest rating.
 The lobby's Ranked search, the career queue and the store's rated-start check use
-the same policy (`career-store/src/matchmaking.rs`: `fits_cohort`, `same_cohort`),
-so the lobby never forms a Ranked roster the store rejects. A Ranked party whose
-members are not one cohort (for example a 1000 newcomer with a 1400 veteran) is
-never seated in Ranked; its members are told to play Casual PvP together.
+the same policy family (`career-store/src/matchmaking.rs`: `fits_cohort`,
+`same_cohort`, and their `_with` forms that take a `CohortAllowance`), so the
+lobby never forms a Ranked roster the store rejects. A Ranked party whose
+members are not one base cohort (for example a 1000 newcomer with a 1400 veteran)
+is never seated in Ranked, whatever window its wait opens; its members are told
+to play Casual PvP together.
+
+### Ranked window at low population (LR-35)
+
+Since 2026-11-05 the Ranked window widens with the wait of the oldest unit that
+anchors a roster (`CohortAllowance::after_wait`): the base spread of 300 holds
+for the first 2 minutes, then grows by 100 every minute (400 at 2 min, 500 at
+3 min, 600 from 4 min on, never more); after 5 minutes newcomers and veterans
+may share a roster. The searching screen's compatible count follows the
+player's own window. The manifest records the window a Ranked roster was formed
+with (`Manifest.cohort`, validated within the caps), and the store's rated-start
+re-check accepts any roster within the maximum window (600 points, brackets
+merged), so a roster whose ratings drifted beyond anything the lobby could have
+formed is still refused. Parties stay one base cohort inside a widened roster.
+
+### Before the match starts (LR-32 minimum)
+
+A found match can still fall apart before it starts: a member cancels on the
+searching screen or leaves the draft, a member never reaches the worker, the
+worker fails. The lobby then returns every other human of that allocation to the
+queue with their original place and queue age (`Lobby::requeue_parked`) and the
+client searches again on its own with a notice; nobody is dropped to Home. The
+member who cancelled is not re-queued; one who cancelled a found **Ranked**
+match is refused for 60 s (`dodge_cooldown`, in memory). A member the worker
+never saw (its last receipt lists `joined_sessions`) is not re-queued either:
+their client, if alive, searches again. A worker nobody reached aborts 60 s after
+boot instead of holding its arena for the 180 s join deadline, and the lobby kills
+a worker that wrote no receipt within 20 s of spawning. A worker that died or was
+killed before it ever reported is a broken worker, not a lost player: its humans
+are told the allocation was cancelled rather than re-queued into the same failure.
+
+A party member who cancels leaves the party's search; the others see
+`party_member_left` for a moment and keep searching without them (the head count
+drops until that member queues again, or for 10 minutes). A member who was
+already searching another queue when the party launched is seated alone.
+
+### Arena priority
+
+When arenas are short, ready rosters take the next free arena by seated humans
+first (a 5v5 before a bot-filled Casual roster before a solo vs Bots game), then
+by age; with arenas free, vs Bots is still immediate. The lobby holds up to
+`OMOBA_LOBBY_MAX_WAITING` queue entries (default 1024, at most 4096; `queue_full`
+beyond, the client retries) and remembers at most 4096 recent requesters
+(`lobby_busy` beyond, instead of silence).
 
 ### Low-population Ranked policy
 
@@ -171,14 +216,15 @@ Owner defaults O-1 to O-3 (`docs/plans/launch-readiness.md` §7), each one setti
   seats after 30 s (`CASUAL_BOT_FILL`). vs Bots stays a separate choice.
 - **No Ranked entry gate** (O-3) beyond the newcomer and eligibility rules; an
   entry gate (career level, match count, VK ID in RU) is LR-37.
-- Later steps, not in M0: a widening Ranked window over time (LR-35) and humans
-  replacing bots in Casual (LR-36).
+- The widening Ranked window (LR-35) shipped on 2026-11-05 as described above;
+  humans replacing bots in Casual (LR-36) is later work.
 
 ## Rating and matchmaking
 
-The implemented authenticated queue holds at most 128 waiting/reserved players per
-arena. The first 20 rated matches form a separate newcomer cohort; compatible
-rosters have at most 300 MMR spread. Equal teams are selected with balanced rating,
+The standalone career queue holds at most 128 waiting/reserved players per
+arena; the public lobby's queue is bounded by `OMOBA_LOBBY_MAX_WAITING`. The
+first 20 rated matches form a separate newcomer cohort; compatible rosters have
+at most 300 MMR spread until the Ranked window widens with the wait (above). Equal teams are selected with balanced rating,
 and the default full release roster is 5v5. An empty/insufficient population waits
 honestly; it is not filled with mismatched veterans. On the public lobby these
 cohorts apply to Ranked only; Casual PvP groups every cohort.

@@ -2113,6 +2113,7 @@ mod tests {
             }),
             invites: Vec::new(),
             online: Vec::new(),
+            error: None,
         };
         harness::press(leader.world_mut(), "HomeRanked");
         leader.update();

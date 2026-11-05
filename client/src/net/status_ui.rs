@@ -286,14 +286,21 @@ fn connection_line(client_session: &ClientSession) -> String {
     }
     match client_session.state {
         ClientConnectionState::Connecting => trf("net.status.connecting", &[("addr", addr)]),
-        ClientConnectionState::WaitingForServer => trf(
-            "net.status.waiting",
-            &[
-                ("addr", addr),
-                ("retry", &T_RETRY.as_secs()),
-                ("max_wait", &T_WAIT_MAX.as_secs()),
-            ],
-        ),
+        // A developer who pointed the game at a server by hand gets the
+        // address and the retry budget; a player gets a plain line.
+        ClientConnectionState::WaitingForServer
+            if crate::connection_profile::desktop_override("GAME_SERVER_ADDR").is_some() =>
+        {
+            trf(
+                "net.status.waiting_dev",
+                &[
+                    ("addr", addr),
+                    ("retry", &T_RETRY.as_secs()),
+                    ("max_wait", &T_WAIT_MAX.as_secs()),
+                ],
+            )
+        }
+        ClientConnectionState::WaitingForServer => tr("net.status.waiting").to_owned(),
         ClientConnectionState::Connected if client_session.join_confirmed() => {
             tr("net.status.joined").to_owned()
         }

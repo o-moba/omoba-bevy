@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 use std::{fs, io};
 
 use crate::match_allocation::{self, Manifest, Phase, Status};
@@ -16,7 +17,20 @@ pub(crate) struct Slot {
     /// The lobby saw this match running (LR-13). Its later failure ends a
     /// played match; it is not a cancelled or expired allocation.
     ran: bool,
+    /// `cancel.json` exists: written by this lobby or by the worker when an
+    /// allocated human left before the match started. Refreshed by `poll`.
+    cancelled: bool,
+    /// When this lobby spawned the child; `None` for an adopted worker.
+    spawned_at: Option<Instant>,
 }
+
+/// A spawned worker that wrote no status at all within this long is wedged
+/// (a blocked database connect, a bad environment): the lobby kills it so the
+/// slot fails instead of holding ten players on "preparing the arena".
+const FIRST_STATUS_DEADLINE: Duration = Duration::from_secs(20);
+/// Grace after the manifest's join deadline before the lobby kills a worker
+/// that never ran: the worker aborts itself at the deadline, this is the backstop.
+const JOIN_DEADLINE_GRACE_MS: u64 = 30_000;
 pub(crate) struct Pool {
     // Kernel-owned advisory lock is released on crash as well as normal drop.
     lock: fs::File,
@@ -147,6 +161,7 @@ impl Pool {
                 continue;
             }
             let ran = status.as_ref().is_some_and(Status::played);
+            let cancelled = directory.join("cancel.json").exists();
             pool.slots.insert(
                 manifest.allocation_id.clone(),
                 Slot {
@@ -156,6 +171,8 @@ impl Pool {
                     child: None,
                     recovering: false,
                     ran,
+                    cancelled,
+                    spawned_at: None,
                 },
             );
         }
@@ -217,8 +234,12 @@ impl Pool {
                     phase: Phase::Failed,
                     result_id: None,
                     ends_by_ms: None,
+                    joined_sessions: Vec::new(),
                 };
                 let _ = match_allocation::atomic_json(&directory.join("status.json"), &status);
+                // Nothing will ever run here: keep the failed receipt in the
+                // archive instead of a dead directory in the live root.
+                archive(&self.root, &directory, &manifest.allocation_id);
                 return Err("worker_spawn_failed".into());
             }
         };
@@ -232,12 +253,14 @@ impl Pool {
                 child: Some(child),
                 recovering: false,
                 ran: false,
+                cancelled: false,
+                spawned_at: Some(Instant::now()),
             },
         );
         Ok(id)
     }
     pub fn cancel(&mut self, id: &str) -> bool {
-        let Some(slot) = self.slots.get(id) else {
+        let Some(slot) = self.slots.get_mut(id) else {
             return true;
         };
         if slot
@@ -247,17 +270,52 @@ impl Pool {
         {
             return false;
         }
-        match_allocation::atomic_json(&slot.directory.join("cancel.json"), &true).is_ok()
+        let written =
+            match_allocation::atomic_json(&slot.directory.join("cancel.json"), &true).is_ok();
+        slot.cancelled |= written;
+        written
+    }
+
+    /// The sessions a worker named in its `cancel.json` (allocated humans who
+    /// left before the match started), empty for a lobby-written or absent
+    /// cancellation. Those humans are not re-queued; the others are.
+    pub fn cancelled_sessions(&self, id: &str) -> Vec<String> {
+        self.slots
+            .get(id)
+            .and_then(|slot| fs::read(slot.directory.join("cancel.json")).ok())
+            .filter(|bytes| bytes.len() <= 4096)
+            .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
+            .unwrap_or_default()
     }
     pub fn poll(&mut self) {
         let now = match_allocation::unix_ms();
         let mut recovery_launches = 0;
         for slot in self.slots.values_mut() {
             slot.refresh_status();
-            let exited = slot
-                .child
-                .as_mut()
-                .is_some_and(|child| child.try_wait().is_ok_and(|r| r.is_some()));
+            // Watchdog: a child this lobby spawned that never reported, or
+            // that outlived its join deadline without ever running, is killed
+            // so the slot fails instead of holding its players and its port.
+            let wedged = slot.child.is_some()
+                && !slot.terminal()
+                && !slot.ran
+                && (slot.status.is_none()
+                    && slot
+                        .spawned_at
+                        .is_some_and(|at| at.elapsed() >= FIRST_STATUS_DEADLINE)
+                    || slot.status.as_ref().is_some_and(|s| {
+                        matches!(s.phase, Phase::Ready | Phase::Forming)
+                            && now > slot.manifest.join_deadline_ms + JOIN_DEADLINE_GRACE_MS
+                    }));
+            if wedged && let Some(child) = slot.child.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+                slot.status = None;
+            }
+            let exited = wedged
+                || slot
+                    .child
+                    .as_mut()
+                    .is_some_and(|child| child.try_wait().is_ok_and(|r| r.is_some()));
             if exited {
                 slot.child = None;
                 if slot.status.is_none() {
@@ -268,6 +326,7 @@ impl Pool {
                         phase: Phase::Failed,
                         result_id: None,
                         ends_by_ms: None,
+                        joined_sessions: Vec::new(),
                     };
                     if match_allocation::atomic_json(&slot.directory.join("status.json"), &status)
                         .is_ok()
@@ -332,6 +391,7 @@ impl Slot {
     pub fn refresh_status(&mut self) {
         self.status = self.latest_status();
         self.ran |= self.status.as_ref().is_some_and(Status::played);
+        self.cancelled |= self.directory.join("cancel.json").exists();
     }
 
     /// The lobby saw this match running (LR-13).
@@ -347,7 +407,7 @@ impl Slot {
             })
     }
     pub fn cancelled(&self) -> bool {
-        self.directory.join("cancel.json").exists()
+        self.cancelled || self.directory.join("cancel.json").exists()
     }
 
     pub fn terminal(&self) -> bool {
@@ -361,7 +421,9 @@ impl Slot {
     }
 
     /// The worker's latest receipt while the slot is ready: not recovering or
-    /// cancelled, `ready`, `forming` or `running`, with a fresh heartbeat.
+    /// cancelled, `ready`, `forming` or `running`, with a fresh heartbeat. Reads
+    /// the disk: a worker that settled between two lobby passes must never be
+    /// handed out again. Only players in a handoff ask for this.
     pub fn ready_status(&self) -> Option<Status> {
         if self.recovering || self.cancelled() {
             return None;
@@ -511,6 +573,7 @@ mod tests {
                 team: shared::map::Team::Green,
             }],
             join_deadline_ms: match_allocation::unix_ms() + 180_000,
+            cohort: None,
         }
     }
     #[test]
@@ -591,6 +654,7 @@ mod tests {
             phase: Phase::Ready,
             result_id: None,
             ends_by_ms: None,
+            joined_sessions: Vec::new(),
         });
         assert!(p.slots[&id].ready());
         assert!(p.cancel(&id));
@@ -680,6 +744,7 @@ mod tests {
             phase: Phase::Failed,
             result_id: Some("r".repeat(32)),
             ends_by_ms: None,
+            joined_sessions: Vec::new(),
         };
         p.write_status_for_test(&id, &retired(1_000));
         p.poll();
@@ -712,6 +777,7 @@ mod tests {
             phase: Phase::Running,
             result_id: None,
             ends_by_ms: None,
+            joined_sessions: Vec::new(),
         });
         assert!(!p.cancel(&id));
         assert!(!p.slots[&id].cancelled());

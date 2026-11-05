@@ -1,0 +1,13 @@
+{
+  "party.error.not_online": "该玩家已离线。",
+  "party.error.self_invite": "不能邀请自己。",
+  "party.error.already_member": "该玩家已在你的队伍中。",
+  "party.error.party_full": "队伍已满。",
+  "party.error.no_invite": "邀请已过期。",
+  "party.error.not_leader": "只有队长可以执行此操作。",
+  "party.error.no_party": "你不在队伍中。",
+  "party.error.invite_declined": "该玩家拒绝了邀请，请一分钟后再试。",
+  "party.error.invite_rate": "邀请过多，请稍等一分钟。",
+  "party.error.unknown": "服务器未接受该操作。",
+  "party.notice.lobby_restarted": "已重新连接到大厅，队伍已解散。"
+}

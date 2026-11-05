@@ -1080,7 +1080,7 @@ impl ServerRuntime {
         self.handle_rejected_career_start(now);
         for addr in self.career.backend.take_cancelled() {
             if let Some(profile) = self.career.backend.profile(addr) {
-                self.match_service.cancel(&profile.profile_id);
+                self.match_service.cancel(&profile.profile_id, now);
             }
             if let Some(worker) = self.match_service.worker() {
                 let member = self
@@ -1088,17 +1088,24 @@ impl ServerRuntime {
                     .backend
                     .profile(addr)
                     .zip(self.career.backend.authenticated_session(addr))
-                    .is_some_and(|(profile, session)| {
-                        worker
-                            .manifest
-                            .team(&profile.profile_id, &session)
-                            .is_some()
-                    });
-                if self.match_started_at.is_none() && member {
-                    let _ = crate::match_allocation::atomic_json(
-                        &worker.directory.join("cancel.json"),
-                        &true,
-                    );
+                    .filter(|(profile, session)| {
+                        worker.manifest.team(&profile.profile_id, session).is_some()
+                    })
+                    .map(|(_, session)| session);
+                if self.match_started_at.is_none()
+                    && let Some(session) = member
+                {
+                    // Name who left (LR-32): the lobby re-queues the other
+                    // humans of this allocation and leaves these out.
+                    let path = worker.directory.join("cancel.json");
+                    let mut left: Vec<String> = std::fs::read(&path)
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                        .unwrap_or_default();
+                    if !left.contains(&session) {
+                        left.push(session);
+                    }
+                    let _ = crate::match_allocation::atomic_json(&path, &left);
                 }
             }
             if let Some(player) = self.world.players.get(&addr) {

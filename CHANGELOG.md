@@ -5,6 +5,24 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Matchmaking readiness for the RU launch (LR-32 minimum, LR-35, LR-47, ADR-027):
+  an allocation that ends before its match starts re-queues the other humans
+  with their place and the client searches again with a notice; cancelling a
+  found Ranked match costs a 60 s cooldown; a worker nobody reached aborts after
+  60 s and a silent worker is killed after 20 s. The Ranked window widens with
+  the wait (300 → 600 points, brackets merge at 5 min; parties stay one cohort).
+  Ready 5v5 rosters take a scarce arena before solo bot games. Lobby caps:
+  `OMOBA_LOBBY_MAX_WAITING` (1024), 4096 recent requests (`lobby_busy`), 2048
+  endpoints/career clients, per-IP refusals answer `server_full`. Party views
+  are no longer rebuilt on every presence heartbeat; party refusals, lobby
+  failure codes, prematch resets and `not_completed` reach players as localized
+  text. Leaderboard: career schema 6 index, `GET /v1/leaderboard`, portal page,
+  opt-out (portal schema 11). RU kit: 16 arenas, `KillMode=process`, NAT-sized
+  limits, `max_connections` check; `make verify-public-mvp`. Automatic returns
+  survive the draft/loading screen without issuing a dodge, ready Ranked
+  rosters keep their shared players, and the Chinese display subset covers
+  the new translations.
+
 - Creator tooling exports a game-owned Classic hero design policy beside the
   animation contract. All 17 bases stay explicitly unconfigured until reviewed;
   strict bindings reject `any`, wrong identities and stale hashes/revisions.

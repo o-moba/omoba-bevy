@@ -29,7 +29,7 @@ It is the minimum social loop for playtesting with a friend.
 | --- | --- | --- |
 | standalone / `practice` (no DB) | in the server process | joining human takes a seat on a seated mate's team (`party_team`), draft countdown held ≤60 s for missing members |
 | `lobby` (public) | in the lobby process | queue units: a party is scheduled only when all present members queued with one preference; one manifest, one team (`split_teams`) |
-| `match` worker | none (members show as *Away* in the lobby) | frozen manifest |
+| `match` worker | none (members show as *In match* in the lobby while it holds their allocation, *Away* otherwise) | frozen manifest |
 
 Members are keyed by player id; a member with a career profile who leaves for
 a public match is rebound by profile id when they return (45-minute grace;
@@ -41,8 +41,28 @@ guests: 60 s).
   `accept`, `decline`, `leave`, `kick`, `launch`. The client announces
   presence (nickname + showcase avatar) every 2 s while connected.
 - `ServerPacket::Party { server_epoch, sequence, party: PartyView }` — framed
-  like social views (tick namespace `3 << 62`), every 500 ms or right after a
-  command, only to endpoints that announced presence.
+  like social views (tick namespace `3 << 62`), only to endpoints that
+  announced presence. The periodic pass (every 500 ms) builds the online list
+  once and derives every viewer's view from it; a presence heartbeat never
+  triggers a send. A state-changing command (`invite`, `accept`, `decline`,
+  `leave`, `kick`, `launch`) answers its issuer at once and a successful
+  `invite` also reaches the invitee at once; everyone else sees the change on
+  the next periodic pass.
+- `PartyView.error` (additive, absent when there is none): why the command
+  this view answers was refused, as a stable code the client localizes
+  (`party.error.<code>`): `not_online`, `self_invite`, `already_member`,
+  `party_full`, `no_invite` (also an expired one), `not_leader`, `no_party`,
+  `invite_declined`, `invite_rate`. Only on the immediate reply to the
+  issuer, never in the periodic broadcast.
+- `PartyMember.in_match` on the public lobby: the member's profile holds a
+  live allocation this lobby handed out (`MatchService::assigned_profiles`);
+  such a member is not `away` even without presence. On a standalone or
+  practice server it is a human seated in this process.
+- Friends (`OnlinePlayer.friend`, listed first before the 16-row cap) are the
+  viewer's accepted friends as known to the server's career view, which a
+  Friends request fills; the client sends one on entering the party lobby
+  (and the friends modal sends its own). The server re-reads the list every
+  2 s per viewer.
 - Avatars shown to others are restricted to roster slugs; nicknames are
   trimmed/bounded; authenticated players show their profile nickname.
 - A launch carries an increasing `sequence`; a client follows each launch of
@@ -71,5 +91,12 @@ guests: 60 s).
 ## Limits
 
 Parties are per server process and in memory: no cross-server invites, no
-party chat, not persisted across a server restart. Inviting by friend code to
-another server is out of scope.
+party chat, not persisted across a server restart (a client that was in a
+party when the lobby's epoch changes shows «Reconnected to the lobby. Your
+party was disbanded.» in the party lobby). Inviting by friend code to another
+server is out of scope.
+
+Invite throttle: a target that declined is not re-invited by the same sender
+for 60 s (`invite_declined`); a sender issues at most 10 invites per minute
+(`invite_rate`). Refused invites do not count. Online list: at most 16 rows,
+friends first, then players not in a party, then by nickname.

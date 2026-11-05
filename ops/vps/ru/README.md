@@ -120,7 +120,9 @@ the kit files it names.
    - Env files from the examples: database passwords, `OMOBA_PORTAL_SECRET` and
      `OMOBA_SOCIAL_SECRET` are generated on the host; `OMOBA_MATCH_PUBLIC_HOST` is
      `$RU_IP`; `--vkid-client-id` fills both VK ID lines (without it they stay
-     placeholders and `ship` refuses). Rerunning only fills placeholders.
+     placeholders and `ship` refuses). Rerunning only fills placeholders and appends
+     the settings an example gained since the file was written (the per-source
+     limits of `lobby.env.example`), with the kit's values; it never replaces a value.
    - Roles `omoba_owner` (NOLOGIN), `omoba_game`, `omoba_portal` and database
      `omoba_ru` (UTF8, collation C.UTF-8; handles use `und-x-icu` explicitly).
    - [Caddyfile.ru](Caddyfile.ru) after `caddy validate`; the old file is kept as
@@ -175,6 +177,31 @@ the kit files it names.
    when nothing is missing) and once per new host `reboot-check --apply`.
 
 Each change is appended to `/opt/omoba-ru/deployments.jsonl`.
+
+### Upgrades and live matches
+
+The lobby unit has `KillMode=process` (and `SendSIGHUP=no`): a stop, a restart
+(`systemctl restart omoba-lobby-ru`, a crash, the 5 s `Restart=always`) signals the
+lobby process only. Match workers it spawned keep running in the unit's cgroup, under
+the same memory, CPU and task limits, and their players keep playing. The next lobby
+adopts them at start from `/var/lib/omoba-ru/matches/<allocation>/manifest.json`
+(`server/src/match_pool.rs`): a slot without a child handle whose `status.json` still
+heartbeats keeps its port and its seats; a slot whose last heartbeat is older than 100 s
+is relaunched for recovery only when its UDP port can be bound (so a live worker is
+never duplicated); a finished or failed slot more than 35 s old is archived. A reboot
+still ends everything (`systemd` kills the cgroup at shutdown), and interrupted matches
+are recovered from their durable directories as before.
+
+- `ship` is still refused while a match runs (`match workers are running`): wait or
+  retry, so a release switch never leaves a mixed pair running by accident. If a
+  release is ever switched under live workers (a crash restart right after `ship`),
+  the old release's workers keep running until their match ends while the new lobby
+  adopts them: the lobby and its workers talk through the manifest, the status file and
+  the wire protocol, and must stay compatible across one upgrade (they already must,
+  for recovery). The adopted worker runs the old binary; it is not restarted.
+- `systemctl stop omoba-lobby-ru` therefore does not end matches. To stop everything,
+  stop the unit and then `systemctl kill omoba-lobby-ru` (or `pkill -u omoba-ru
+  omoba-server`); never kill a worker to free a port by hand.
 
 ## Server bundle
 
@@ -475,18 +502,29 @@ Never restore over the running database as a test; the monthly drill does that s
 
 Two layers keep one source (an address, or a household or carrier NAT behind
 one address) from crowding everyone else out. Both count **per source
-address**: many players behind one address share one budget, so the defaults
-leave room for about eight players on one address.
+address**: many players behind one address share one budget. The game's
+defaults leave room for about eight players on one address; the RU host sets
+larger values ([lobby.env.example](lobby.env.example), table below) because
+Russian mobile operators put hundreds of subscribers behind one IPv4
+(carrier-grade NAT): a tournament bar, a dormitory or one operator's city
+pool must not look like one flooding source. One address may then hold 256
+players and 8 arenas; the kernel rates are sized so that share never trips
+them, while a real flood still does.
 
 **In the kernel** ([nftables-omoba.conf](nftables-omoba.conf), its own table
 `inet omoba_limits`, loaded by [omoba-limits-ru.service](omoba-limits-ru.service);
 it never flushes ufw's rules). Over-rate datagrams are dropped before the game
 reads them:
 
-| Port | Rate per source address | Burst |
-| --- | --- | --- |
-| UDP 4000 (lobby) | 400 datagrams/s | 800 |
-| UDP arena range (41000–41001) | 1200 datagrams/s | 2400 |
+| Port | Rate per source address | Burst | Why this much |
+| --- | --- | --- | --- |
+| UDP 4000 (lobby) | 4000 datagrams/s | 8000 | a lobby client sends a few datagrams per second; 256 NAT players ≈ 1500/s |
+| UDP arena range (41000–41015) | 6000 datagrams/s | 12000 | an arena player sends at most 120 datagrams/s (the game's per-endpoint limit); ~50 NAT players in matches at once |
+
+- If one operator address ever holds more than ~50 players in matches at once (the
+  arena rule's drop counter grows while players report lag), key the arena sets by
+  `ip saddr . udp dport` (per source and arena, 1200/s each) instead of raising the
+  rate again.
 
 - To change a rate, edit the rule in `nftables-omoba.conf` and run `ru_host.py
   bootstrap --apply` (it runs `nft -c` first, then restarts the unit).
@@ -497,24 +535,28 @@ reads them:
   counters; `systemctl stop omoba-limits-ru` removes the table (emergency only;
   `status` then reports it).
 
-**In the game** (lobby and match workers). Defaults are the production values; to
-change one, add the line to `/opt/omoba-ru/lobby.env` (the workers inherit it) and
-restart the lobby. A malformed value stops the lobby with a message naming it. The
-lobby logs the values it runs with (`Admission limits: …`).
+**In the game** (lobby and match workers). The defaults are the game's; the RU values
+are the fixed lines of [lobby.env.example](lobby.env.example), which `bootstrap` writes
+to `/opt/omoba-ru/lobby.env` (and appends to an older file) and `status` checks. To
+change one, edit the example (the kit is the contract), run `bootstrap --apply`, edit
+the host file to the same value and restart the lobby; the workers inherit it. A
+malformed value stops the lobby with a message naming it. The lobby logs the values it
+runs with (`Admission limits: …`).
 
-| Setting | Default | What it limits |
-| --- | --- | --- |
-| `OMOBA_LIMIT_PROBES_PER_IP` | 8 | Transport probes per second from one IP, and, counted separately, compatibility replies |
-| `OMOBA_LIMIT_PROBES_PER_NETWORK` | 32 | The same per IPv4 /24 (IPv6 /48) |
-| `OMOBA_LIMIT_PROBES_GLOBAL` | 64 | The same for everyone together |
-| `OMOBA_LIMIT_PROBES_NEW_RESERVE` | 16 | Part of the global budget only a source's first datagram of the second may use (0 = none) |
-| `OMOBA_LIMIT_ENDPOINTS_PER_IP` | 8 | Return-path endpoints, and career clients, one IP holds at once. An unproven endpoint expires after 5 s and a proven one after 30 s without traffic; an idle career client gives way to a newcomer of its IP after 30 s |
-| `OMOBA_LIMIT_NEW_PROFILES_PER_IP` | 10 | Profiles new device keys may create from one IP in 24 hours; existing keys always sign in |
-| `OMOBA_LIMIT_NEW_PROFILES_TOTAL` | 5000 | The same for everyone together (then «new profiles are paused») |
-| `OMOBA_LIMIT_ARENAS_PER_IP` | 1 | Running or forming arenas one IP holds alone (every human of the match came from it) |
-| `OMOBA_LIMIT_PRACTICE_ABANDONS` | 3 | vs Bots allocations from one IP left unplayed within 10 minutes before a cooldown |
-| `OMOBA_LIMIT_PRACTICE_COOLDOWN_SECS` | 120 | That cooldown |
-| `OMOBA_PROFILE_RETENTION_DAYS` | 30 | The lobby deletes, hourly and 200 at a time, profiles whose only key is older than this, that never played and that nothing else holds (a friend, a portal link, a sign-in, a Supporter grant); 0 = off, otherwise 7–3650 |
+| Setting | Default | RU `lobby.env` | What it limits |
+| --- | --- | --- | --- |
+| `OMOBA_LIMIT_PROBES_PER_IP` | 8 | 64 | Transport probes per second from one IP, and, counted separately, compatibility replies. 256 NAT players reconnecting after a network blip probe once a second each, admitted over a few seconds |
+| `OMOBA_LIMIT_PROBES_PER_NETWORK` | 32 | 256 | The same per IPv4 /24 (IPv6 /48): one operator's pool is many addresses of one /24 |
+| `OMOBA_LIMIT_PROBES_GLOBAL` | 64 | 512 | The same for everyone together: a full lobby of 2048 players reconnecting is admitted within 4 s |
+| `OMOBA_LIMIT_PROBES_NEW_RESERVE` | 16 | 128 | Part of the global budget only a source's first datagram of the second may use (0 = none); must stay below the global budget |
+| `OMOBA_LIMIT_ENDPOINTS_PER_IP` | 8 | 256 | Return-path endpoints, and career clients, one IP holds at once (the game allows up to 2048, its endpoint ceiling). A new source of an IP at its share is answered `server_full` (the game shows «Сервер заполнен» and keeps trying). An unproven endpoint expires after 5 s and a proven one after 30 s without traffic; an idle career client gives way to a newcomer of its IP after 30 s |
+| `OMOBA_LIMIT_NEW_PROFILES_PER_IP` | 10 | 40 | Profiles new device keys may create from one IP in 24 hours; existing keys always sign in. Raised moderately: a NAT shares the counter, a farm of fresh keys still stops at 40 a day |
+| `OMOBA_LIMIT_NEW_PROFILES_TOTAL` | 5000 | — | The same for everyone together (then «new profiles are paused») |
+| `OMOBA_LIMIT_ARENAS_PER_IP` | 1 | 8 | Running or forming arenas one IP holds alone (every human of the match came from it): eight solo vs Bots players behind one operator address |
+| `OMOBA_LIMIT_PRACTICE_ABANDONS` | 3 | — | vs Bots allocations from one IP left unplayed within 10 minutes before a cooldown |
+| `OMOBA_LOBBY_MAX_WAITING` | 1024 | — | Queue entries the lobby holds (1–4096); a player beyond it is told `queue_full` and keeps retrying. The lobby also remembers at most 4096 recent requesters (`lobby_busy` beyond) |
+| `OMOBA_LIMIT_PRACTICE_COOLDOWN_SECS` | 120 | — | That cooldown |
+| `OMOBA_PROFILE_RETENTION_DAYS` | 30 | — | The lobby deletes, hourly and 200 at a time, profiles whose only key is older than this, that never played and that nothing else holds (a friend, a portal link, a sign-in, a Supporter grant); 0 = off, otherwise 7–3650 |
 
 - One IP is an IPv4 address or an IPv6 /64. The new-profile counter is durable
   (PostgreSQL, career schema 4): it stores a salted hash of the address, never the
@@ -530,14 +572,19 @@ Every vs Bots player, and every bot-filled Casual match, takes a whole arena (a 
 worker with nine or more server bots), so the arena count, not the player count, is what
 runs out. The lobby and all its workers share the lobby unit's cgroup limits.
 
-**Setting now: a placeholder, not measured on this host.**
+**Setting now: 16 arenas, sized by the per-arena formula below, not yet measured on
+this host (LR-09).** Re-derive every value from the formula when the capacity changes,
+and replace the formula's per-arena constants with the measured ones once the table
+«Measured per-arena cost» is filled.
 
 | Setting | Value | Where |
 | --- | --- | --- |
-| Arenas (`OMOBA_MATCH_CAPACITY`) | 2 | [omoba-lobby-ru.service](omoba-lobby-ru.service); `ru_host.py` allows 1–64 |
-| UDP arena range | 41000–41001 (`OMOBA_MATCH_FIRST_PORT` … `+ capacity - 1`) | the same unit; `OMOBA_ARENA_PORTS` in [nftables-omoba.conf](nftables-omoba.conf) must match, and `bootstrap` opens it in ufw |
-| `MemoryHigh` / `MemoryMax` | 600M / 700M | the lobby unit (lobby and every worker together) |
-| `CPUQuota` / `TasksMax` | 150% / 128 | the lobby unit |
+| Arenas (`OMOBA_MATCH_CAPACITY`) | 16 | [omoba-lobby-ru.service](omoba-lobby-ru.service); `ru_host.py` allows 1–64 |
+| UDP arena range | 41000–41015 (`OMOBA_MATCH_FIRST_PORT` … `+ capacity - 1`) | the same unit; `OMOBA_ARENA_PORTS` in [nftables-omoba.conf](nftables-omoba.conf) must match (`ru_host.py` refuses a kit where they differ), and `bootstrap` opens it in ufw |
+| `MemoryHigh` / `MemoryMax` | 450M / 500M | the lobby unit (lobby and every worker together): `MemoryMax = 16 MiB × arenas + 200 MiB` (16 MiB per arena from the developer-Mac scale run below, 200 MiB for the lobby and headroom), `MemoryHigh = MemoryMax − 50 MiB` |
+| `CPUQuota` / `TasksMax` | 190% / 96 | the lobby unit: `CPUQuota` = 190 % of the 2-vCPU host (PostgreSQL, the Account API and the portal share the rest); `TasksMax ≥ 3 × arenas + 16` (the formula assumes about three threads per worker; 64 for 16 arenas, set 96 for headroom; check `systemctl status omoba-lobby-ru` → `Tasks:` under the measured load) |
+| PostgreSQL `max_connections` | ≥ capacity + 32 (48 for 16 arenas; Ubuntu's default 100 passes up to 68 arenas) | one connection per match worker, 4 for the lobby's pool, 8 for the Account API's, the rest for psql, backups, monitoring and the superuser reserve. Not managed by `ru_host.py`: set it in `/etc/postgresql/<version>/main/conf.d/50-omoba-ru.conf` (`max_connections = 128`) and `systemctl restart postgresql@<version>-main`; `ru_host.py status`, `bootstrap` and `ship` refuse a host below the requirement |
+| Uplink | ≥ 500 Mbit/s for 16 arenas | `arenas × 10 players × 250 kB/s` of snapshot egress must stay under 60 % of the port: 16 arenas ≈ 40 MB/s ≈ 320 Mbit/s. A 100 Mbit/s port carries about 6 full PvP arenas (vs Bots arenas send one player's share each). About 1000 concurrent players (100 arenas) need ≈ 2 Gbit/s of egress and more than one host (LR-57) |
 
 **Measured per-arena cost on this host** (fill in from the probe's `CAPACITY_RESULT`
 lines, below):
@@ -567,9 +614,12 @@ Ranked, then Casual PvP, as the lobby seats them. The lobby reports it:
   searching=… waiting_for_arena=… longest_wait_secs=… busy_secs=…` when the line forms or
   clears and every minute while it lasts
   (`journalctl -u omoba-lobby-ru -g CAPACITY_METRIC`).
-- A full server answers instead of staying silent: at 512 endpoints a new player's
-  transport probe gets `server_full`, and at 512 career clients its sign-in gets the
-  `server_full` code. The game shows «Сервер заполнен. Повторяем попытку…» and keeps trying.
+- A full server answers instead of staying silent: at 2048 endpoints a new player's
+  transport probe gets `server_full`, at 2048 career clients its sign-in gets the
+  `server_full` code, and so does a new source of an IP that already holds its
+  `OMOBA_LIMIT_ENDPOINTS_PER_IP` share. The game shows «Сервер заполнен. Повторяем
+  попытку…» and keeps trying. 2048 is the lobby's player ceiling; the arenas run out
+  long before it (16 arenas seat 160 humans), and the rest wait in line.
 
 **Measure** on this host before launch (or on an identical one), with the release that
 will run. The probe ([scripts/test_public_mvp.mjs](../../../scripts/test_public_mvp.mjs),
@@ -603,14 +653,20 @@ from 127.0.0.1, so it lifts the per-source limits for its own lobby.
    ```
    Pass: snapshot gap p95 stays under 100 ms at the chosen capacity, and the 20 vs Bots
    players and the mixed 20 all reach Running within 60 s (`--max-wait-secs` fails the run
-   otherwise; Casual waits its 30 s for bots by design). If 20 vs Bots arenas do not fit,
-   raise `CPUQuota`/`MemoryMax` (the host is 2 vCPU / 4 GB shared with PostgreSQL, the
-   Account API and the portal) or take a bigger host (owner, O-16).
-4. Set and record: `OMOBA_MATCH_CAPACITY` and the cgroup limits in the lobby unit, the
-   same arena range in `nftables-omoba.conf` (`OMOBA_ARENA_PORTS`), PostgreSQL
-   `max_connections` (one per worker, [data.md](../../../docs/architecture/data.md)), then
-   `ru_host.py bootstrap --apply` (firewall and limits) and `ship`. Fill both tables above
-   and keep the `CAPACITY_RESULT` lines and the reports in `docs/progress/`.
+   otherwise; Casual waits its 30 s for bots by design). If 16 arenas do not fit under
+   the unit's limits, raise `CPUQuota`/`MemoryMax` by the formula (the host is 2 vCPU /
+   4 GB shared with PostgreSQL, the Account API and the portal) or take a bigger host
+   (owner, O-16). The lobby alone is probed with `--queue-only --allow-large
+   --clients=1000 --capacity=1 --seconds=30`: a thousand signed-in players waiting in
+   line, no arenas, from one machine.
+4. Set and record: `OMOBA_MATCH_CAPACITY` and the cgroup limits in the lobby unit (from
+   the formula, with the measured per-arena memory in place of 16 MiB), the same arena
+   range in `nftables-omoba.conf` (`OMOBA_ARENA_PORTS`), PostgreSQL `max_connections`
+   (≥ capacity + 32, [data.md](../../../docs/architecture/data.md); `ru_host.py status`
+   checks it), then `ru_host.py bootstrap --apply` (firewall and limits) and `ship`. Fill
+   both tables above and keep the `CAPACITY_RESULT` lines and the reports in
+   `docs/progress/`. On the Mac, `make verify-public-mvp` runs the lifecycle scenario and
+   a short mixed load against a disposable database (the same two runs CI makes).
 5. Clean up: `runuser -u postgres -- psql -c 'DROP DATABASE omoba_capacity' -c 'DROP ROLE
    omoba_capacity'`, then `rm -rf /root/capacity`.
 

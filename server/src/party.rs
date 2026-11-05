@@ -5,8 +5,16 @@
 //!
 //! State is in memory on the server the players are connected to: the
 //! standalone/practice server, or the public lobby. Match workers do not run
-//! parties; members of a public match are "away" until they return to the
-//! lobby and are rebound by their career profile.
+//! parties; members of a public match are "in match" while this lobby holds
+//! their allocation and "away" otherwise, until they return to the lobby and
+//! are rebound by their career profile.
+//!
+//! Sending: a presence heartbeat (every client, every 2 s) never forces a
+//! broadcast. The periodic pass (every 500 ms) builds the online list once
+//! ([`ViewContext`]) and derives each viewer's view from it. A state-changing
+//! command answers its issuer at once, with the refusal code if it was
+//! refused, and a successful invite also reaches the invitee at once;
+//! everyone else sees the change on the next periodic pass.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -28,7 +36,15 @@ const GUEST_GRACE: Duration = Duration::from_secs(60);
 const PROFILE_GRACE: Duration = Duration::from_secs(45 * 60);
 /// A launched party holds the practice draft for its missing members this long.
 pub(crate) const LAUNCH_GATHER: Duration = Duration::from_secs(60);
-const SEND_INTERVAL: Duration = Duration::from_millis(500);
+pub(crate) const SEND_INTERVAL: Duration = Duration::from_millis(500);
+/// A target that declined is not re-invited by the same sender for this long.
+pub(crate) const DECLINE_COOLDOWN: Duration = Duration::from_secs(60);
+/// Invites one sender may issue within [`INVITE_RATE_WINDOW`].
+pub(crate) const INVITES_PER_WINDOW: usize = 10;
+pub(crate) const INVITE_RATE_WINDOW: Duration = Duration::from_secs(60);
+/// A viewer's friend list is re-read from the career view this often; the
+/// career view is a clone, so it is not taken on every pass for every viewer.
+const FRIENDS_CACHE_TTL: Duration = Duration::from_secs(2);
 /// Party views are framed like social views, in their own tick namespace.
 const PARTY_FRAME_NAMESPACE: u64 = (1 << 63) | (1 << 62);
 
@@ -41,6 +57,27 @@ pub(crate) enum PartyError {
     NoInvite,
     NotLeader,
     NoParty,
+    /// The target declined this sender's invite less than a minute ago.
+    InviteDeclined,
+    /// The sender issued more than [`INVITES_PER_WINDOW`] invites in a minute.
+    InviteRate,
+}
+
+impl PartyError {
+    /// The stable code the client localizes (`PartyView::error`).
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::NotOnline => "not_online",
+            Self::SelfInvite => "self_invite",
+            Self::AlreadyMember => "already_member",
+            Self::PartyFull => "party_full",
+            Self::NoInvite => "no_invite",
+            Self::NotLeader => "not_leader",
+            Self::NoParty => "no_party",
+            Self::InviteDeclined => "invite_declined",
+            Self::InviteRate => "invite_rate",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,11 +119,36 @@ pub(crate) struct PartyState {
     presence: HashMap<u64, Presence>,
     parties: BTreeMap<u64, Party>,
     invites: Vec<Invite>,
+    /// `(from, to, when)` of declined invites, for the re-invite cooldown.
+    declined: Vec<(u64, u64, Instant)>,
+    /// When each sender's recent invites went out, for the rate limit.
+    invite_log: HashMap<u64, Vec<Instant>>,
+    /// Each subscriber's accepted friends (profile ids), as of `Instant`.
+    friends_cache: HashMap<SocketAddr, (Instant, HashSet<String>)>,
     next_party_id: u64,
     launch_sequence: u64,
     sequence: u64,
     last_sent: Option<Instant>,
     send_diagnostic: crate::runtime::RateLimitedDiagnostic,
+}
+
+/// One online player as every viewer sees it, before the viewer's own marks
+/// (friend, invited) are applied.
+struct OnlineRow {
+    player: OnlinePlayer,
+    profile_id: Option<String>,
+    sort_name: String,
+}
+
+/// What every view of one pass shares: built once, read for each viewer.
+pub(crate) struct ViewContext {
+    now: Instant,
+    in_match: HashSet<u64>,
+    party_of: HashMap<u64, u64>,
+    /// Every online player; a viewer's list is picked from it.
+    online: Vec<OnlineRow>,
+    /// `(party_id, invitee)` of every live invite.
+    invited: HashSet<(u64, u64)>,
 }
 
 /// Only shipped roster avatars travel to other players; anything else (an
@@ -166,12 +228,28 @@ impl PartyState {
                 invite.to = new;
             }
         }
+        for (from, to, _) in &mut self.declined {
+            if *from == old {
+                *from = new;
+            }
+            if *to == old {
+                *to = new;
+            }
+        }
+        if let Some(log) = self.invite_log.remove(&old) {
+            self.invite_log.entry(new).or_default().extend(log);
+        }
     }
 
     fn online(&self, player_id: u64, now: Instant) -> bool {
         self.presence
             .get(&player_id)
             .is_some_and(|p| now.saturating_duration_since(p.last_seen) < PRESENCE_TTL)
+    }
+
+    /// The endpoint an online player announced from.
+    pub(crate) fn addr_of(&self, player_id: u64) -> Option<SocketAddr> {
+        self.presence.get(&player_id).map(|p| p.addr)
     }
 
     pub(crate) fn party_id_of(&self, player_id: u64) -> Option<u64> {
@@ -226,6 +304,19 @@ impl PartyState {
         if !self.online(from, now) || !self.online(to, now) {
             return Err(PartyError::NotOnline);
         }
+        if self.declined.iter().any(|(f, t, at)| {
+            *f == from && *t == to && now.saturating_duration_since(*at) < DECLINE_COOLDOWN
+        }) {
+            return Err(PartyError::InviteDeclined);
+        }
+        let recent = self.invite_log.get(&from).map_or(0, |sent| {
+            sent.iter()
+                .filter(|at| now.saturating_duration_since(**at) < INVITE_RATE_WINDOW)
+                .count()
+        });
+        if recent >= INVITES_PER_WINDOW {
+            return Err(PartyError::InviteRate);
+        }
         let party_id = match self.party_id_of(from) {
             Some(id) => id,
             None => {
@@ -259,6 +350,7 @@ impl PartyState {
             to,
             expires: now + Duration::from_secs(PARTY_INVITE_TTL_SECS),
         });
+        self.invite_log.entry(from).or_default().push(now);
         Ok(party_id)
     }
 
@@ -298,7 +390,14 @@ impl PartyState {
         Ok(())
     }
 
-    pub(crate) fn decline(&mut self, player_id: u64, party_id: u64) {
+    /// Drops the invite; its sender may not invite this player again for
+    /// [`DECLINE_COOLDOWN`].
+    pub(crate) fn decline(&mut self, player_id: u64, party_id: u64, now: Instant) {
+        for invite in &self.invites {
+            if invite.party_id == party_id && invite.to == player_id {
+                self.declined.push((invite.from, player_id, now));
+            }
+        }
         self.invites
             .retain(|i| !(i.party_id == party_id && i.to == player_id));
     }
@@ -381,10 +480,16 @@ impl PartyState {
         }
     }
 
-    /// Expires invites and presence, marks vanished members away and drops
-    /// them after their grace period.
+    /// Expires invites, presence, decline cooldowns and invite rate records,
+    /// marks vanished members away and drops them after their grace period.
     pub(crate) fn prune(&mut self, now: Instant) {
         self.invites.retain(|i| i.expires > now);
+        self.declined
+            .retain(|(_, _, at)| now.saturating_duration_since(*at) < DECLINE_COOLDOWN);
+        self.invite_log.retain(|_, sent| {
+            sent.retain(|at| now.saturating_duration_since(*at) < INVITE_RATE_WINDOW);
+            !sent.is_empty()
+        });
         self.presence
             .retain(|_, p| now.saturating_duration_since(p.last_seen) < PRESENCE_TTL);
         let mut gone = Vec::new();
@@ -433,26 +538,101 @@ impl PartyState {
         self.presence.iter().map(|(id, p)| (*id, p.addr))
     }
 
-    pub(crate) fn view(
+    /// Player ids (online players and party members, including away ones)
+    /// whose career profile is among `profiles`: on the public lobby, the
+    /// profiles holding a live match allocation.
+    pub(crate) fn players_with_profiles<'a>(
+        &self,
+        profiles: impl IntoIterator<Item = &'a str>,
+    ) -> HashSet<u64> {
+        let profiles: HashSet<&str> = profiles.into_iter().collect();
+        if profiles.is_empty() {
+            return HashSet::new();
+        }
+        let has =
+            |profile: &Option<String>| profile.as_deref().is_some_and(|p| profiles.contains(p));
+        self.presence
+            .iter()
+            .filter(|(_, p)| has(&p.profile_id))
+            .map(|(id, _)| *id)
+            .chain(
+                self.parties
+                    .values()
+                    .flat_map(|party| &party.members)
+                    .filter(|m| has(&m.profile_id))
+                    .map(|m| m.player_id),
+            )
+            .collect()
+    }
+
+    /// The shared part of every view of one pass.
+    pub(crate) fn view_context(&self, now: Instant, in_match: HashSet<u64>) -> ViewContext {
+        let party_of: HashMap<u64, u64> = self
+            .parties
+            .iter()
+            .flat_map(|(id, party)| party.members.iter().map(move |m| (m.player_id, *id)))
+            .collect();
+        let online = self
+            .presence
+            .iter()
+            .filter(|(_, p)| now.saturating_duration_since(p.last_seen) < PRESENCE_TTL)
+            .map(|(id, p)| OnlineRow {
+                player: OnlinePlayer {
+                    player_id: *id,
+                    nickname: p.nickname.clone(),
+                    avatar: p.avatar.clone(),
+                    friend: false,
+                    in_party: party_of
+                        .get(id)
+                        .is_some_and(|party_id| self.parties[party_id].members.len() > 1),
+                    in_match: in_match.contains(id),
+                    invited: false,
+                },
+                profile_id: p.profile_id.clone(),
+                sort_name: p.nickname.to_lowercase(),
+            })
+            .collect();
+        let invited = self
+            .invites
+            .iter()
+            .filter(|i| i.expires > now)
+            .map(|i| (i.party_id, i.to))
+            .collect();
+        ViewContext {
+            now,
+            in_match,
+            party_of,
+            online,
+            invited,
+        }
+    }
+
+    /// One viewer's view: its party, its invites and the online list with
+    /// its friends marked and listed first, capped at [`MAX_PARTY_ONLINE`].
+    pub(crate) fn view_in(
         &self,
         viewer: u64,
-        now: Instant,
-        in_match: impl Fn(u64) -> bool,
+        context: &ViewContext,
         friends: &HashSet<String>,
     ) -> PartyView {
-        let own = self.party_id_of(viewer);
+        let now = context.now;
+        let own = context.party_of.get(&viewer).copied();
         let party = own.map(|party_id| {
             let party = &self.parties[&party_id];
             let mut members: Vec<_> = party
                 .members
                 .iter()
-                .map(|m| PartyMember {
-                    player_id: m.player_id,
-                    nickname: m.nickname.clone(),
-                    avatar: m.avatar.clone(),
-                    leader: m.player_id == party.leader,
-                    in_match: in_match(m.player_id),
-                    away: m.away_since.is_some(),
+                .map(|m| {
+                    let in_match = context.in_match.contains(&m.player_id);
+                    PartyMember {
+                        player_id: m.player_id,
+                        nickname: m.nickname.clone(),
+                        avatar: m.avatar.clone(),
+                        leader: m.player_id == party.leader,
+                        in_match,
+                        // A member in a match elsewhere is not "away".
+                        away: m.away_since.is_some() && !in_match,
+                    }
                 })
                 .collect();
             members.sort_by_key(|m| !m.leader);
@@ -482,45 +662,69 @@ impl PartyState {
                 })
             })
             .collect();
-        let mut online: Vec<_> = self
-            .presence
+        // Pick the viewer's rows by key first; only the listed ones are cloned.
+        let mut picks: Vec<(usize, bool, bool)> = context
+            .online
             .iter()
-            .filter(|(id, p)| {
-                **id != viewer && now.saturating_duration_since(p.last_seen) < PRESENCE_TTL
-            })
-            .map(|(id, p)| OnlinePlayer {
-                player_id: *id,
-                nickname: p.nickname.clone(),
-                avatar: p.avatar.clone(),
-                friend: p
+            .enumerate()
+            .filter(|(_, row)| row.player.player_id != viewer)
+            .map(|(index, row)| {
+                let friend = row
                     .profile_id
                     .as_ref()
-                    .is_some_and(|pid| friends.contains(pid)),
-                in_party: self
-                    .party_of(*id)
-                    .is_some_and(|party| party.members.len() > 1),
-                in_match: in_match(*id),
-                invited: own.is_some_and(|party_id| {
-                    self.invites
-                        .iter()
-                        .any(|i| i.party_id == party_id && i.to == *id && i.expires > now)
-                }),
+                    .is_some_and(|pid| friends.contains(pid));
+                let invited = own.is_some_and(|party_id| {
+                    context.invited.contains(&(party_id, row.player.player_id))
+                });
+                (index, friend, invited)
             })
             .collect();
-        online.sort_by(|a, b| {
-            b.friend
-                .cmp(&a.friend)
-                .then_with(|| a.in_party.cmp(&b.in_party))
-                .then_with(|| a.nickname.to_lowercase().cmp(&b.nickname.to_lowercase()))
-                .then_with(|| a.player_id.cmp(&b.player_id))
+        picks.sort_by(|a, b| {
+            let (ra, rb) = (&context.online[a.0], &context.online[b.0]);
+            b.1.cmp(&a.1)
+                .then_with(|| ra.player.in_party.cmp(&rb.player.in_party))
+                .then_with(|| ra.sort_name.cmp(&rb.sort_name))
+                .then_with(|| ra.player.player_id.cmp(&rb.player.player_id))
         });
-        online.truncate(MAX_PARTY_ONLINE);
+        picks.truncate(MAX_PARTY_ONLINE);
+        let online = picks
+            .into_iter()
+            .map(|(index, friend, invited)| OnlinePlayer {
+                friend,
+                invited,
+                ..context.online[index].player.clone()
+            })
+            .collect();
         PartyView {
             you: viewer,
             party,
             invites,
             online,
+            error: None,
         }
+    }
+
+    /// A single view (tests): the context is built for it alone.
+    #[cfg(test)]
+    pub(crate) fn view(
+        &self,
+        viewer: u64,
+        now: Instant,
+        in_match: impl Fn(u64) -> bool,
+        friends: &HashSet<String>,
+    ) -> PartyView {
+        let ids: HashSet<u64> = self
+            .presence
+            .keys()
+            .copied()
+            .chain(
+                self.parties
+                    .values()
+                    .flat_map(|party| party.members.iter().map(|m| m.player_id)),
+            )
+            .filter(|id| in_match(*id))
+            .collect();
+        self.view_in(viewer, &self.view_context(now, ids), friends)
     }
 }
 
@@ -539,6 +743,13 @@ impl ServerRuntime {
         let player = self.world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
         let player_id = player.hero.identity.id;
+        // A heartbeat changes nothing another viewer must see right now; the
+        // periodic pass carries it. Every other command is answered at once.
+        let answer_now = !matches!(command, PartyCommand::Presence { .. });
+        let invitee = match command {
+            PartyCommand::Invite { player_id } => Some(player_id),
+            _ => None,
+        };
         let result = match command {
             // An account or matchmaking ban hides the player (LR-15); the
             // presence also carries a moderator's name reset to others.
@@ -569,7 +780,7 @@ impl ServerRuntime {
             }
             PartyCommand::Accept { party_id } => self.party.accept(player_id, party_id, now),
             PartyCommand::Decline { party_id } => {
-                self.party.decline(player_id, party_id);
+                self.party.decline(player_id, party_id, now);
                 Ok(())
             }
             PartyCommand::Leave => {
@@ -581,12 +792,23 @@ impl ServerRuntime {
                 self.party.launch(player_id, preference, now).map(|_| ())
             }
         };
-        if let Err(error) = result {
+        let error = result.err();
+        if let Some(error) = error {
             println!("Party: command from player {player_id} rejected: {error:?}");
         }
-        // Answer promptly: the button press should show up at once.
-        self.party.last_sent = None;
-        self.send_party_views(now);
+        if !answer_now {
+            return;
+        }
+        // The button press shows up at once for the one who pressed it, with
+        // the refusal if any; a fresh invite shows up for the invitee too.
+        let context = self.party_context(now);
+        self.send_party_view_to(player_id, addr, &context, error.map(PartyError::code), now);
+        if error.is_none()
+            && let Some(to) = invitee
+            && let Some(to_addr) = self.party.addr_of(to)
+        {
+            self.send_party_view_to(to, to_addr, &context, None, now);
+        }
     }
 
     /// The same-team seat for a joining human whose party mate is already
@@ -639,6 +861,52 @@ impl ServerRuntime {
         self.send_party_views(now);
     }
 
+    /// Who is in a match: humans seated on this server (standalone,
+    /// practice) and, on the public lobby, the profiles this lobby handed a
+    /// live allocation (they play on a worker, so nobody is seated here).
+    fn party_context(&self, now: Instant) -> ViewContext {
+        let mut in_match: HashSet<u64> = self
+            .world
+            .players
+            .values()
+            .filter(|p| p.joined && !p.hero.identity.is_bot)
+            .map(|p| p.hero.identity.id)
+            .collect();
+        in_match.extend(
+            self.party
+                .players_with_profiles(self.match_service.assigned_profiles()),
+        );
+        self.party.view_context(now, in_match)
+    }
+
+    /// The viewer's accepted friends from its career view, re-read every
+    /// [`FRIENDS_CACHE_TTL`]: the career view is a clone, too heavy to take
+    /// twice a second for every subscriber.
+    fn refresh_friends(&mut self, addr: SocketAddr, now: Instant) {
+        let fresh = self
+            .party
+            .friends_cache
+            .get(&addr)
+            .is_some_and(|(at, _)| now.saturating_duration_since(*at) < FRIENDS_CACHE_TTL);
+        if fresh {
+            return;
+        }
+        let friends = self
+            .career
+            .backend
+            .view(addr)
+            .friends
+            .map(|f| {
+                f.friends
+                    .into_iter()
+                    .map(|f| f.profile.profile_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.party.friends_cache.insert(addr, (now, friends));
+    }
+
+    /// The periodic pass: every subscriber's view, from one shared context.
     fn send_party_views(&mut self, now: Instant) {
         if self
             .party
@@ -648,73 +916,73 @@ impl ServerRuntime {
             return;
         }
         self.party.last_sent = Some(now);
-        self.party.sequence = self.party.sequence.saturating_add(1);
-        let in_match: HashSet<u64> = self
-            .world
-            .players
-            .values()
-            .filter(|p| p.joined && !p.hero.identity.is_bot)
-            .map(|p| p.hero.identity.id)
-            .collect();
         let subscribers: Vec<_> = self.party.subscribers().collect();
+        let live: HashSet<SocketAddr> = subscribers.iter().map(|(_, addr)| *addr).collect();
+        self.party
+            .friends_cache
+            .retain(|addr, _| live.contains(addr));
+        let context = self.party_context(now);
         for (player_id, addr) in subscribers {
-            let Some(player) = self.world.players.get(&addr) else {
-                continue;
-            };
-            if player.hero.identity.id != player_id
-                || !player.framed_snapshots
-                || !crate::runtime::network_endpoint(addr, player)
-            {
-                continue;
-            }
-            let friends: HashSet<String> = self
-                .career
-                .backend
-                .view(addr)
-                .friends
-                .map(|f| {
-                    f.friends
-                        .into_iter()
-                        .map(|f| f.profile.profile_id)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let packet = ServerPacket::Party {
-                server_epoch: self.server_epoch,
-                sequence: self.party.sequence,
-                party: self
-                    .party
-                    .view(player_id, now, |id| in_match.contains(&id), &friends),
-            };
-            let result = serde_json::to_vec(&packet)
+            self.send_party_view_to(player_id, addr, &context, None, now);
+        }
+    }
+
+    /// One viewer's view, now; `error` only on the reply to a refused command.
+    fn send_party_view_to(
+        &mut self,
+        player_id: u64,
+        addr: SocketAddr,
+        context: &ViewContext,
+        error: Option<&str>,
+        now: Instant,
+    ) {
+        let Some(player) = self.world.players.get(&addr) else {
+            return;
+        };
+        if player.hero.identity.id != player_id
+            || !player.framed_snapshots
+            || !crate::runtime::network_endpoint(addr, player)
+        {
+            return;
+        }
+        self.refresh_friends(addr, now);
+        let friends = &self.party.friends_cache[&addr].1;
+        let mut view = self.party.view_in(player_id, context, friends);
+        view.error = error.map(str::to_owned);
+        self.party.sequence = self.party.sequence.saturating_add(1);
+        let packet = ServerPacket::Party {
+            server_epoch: self.server_epoch,
+            sequence: self.party.sequence,
+            party: view,
+        };
+        let result = serde_json::to_vec(&packet)
+            .map_err(|e| e.to_string())
+            .and_then(|payload| {
+                shared::transport::encode_snapshot(
+                    &payload,
+                    self.server_epoch,
+                    PARTY_FRAME_NAMESPACE | self.party.sequence,
+                )
                 .map_err(|e| e.to_string())
-                .and_then(|payload| {
-                    shared::transport::encode_snapshot(
-                        &payload,
-                        self.server_epoch,
-                        PARTY_FRAME_NAMESPACE | self.party.sequence,
-                    )
-                    .map_err(|e| e.to_string())
-                });
-            match result {
-                Ok(datagrams) => {
-                    for datagram in datagrams {
-                        if let Err(error) = self.transport.send_to(&datagram, addr) {
-                            if let Some(suppressed) = self.party.send_diagnostic.record(now) {
-                                eprintln!(
-                                    "Party send failed for {addr}: {error}; suppressed {suppressed} similar errors"
-                                );
-                            }
-                            break;
+            });
+        match result {
+            Ok(datagrams) => {
+                for datagram in datagrams {
+                    if let Err(error) = self.transport.send_to(&datagram, addr) {
+                        if let Some(suppressed) = self.party.send_diagnostic.record(now) {
+                            eprintln!(
+                                "Party send failed for {addr}: {error}; suppressed {suppressed} similar errors"
+                            );
                         }
+                        break;
                     }
                 }
-                Err(error) => {
-                    if let Some(suppressed) = self.party.send_diagnostic.record(now) {
-                        eprintln!(
-                            "Party framing failed for {addr}: {error}; suppressed {suppressed} similar errors"
-                        );
-                    }
+            }
+            Err(error) => {
+                if let Some(suppressed) = self.party.send_diagnostic.record(now) {
+                    eprintln!(
+                        "Party framing failed for {addr}: {error}; suppressed {suppressed} similar errors"
+                    );
                 }
             }
         }

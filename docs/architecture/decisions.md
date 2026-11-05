@@ -638,6 +638,31 @@ sequenceDiagram
 
 ---
 
+## ADR-027: Pre-start resilience by re-queue, a widening Ranked window and lobby ceilings sized for ~1000 players
+
+- **Date:** 2026-11-05 ([../plans/ranked-launch-readiness-2026-11-05.md](../plans/ranked-launch-readiness-2026-11-05.md); LR-32, LR-35, LR-47 in [../plans/launch-readiness.md](../plans/launch-readiness.md)).
+- **Status:** Accepted. The accept/ready-check step, the persisted dodge cooldown and the leaver policy stay open (LR-32, LR-33).
+
+**Context.** A review of the matchmaking pipeline before the RU launch found that one player's cancel, no-show or crash before a match started aborted the allocation for all ten, dropped the other nine with a raw code and sent them to the back of the queue; that the Ranked cohort (300 points, one newcomer bracket) never widened, so ten Ranked humans across cohorts never met; that the lobby's constants (128 waiting, 512 recent requests, 512 endpoints and career clients, 8 endpoints and 1 arena per source IP) were sized for a closed beta and failed silently; and that rating had no ladder anywhere.
+
+**Decision.**
+- **Re-queue, not drop.** The lobby parks the queue entries of every allocation it seats. When an allocation ends before its match started, the humans who had joined the worker go back to the queue with their original order and age (a 30 s grace covers the client's return to the lobby); the member who cancelled, and a member the worker never saw, are not re-queued. Cancelling a found Ranked match costs a 60 s in-memory cooldown. The client returns to the lobby and re-sends its last lock-in on its own, with a localized notice. A worker nobody reached aborts after 60 s; the lobby kills a worker that writes no receipt within 20 s. If no worker receipt was ever available, all parked humans keep their queue places because the server has no evidence of a player no-show. Explicit cancellation reported by a Ranked worker applies the same cooldown once, when its allocation fails.
+- **Widening window (LR-35), parties excepted.** `CohortAllowance::after_wait`: 300 points for 2 minutes, +100 per minute to 600, brackets merge at 5 minutes. The manifest records the window; the store re-checks a rated start against the **maximum** window, not the exact one, so the start record and the wire stay unchanged. A party must itself be one base cohort.
+- **Arena priority by seated humans**, then age: a ready 5v5 before a solo vs Bots game when arenas are short.
+- **Ceilings.** `OMOBA_LOBBY_MAX_WAITING` (default 1024, max 4096) replaces the 128 constant; 4096 recent requests answer `lobby_busy` beyond; 2048 transport endpoints and career clients per lobby; a per-IP refusal answers `server_full`. The RU kit ships 16 arenas, `KillMode=process` (workers survive a lobby restart and are adopted), cgroup limits from a per-arena formula, per-IP limits sized for carrier-grade NAT, and a PostgreSQL `max_connections` check.
+- **Leaderboard (LR-47).** `GET /v1/leaderboard` over a career partial index (schema 6), listing profiles past the newcomer bracket by rating; opt-out per profile (`portal.profile_settings.leaderboard_listed`, default listed, portal schema 11) because nickname and rating already reach every opponent in match reports.
+- **Codes, not sentences**, for everything the lobby or the prematch tells a player (`not_completed`, `roster_changed`, `loading_timeout`, `start_timeout`, the lobby failure codes, the party error codes).
+
+**Consequences.**
+- A single host still bounds the product: snapshot egress (~250 kB/s per player) and one worker pool per host put ~1000 concurrent players beyond one VPS (LR-57). The software ceilings no longer hide that.
+- Workers of an old release keep running across a lobby upgrade; lobby and workers must stay protocol-compatible across one upgrade (they already must).
+- The port of a finished arena still stays reserved 35 s after its last heartbeat, by the existing design; freeing it on an observed exit was considered and left out.
+- The exact widened window is not persisted in the match receipt; auditing a formed roster's window needs the archived manifest.
+
+**Links:** [../match-progression.md](../match-progression.md#ranked-window-at-low-population-lr-35), [../public-mvp.md](../public-mvp.md), [../party.md](../party.md), [../../ops/vps/ru/README.md](../../ops/vps/ru/README.md), [../../account-api/README.md](../../account-api/README.md).
+
+---
+
 ## Proposals not yet decided
 
 - **Game directory and server routing** (concept, 2026-10-13, not scheduled). Clients would fetch one HTTPS directory document per contour instead of using a compiled lobby address, and pick a lobby whose compatibility contract matches their own (phases D0 to D4). The document is proposed to be Ed25519-signed with a public key baked into the client. Where it is hosted (a portal route or a static signed file on the game host) is undecided. See [../plans/game-directory.md](../plans/game-directory.md). If adopted, it would amend ADR-002 and ADR-013. LR-68 (ADR-025) needs D0 for the global lobby (a DNS name instead of `77.246.105.57`, O-31) and serves the D1 document per region.

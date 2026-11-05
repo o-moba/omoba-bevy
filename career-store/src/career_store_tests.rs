@@ -214,6 +214,25 @@ async fn career_store_distinct_owners_can_share_legacy_epoch_and_round_metadata(
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_accepts_the_lobbys_widened_rating_and_experience_window() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    sqlx::query("UPDATE career_profiles SET rating=1500,rated_matches=20,matches_played=20 WHERE profile_id=$1")
+        .bind(&b.profile_id).execute(&f.store.pool).await.unwrap();
+    let b = f.store.profile(&b.profile_id).await.unwrap();
+    assert!(a.newcomer() && !b.newcomer());
+    assert!(!crate::matchmaking::same_cohort([&a, &b]));
+    assert!(crate::matchmaking::same_cohort_with(
+        [&a, &b],
+        crate::matchmaking::CohortAllowance::MAX
+    ));
+    f.store.start(starting(&result(&a, &b, 1))).await.unwrap();
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_allocation_rechecks_current_experience_and_rating_after_remote_match() {
     let f = Fixture::new().await;
     let a = f.profile(1).await;
@@ -234,6 +253,14 @@ async fn career_store_allocation_rechecks_current_experience_and_rating_after_re
     assert_eq!(current_a.rated_matches, 20);
     assert!(!current_a.newcomer());
 
+    // A newcomer and a veteran within the widened window are one cohort for
+    // the store (LR-35: the lobby merges the brackets after five minutes);
+    // ratings that drifted beyond the widest window the lobby can form are not.
+    sqlx::query("UPDATE career_profiles SET rating = rating + 650 WHERE profile_id = $1")
+        .bind(&a.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
     let stale = result(&cached_a, &cached_b, 2);
     let error = "Queued ratings changed. Clear the queue and try again.";
     assert_eq!(server_b.start(starting(&stale)).await.unwrap_err(), error);
@@ -260,12 +287,13 @@ async fn career_store_allocation_rechecks_current_experience_and_rating_after_re
         .unwrap();
     assert_eq!(seats, 0, "failed validation cannot reserve either account");
 
+    // A is 650 above current_a: 601 points must fail, exactly 600 must pass.
     sqlx::query("UPDATE career_profiles SET rated_matches=20,matches_played=20,losses=11,rating=$2 WHERE profile_id=$1")
-        .bind(&b.profile_id).bind(current_a.rating + 301).execute(&f.store.pool).await.unwrap();
+        .bind(&b.profile_id).bind(current_a.rating + 49).execute(&f.store.pool).await.unwrap();
     assert_eq!(server_b.start(starting(&stale)).await.unwrap_err(), error);
     sqlx::query("UPDATE career_profiles SET rating=$2 WHERE profile_id=$1")
         .bind(&b.profile_id)
-        .bind(current_a.rating + 300)
+        .bind(current_a.rating + 50)
         .execute(&f.store.pool)
         .await
         .unwrap();

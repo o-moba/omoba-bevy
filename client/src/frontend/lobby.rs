@@ -5,8 +5,9 @@
 //! (`crate::party::PartyClient`); buttons only send `PartyCommand`s. The
 //! launch itself moves every member to hero select (`crate::party`).
 //!
-//! Text comes from the `lobby` dictionary; the render key includes the
-//! locale generation, so a language change rebuilds the screen.
+//! Text comes from the `lobby` dictionary (refusals and notices from
+//! `party`); the render key includes the locale generation, so a language
+//! change rebuilds the screen.
 // i18n-strict
 
 use bevy::prelude::*;
@@ -17,7 +18,7 @@ use super::party_stage::{PartyStage, STAGE_HEIGHT, STAGE_WIDTH, StageMember, Sta
 use super::{AppScreen, automation_bypass, widgets};
 use crate::i18n::{Locale, tr, trf};
 use crate::net::{ClientSession, NetworkCommand};
-use crate::party::PartyClient;
+use crate::party::{PartyClient, PartyNotice};
 use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::TextStyle;
 use crate::ui::theme::{self, ButtonKind};
@@ -30,7 +31,10 @@ pub struct LobbyScreenPlugin;
 impl Plugin for LobbyScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<LobbyAction>()
-            .add_systems(OnEnter(AppScreen::Lobby), (spawn_backdrop, spawn_lobby))
+            .add_systems(
+                OnEnter(AppScreen::Lobby),
+                (spawn_backdrop, spawn_lobby, request_friends_on_enter),
+            )
             .add_systems(
                 PostUpdate,
                 sync_scrollbar.after(bevy::ui::UiSystems::Layout),
@@ -132,6 +136,40 @@ pub(crate) fn stage_members(
         .collect()
 }
 
+/// Outside the career client's own request sequence: the reply only refreshes
+/// the server's friend list for this endpoint (the ★ marks and the order of
+/// the online list), the career client has nothing pending for it.
+const LOBBY_FRIENDS_REQUEST_ID: u64 = 1 << 62;
+
+/// Friends are marked and listed first on the first visit: the server learns
+/// a player's friends from a Friends request, which otherwise the friends
+/// modal sends. The same command the modal sends, for a signed-in player.
+fn request_friends_on_enter(
+    career: Res<crate::career::CareerClient>,
+    mut requests: MessageWriter<NetworkCommand>,
+) {
+    if career.view.storage_enabled && career.view.profile.is_some() {
+        requests.write(NetworkCommand::Career(
+            shared::career::CareerRequest::Friends {
+                request_id: LOBBY_FRIENDS_REQUEST_ID,
+            },
+        ));
+    }
+}
+
+/// A refusal code (`PartyView::error`) in the player's words; an unknown
+/// code gets the generic line.
+pub(crate) fn party_error_text(code: &str) -> &'static str {
+    crate::i18n::lookup(&format!("party.error.{code}")).unwrap_or_else(|| tr("party.error.unknown"))
+}
+
+fn notice_text(notice: &PartyNotice) -> &'static str {
+    match notice {
+        PartyNotice::Error(code) => party_error_text(code),
+        PartyNotice::LobbyRestarted => tr("party.notice.lobby_restarted"),
+    }
+}
+
 fn member_status(member: &shared::party::PartyMember) -> (&'static str, Color) {
     if member.away {
         (tr("lobby.status.away"), theme::MUTED)
@@ -157,6 +195,8 @@ struct LobbySignature {
     scale: u32,
     avatar: Option<String>,
     character: crate::team::CharacterChoice,
+    /// A fresh refusal or notice (`crate::party`), shown under the online list.
+    notice: Option<PartyNotice>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -171,9 +211,10 @@ fn signature(
     avatar: Option<String>,
     character: crate::team::CharacterChoice,
 ) -> LobbySignature {
+    let now = std::time::Instant::now();
     LobbySignature {
         view: party.view.clone(),
-        live: party.is_live(std::time::Instant::now()),
+        live: party.is_live(now),
         public: career.view.match_service.is_some(),
         friends: career.view.storage_enabled,
         server: session.server_addr().to_owned(),
@@ -188,6 +229,7 @@ fn signature(
         scale: scale.to_bits(),
         avatar,
         character,
+        notice: party.notice(now).cloned(),
     }
 }
 
@@ -899,6 +941,12 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                         for player in &view.online {
                             spawn_online_row(column, view, player);
                         }
+                        if let Some(notice) = &sig.notice {
+                            column.spawn((
+                                label(notice_text(notice), 12.0, theme::GOLD),
+                                Name::new("LobbyNotice"),
+                            ));
+                        }
                         // A contour build's connection is secondary and scrolls with
                         // the social list; production shows none (no server selection).
                         if let Some(profile) = sig.connection {
@@ -1248,6 +1296,69 @@ mod tests {
                 "a member waits"
             );
         }
+    }
+
+    #[test]
+    fn refusal_codes_have_text_and_unknown_codes_fall_back() {
+        for code in [
+            "not_online",
+            "self_invite",
+            "already_member",
+            "party_full",
+            "no_invite",
+            "not_leader",
+            "no_party",
+            "invite_declined",
+            "invite_rate",
+        ] {
+            let text = party_error_text(code);
+            assert!(
+                !text.is_empty() && !text.starts_with("party."),
+                "{code}: {text}"
+            );
+            assert_ne!(text, party_error_text("no_such_code"), "{code}");
+        }
+        assert_eq!(party_error_text("no_such_code"), tr("party.error.unknown"));
+        assert_eq!(
+            notice_text(&PartyNotice::Error("party_full".into())),
+            tr("party.error.party_full")
+        );
+        assert_eq!(
+            notice_text(&PartyNotice::LobbyRestarted),
+            tr("party.notice.lobby_restarted")
+        );
+    }
+
+    /// Friends are marked on the first visit: entering the lobby asks the
+    /// server for the friend list, for a signed-in player only.
+    #[test]
+    fn entering_the_lobby_requests_friends_for_a_signed_in_player() {
+        let run = |signed_in: bool, storage: bool| {
+            let mut app = App::new();
+            let mut career = crate::career::CareerClient::default();
+            career.view.storage_enabled = storage;
+            career.view.profile = signed_in
+                .then(|| shared::career::ProfileSummary::new("p".repeat(64), "Ann".into()));
+            app.insert_resource(career)
+                .add_message::<NetworkCommand>()
+                .add_systems(Update, request_friends_on_enter);
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter(|command| {
+                    matches!(
+                        command,
+                        NetworkCommand::Career(shared::career::CareerRequest::Friends {
+                            request_id: LOBBY_FRIENDS_REQUEST_ID,
+                        })
+                    )
+                })
+                .count()
+        };
+        assert_eq!(run(true, true), 1);
+        assert_eq!(run(false, true), 0, "a guest has no friends to ask for");
+        assert_eq!(run(true, false), 0, "no storage, no friends");
     }
 
     #[test]

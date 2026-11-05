@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use shared::HeroClass;
 use shared::map::Team;
 use shared::match_service::MatchPreference;
-use shared::party::{MAX_PARTY_SIZE, PartyCommand};
+use shared::party::{MAX_PARTY_ONLINE, MAX_PARTY_SIZE, PartyCommand, PartyView};
 use shared::wire::{CharacterChoice, ClientPacket};
 
 use super::*;
@@ -70,18 +70,19 @@ fn declined_and_expired_invites_leave_no_party_behind() {
     let mut state = PartyState::default();
     online(&mut state, &[1, 2], now);
     let party = state.invite(1, 2, now).unwrap();
-    state.decline(2, party);
+    state.decline(2, party, now);
     state.prune(now);
     assert!(state.view(1, now, |_| false, &no_friends()).party.is_none());
 
-    let party = state.invite(1, 2, now).unwrap();
+    // The other way round (the decline put 1 -> 2 on cooldown).
+    let party = state.invite(2, 1, now).unwrap();
     let later = now + Duration::from_secs(shared::party::PARTY_INVITE_TTL_SECS + 1);
     online(&mut state, &[1, 2], later);
-    assert_eq!(state.accept(2, party, later), Err(PartyError::NoInvite));
+    assert_eq!(state.accept(1, party, later), Err(PartyError::NoInvite));
     state.prune(later);
     assert!(
         state
-            .view(1, later, |_| false, &no_friends())
+            .view(2, later, |_| false, &no_friends())
             .party
             .is_none()
     );
@@ -222,12 +223,124 @@ fn friends_are_listed_first() {
     assert!(view.online[0].friend && !view.online[1].friend);
 }
 
+#[test]
+fn a_declined_target_is_not_reinvited_by_the_same_sender_for_a_minute() {
+    let now = Instant::now();
+    let mut state = PartyState::default();
+    online(&mut state, &[1, 2, 3], now);
+    let party = state.invite(1, 2, now).unwrap();
+    state.decline(2, party, now);
+    assert_eq!(state.invite(1, 2, now), Err(PartyError::InviteDeclined));
+    // Another sender may still invite; the same sender may invite others.
+    assert!(state.invite(3, 2, now).is_ok());
+    assert!(state.invite(1, 3, now).is_ok());
+    let later = now + DECLINE_COOLDOWN;
+    online(&mut state, &[1, 2, 3], later);
+    state.prune(later);
+    assert!(state.invite(1, 2, later).is_ok());
+}
+
+#[test]
+fn a_sender_is_limited_to_ten_invites_a_minute() {
+    let now = Instant::now();
+    let mut state = PartyState::default();
+    let ids: Vec<u64> = (1..=INVITES_PER_WINDOW as u64 + 2).collect();
+    online(&mut state, &ids, now);
+    for &to in &ids[1..=INVITES_PER_WINDOW] {
+        state.invite(1, to, now).unwrap();
+    }
+    assert_eq!(
+        state.invite(1, ids[INVITES_PER_WINDOW + 1], now),
+        Err(PartyError::InviteRate)
+    );
+    // A refused invite is not counted, and the window slides.
+    let later = now + INVITE_RATE_WINDOW;
+    online(&mut state, &ids, later);
+    state.prune(later);
+    assert!(state.invite(1, ids[INVITES_PER_WINDOW + 1], later).is_ok());
+}
+
+#[test]
+fn error_codes_are_stable_snake_case() {
+    for (error, code) in [
+        (PartyError::NotOnline, "not_online"),
+        (PartyError::SelfInvite, "self_invite"),
+        (PartyError::AlreadyMember, "already_member"),
+        (PartyError::PartyFull, "party_full"),
+        (PartyError::NoInvite, "no_invite"),
+        (PartyError::NotLeader, "not_leader"),
+        (PartyError::NoParty, "no_party"),
+        (PartyError::InviteDeclined, "invite_declined"),
+        (PartyError::InviteRate, "invite_rate"),
+    ] {
+        assert_eq!(error.code(), code);
+    }
+}
+
+#[test]
+fn a_mate_holding_a_lobby_allocation_is_in_match_not_away() {
+    let now = Instant::now();
+    let mut state = PartyState::default();
+    state.presence(1, addr(1), "Ann", None, Some("ann".into()), now);
+    state.presence(2, addr(2), "Bob", None, Some("bob".into()), now);
+    let party = state.invite(2, 1, now).unwrap();
+    state.accept(1, party, now).unwrap();
+    // Ann plays on a worker: no presence on the lobby, an allocation held.
+    let quiet = now + PRESENCE_TTL;
+    state.presence(2, addr(2), "Bob", None, Some("bob".into()), quiet);
+    state.prune(quiet);
+    let ann = |view: PartyView| {
+        view.party
+            .unwrap()
+            .members
+            .into_iter()
+            .find(|m| m.player_id == 1)
+            .unwrap()
+    };
+    let playing = state.players_with_profiles(["ann"]);
+    assert_eq!(playing, HashSet::from([1]));
+    let member = ann(state.view(2, quiet, |id| playing.contains(&id), &no_friends()));
+    assert!(member.in_match && !member.away);
+    // Without an allocation the silent mate is away.
+    assert!(state.players_with_profiles([]).is_empty());
+    let member = ann(state.view(2, quiet, |_| false, &no_friends()));
+    assert!(!member.in_match && member.away);
+}
+
+#[test]
+fn friends_are_listed_before_the_online_cap_applies() {
+    let now = Instant::now();
+    let mut state = PartyState::default();
+    // More players than one view lists, the friend sorting last by name.
+    let crowd = MAX_PARTY_ONLINE as u64 + 4;
+    for id in 1..=crowd {
+        state.presence(id, addr(id as u16), &format!("P{id:03}"), None, None, now);
+    }
+    state.presence(99, addr(99), "Zz", None, Some("zz".into()), now);
+    let friends: HashSet<String> = ["zz".to_owned()].into();
+    let context = state.view_context(now, HashSet::new());
+    let view = state.view_in(1, &context, &friends);
+    assert_eq!(view.online.len(), MAX_PARTY_ONLINE);
+    assert_eq!(view.online[0].player_id, 99);
+    assert!(view.online[0].friend);
+    assert!(view.online.iter().all(|p| p.player_id != 1));
+    // The same context serves another viewer with its own marks.
+    let other = state.view_in(99, &context, &no_friends());
+    assert!(other.online.iter().all(|p| !p.friend && p.player_id != 99));
+}
+
 // --- Runtime: two party members on a practice server share a team. ---
 
 fn practice_runtime(size: u32) -> (ServerRuntime, ManualClock) {
+    let (rt, clock, _) = practice_runtime_with_transport(size);
+    (rt, clock)
+}
+
+fn practice_runtime_with_transport(size: u32) -> (ServerRuntime, ManualClock, MemoryTransport) {
     let clock = ManualClock::new(Instant::now());
+    let transport = MemoryTransport::new(addr(0));
     let rt = ServerRuntime::for_test(
-        MemoryTransport::new(addr(0)),
+        transport.clone(),
         clock.clone(),
         career_backend::MemoryCareer::test_backend(7),
         MatchConfig {
@@ -235,7 +348,30 @@ fn practice_runtime(size: u32) -> (ServerRuntime, ManualClock) {
             team_size: size,
         },
     );
-    (rt, clock)
+    (rt, clock, transport)
+}
+
+/// Makes the endpoint a party-view recipient (a session that framed up).
+fn framed(rt: &mut ServerRuntime, index: u16) {
+    rt.world
+        .players
+        .get_mut(&addr(index))
+        .unwrap()
+        .framed_snapshots = true;
+}
+
+/// The party views in `sent`, by recipient.
+fn party_views(sent: &[(SocketAddr, Vec<u8>)], now: Instant) -> Vec<(SocketAddr, PartyView)> {
+    let mut assembler = shared::transport::SnapshotAssembler::default();
+    sent.iter()
+        .filter_map(|(to, datagram)| {
+            let body = assembler.push(datagram, now).unwrap()?;
+            match serde_json::from_slice::<shared::wire::ServerPacket>(&body).unwrap() {
+                shared::wire::ServerPacket::Party { party, .. } => Some((*to, party)),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 fn join(session: &str, prematch: bool) -> ClientPacket {
@@ -319,6 +455,83 @@ fn party_mates_share_a_team_against_bots_on_a_practice_server() {
     };
     assert_eq!(bots_on(ours), 3);
     assert_eq!(bots_on(theirs), 5);
+}
+
+#[test]
+fn a_presence_heartbeat_sends_nobody_a_view_before_the_periodic_pass() {
+    let (mut rt, clock, transport) = practice_runtime_with_transport(5);
+    let now = clock.now();
+    presence(&mut rt, 1, now);
+    presence(&mut rt, 2, now);
+    framed(&mut rt, 1);
+    framed(&mut rt, 2);
+    rt.tick_party(now);
+    assert_eq!(
+        party_views(&transport.take_outbound(), now).len(),
+        2,
+        "the first periodic pass reaches both"
+    );
+    let soon = now + Duration::from_millis(100);
+    presence(&mut rt, 1, soon);
+    rt.tick_party(soon);
+    assert!(
+        transport.take_outbound().is_empty(),
+        "a heartbeat is not answered and does not reset the periodic timer"
+    );
+    let due = now + SEND_INTERVAL;
+    rt.tick_party(due);
+    let mut to: Vec<_> = party_views(&transport.take_outbound(), due)
+        .into_iter()
+        .map(|(to, _)| to)
+        .collect();
+    to.sort();
+    assert_eq!(to, [addr(1), addr(2)]);
+}
+
+#[test]
+fn a_command_answers_its_issuer_at_once_and_an_invite_reaches_the_invitee() {
+    let (mut rt, clock, transport) = practice_runtime_with_transport(5);
+    let now = clock.now();
+    let one = presence(&mut rt, 1, now);
+    let two = presence(&mut rt, 2, now);
+    presence(&mut rt, 3, now);
+    for index in 1..=3 {
+        framed(&mut rt, index);
+    }
+    rt.tick_party(now);
+    transport.take_outbound();
+    rt.handle_packet(
+        addr(1),
+        ClientPacket::Party {
+            command: PartyCommand::Invite { player_id: two },
+        },
+        now,
+    );
+    let views = party_views(&transport.take_outbound(), now);
+    let mut to: Vec<_> = views.iter().map(|(to, _)| *to).collect();
+    to.sort();
+    assert_eq!(to, [addr(1), addr(2)], "issuer and invitee, not the third");
+    assert!(views.iter().all(|(_, view)| view.error.is_none()));
+    let invitee = &views.iter().find(|(to, _)| *to == addr(2)).unwrap().1;
+    assert_eq!(invitee.invites.len(), 1);
+    // A refused command answers the issuer alone, with the code.
+    rt.handle_packet(
+        addr(1),
+        ClientPacket::Party {
+            command: PartyCommand::Invite { player_id: one },
+        },
+        now,
+    );
+    let views = party_views(&transport.take_outbound(), now);
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].0, addr(1));
+    assert_eq!(views[0].1.error.as_deref(), Some("self_invite"));
+    // The periodic pass carries no error.
+    let due = now + SEND_INTERVAL;
+    rt.tick_party(due);
+    let views = party_views(&transport.take_outbound(), due);
+    assert_eq!(views.len(), 3);
+    assert!(views.iter().all(|(_, view)| view.error.is_none()));
 }
 
 #[test]

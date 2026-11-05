@@ -1,7 +1,8 @@
 {
   "net.retry": "Retry",
   "net.status.connecting": "Connecting… ({addr})",
-  "net.status.waiting": "Waiting for server at {addr}. Start the server or check GAME_SERVER_ADDR. Retries every {retry}s (max wait {max_wait}s).",
+  "net.status.waiting": "The server is not answering. Checking the connection and retrying…",
+  "net.status.waiting_dev": "Waiting for server at {addr}. Start the server or check GAME_SERVER_ADDR. Retries every {retry}s (max wait {max_wait}s).",
   "net.status.joined": "Joined - connected to match.",
   "net.status.joining": "Joining match… attempt {attempt}/{max}. Waiting for server admission.",
   "net.status.connected": "Connected - choose a hero and team to join.",

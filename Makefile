@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish release-ru-verify-downloads showcase demo-video trailer-clips sdk-pin-check
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay verify-public-mvp iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish release-ru-verify-downloads showcase demo-video trailer-clips sdk-pin-check
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -193,6 +193,20 @@ verify-task-12: ## Build server and run the live UDP QA matrix
 verify-gameplay: ## Build server and run headless gameplay/matchmaking checks
 	cargo build -p server
 	cargo test -p harness -- --test-threads=1
+
+# Not part of `check`: needs a disposable PostgreSQL database in OMOBA_TEST_DATABASE_URL
+# (as test-postgres), which it migrates first. Runs the public-protocol probe
+# (scripts/test_public_mvp.mjs, docs/public-mvp.md) twice against a loopback lobby built
+# from this checkout: the lifecycle scenario, then a short mixed Ranked/Casual/vs Bots
+# load. Reports land in PUBLIC_MVP_OUT. CI's `postgres` job runs the same target.
+PUBLIC_MVP_OUT ?= $(or $(CARGO_TARGET_DIR),target)/public-mvp
+PUBLIC_MVP_PROBE = HARNESS_SERVER_BIN="$(or $(CARGO_TARGET_DIR),target)/debug/server" node scripts/test_public_mvp.mjs
+verify-public-mvp: ## Public-protocol probe: lifecycle + mixed load (set OMOBA_TEST_DATABASE_URL to a disposable database)
+	@test -n "$(OMOBA_TEST_DATABASE_URL)" || { echo "verify-public-mvp: set OMOBA_TEST_DATABASE_URL to a disposable PostgreSQL database" >&2; exit 2; }
+	cargo build --locked -p server
+	OMOBA_DATABASE_URL="$(OMOBA_TEST_DATABASE_URL)" cargo run --locked -q -p omoba-account-api -- migrate
+	$(PUBLIC_MVP_PROBE) --scenario=lifecycle --output="$(PUBLIC_MVP_OUT)/lifecycle"
+	$(PUBLIC_MVP_PROBE) --mix=humans_only:10,quick:5,bot_practice:2 --max-wait-secs=60 --seconds=5 --output="$(PUBLIC_MVP_OUT)/mixed"
 
 # ---------------------------------------------------------------------------
 # Releases (docs/RELEASING.md). Artifacts go to dist/v<version>/.
