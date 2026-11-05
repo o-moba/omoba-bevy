@@ -695,7 +695,7 @@ impl CareerStore {
                 .map(|p| {
                     let profile =
                         &profiles[p.profile_id.as_ref().expect("validated rated identity")];
-                    (p.player_id, p.team, profile.rating)
+                    (p.player_id, p.team, profile.rating, profile.rated_matches)
                 })
                 .collect();
             crate::matchmaking::rating_changes_for_players(

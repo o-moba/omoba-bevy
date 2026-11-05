@@ -8,6 +8,7 @@ runner never connects to a configured live lobby or changes its limits.
 import argparse
 from collections import deque
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -51,6 +52,7 @@ def verify_results(statuses, count, ranked, custom_map=False):
     assert len(profiles) == count, "duplicate result/profile identities"
     ids = {status["result"]["result_id"] for status in statuses}
     assert len(ids) == 1, "clients settled different matches"
+    initial_profiles = {s["profile"]["profile_id"]: s["initial_profile"] for s in statuses}
     for status in statuses:
         result, profile, initial = (status[k] for k in ("result", "profile", "initial_profile"))
         assert result["saved"] and result["outcome"] == "completed"
@@ -77,12 +79,23 @@ def verify_results(statuses, count, ranked, custom_map=False):
             assert {p["profile_id"] for p in result["participants"]} == profiles
             assert all(not p.get("is_bot", False) and p["profile_id"] for p in result["participants"])
             rating = me["rating"]
-            assert rating and rating["delta"] != 0
+            assert rating
             assert rating["before"] == initial["rating"]
             assert rating["after"] == profile["rating"] == rating["before"] + rating["delta"]
             assert profile["rated_matches"] == initial["rated_matches"] + 1
             won = me["team"] == result["winner"]
-            assert (rating["delta"] > 0) == won
+            team_ratings = [initial_profiles[p["profile_id"]]["rating"]
+                            for p in result["participants"] if p["team"] == me["team"]]
+            opposing_ratings = [initial_profiles[p["profile_id"]]["rating"]
+                                for p in result["participants"] if p["team"] != me["team"]]
+            expected_score = 1 / (1 + 10 ** ((sum(opposing_ratings) / len(opposing_ratings)
+                                            - sum(team_ratings) / len(team_ratings)) / 400))
+            k = 48 if initial["rated_matches"] < 20 else 32
+            requested = k * (int(won) - expected_score)
+            # Rust f64::round rounds half away from zero, unlike Python round.
+            delta = math.floor(abs(requested) + 0.5) * (1 if requested >= 0 else -1)
+            expected_after = max(0, min(5000, initial["rating"] + delta))
+            assert rating["after"] == expected_after, "wrong placement/team Elo award"
             assert me["progression_xp_gained"] == (150 if won else 100)
             assert profile["wins"] == initial["wins"] + int(won)
             assert profile["losses"] == initial["losses"] + int(not won)

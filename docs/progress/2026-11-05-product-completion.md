@@ -400,3 +400,39 @@ Original findings #53/#54 are explicitly reopened for P7. Their earlier
 The prepared Android haptic patch's blank context lines were normalized; it
 still passes `git apply --check`, without adding production dependencies or
 permissions before approval.
+
+
+## P6 continuation: placement K (#35)
+
+Implemented K=48 for each player's first 20 rated completions and K=32 after
+that, using the current locked database profile before the result increments
+rated_matches. Team-average expected score, outcome-only changes, independent
+0–5000 clamping and half-away-from-zero rounding remain unchanged. Mixed
+experience may deliberately be non-zero-sum. No migration, dependency, CI or
+infrastructure changes are involved in this rating change.
+
+The focused unit and real PostgreSQL boundary tests both passed: count 0/19/20,
+mixed K in both win directions, rating bounds, the actual 20th→21st settlement,
+and idempotent retry without another rated counter increment. The complete
+store suite passed all 42 tests (including every ignored real-PostgreSQL case),
+and all-target store clippy passed with warnings denied. Eight rehearsal-tool tests pass;
+the complete Ranked proof now checks the exact per-player Elo amount, including
+placement K, rather than only checking a nonzero delta of the right sign. A
+self-consistent but outdated ±16 award to fresh profiles is explicitly rejected.
+Historical ±16 evidence above predates this change and is retained as such;
+current complete-gameplay CI must verify fresh-profile ±24 before #35 closes.
+
+P5 is awaiting its corrected complete-gate repeat, Android haptic approval and
+native Home evidence. Repeated guarded native builds stopped when free root
+disk fell below 20 GiB; no heavy native build will be retried until sufficient
+headroom is available. This does not block the isolated store work. Fair-play
+accounting, remake/surrender, uniqueness, explicit tiers/seasons and the owner
+O-3 eligibility decision remain required in P6.
+
+
+P5 platform acceptance update: all code/client/headless/Android/tooling jobs in
+CI 42013272058 passed; its only failure was the stale 22-second lifecycle
+expectation corrected in ea9bcde. Separate iOS compile workflow 42013403638 also
+passed on the actual aarch64-apple-ios target. Combined gate repeat 42014873649
+is running for ea9bcde; native Home rendering remains blocked by local disk
+headroom, and physical device behavior is not claimed.

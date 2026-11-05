@@ -229,7 +229,13 @@ and the default full release roster is 5v5. An empty/insufficient population wai
 honestly; it is not filled with mismatched veterans. On the public lobby these
 cohorts apply to Ranked only; Casual PvP groups every cohort.
 
-Rating starts at 1000, uses outcome-based team Elo with K = 32, and stays within 0–5000.
+Rating starts at 1000 and stays within 0–5000. Team-average Elo uses K = 48
+for each player's first 20 rated completions and K = 32 thereafter. The store
+chooses K from the locked pre-settlement rated-match count: the 20th match still
+uses 48, the 21st uses 32. Widened rosters may mix placement and established
+players; each has their own K, so such a match need not be zero-sum. Each award
+is rounded half away from zero and clamped independently at the rating bounds.
+Stats, XP and combat performance do not enter the formula.
 An eligible rated completion gives 150 permanent XP for a win and 100 for a loss;
 profile level is 1 + XP / 1000. These are initial beta values, not a calibrated
 competitive ranking model. Damage farming never directly increases MMR.

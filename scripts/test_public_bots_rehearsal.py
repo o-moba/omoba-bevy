@@ -45,24 +45,43 @@ class PublicBotsRehearsalTests(unittest.TestCase):
         self.assertEqual(list(rehearsal.read_events(stream)), [])
 
     @staticmethod
-    def completed_ranked():
+    def completed_ranked(rated_matches=0):
+        delta = 24 if rated_matches < 20 else 16
         participants = [{"profile_id": str(i), "team": "green" if i < 5 else "blue",
-                         "rating": {"before": 1000, "after": 1016 if i < 5 else 984,
-                                    "delta": 16 if i < 5 else -16},
+                         "rating": {"before": 1000, "after": 1000 + (delta if i < 5 else -delta),
+                                    "delta": delta if i < 5 else -delta},
                          "progression_xp_gained": 150 if i < 5 else 100} for i in range(10)]
         result = {"result_id": "result", "saved": True, "outcome": "completed", "rated": True,
                   "winner": "green", "ruleset": "verdant-default-v1", "participants": participants}
         return [{"result": copy.deepcopy(result),
-                 "initial_profile": {"rating": 1000, "rated_matches": 0, "matches_played": 0,
-                                     "wins": 0, "losses": 0, "progression_xp": 0},
-                 "profile": {"profile_id": str(i), "matches_played": 1, "rated_matches": 1,
+                 "initial_profile": {"rating": 1000, "rated_matches": rated_matches, "matches_played": rated_matches,
+                                     "wins": 0, "losses": rated_matches, "progression_xp": 0},
+                 "profile": {"profile_id": str(i), "matches_played": rated_matches + 1, "rated_matches": rated_matches + 1,
                              "rating": participants[i]["rating"]["after"],
                              "progression_xp": participants[i]["progression_xp_gained"],
-                             "wins": int(i < 5), "losses": int(i >= 5)},
+                             "wins": int(i < 5), "losses": rated_matches + int(i >= 5)},
                  "history": [{"result_id": "result", "rating": participants[i]["rating"]}]} for i in range(10)]
 
     def test_a_complete_rated_result_checks_every_profile_and_history(self):
         self.assertEqual(rehearsal.verify_results(self.completed_ranked(), 10, True), "result")
+
+    def test_twentieth_match_uses_placement_k_and_the_next_uses_regular_k(self):
+        for count, delta in [(19, 24), (20, 16)]:
+            statuses = self.completed_ranked(count)
+            self.assertEqual(statuses[0]["result"]["participants"][0]["rating"]["delta"], delta)
+            self.assertEqual(rehearsal.verify_results(statuses, 10, True), "result")
+
+    def test_consistent_but_wrong_placement_award_is_rejected(self):
+        statuses = self.completed_ranked()
+        for status in statuses:
+            for p in status["result"]["participants"]:
+                p["rating"].update(after=1016 if p["team"] == "green" else 984,
+                                   delta=16 if p["team"] == "green" else -16)
+            me = status["result"]["participants"][int(status["profile"]["profile_id"])]
+            status["profile"]["rating"] = me["rating"]["after"]
+            status["history"][0]["rating"] = me["rating"].copy()
+        with self.assertRaisesRegex(AssertionError, "wrong placement/team Elo"):
+            rehearsal.verify_results(statuses, 10, True)
 
     def test_rated_proof_rejects_partial_or_uncredited_or_duplicated_settlement(self):
         for mutation in ("unrated", "not_saved", "wrong_xp", "duplicate", "missing_client", "unplayed", "duplicate_profile", "wrong_history_rating"):

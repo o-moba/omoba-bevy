@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Calibrate each player's first 20 rated matches with K=48, then use K=32.
+  Choose the coefficient from the locked pre-settlement profile, independently
+  for mixed-experience rosters. The full Ranked rehearsal checks exact awards;
+  boundary, independent clamping and idempotent settlement are covered (#35).
+
 - Public solo and party queues enter search directly with the profile card's
   preferred class and valid avatar; the allocated draft owns hero selection.
   Offline practice keeps its picker (#65).

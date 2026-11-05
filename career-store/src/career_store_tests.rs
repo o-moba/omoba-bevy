@@ -428,6 +428,46 @@ async fn career_store_bulk_presence_is_atomic_validates_foreign_owner_and_dedupl
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn placement_k_changes_only_after_the_twentieth_committed_rated_match() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    sqlx::query("UPDATE career_profiles SET rated_matches=19,matches_played=19,wins=9,losses=10")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    for (n, expected_delta) in [(1, 24), (2, 16)] {
+        // Isolate the K boundary from the expected-score change after a win.
+        sqlx::query("UPDATE career_profiles SET rating=1000")
+            .execute(&f.store.pool)
+            .await
+            .unwrap();
+        let completed = result(&a, &b, n);
+        f.store.start(starting(&completed)).await.unwrap();
+        let saved = f.store.settle(completed.clone()).await.unwrap();
+        assert_eq!(
+            saved.participants[0].rating.as_ref().unwrap().delta,
+            expected_delta
+        );
+        assert_eq!(
+            saved.participants[1].rating.as_ref().unwrap().delta,
+            -expected_delta
+        );
+        assert_eq!(f.store.settle(completed).await.unwrap(), saved);
+        assert_eq!(
+            f.store.profile(&a.profile_id).await.unwrap().rated_matches,
+            19 + n as u32
+        );
+        assert_eq!(
+            f.store.profile(&b.profile_id).await.unwrap().rated_matches,
+            19 + n as u32
+        );
+    }
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
     let f = Fixture::new().await;
     let a = f.profile(1).await;
@@ -452,7 +492,7 @@ async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
     let saved = one.unwrap();
     assert_eq!(saved, two.unwrap());
     assert!(saved.saved);
-    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 16);
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 24);
     assert_eq!(saved.participants[0].progression_xp_gained, 150);
     assert_eq!(saved.participants[1].progression_xp_gained, 100);
     let profiles = (
@@ -466,7 +506,7 @@ async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
             profiles.0.wins,
             profiles.0.progression_xp
         ),
-        (1016, 1, 1, 150)
+        (1024, 1, 1, 150)
     );
     assert_eq!(
         (
@@ -474,7 +514,7 @@ async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
             profiles.1.matches_played,
             profiles.1.losses
         ),
-        (984, 1, 1)
+        (976, 1, 1)
     );
     let reopened = f.another_owner().await;
     assert_eq!(reopened.settle(final_result.clone()).await.unwrap(), saved);

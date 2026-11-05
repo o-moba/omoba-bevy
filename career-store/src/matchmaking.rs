@@ -7,7 +7,10 @@ use std::{
 };
 
 use shared::{
-    career::{MAX_PARTICIPANTS, ProfileSummary, QueueView, RatingChange, valid_profile_id},
+    career::{
+        MAX_PARTICIPANTS, NEWCOMER_MATCHES, ProfileSummary, QueueView, RatingChange,
+        valid_profile_id,
+    },
     map::Team,
 };
 
@@ -18,6 +21,7 @@ pub const MAX_RATING_SPREAD: i32 = 300;
 pub const MAX_WIDENED_SPREAD: i32 = 600;
 pub const MAX_RATING: i32 = 5000;
 pub const ELO_K: i32 = 32;
+pub const NEWCOMER_ELO_K: i32 = 48;
 
 /// How far a Ranked search may reach beyond the base cohort (LR-35, owner
 /// default O-1 amended 2026-11-05): the allowance a roster was formed with.
@@ -455,27 +459,34 @@ pub fn rating_changes(
     let players: Vec<_> = selection
         .participants
         .iter()
-        .map(|p| (p.waiting.player_id, p.team, p.waiting.profile.rating))
+        .map(|p| {
+            (
+                p.waiting.player_id,
+                p.team,
+                p.waiting.profile.rating,
+                p.waiting.profile.rated_matches,
+            )
+        })
         .collect();
     rating_changes_for_players(&players, winner)
 }
 
 pub fn rating_changes_for_players(
-    players: &[(u64, Team, i32)],
+    players: &[(u64, Team, i32, u32)],
     winner: Team,
 ) -> Result<Vec<(u64, RatingChange)>, QueueError> {
     if players.is_empty() || players.len() > MAX_PARTICIPANTS || !players.len().is_multiple_of(2) {
         return Err(QueueError::InvalidSelection);
     }
     let mut identities = HashSet::new();
-    if players.iter().any(|&(id, _, rating)| {
+    if players.iter().any(|&(id, _, rating, _)| {
         id == 0 || !(0..=MAX_RATING).contains(&rating) || !identities.insert(id)
     }) {
         return Err(QueueError::InvalidSelection);
     }
     let green_count = players
         .iter()
-        .filter(|&&(_, team, _)| team == Team::Green)
+        .filter(|&&(_, team, _, _)| team == Team::Green)
         .count();
     if green_count != players.len() / 2 {
         return Err(QueueError::InvalidSelection);
@@ -483,8 +494,8 @@ pub fn rating_changes_for_players(
     let average = |team: Team| {
         players
             .iter()
-            .filter(|&&(_, t, _)| t == team)
-            .map(|&(_, _, rating)| f64::from(rating))
+            .filter(|&&(_, t, _, _)| t == team)
+            .map(|&(_, _, rating, _)| f64::from(rating))
             .sum::<f64>()
             / green_count as f64
     };
@@ -495,14 +506,21 @@ pub fn rating_changes_for_players(
     };
     let expected_win =
         1.0 / (1.0 + 10.0_f64.powf((average(losing_team) - average(winner)) / 400.0));
-    let transfer = (f64::from(ELO_K) * (1.0 - expected_win)).round() as i32;
-    // Fixed-K team outcome changes are symmetric away from the bounds. Clamp
+    // Equal-experience team outcome changes are symmetric away from bounds.
+    // Placement K is chosen per player from the locked pre-match profile; a
+    // mixed-experience roster may intentionally be non-zero-sum. Clamp
     // each player independently so a zero-rated loser cannot prevent winners
     // from progressing. Bounds intentionally make some matches non-zero-sum;
     // report the actual persisted difference, never the unclamped request.
     Ok(players
         .iter()
-        .map(|&(id, team, before)| {
+        .map(|&(id, team, before, rated_matches)| {
+            let k = if rated_matches < NEWCOMER_MATCHES {
+                NEWCOMER_ELO_K
+            } else {
+                ELO_K
+            };
+            let transfer = (f64::from(k) * (1.0 - expected_win)).round() as i32;
             let requested = if team == winner { transfer } else { -transfer };
             let after = (before + requested).clamp(0, MAX_RATING);
             (
@@ -520,7 +538,6 @@ pub fn rating_changes_for_players(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::career::NEWCOMER_MATCHES;
     use std::time::Duration;
 
     fn profile(id: u64, rating: i32, rated_matches: u32) -> ProfileSummary {
@@ -773,7 +790,10 @@ mod tests {
 
     #[test]
     fn rating_is_team_outcome_only_symmetric_and_rewards_upsets() {
-        let equal = [(1, Team::Green, 1000), (2, Team::Blue, 1000)];
+        let equal = [
+            (1, Team::Green, 1000, NEWCOMER_MATCHES),
+            (2, Team::Blue, 1000, NEWCOMER_MATCHES),
+        ];
         let win = rating_changes_for_players(&equal, Team::Green).unwrap();
         assert_eq!(
             win[0].1,
@@ -793,7 +813,10 @@ mod tests {
         );
         let reversed = rating_changes_for_players(&equal, Team::Blue).unwrap();
         assert_eq!(win[0].1.delta, -reversed[0].1.delta);
-        let unequal = [(1, Team::Green, 1000), (2, Team::Blue, 1300)];
+        let unequal = [
+            (1, Team::Green, 1000, NEWCOMER_MATCHES),
+            (2, Team::Blue, 1300, NEWCOMER_MATCHES),
+        ];
         let upset = rating_changes_for_players(&unequal, Team::Green).unwrap();
         let expected = rating_changes_for_players(&unequal, Team::Blue).unwrap();
         assert!(upset[0].1.delta > 16 && upset[0].1.delta > expected[1].1.delta);
@@ -801,12 +824,46 @@ mod tests {
     }
 
     #[test]
+    fn placement_k_uses_each_players_pre_match_count_at_the_exact_boundary() {
+        for rated_matches in [0, NEWCOMER_MATCHES - 1, NEWCOMER_MATCHES] {
+            let players = [
+                (1, Team::Green, 1000, rated_matches),
+                (2, Team::Blue, 1000, rated_matches),
+            ];
+            let changes = rating_changes_for_players(&players, Team::Green).unwrap();
+            let expected = if rated_matches < NEWCOMER_MATCHES {
+                24
+            } else {
+                16
+            };
+            assert_eq!(changes[0].1.delta, expected);
+            assert_eq!(changes[1].1.delta, -expected);
+        }
+        let mixed = [(1, Team::Green, 1000, 19), (2, Team::Blue, 1000, 20)];
+        for (winner, expected) in [(Team::Green, [24, -16]), (Team::Blue, [-24, 16])] {
+            let changes = rating_changes_for_players(&mixed, winner).unwrap();
+            assert_eq!([changes[0].1.delta, changes[1].1.delta], expected);
+        }
+        for rating in [0, MAX_RATING] {
+            let players = [(1, Team::Green, rating, 0), (2, Team::Blue, rating, 19)];
+            let changes = rating_changes_for_players(&players, Team::Green).unwrap();
+            for (_, change) in changes {
+                assert!((0..=MAX_RATING).contains(&change.after));
+                assert_eq!(change.delta, change.after - change.before);
+            }
+        }
+    }
+
+    #[test]
     fn rating_boundaries_clamp_independently_and_report_actual_non_zero_sum_deltas() {
         for players in [
-            [(1, Team::Green, 0), (2, Team::Blue, 1)],
             [
-                (1, Team::Green, MAX_RATING - 1),
-                (2, Team::Blue, MAX_RATING),
+                (1, Team::Green, 0, NEWCOMER_MATCHES),
+                (2, Team::Blue, 1, NEWCOMER_MATCHES),
+            ],
+            [
+                (1, Team::Green, MAX_RATING - 1, NEWCOMER_MATCHES),
+                (2, Team::Blue, MAX_RATING, NEWCOMER_MATCHES),
             ],
         ] {
             for winner in [Team::Green, Team::Blue] {
@@ -818,13 +875,19 @@ mod tests {
                 }
             }
         }
-        let zero_cohort = [(1, Team::Green, 0), (2, Team::Blue, 0)];
+        let zero_cohort = [
+            (1, Team::Green, 0, NEWCOMER_MATCHES),
+            (2, Team::Blue, 0, NEWCOMER_MATCHES),
+        ];
         let changes = rating_changes_for_players(&zero_cohort, Team::Green).unwrap();
         assert_eq!(changes[0].1.after, 16);
         assert_eq!(changes[0].1.delta, 16);
         assert_eq!(changes[1].1.after, 0);
         assert_eq!(changes[1].1.delta, 0);
-        let upper_cohort = [(1, Team::Green, MAX_RATING), (2, Team::Blue, MAX_RATING)];
+        let upper_cohort = [
+            (1, Team::Green, MAX_RATING, NEWCOMER_MATCHES),
+            (2, Team::Blue, MAX_RATING, NEWCOMER_MATCHES),
+        ];
         let changes = rating_changes_for_players(&upper_cohort, Team::Green).unwrap();
         assert_eq!(changes[0].1.after, MAX_RATING);
         assert_eq!(changes[0].1.delta, 0);
@@ -832,11 +895,23 @@ mod tests {
         assert_eq!(changes[1].1.delta, -16);
         for bad in [
             vec![],
-            vec![(1, Team::Green, 1000)],
-            vec![(1, Team::Green, 1000), (1, Team::Blue, 1000)],
-            vec![(1, Team::Green, -1), (2, Team::Blue, 1000)],
-            vec![(1, Team::Green, MAX_RATING + 1), (2, Team::Blue, 1000)],
-            vec![(1, Team::Green, 1000), (2, Team::Green, 1000)],
+            vec![(1, Team::Green, 1000, NEWCOMER_MATCHES)],
+            vec![
+                (1, Team::Green, 1000, NEWCOMER_MATCHES),
+                (1, Team::Blue, 1000, NEWCOMER_MATCHES),
+            ],
+            vec![
+                (1, Team::Green, -1, NEWCOMER_MATCHES),
+                (2, Team::Blue, 1000, NEWCOMER_MATCHES),
+            ],
+            vec![
+                (1, Team::Green, MAX_RATING + 1, NEWCOMER_MATCHES),
+                (2, Team::Blue, 1000, NEWCOMER_MATCHES),
+            ],
+            vec![
+                (1, Team::Green, 1000, NEWCOMER_MATCHES),
+                (2, Team::Green, 1000, NEWCOMER_MATCHES),
+            ],
         ] {
             assert_eq!(
                 rating_changes_for_players(&bad, Team::Green),
