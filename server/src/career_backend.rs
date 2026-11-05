@@ -161,6 +161,7 @@ pub(crate) enum Reply {
         request_id: Option<u64>,
     },
     Started(String),
+    GameplayStarted(String),
     RecordError(String, String),
     Rejected(String, String),
     Settled {
@@ -353,7 +354,13 @@ impl MemoryLink {
                         .collect();
                     self.replies.push_back(Reply::Settled { result, profiles });
                 }
-                RecordKind::Checkpoint | RecordKind::Rejected => {}
+                RecordKind::Checkpoint => {
+                    if record.result.gameplay_started {
+                        self.replies
+                            .push_back(Reply::GameplayStarted(record.result.result_id));
+                    }
+                }
+                RecordKind::Rejected => {}
             },
             Job::Flush(generation) => self.replies.push_back(Reply::Flushed(generation, true)),
             Job::Presence(_) => {}
@@ -392,6 +399,7 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     pub(crate) link: L,
     clients: HashMap<SocketAddr, Client>,
     starts: HashMap<String, Result<(), String>>,
+    gameplay_starts: HashSet<String>,
     settled: Vec<MatchResult>,
     cancelled: Vec<SocketAddr>,
     social: Vec<(SocketAddr, shared::social::SocialRequest)>,
@@ -420,6 +428,7 @@ impl<L: JobLink> CareerBackend<L> {
             link,
             clients: HashMap::new(),
             starts: HashMap::new(),
+            gameplay_starts: HashSet::new(),
             settled: Vec::new(),
             cancelled: Vec::new(),
             social: Vec::new(),
@@ -615,6 +624,11 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         self.starts.insert(id.into(), Ok(()));
     }
     #[cfg(test)]
+    fn test_ack_gameplay(&mut self, id: &str) {
+        self.gameplay_starts.insert(id.to_owned());
+    }
+
+    #[cfg(test)]
     fn test_ack_settle(&mut self, result: MatchResult) {
         self.settled.push(result);
     }
@@ -765,6 +779,9 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn take_settled(&mut self) -> Vec<MatchResult> {
         std::mem::take(&mut self.settled)
     }
+    fn gameplay_committed(&self, id: &str) -> bool {
+        self.gameplay_starts.contains(id)
+    }
     fn started(&self, id: &str) -> bool {
         matches!(self.starts.get(id), Some(Ok(())))
     }
@@ -773,6 +790,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     }
     fn forget_start(&mut self, id: &str) {
         self.starts.remove(id);
+        self.gameplay_starts.remove(id);
         self.rejected.remove(id);
     }
     fn start_error(&self, id: &str) -> Option<String> {
@@ -1152,6 +1170,9 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                         }
                     }
                 }
+                Reply::GameplayStarted(id) => {
+                    self.gameplay_starts.insert(id);
+                }
                 Reply::Started(id) => {
                     self.starts.insert(id, Ok(()));
                 }
@@ -1203,6 +1224,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     self.pending_ids.remove(&result.result_id);
                     self.matches.retain(|_, id| *id != result.result_id);
                     self.starts.remove(&result.result_id);
+                    self.gameplay_starts.remove(&result.result_id);
                     self.settled.push(result);
                 }
             }
@@ -1815,6 +1837,14 @@ fn worker(
                             if replies.try_send(Reply::Started(id.clone())).is_err() {
                                 continue;
                             }
+                        }
+                        if matches!(record.kind, RecordKind::Checkpoint)
+                            && record.result.gameplay_started
+                            && replies
+                                .try_send(Reply::GameplayStarted(id.clone()))
+                                .is_err()
+                        {
+                            continue; // This ACK gates Running; retain and retry the durable record.
                         }
                         if let Some((result, profiles)) = result {
                             if replies

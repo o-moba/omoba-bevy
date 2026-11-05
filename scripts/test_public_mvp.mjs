@@ -38,15 +38,16 @@ const preference = mix ? 'mixed' : (opts.preference || 'bot_practice');
 assert(mix || QUEUES.includes(preference), `unknown --preference ${preference}`);
 const preferences = mix ? (() => {const left=mix.map(([queue,count])=>[queue,count]);const out=[];while(out.length<clientsCount)for(const entry of left)if(entry[1]>0){out.push(entry[0]);entry[1]--;}return out;})() : Array(clientsCount).fill(preference);
 const scenario = opts.scenario || 'load';
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination'].includes(scenario), 'unknown scenario');
-if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery'].includes(scenario), 'unknown scenario');
+if(['recovery','early-recovery'].includes(scenario)) assert(!mix&&((preference==='humans_only'&&clientsCount===10)||(preference!=='humans_only'&&clientsCount>=1&&clientsCount<=10)), `${scenario} uses one roster (Ranked: ten humans)`);
+else if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
 for(const [queue,count] of mix ?? [[preference,clientsCount]])assert(queue!=='humans_only'||count%10===0, 'Ranked (humans_only) forms only full ten-player matches: use a multiple of 10');
 const maxWaitSecs = opts['max-wait-secs'] ? Number(opts['max-wait-secs']) : null;
 assert(maxWaitSecs===null || maxWaitSecs>0, 'max-wait-secs must be positive');
 const allowLarge = 'allow-large' in opts;
 const queueOnly = 'queue-only' in opts;
 assert(!queueOnly || scenario==='load', '--queue-only is a load option');
-const soakSecs = Number(opts.seconds || 15);
+const soakSecs = Number(opts.seconds || (scenario==='early-recovery'?2:15));
 const inputHz = Number(opts['input-hz'] ?? 20);
 assert(Number.isFinite(inputHz)&&inputHz>=0&&inputHz<=60, 'input-hz must be between 0 and 60');
 // The gameplay protocol of the server under test, so the probe follows bumps: the
@@ -200,7 +201,7 @@ class Client {
    }
   }
   if(now-this.lastSend<300)return;this.lastSend=now;this.gameplay({type:'ping'});
-  if(this.port===lobbyPort){if(this.autoQueue&&now-this.lastQueue>500){const ready=this.career?.match_service;if(this.autoReady&&ready?.state==='ready_check'&&!ready.accepted){this.lastQueue=now;this.account({action:'ready_match',request_id:this.queueId,check_id:ready.check_id,accepted:true});}else if(now-this.lastQueue>2000){this.lastQueue=now;this.account({action:'find_match',request_id:this.queueId,preference:this.preference});}}return;}
+  if(this.port===lobbyPort){const ready=this.career?.match_service;if(this.autoReady&&ready?.state==='ready_check'&&!ready.accepted&&now-this.lastQueue>500){this.lastQueue=now;this.account({action:'ready_match',request_id:this.queueId,check_id:ready.check_id,accepted:true});}else if(this.autoQueue&&now-this.lastQueue>2000){this.lastQueue=now;this.account({action:'find_match',request_id:this.queueId,preference:this.preference});}return;}
   if(!this.autoJoin)return;
   const s=this.snapshot;
   if(!s?.players?.some(p=>p.id===s.your_id)) {this.join();return;}
@@ -505,6 +506,66 @@ async function capacityWait() {
  report.capacity_wait={view:second.career.match_service,report:busy};
  report.scenarios.push('full_pool_shows_place_in_line_and_reports_busy');
 }
+// A complete public roster is killed before creating observers, so the early
+// case proves the durable marker before the normal 10-second checkpoint.
+async function recoverRoster(originals, early) {
+ const original=originals[0], allocation=original.allocation;
+ assert(originals.every(c=>c.allocation.allocation_id===allocation.allocation_id),'recovery needs one worker roster');
+ const baselines=originals.map(c=>({client:c,progress:careerProgress(c),epoch:c.epoch}));
+ const before=allocationStatus(allocation.allocation_id), workerPid=ownedWorkerPid(original.port);
+ if(original.preference==='humans_only'){
+  assert.equal(allocation.rated,true);assert.equal(allocation.human_count,10);assert.equal(allocation.bot_count,0);
+ }
+ assert(before?.phase==='running'&&before.result_id,'worker must have committed Running');
+ const playingFor=Math.max(...originals.map(c=>(performance.now()-c.firstRunning)/1000));
+ if(early)assert(playingFor<10,`early crash reached the ordinary checkpoint: ${playingFor}s`);
+ process.kill(workerPid,'SIGKILL'); for(const c of originals)c.close();
+ const crashedAt=performance.now();
+ const observers=baselines.map(({client},i)=>new Client(7000+i,lobbyPort,client,{autoQueue:false,autoJoin:false,autoHandoff:false,preference:client.preference}));
+ all.push(...observers);
+ await pumpUntil('every recovery observer authenticates',()=>observers.every(c=>!!c.auth));
+ let nextDetail=0,nextFind=0,nextProgress=0,query=700,sawRecovering=false;
+ const observer=observers[0]; observer.queueId++;
+ await pumpUntil('full roster interrupted recovery',()=>{
+  const status=allocationStatus(allocation.allocation_id);
+  if(status?.phase==='recovering')sawRecovering=true;
+  return observer.lastDetail?.result_id===before.result_id&&status?.phase==='failed';
+ },300000,now=>{
+  const status=allocationStatus(allocation.allocation_id);
+  if(status)assert.equal(status.server_epoch,before.server_epoch,'recovery lost the original epoch');
+  if(status?.phase!=='failed')assert(!observer.allocationsSeen.some(a=>a.allocation_id!==allocation.allocation_id),'profile reassigned before durable settlement');
+  if(now>=nextDetail){nextDetail=now+2000;observer.account({action:'detail',request_id:++query,result_id:before.result_id});}
+  if(now>=nextFind&&status?.phase!=='failed'){nextFind=now+7000;observer.account({action:'find_match',request_id:observer.queueId,preference:original.preference});}
+  if(now>=nextProgress){nextProgress=now+10000;resourceSample();console.log(wire({phase:'roster-recovery',elapsed_seconds:Math.round((now-crashedAt)/1000),worker_phase:status?.phase}));}
+ });
+ const saved=observer.lastDetail;
+ assert(sawRecovering); assert.equal(saved.outcome,'interrupted'); assert(saved.saved&&!saved.rated);
+ assert.notEqual(saved.gameplay_started,false,'a Running match was recovered as an unplayed draft');
+ if(original.preference==='humans_only'){
+  assert.equal(saved.ruleset,'verdant-default-v1');assert.equal(saved.participants.length,10);
+  assert(saved.participants.every(p=>!p.is_bot&&p.profile_id),'Ranked recovery must contain ten authenticated humans');
+ }
+ assert.equal(saved.server_epoch,before.server_epoch);
+ assert(saved.participants.every(p=>p.progression_xp_gained===0&&p.rating==null));
+ assert(performance.now()-crashedAt>=120000,'recovery bypassed its real ownership/recovery gate');
+ const profileRequests=observers.map(()=>++query); let nextProfiles=0;
+ await pumpUntil('every participant has exactly one played match after recovery',()=>observers.every((c,i)=>c.profileResponses.get(String(profileRequests[i]))?.matches_played===baselines[i].progress.matches_played+1),15000,now=>{
+  if(now>=nextProfiles){nextProfiles=now+1500;observers.forEach((c,i)=>c.account({action:'profile',request_id:profileRequests[i],profile_id:baselines[i].progress.profile_id}));}
+ });
+ for(let i=0;i<observers.length;i++){
+  const fresh=observers[i].profileResponses.get(String(profileRequests[i])), previous=baselines[i].progress;
+  for(const key of ['rating','rated_matches','progression_xp','wins','losses'])assert.equal(fresh[key],previous[key],`recovery changed ${key} for participant ${i}`);
+ }
+ let nextHistory=0;
+ await pumpUntil('interrupted history is visible to every participant',()=>observers.every(c=>c.lastHistory?.filter(r=>r.result_id===before.result_id).length===1),15000,now=>{
+  if(now>=nextHistory){nextHistory=now+1500;observers.forEach(c=>c.account({action:'history',request_id:++query,before:null}));}
+ });
+ for(const c of observers){c.queueId++;c.lastQueue=0;c.autoQueue=true;}
+ await pumpUntil('all recovered participants can search and accept a fresh roster',()=>observers.every(c=>c.allocation&&c.allocation.allocation_id!==allocation.allocation_id),45000);
+ if(original.preference==='humans_only')assert.equal(new Set(observers.map(c=>c.allocation.allocation_id)).size,1,'recovered Ranked roster split across workers');
+ report.recovery={status:'PASS',queue:original.preference,participants:originals.length,crashed_after_running_seconds:playingFor,early_before_first_checkpoint:early,result_id:before.result_id,server_epoch:before.server_epoch,outcome:saved.outcome,all_profiles_checked:true,all_histories_checked:true,no_elo_or_xp:true,elapsed_seconds:(performance.now()-crashedAt)/1000};
+ report.scenarios.push('full_roster_crash_recovers_played_history_without_elo_or_xp');
+}
 async function restartAndRecover(original, crashWorker) {
  const allocation=original.allocation, baseline=ids(original.snapshot), progress=careerProgress(original), workerEpoch=original.epoch;
  const workerPid=ownedWorkerPid(original.port);
@@ -639,7 +700,8 @@ try {
  if(scenario==='lifecycle')await lifecycle(all[0]);
  if(scenario==='abandoned')await abandoned(all[0]);
  if(scenario==='capacity-wait')await capacityWait();
- if(scenario==='lobby-restart'||scenario==='recovery')await restartAndRecover(all[0],scenario==='recovery');
+ if(scenario==='early-recovery'||(scenario==='recovery'&&preference!=='bot_practice'))await recoverRoster(all.filter(c=>c.stage==='running'),scenario==='early-recovery');
+ else if(scenario==='lobby-restart'||scenario==='recovery')await restartAndRecover(all[0],scenario==='recovery');
  report.total_transforms_sent=all.reduce((n,c)=>n+c.transforms,0);
  report.total_sent_datagrams=all.reduce((n,c)=>n+c.sentPackets,0);
  report.total_sent_bytes=all.reduce((n,c)=>n+c.sentBytes,0);

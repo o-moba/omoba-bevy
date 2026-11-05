@@ -726,6 +726,10 @@ fn loaded_peers_still_wait_for_durable_career_ack_and_frozen_loadout_is_recorded
     assert!(rt.world.minions.is_empty());
     rt.career.backend.test_ack_start(&allocation.result_id);
     rt.tick_prematch(loading + Duration::from_millis(1));
+    assert_eq!(view(&rt, address(1), loading).phase, PrematchPhase::Loading);
+    assert!(rt.match_started_at.is_none());
+    rt.career.backend.test_ack_gameplay(&allocation.result_id);
+    rt.tick_prematch(loading + Duration::from_millis(2));
     assert_eq!(rt.world.game_state, GameState::Running);
     assert!(rt.match_started_at.is_some());
 }

@@ -25,6 +25,7 @@ pub(crate) const RATED_RULESET: &str = "verdant-default-v1";
 struct CareerRound {
     result: MatchResult,
     start_enqueued: bool,
+    gameplay_enqueued: bool,
     started_at: Instant,
     checkpoint_at: Instant,
     finalized: bool,
@@ -674,6 +675,7 @@ impl ServerRuntime {
             self.career.round = Some(CareerRound {
                 result,
                 start_enqueued: false,
+                gameplay_enqueued: false,
                 started_at: now,
                 checkpoint_at: now,
                 finalized: false,
@@ -703,6 +705,20 @@ impl ServerRuntime {
                 }
             }
             round.result.participants.sort_by_key(|p| p.player_id);
+            if durable && self.career.backend.enabled() {
+                if !round.gameplay_enqueued {
+                    let mut marker = round.result.clone();
+                    marker.gameplay_started = true;
+                    round.gameplay_enqueued = self.career.backend.checkpoint(marker);
+                }
+                if !self
+                    .career
+                    .backend
+                    .gameplay_committed(&round.result.result_id)
+                {
+                    return false;
+                }
+            }
             if let Err(error) = self
                 .combat_log
                 .ledger

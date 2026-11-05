@@ -1427,6 +1427,15 @@ fn same_terminal_allocation(old: &MatchResult, new: &MatchResult) -> StoreResult
         comparable.rated = old.rated;
         comparable.unrated_reason = old.unrated_reason.clone();
     }
+    // Activation may reach SQL while the simulation is still awaiting its ACK.
+    // An explicit unplayed terminal cancellation wins that race. Recovery and
+    // completed matches must never downgrade a committed gameplay checkpoint.
+    if new.outcome == MatchOutcome::Abandoned
+        && !new.gameplay_started
+        && new.unrated_reason.as_deref() == Some("prematch_abandoned")
+    {
+        comparable.gameplay_started = old.gameplay_started;
+    }
     same_allocation(old, &comparable, roster_can_grow(old))
 }
 

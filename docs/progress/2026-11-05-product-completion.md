@@ -58,3 +58,36 @@ remaining client findings, multi-host/cross-host penalties, snapshot traffic,
 1000-player evidence, drain, PITR and real RU capacity/deployment remain in TODO.
 The first-ten-seconds crash case must durably distinguish gameplay from a draft.
 No production host, database, secret, CI configuration or deployment was changed.
+
+## Durable gameplay / Ranked early-crash continuation
+
+The server now distinguishes the allocation ACK from a committed gameplay
+checkpoint. Both must arrive before combat or income. A cancelled unplayed
+roster can still settle without credit if cancellation wins the activation-ACK
+race; ordinary checkpoint/recovery paths cannot downgrade committed gameplay.
+
+Finding #41 is verified and closed: ten signed Ranked humans were SIGKILLed
+2.10 seconds after Running, before the first periodic ten-second checkpoint.
+Recovery passed its actual >=120-second gate, kept the original result/epoch,
+updated all ten profiles exactly once, exposed each player's own history, changed
+no Elo/XP and allowed all ten to accept a fresh roster. Database inspection
+confirmed initially rated=true, verdant-default-v1, committed gameplay and ten
+humans/zero bots. Evidence is in
+`.agent/codex-ranked-readiness/ranked-early-recovery/report.json`.
+
+Current verification: 563 full PostgreSQL-backed API/store/server tests passed
+with no ignores; server/store all-target clippy, formatting and Node syntax pass.
+The full lifecycle process probe also passed after the new gameplay gate.
+The added ordinary-checkpoint/Interrupted no-downgrade and pre-start-cancel
+regressions passed against real PostgreSQL.
+
+The unchanged client source now has completed CI evidence: the dev-contour job
+on 548d152 passed 1553 tests (one ignored), including both new readiness
+regressions. The main runner was externally shut down on its first attempt;
+a rerun completed and every CI job for 548d152 is green. Current backend changes
+have not required a new client/native build or any dependency/schema change.
+
+P4 remains open for completed rated Victory (#14), public signed AI clients
+(#40), loopback-only victory tooling (#42), and party/draft process evidence
+(#43). The native RU screenshot and all other unresolved P5–P9 work remain
+explicitly pending. No production deployment or configuration was changed.

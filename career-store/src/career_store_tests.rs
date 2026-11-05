@@ -1816,3 +1816,59 @@ async fn unplayed_allocations_settle_idempotently_without_career_or_history() {
     );
     f.close().await;
 }
+
+/// Activation is committed before Running, but a cancellation already accepted
+/// by the simulation while its ACK is in flight still retires an unplayed roster.
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_TEST_DATABASE_URL"]
+async fn committed_gameplay_recovers_immediately_but_prematch_cancel_can_win_the_ack_race() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for (match_id, cancelled) in [(1, false), (2, true)] {
+        let mut r = result(&a, &b, match_id);
+        r.gameplay_started = false;
+        f.store.start(starting(&r)).await.unwrap();
+        let mut marker = starting(&r);
+        marker.gameplay_started = true;
+        f.store.checkpoint(marker).await.unwrap();
+        if cancelled {
+            assert!(
+                f.store.checkpoint(starting(&r)).await.is_err(),
+                "ordinary checkpoints cannot undo gameplay activation"
+            );
+            let mut invalid_recovery = r.clone();
+            invalid_recovery.outcome = MatchOutcome::Interrupted;
+            invalid_recovery.winner = None;
+            invalid_recovery.rated = false;
+            invalid_recovery.unrated_reason = Some("server_interrupted".into());
+            assert!(
+                f.store.settle(invalid_recovery).await.is_err(),
+                "recovery cannot erase committed gameplay"
+            );
+            r.outcome = MatchOutcome::Abandoned;
+            r.winner = None;
+            r.rated = false;
+            r.unrated_reason = Some("prematch_abandoned".into());
+            let saved = f.store.settle(r).await.unwrap();
+            assert!(!saved.gameplay_started);
+        } else {
+            f.expire(&r.result_id).await;
+            let recovered = f.store.recover_expired().await.unwrap();
+            assert_eq!(recovered.len(), 1);
+            assert!(recovered[0].gameplay_started);
+            assert_eq!(recovered[0].outcome, MatchOutcome::Interrupted);
+            assert!(!recovered[0].rated);
+        }
+        let profile = f.store.profile(&a.profile_id).await.unwrap();
+        assert_eq!(profile.matches_played, 1);
+        assert_eq!(profile.rating, a.rating);
+        assert_eq!(profile.rated_matches, 0);
+        assert_eq!(profile.progression_xp, 0);
+        assert_eq!(
+            f.store.history(&a.profile_id, None).await.unwrap().0.len(),
+            1
+        );
+    }
+    f.close().await;
+}

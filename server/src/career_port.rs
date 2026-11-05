@@ -80,6 +80,8 @@ pub(crate) trait CareerPort {
     /// the local outbox (or already settled). Does not require a live database.
     fn flush_outbox(&mut self) -> bool;
     fn started(&self, id: &str) -> bool;
+    /// SQL acknowledged the gameplay-start checkpoint, distinct from allocation.
+    fn gameplay_committed(&self, id: &str) -> bool;
     fn start_rejected(&self, id: &str) -> Option<String>;
     fn start_error(&self, id: &str) -> Option<String>;
     fn forget_start(&mut self, id: &str);
@@ -91,6 +93,8 @@ pub(crate) trait CareerPort {
     fn test_authenticated(&mut self, addr: SocketAddr, profile: ProfileSummary, session_id: &str);
     #[cfg(test)]
     fn test_ack_start(&mut self, id: &str);
+    #[cfg(test)]
+    fn test_ack_gameplay(&mut self, id: &str);
     #[cfg(test)]
     fn test_ack_settle(&mut self, result: MatchResult);
     #[cfg(test)]

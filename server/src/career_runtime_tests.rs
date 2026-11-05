@@ -87,6 +87,12 @@ fn start(rt: &mut ServerRuntime, now: Instant) {
     let allocation = rt.career_allocation_for_test().unwrap();
     rt.career.backend.test_ack_start(&allocation.result_id);
     rt.tick(now, 0.0);
+    assert!(matches!(
+        rt.world.game_state,
+        GameState::Starting { countdown_ms: 0 }
+    ));
+    rt.career.backend.test_ack_gameplay(&allocation.result_id);
+    rt.tick(now, 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
 }
 
@@ -155,6 +161,13 @@ fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocatio
     }
     rt.career.backend.test_ack_start(&allocation.result_id);
     rt.tick(now + Duration::from_millis(4), 0.0);
+    assert_eq!(rt.world.game_state, GameState::Starting { countdown_ms: 0 });
+    assert!(!rt.career_allocation_for_test().unwrap().gameplay_started);
+    assert!(!rt.combat_log.ledger.is_started());
+    assert_eq!(rt.world.players[&addr(59301)].economy.gold, before);
+    rt.career.backend.test_ack_gameplay(&allocation.result_id);
+    rt.tick(now + Duration::from_millis(5), 0.0);
+    assert!(rt.career_allocation_for_test().unwrap().gameplay_started);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_eq!(rt.combat_log.ledger.snapshot().len(), 2);
     assert_eq!(rt.career.queue.len(), 2);
@@ -196,8 +209,8 @@ fn immediate_memory_career_acknowledges_start_and_settle_through_poll() {
     authenticated_join(&mut rt, addr(59302), 2, 1000, false, now);
     rt.tick(now, 0.0);
     rt.tick(now, 3.0);
-    // The durable start was enqueued and answered at once; the next poll
-    // delivers the acknowledgement and the countdown ends without a hook.
+    // Both allocation and gameplay-start checkpoints are acknowledged by
+    // the real port polling contract, without either manual ACK hook.
     let allocation = rt.career_allocation_for_test().unwrap();
     assert!(matches!(
         rt.world.game_state,
@@ -205,6 +218,11 @@ fn immediate_memory_career_acknowledges_start_and_settle_through_poll() {
     ));
     rt.poll_career(now);
     assert!(rt.career.backend.started(&allocation.result_id));
+    rt.tick(now, 0.0);
+    assert_eq!(rt.world.game_state, GameState::Starting { countdown_ms: 0 });
+    assert!(!rt.career.backend.gameplay_committed(&allocation.result_id));
+    rt.poll_career(now);
+    assert!(rt.career.backend.gameplay_committed(&allocation.result_id));
     rt.tick(now, 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
     let later = now + Duration::from_secs(30);
@@ -637,6 +655,11 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     ));
     pump_worker(&mut rt, &sockets, |rt| {
         rt.career.backend.started(&allocation.result_id)
+    });
+    rt.tick(Instant::now(), 0.0);
+    assert_ne!(rt.world.game_state, GameState::Running);
+    pump_worker(&mut rt, &sockets, |rt| {
+        rt.career.backend.gameplay_committed(&allocation.result_id)
     });
     rt.tick(Instant::now(), 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
@@ -1357,6 +1380,11 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
     let allocation = rt.career_allocation_for_test().unwrap();
     pump_worker(&mut rt, &sockets, |rt| {
         rt.career.backend.started(&allocation.result_id)
+    });
+    rt.tick(Instant::now(), 0.0);
+    assert_ne!(rt.world.game_state, GameState::Running);
+    pump_worker(&mut rt, &sockets, |rt| {
+        rt.career.backend.gameplay_committed(&allocation.result_id)
     });
     rt.tick(Instant::now(), 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);

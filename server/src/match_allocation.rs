@@ -511,6 +511,11 @@ pub(crate) mod runtime_tests {
         assert!(!allocation.rated);
         assert_eq!(allocation.participants.len(), 10);
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
     }
 
@@ -644,6 +649,11 @@ pub(crate) mod runtime_tests {
         let allocation = rt.career_allocation_for_test().unwrap();
         assert_eq!(allocation.ruleset, "public-casual-v1");
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         assert!(
             rt.rules.debug_commands,
@@ -673,6 +683,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -724,6 +739,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -753,6 +773,11 @@ pub(crate) mod runtime_tests {
             rt.begin_career_round(now);
             let result = rt.career_allocation_for_test().unwrap();
             rt.career.backend.test_ack_start(&result.result_id);
+            assert!(
+                !rt.begin_career_round(now),
+                "gameplay activation also needs an ACK"
+            );
+            rt.career.backend.test_ack_gameplay(&result.result_id);
             assert!(rt.begin_career_round(now));
             rt.world.game_state = GameState::Running;
             rt.match_started_at = Some(now);
@@ -792,6 +817,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -871,6 +901,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -943,6 +978,11 @@ pub(crate) mod runtime_tests {
             rt.begin_career_round(now);
             let result = rt.career_allocation_for_test().unwrap();
             rt.career.backend.test_ack_start(&result.result_id);
+            assert!(
+                !rt.begin_career_round(now),
+                "gameplay activation also needs an ACK"
+            );
+            rt.career.backend.test_ack_gameplay(&result.result_id);
             assert!(rt.begin_career_round(now));
             rt.world.game_state = GameState::Running;
             rt.match_started_at = Some(now);
@@ -1047,6 +1087,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -1210,6 +1255,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -1335,6 +1385,11 @@ pub(crate) mod runtime_tests {
         assert!(!rt.begin_career_round(now));
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);

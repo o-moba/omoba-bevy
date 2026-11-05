@@ -284,3 +284,11 @@ a replacement only after another unanimous confirmation.
 worker and asserts a durable Interrupted result with no Elo/XP changes and one
 played-match increment. Both scenarios launch their own loopback lobby and need
 the same disposable database as the existing probes.
+
+For full-roster Ranked recovery, use `--scenario=recovery --preference=humans_only
+--clients=10`. `--scenario=early-recovery --preference=humans_only --clients=10
+--seconds=2 --input-hz=0` kills the worker before the ordinary first ten-second
+checkpoint. It verifies all ten profiles and histories, unchanged rating/XP,
+the actual >=120 s recovery gate and re-entry into a unanimously accepted roster.
+Casual (`--preference=quick`, one roster of up to ten) is accepted too. Recovery
+keeps its real wall-clock gates; no timeout or lease is accelerated.

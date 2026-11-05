@@ -200,6 +200,11 @@ mod tests {
         assert!(!rt.begin_career_round(now));
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);

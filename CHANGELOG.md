@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Commit gameplay activation to PostgreSQL before combat or income begins,
+  separately from the allocation acknowledgement. A crash in the first seconds
+  now recovers a played Interrupted match; an explicit pre-start cancellation
+  racing the activation ACK still settles without career credit. The public
+  probe covers every profile/history of a ten-human Ranked roster and supports
+  an early crash before the ordinary ten-second checkpoint (#27, #41).
+
 - Server SIGTERM/SIGINT handling finalizes an interrupted/aborted round and
   waits for a generation-bound fsync acknowledgement before exit, with a
   15-second stop budget. Lobby shutdown preserves independently running workers.
