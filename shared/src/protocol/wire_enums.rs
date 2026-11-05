@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 12;
+const POLICY_PROTOCOL_VERSION: u16 = 13;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;
@@ -74,7 +74,7 @@ wire_enums! {
     // where it used to send nothing (a probe at the endpoint ceiling), and an
     // older client drops a datagram it cannot decode, so it still sees silence.
     crate::public_transport::PublicServerDatagram => Strict [TransportChallenge, ServerFull],
-    crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
+    crate::career::CareerRequest => Strict [FindMatch, ReadyMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
     crate::utility::UtilityAction => Strict [Dash, Haste, Recall, CancelRecall],
     crate::map::Team => Strict [Green, Blue],
     crate::HeroClass => Tolerant [Warrior, Mage, Ranger, Cleric, Warden, Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard, Adventurer],
@@ -96,10 +96,10 @@ wire_enums! {
     crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant, Rose, Jade, Azure, Crimson, PrismI, PrismII, PrismIII],
     crate::handheld::HandheldSelection => Strict [ClassDefault, Unequipped, Item],
     crate::career::FriendAction => Strict [Request, Accept, Reject, Cancel, Remove],
-    crate::career::CareerAction => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, CancelQueue],
+    crate::career::CareerAction => Strict [FindMatch, ReadyMatch, SupporterStatus, EquipSupporterAura, Social, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, CancelQueue],
     crate::protocol::wire::TargetKind => Strict [Player, Minion, Structure, Neutral],
     crate::prematch::PrematchAction => Strict [Select, Lock, Loaded],
-    crate::match_service::MatchServiceView => Strict [Idle, Waiting, Allocating, Assigned, Failed],
+    crate::match_service::MatchServiceView => Strict [Idle, Waiting, ReadyCheck, Allocating, Assigned, Failed],
     crate::career::QueueView => Strict [Idle, Waiting, Selected, Playing, Full],
     crate::shop::ItemId => Strict [EmberBlade, SwiftGrip, TrailBoots, VitalityGem, FocusCharm, GuardianCrest, CritShard, SiphonStone, WindrunnerBoots, DuelistEdge, VampiricFang, ArcaneFocus, Bulwark, TempestBlade, Bloodreaver, AetherCrown],
     crate::PlayerActionKind => Tolerant [Attack, Cast, None],

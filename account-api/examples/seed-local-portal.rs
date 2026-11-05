@@ -75,6 +75,7 @@ async fn main() {
         })
         .collect();
     let mut r = MatchResult {
+        gameplay_started: true,
         result_id: result_id.clone(),
         server_epoch: 1,
         match_id: now() as u64,

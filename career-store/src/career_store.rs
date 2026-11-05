@@ -467,7 +467,7 @@ impl CareerStore {
         retry(|| async {
             check_id(id)?;
             let before = before.map(i64::try_from).transpose().map_err(|_| "Invalid history cursor.")?;
-            let rows = sqlx::query("SELECT m.seq,m.result FROM career_matches m JOIN career_participants p USING(result_id) WHERE p.profile_id=$1 AND m.status='settled' AND ($2::bigint IS NULL OR m.seq<$2) ORDER BY m.seq DESC LIMIT $3")
+            let rows = sqlx::query("SELECT m.seq,m.result FROM career_matches m JOIN career_participants p USING(result_id) WHERE p.profile_id=$1 AND m.status='settled' AND coalesce((m.result->>'gameplay_started')::boolean,true) AND ($2::bigint IS NULL OR m.seq<$2) ORDER BY m.seq DESC LIMIT $3")
                 .bind(id).bind(before).bind((HISTORY_PAGE_SIZE + 1) as i64).fetch_all(&self.pool).await?;
             let more = rows.len() > HISTORY_PAGE_SIZE;
             let mut summaries = Vec::new(); let mut cursor = None;
@@ -716,6 +716,9 @@ impl CareerStore {
             let profile = profiles
                 .get_mut(id)
                 .ok_or("Stored participant profile is missing.")?;
+            if !result.gameplay_started {
+                continue;
+            }
             profile.matches_played = profile
                 .matches_played
                 .checked_add(1)
@@ -1243,6 +1246,9 @@ fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
     let roster_fits_reason = match result.unrated_reason.as_deref() {
         Some("allocated_bots") => bots > 0,
         Some("casual_queue") => true,
+        Some("prematch_abandoned") => {
+            !result.gameplay_started && result.outcome != MatchOutcome::Completed
+        }
         _ => interrupted_recovery,
     };
     if result.rated
@@ -1335,6 +1341,9 @@ fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
 }
 fn normalize_terminal(result: MatchResult) -> StoreResult<MatchResult> {
     let result = normalize(result)?;
+    if !result.gameplay_started && result.outcome == MatchOutcome::Completed {
+        return Err("An unplayed allocation cannot complete or award progression.".into());
+    }
     if result.ended_at_ms == 0 || result.ended_at_ms < result.started_at_ms {
         return Err("Terminal result requires a valid end timestamp.".into());
     }
@@ -1400,6 +1409,7 @@ fn same_allocation(old: &MatchResult, new: &MatchResult, allow_add: bool) -> Sto
         || old.ruleset != new.ruleset
         || old.rated != new.rated
         || old.unrated_reason != new.unrated_reason
+        || (old.gameplay_started && !new.gameplay_started)
         || (!allow_add && old.participants.len() != new.participants.len())
         || old
             .participants

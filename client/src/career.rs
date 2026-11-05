@@ -3030,6 +3030,7 @@ mod tests {
 
     fn result() -> MatchResult {
         MatchResult {
+            gameplay_started: true,
             result_id: "r1".into(),
             server_epoch: 1,
             match_id: 1,

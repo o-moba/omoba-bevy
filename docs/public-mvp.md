@@ -274,3 +274,13 @@ session status and remaining checks are in
 [the public MVP session note](progress/2026-09-22-public-mvp.md).
 WAN loss/jitter, public DNS/firewall reachability, signed platform installers and
 physical phone QA remain separate publication gates.
+
+Ready confirmation can be rehearsed with `--scenario=ready-check --seconds=2
+--input-hz=0`: the probe keeps one human unconfirmed for 15 seconds, asserts no
+worker was spawned, checks preserved FIFO age, rejects a stale answer and seats
+a replacement only after another unanimous confirmation.
+
+`--scenario=termination --seconds=2 --input-hz=0` sends SIGTERM to its own running
+worker and asserts a durable Interrupted result with no Elo/XP changes and one
+played-match increment. Both scenarios launch their own loopback lobby and need
+the same disposable database as the existing probes.

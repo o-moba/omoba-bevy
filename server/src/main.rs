@@ -49,6 +49,7 @@ mod sandbox;
 mod session;
 mod session_recovery;
 mod shop;
+mod shutdown;
 mod sim;
 mod skills;
 mod snapshot;

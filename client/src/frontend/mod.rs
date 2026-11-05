@@ -984,6 +984,7 @@ mod tests {
         use shared::prematch::{PrematchPhase, PrematchSnapshot};
         let mut app = driver_app();
         app.world_mut().resource_mut::<GameStateSnapshot>().prematch = Some(PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,

@@ -846,6 +846,29 @@ impl ServerRuntime {
         self.party.gathering(now, |id| joined.contains(&id))
     }
 
+    pub(crate) fn queue_party_roster(
+        &self,
+        addr: SocketAddr,
+    ) -> Option<(u64, Vec<(String, String)>)> {
+        let id = self.world.players.get(&addr)?.hero.identity.id;
+        let party_id = self.party.party_id_of(id)?;
+        let party = self.party.parties.get(&party_id)?;
+        let members = party
+            .members
+            .iter()
+            .filter(|m| m.away_since.is_none())
+            .map(|m| {
+                (
+                    m.profile_id
+                        .clone()
+                        .unwrap_or_else(|| format!("guest:{}", m.player_id)),
+                    m.nickname.clone(),
+                )
+            })
+            .collect();
+        Some((party_id, members))
+    }
+
     /// Party tag for a public queue entry: (party id, members to wait for).
     pub(crate) fn party_tag(&self, addr: SocketAddr) -> Option<(u64, usize)> {
         let id = self.world.players.get(&addr)?.hero.identity.id;

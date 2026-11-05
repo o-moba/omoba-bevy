@@ -266,6 +266,7 @@ mod tests {
             })
             .collect();
         let mut prematch = PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 30_000,

@@ -188,6 +188,7 @@ fn prematch_fixture(stage: usize) -> PrematchSnapshot {
         _ => PrematchPhase::Loading,
     };
     PrematchSnapshot {
+        join_remaining_ms: None,
         generation: 1,
         phase,
         remaining_ms: match stage {

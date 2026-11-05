@@ -23,7 +23,9 @@ the host's one Telegram bot and the alert thresholds.
   OMOBA_ALERT_WORKER_STALE_SECONDS (300) while the lobby runs;
 - players waiting for a free arena for OMOBA_ALERT_CAPACITY_WAIT_SECONDS (120) or longer:
   every arena busy while a ready roster waits, as the lobby reports it in
-  <match root>/capacity.json (LR-09).
+  <match root>/capacity.json (LR-09);
+- terminal career receipts pending for 5 min in lobby/worker outboxes, unreadable
+  receipts or an incomplete bounded scan (active checkpoints do not alert).
 
 Every problem goes to the journal; with the bot, also to Telegram: at once, then a
 reminder every OMOBA_ALERT_REPEAT_MINUTES (60) while it lasts (every
@@ -58,6 +60,9 @@ PLACEHOLDER = "CHANGE_ME"
 STATE_DIR = "/var/lib/omoba-ru-monitor"            # StateDirectory= of its units
 MATCH_ROOT = "/var/lib/omoba-ru/matches"           # OMOBA_MATCH_ROOT of the lobby unit
 CAPACITY_REPORT = MATCH_ROOT + "/capacity.json"    # the lobby's arena report (server/src/capacity.rs)
+LOBBY_OUTBOX = "/var/lib/omoba-ru/lobby-outbox"
+SETTLEMENT_STALE_SECONDS = 300
+MAX_OUTBOX_RECORDS = 16384
 CAPACITY_FRESH_SECONDS = 120                        # the lobby rewrites it every 5 s
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -193,7 +198,7 @@ def label(code: str) -> str:
     """What a problem code is about, for the "resolved" message."""
     kind, _, subject = code.partition(":")
     return {"unit": subject, "disk": f"free disk on {subject}", "worker": f"match worker {subject[:8]}",
-            "postgres": "PostgreSQL", "capacity": "arena capacity"}.get(
+            "postgres": "PostgreSQL", "capacity": "arena capacity", "settlement": "match result settlement"}.get(
         kind, "alerts.env" if kind == "config" else code)
 
 
@@ -432,6 +437,71 @@ class Monitor:
                  f"players waiting (the longest {facts['longest_wait_secs']} s); check CPU and memory, then "
                  f"raise OMOBA_MATCH_CAPACITY (README.md, \"Arena capacity\")", repeat)], facts
 
+    def settlement_problems(self) -> tuple[list, dict]:
+        """Terminal outbox records only: an active Start/Checkpoint may be hours old.
+
+        Never read player data into the report, and never follow symlinks out of
+        the owned roots. A scan limit or unreadable receipt is actionable too:
+        silently ignoring either could hide unsaved match results.
+        """
+        from itertools import islice
+        roots = [Path(self.p(LOBBY_OUTBOX))]
+        match_root = Path(self.p(MATCH_ROOT))
+        try:
+            with os.scandir(match_root) as entries:
+                workers = list(islice((e for e in entries if ALLOCATION.fullmatch(e.name)
+                                      and e.is_dir(follow_symlinks=False)), MAX_WORKER_DIRS + 1))
+            roots.extend(Path(e.path) / "outbox" for e in workers[:MAX_WORKER_DIRS])
+            limited = len(workers) > MAX_WORKER_DIRS
+        except FileNotFoundError:
+            limited = False
+        except OSError:
+            limited = True
+        stale, unreadable, scanned, oldest = 0, 0, 0, 0
+        for root in roots:
+            if root.is_symlink():
+                unreadable += 1
+                continue
+            try:
+                with os.scandir(root) as entries:
+                    for entry in entries:
+                        if not entry.name.endswith(".json") or not entry.is_file(follow_symlinks=False):
+                            continue
+                        scanned += 1
+                        if scanned > MAX_OUTBOX_RECORDS:
+                            limited = True
+                            break
+                        try:
+                            info = entry.stat(follow_symlinks=False)
+                            if info.st_size > 1024 * 1024:
+                                raise ValueError("receipt too large")
+                            record = json.loads(Path(entry.path).read_text())
+                            if not isinstance(record, dict) or record.get("kind") not in ("Start", "Checkpoint", "Settle", "Rejected"):
+                                raise ValueError("unknown outbox record")
+                            if record["kind"] not in ("Settle", "Rejected"):
+                                continue
+                            age = max(0, int(self.now() - info.st_mtime))
+                            if age >= SETTLEMENT_STALE_SECONDS:
+                                stale += 1
+                                oldest = max(oldest, age)
+                        except (OSError, ValueError):
+                            unreadable += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                unreadable += 1
+            if limited:
+                break
+        facts = {"stale": stale, "unreadable": unreadable, "scan_limited": limited,
+                 "scanned": min(scanned, MAX_OUTBOX_RECORDS), "oldest_seconds": oldest}
+        if not stale and not unreadable and not limited:
+            return [], facts
+        repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60
+        text = (f"match result outbox needs attention: {stale} terminal receipts pending for at least "
+                f"5 min (oldest {oldest // 60} min), {unreadable} unreadable, scan limited={limited}; "
+                f"check PostgreSQL and career worker errors; preserve outboxes before recovery")
+        return [("settlement:outbox", text, repeat)], facts
+
     def check(self) -> dict:
         problems, warnings, facts = [], [], {}
         for text in self.cfg.problems:
@@ -445,6 +515,8 @@ class Monitor:
         more, facts["workers"] = self.worker_problems(facts["units"].get(LOBBY, {}))
         problems += more
         more, facts["capacity"] = self.capacity_problems(facts["units"].get(LOBBY, {}))
+        problems += more
+        more, facts["settlements"] = self.settlement_problems()
         problems += more
         if not self.cfg.telegram()[0]:
             warnings.append(f"no Telegram bot in {self.cfg.path}: alerts reach the journal only")

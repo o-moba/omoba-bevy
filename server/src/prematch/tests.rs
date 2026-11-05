@@ -513,7 +513,7 @@ fn practice_bots_auto_ready_and_loading_timeout_returns_to_draft() {
     let state = view(&rt, address(1), now + Duration::from_secs(34));
     assert_eq!(state.phase, PrematchPhase::Draft);
     assert!(state.generation > generation);
-    assert!(state.error.unwrap().contains("timed out"));
+    assert_eq!(state.error.as_deref(), Some("loading_timeout"));
     assert!(!rt.world.players[&address(1)].draft.locked);
     let retry = now + Duration::from_secs(35);
     rt.tick_prematch(retry);
@@ -878,7 +878,7 @@ fn durable_allocation_timeout_is_bounded_and_retires_the_pending_roster() {
     rt.tick_prematch(loading + Duration::from_secs(30));
     let state = view(&rt, address(1), loading + Duration::from_secs(30));
     assert_eq!(state.phase, PrematchPhase::Draft);
-    assert!(state.error.unwrap().contains("Match start took too long"));
+    assert_eq!(state.error.as_deref(), Some("start_timeout"));
     assert!(rt.career_allocation_for_test().is_none());
     assert!(!rt.world.players[&address(1)].draft.loaded);
     assert!(!rt.combat_log.ledger.is_started());
@@ -915,4 +915,121 @@ fn late_avatar_authorization_cannot_modify_a_new_roster_generation() {
         rt.world.players[&address(1)].hero.identity.hero_class,
         HeroClass::Warrior
     );
+}
+
+fn allocated_loading_roster(
+    preference: shared::match_service::MatchPreference,
+) -> (ServerRuntime, Instant, std::path::PathBuf) {
+    use crate::match_allocation::{AllocatedHuman, Manifest, Worker, unix_ms};
+    let mode = if preference.rated() {
+        MatchMode::Release
+    } else {
+        MatchMode::Practice
+    };
+    let (mut rt, now) = fixture(mode, 5);
+    rt.career.backend = Box::new(crate::career_backend::MemoryCareer::test_backend(
+        rt.server_epoch,
+    ));
+    let directory = std::env::temp_dir().join(format!("omoba-loading-product-{}", rt.server_epoch));
+    std::fs::create_dir_all(&directory).unwrap();
+    let humans: Vec<_> = (1..=10)
+        .map(|i| AllocatedHuman {
+            profile_id: format!("{i:064x}"),
+            session_id: format!("seat-{i}"),
+            team: if i <= 5 { Team::Green } else { Team::Blue },
+        })
+        .collect();
+    rt.match_service = crate::match_service::MatchService::Worker(Worker {
+        manifest: Manifest {
+            version: 1,
+            allocation_id: "e".repeat(32),
+            endpoint: "127.0.0.1:41000".into(),
+            bind: "127.0.0.1:41000".into(),
+            preference,
+            humans: humans.clone(),
+            join_deadline_ms: unix_ms() + 60_000,
+            cohort: None,
+        },
+        directory: directory.clone(),
+        recovery: false,
+        origin_epoch: 0,
+        aborted: false,
+        booted_at: now,
+        last_status: None,
+        terminal_at: None,
+        saw_human: true,
+        released: Vec::new(),
+    });
+    for (i, human) in humans.iter().enumerate() {
+        let addr = address(i as u16 + 1);
+        rt.career.backend.test_authenticated(
+            addr,
+            shared::career::ProfileSummary::new(human.profile_id.clone(), format!("Player {i}")),
+            &human.session_id,
+        );
+        join(&mut rt, addr, &human.session_id, now, true);
+    }
+    for (addr, p) in &mut rt.world.players {
+        if !p.hero.identity.is_bot {
+            p.draft.locked = true;
+            p.draft.loaded = *addr != address(10);
+        }
+    }
+    rt.prematch.phase = Some(PrematchPhase::Loading);
+    rt.prematch.deadline = Some(now + Duration::from_secs(1));
+    (rt, now, directory)
+}
+
+#[test]
+fn casual_loading_timeout_replaces_only_the_missing_human_and_keeps_every_other_lock() {
+    let (mut rt, now, directory) =
+        allocated_loading_roster(shared::match_service::MatchPreference::Casual);
+    rt.tick_prematch(now + Duration::from_secs(2));
+    let humans: Vec<_> = rt
+        .world
+        .players
+        .values()
+        .filter(|p| p.joined && !p.hero.identity.is_bot)
+        .collect();
+    assert_eq!(humans.len(), 9);
+    assert!(humans.iter().all(|p| p.draft.locked && p.draft.loaded));
+    assert_eq!(
+        rt.world
+            .players
+            .values()
+            .filter(|p| p.joined && p.hero.identity.is_bot)
+            .count(),
+        1
+    );
+    assert_eq!(rt.prematch.phase, Some(PrematchPhase::Loading));
+    assert!(
+        rt.match_service
+            .worker()
+            .unwrap()
+            .released
+            .contains(&"seat-10".into())
+    );
+    assert!(rt.allocated_humans_ready());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn ranked_loading_timeout_aborts_for_requeue_without_resetting_the_other_nine_picks() {
+    let (mut rt, now, directory) =
+        allocated_loading_roster(shared::match_service::MatchPreference::Ranked);
+    rt.tick_prematch(now + Duration::from_secs(2));
+    assert!(rt.match_service.worker().unwrap().aborted);
+    let left: Vec<String> =
+        serde_json::from_slice(&std::fs::read(directory.join("cancel.json")).unwrap()).unwrap();
+    assert_eq!(left, vec!["seat-10"]);
+    assert!(
+        rt.world
+            .players
+            .values()
+            .filter(|p| p.joined)
+            .all(|p| p.draft.locked
+                && p.draft.error.as_deref() == Some("allocation_cancelled_or_expired"))
+    );
+    assert_eq!(rt.match_started_at, None);
+    std::fs::remove_dir_all(directory).unwrap();
 }

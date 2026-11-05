@@ -30,5 +30,6 @@
   "loading.tip.objective": "Уничтожь башни на одной линии, затем главную башню врага. Следуй за своими миньонами.",
   "loading.tip.previous": "‹",
   "loading.tip.next": "›",
-  "loading.tip.counter": "Совет {current} / {total}"
+  "loading.tip.counter": "Совет {current} / {total}",
+  "loading.waiting_players": "Ждём: {names}"
 }

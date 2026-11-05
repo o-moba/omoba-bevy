@@ -138,6 +138,8 @@ pub(crate) struct Status {
     /// (LR-32); a human who never came is not re-queued. Additive.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub joined_sessions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub released_sessions: Vec<String>,
 }
 impl Status {
     /// The match was played: it is running or ended with a winner.
@@ -176,6 +178,7 @@ pub(crate) struct Worker {
     /// An allocated human joined at least once. A worker nobody ever reached
     /// aborts early instead of holding its arena for the whole join deadline.
     pub saw_human: bool,
+    pub released: Vec<String>,
 }
 impl Worker {
     pub fn cancelled(&self) -> bool {
@@ -194,6 +197,9 @@ impl ServerRuntime {
         };
         let profile = self.career.backend.profile(addr)?;
         if self.career.backend.authenticated_session(addr).as_deref() != Some(session) {
+            return None;
+        }
+        if worker.released.iter().any(|s| s == session) {
             return None;
         }
         worker.manifest.team(&profile.profile_id, session)
@@ -229,16 +235,21 @@ impl ServerRuntime {
     }
     pub(crate) fn allocated_humans_ready(&self) -> bool {
         self.match_service.worker().is_none_or(|worker| {
-            worker.manifest.humans.iter().all(|h| {
-                self.world.players.values().any(|p| {
-                    p.joined
-                        && !p.hero.identity.is_bot
-                        && p.session_id.as_deref() == Some(h.session_id.as_str())
-                        && p.career_profile
-                            .as_ref()
-                            .is_some_and(|p| p.profile_id == h.profile_id)
+            worker
+                .manifest
+                .humans
+                .iter()
+                .filter(|h| !worker.released.contains(&h.session_id))
+                .all(|h| {
+                    self.world.players.values().any(|p| {
+                        p.joined
+                            && !p.hero.identity.is_bot
+                            && p.session_id.as_deref() == Some(h.session_id.as_str())
+                            && p.career_profile
+                                .as_ref()
+                                .is_some_and(|p| p.profile_id == h.profile_id)
+                    })
                 })
-            })
         })
     }
 }
@@ -367,6 +378,7 @@ pub(crate) mod runtime_tests {
             last_status: None,
             terminal_at: None,
             saw_human: false,
+            released: Vec::new(),
         });
         let join = ClientPacket::Join {
             handheld: Default::default(),
@@ -381,11 +393,44 @@ pub(crate) mod runtime_tests {
         };
         (rt, addr, join)
     }
+
+    #[test]
+    fn casual_leave_releases_only_the_exact_profile_session_and_keeps_other_reserved_seats() {
+        let (mut rt, member, _) = fixture();
+        let outsider = "127.0.0.1:60309".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            outsider,
+            shared::career::ProfileSummary::new("c".repeat(64), "Other".into()),
+            "seat-a",
+        );
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.humans.push(AllocatedHuman {
+                profile_id: "d".repeat(64),
+                session_id: "seat-b".into(),
+                team: Team::Blue,
+            });
+        }
+        rt.leave_match(outsider, Instant::now());
+        assert!(
+            rt.match_service.worker().unwrap().released.is_empty(),
+            "session collision must not release someone else's allocation"
+        );
+        rt.leave_match(member, Instant::now());
+        let worker = rt.match_service.worker().unwrap();
+        assert_eq!(worker.released, ["seat-a"]);
+        assert!(
+            !worker.aborted,
+            "the other allocated player may still arrive"
+        );
+    }
     #[test]
     fn only_allocated_profile_and_session_can_cancel_an_unstarted_worker() {
         use ed25519_dalek::{Signer, SigningKey};
         use shared::career::{CareerAction, CareerRequest, authorized_signing_bytes};
         let (mut rt, member, _) = fixture();
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.preference = MatchPreference::Ranked;
+        }
         let now = Instant::now();
         let directory = rt.match_service.worker().unwrap().directory.clone();
         fs::create_dir_all(&directory).unwrap();
@@ -518,6 +563,7 @@ pub(crate) mod runtime_tests {
                 last_status: None,
                 terminal_at: None,
                 saw_human: false,
+                released: Vec::new(),
             });
             let now = Instant::now();
             for (i, human) in humans.iter().enumerate() {

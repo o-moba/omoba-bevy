@@ -20,8 +20,14 @@
   "queue.failed.profile_has_another_session": "This account is already in a match on another device.\nFinish it there, or cancel and try again later.",
   "queue.failed.worker_spawn_failed": "The server could not start the arena. Retrying…",
   "queue.failed.lobby_busy": "The server is overloaded. Retrying…",
-  "queue.failed.dodge_cooldown": "You left a Ranked match that was found for you. A new search opens in a minute.\nCancel and search again later.",
+  "queue.failed.dodge_cooldown": "You declined or missed a match confirmation.\nA temporary search cooldown applies; repeated dodges increase it.",
   "queue.failed.party_member_left": "A party member left the search. Start the search again.",
   "queue.failed.capacity_busy": "All arenas are busy. Retrying…",
-  "queue.requeue.worker_lost": "The match did not start: a player did not connect. Searching again…"
+  "queue.requeue.worker_lost": "The match did not start: a player did not connect. Searching again…",
+  "queue.party_wait": "Waiting for {count} party members · up to {seconds}s",
+  "queue.party_wait_named": "Waiting for {names} · up to {seconds}s",
+  "queue.ready.found": "Match found · {count}/{needed} accepted\nConfirm within {seconds}s",
+  "queue.ready.accepted": "Accepted · {count}/{needed} ready\nWaiting for the others · {seconds}s",
+  "queue.ready.accept": "Accept match",
+  "queue.ready.decline": "Decline"
 }

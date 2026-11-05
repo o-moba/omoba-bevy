@@ -1535,6 +1535,21 @@ fn sync_loading(
                     &[("ready", &ready), ("total", &total)],
                 )
             };
+            let missing = prematch
+                .players
+                .iter()
+                .filter(|p| !p.is_bot && !p.loaded)
+                .map(|p| p.nickname.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let count = if prematch.phase == PrematchPhase::Loading && !missing.is_empty() {
+                format!(
+                    "{count}\n{}",
+                    trf("loading.waiting_players", &[("names", &missing)])
+                )
+            } else {
+                count
+            };
             set_text(parts.stage, &count, color::TEXT_GOLD);
         }
         None => {

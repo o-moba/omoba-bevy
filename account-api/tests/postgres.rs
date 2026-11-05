@@ -136,6 +136,7 @@ fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResu
         progression_xp_gained: 0,
     };
     MatchResult {
+        gameplay_started: true,
         result_id: id.into(),
         server_epoch: u64::MAX,
         match_id: n,
@@ -1079,5 +1080,68 @@ async fn leaderboard_orders_ties_hides_newcomers_and_opt_outs_and_ranks_caller()
     println!("SAMPLE leaderboard limit=2: {page}");
     println!(
         "PASS: ladder order with both tie-breakers, newcomer and opt-out exclusion, own rank beyond the page, null rank when ineligible or hidden, versioned opt-out, strict query, 17-class filters."
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn an_unplayed_draft_never_enters_history_or_analytics() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    let app = App::connect(
+        &url,
+        Config {
+            origin: "https://players.example".into(),
+            secret: [41; 32],
+            trust_loopback_proxy: false,
+            release_file: None,
+        },
+    )
+    .await
+    .unwrap();
+    let mut seed = [0; 32];
+    getrandom::fill(&mut seed).unwrap();
+    let key = SigningKey::from_bytes(&seed);
+    let a = app
+        .career
+        .authenticate(&crypto::hex(key.verifying_key().as_bytes()), "Draft One")
+        .await
+        .unwrap();
+    getrandom::fill(&mut seed).unwrap();
+    let b = app
+        .career
+        .authenticate(
+            &crypto::hex(SigningKey::from_bytes(&seed).verifying_key().as_bytes()),
+            "Draft Two",
+        )
+        .await
+        .unwrap();
+    let mut r = result(&a, &b, &format!("unplayed-{}", crypto::random::<8>()), 1);
+    r.gameplay_started = false;
+    start(&app, &r).await;
+    r.outcome = MatchOutcome::Abandoned;
+    r.winner = None;
+    r.rated = false;
+    r.unrated_reason = Some("prematch_abandoned".into());
+    app.career.settle(r.clone()).await.unwrap();
+    projected(&app, &r.result_id).await;
+    let (session, _) = login(&app, &key).await;
+    let history = read::history(&app, &session, Some("days=all"))
+        .await
+        .unwrap();
+    assert_eq!(history["matches"].as_array().unwrap().len(), 0);
+    let facts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM portal.player_match_facts WHERE result_id=$1")
+            .bind(&r.result_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(facts, 0);
+    assert_eq!(
+        app.career
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .matches_played,
+        0
     );
 }

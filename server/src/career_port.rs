@@ -28,6 +28,14 @@ pub(crate) struct MatchRequest {
     pub also_casual: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ReadyRequest {
+    pub addr: SocketAddr,
+    pub request_id: u64,
+    pub check_id: String,
+    pub accepted: bool,
+}
+
 pub(crate) trait CareerPort {
     /// Whether durable storage is configured; disabled stores accept nothing
     /// and report guest play in the view.
@@ -58,6 +66,7 @@ pub(crate) trait CareerPort {
     fn handle(&mut self, addr: SocketAddr, request: CareerRequest);
     fn poll(&mut self);
     fn take_match_requests(&mut self) -> Vec<MatchRequest>;
+    fn take_ready_requests(&mut self) -> Vec<ReadyRequest>;
     fn take_cancelled(&mut self) -> Vec<SocketAddr>;
     fn take_social(&mut self) -> Vec<(SocketAddr, shared::social::SocialRequest)>;
     fn take_settled(&mut self) -> Vec<MatchResult>;
@@ -67,6 +76,9 @@ pub(crate) trait CareerPort {
     fn start(&mut self, result: MatchResult) -> bool;
     fn checkpoint(&mut self, result: MatchResult) -> bool;
     fn settle(&mut self, result: MatchResult) -> bool;
+    /// Non-blocking barrier: all previously accepted records are fsynced in
+    /// the local outbox (or already settled). Does not require a live database.
+    fn flush_outbox(&mut self) -> bool;
     fn started(&self, id: &str) -> bool;
     fn start_rejected(&self, id: &str) -> Option<String>;
     fn start_error(&self, id: &str) -> Option<String>;

@@ -228,6 +228,7 @@ impl Pool {
             Ok(child) => child,
             Err(_) => {
                 let status = Status {
+                    released_sessions: Vec::new(),
                     allocation_id: manifest.allocation_id.clone(),
                     server_epoch: 0,
                     heartbeat_ms: match_allocation::unix_ms(),
@@ -320,6 +321,7 @@ impl Pool {
                 slot.child = None;
                 if slot.status.is_none() {
                     let status = Status {
+                        released_sessions: Vec::new(),
                         allocation_id: slot.manifest.allocation_id.clone(),
                         server_epoch: 0,
                         heartbeat_ms: now,
@@ -648,6 +650,7 @@ mod tests {
         let id = p.allocate(manifest('a')).unwrap();
         let slot = p.slots.get_mut(&id).unwrap();
         slot.status = Some(Status {
+            released_sessions: Vec::new(),
             allocation_id: id.clone(),
             server_epoch: 1,
             heartbeat_ms: match_allocation::unix_ms(),
@@ -738,6 +741,7 @@ mod tests {
             .unwrap();
         // What an aborted worker (reaped or capped) writes before it exits.
         let retired = |age_ms: u64| Status {
+            released_sessions: Vec::new(),
             allocation_id: id.clone(),
             server_epoch: 1,
             heartbeat_ms: match_allocation::unix_ms() - age_ms,
@@ -771,6 +775,7 @@ mod tests {
         let id = p.allocate(manifest('a')).unwrap();
         let slot = p.slots.get_mut(&id).unwrap();
         slot.status = Some(Status {
+            released_sessions: Vec::new(),
             allocation_id: id.clone(),
             server_epoch: 1,
             heartbeat_ms: match_allocation::unix_ms(),

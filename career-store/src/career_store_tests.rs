@@ -99,6 +99,7 @@ fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> Particip
 }
 fn result(a: &ProfileSummary, b: &ProfileSummary, n: u64) -> MatchResult {
     MatchResult {
+        gameplay_started: true,
         result_id: format!("fixture-result-{n}"),
         server_epoch: u64::MAX,
         match_id: n,
@@ -1750,5 +1751,68 @@ async fn career_store_sanctions_apply_expire_lift_and_audit() {
         .unwrap();
     assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
     assert!(f.store.profile(&throwaway.profile_id).await.is_ok());
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn unplayed_allocations_settle_idempotently_without_career_or_history() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut r = result(&a, &b, 1);
+    r.gameplay_started = false;
+    f.store.start(starting(&r)).await.unwrap();
+    r.outcome = MatchOutcome::Abandoned;
+    r.winner = None;
+    r.rated = false;
+    r.unrated_reason = Some("prematch_abandoned".into());
+    let saved = f.store.settle(r.clone()).await.unwrap();
+    assert!(saved.saved && !saved.gameplay_started);
+    assert_eq!(f.store.settle(r).await.unwrap(), saved);
+    for p in [&a, &b] {
+        assert_eq!(f.store.profile(&p.profile_id).await.unwrap(), *p);
+        assert!(
+            f.store
+                .history(&p.profile_id, None)
+                .await
+                .unwrap()
+                .0
+                .is_empty()
+        );
+    }
+    let mut crashed = result(&a, &b, 2);
+    crashed.gameplay_started = false;
+    f.store.start(starting(&crashed)).await.unwrap();
+    f.expire(&crashed.result_id).await;
+    let recovered = f.store.recover_expired().await.unwrap();
+    assert_eq!(recovered.len(), 1);
+    assert!(!recovered[0].gameplay_started);
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().matches_played,
+        0
+    );
+    assert!(
+        f.store
+            .history(&a.profile_id, None)
+            .await
+            .unwrap()
+            .0
+            .is_empty()
+    );
+    let mut played = result(&a, &b, 3);
+    played.gameplay_started = false;
+    f.store.start(starting(&played)).await.unwrap();
+    played.gameplay_started = true;
+    let receipt = f.store.settle(played).await.unwrap();
+    assert!(receipt.rated && receipt.participants.iter().all(|p| p.rating.is_some()));
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().matches_played,
+        1
+    );
+    assert_eq!(
+        f.store.history(&a.profile_id, None).await.unwrap().0.len(),
+        1
+    );
     f.close().await;
 }

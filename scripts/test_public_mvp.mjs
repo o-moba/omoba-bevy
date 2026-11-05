@@ -4,6 +4,8 @@
 // ops/vps/ru/README.md "Arena capacity"). It launches its own loopback lobby;
 // run it against a disposable database, never production.
 //
+// --scenario=ready-check verifies nine accepts, a 15 s timeout, FIFO requeue,
+// late-answer rejection and one unanimous replacement roster before spawn.
 // Load options (scenario `load`):
 //   --clients=N --preference=P      N players of one queue (bot_practice, quick, humans_only)
 //   --mix=bot_practice:10,quick:5   players of several queues, interleaved (instead of the two above)
@@ -36,7 +38,7 @@ const preference = mix ? 'mixed' : (opts.preference || 'bot_practice');
 assert(mix || QUEUES.includes(preference), `unknown --preference ${preference}`);
 const preferences = mix ? (() => {const left=mix.map(([queue,count])=>[queue,count]);const out=[];while(out.length<clientsCount)for(const entry of left)if(entry[1]>0){out.push(entry[0]);entry[1]--;}return out;})() : Array(clientsCount).fill(preference);
 const scenario = opts.scenario || 'load';
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait'].includes(scenario), 'unknown scenario');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination'].includes(scenario), 'unknown scenario');
 if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
 for(const [queue,count] of mix ?? [[preference,clientsCount]])assert(queue!=='humans_only'||count%10===0, 'Ranked (humans_only) forms only full ten-player matches: use a multiple of 10');
 const maxWaitSecs = opts['max-wait-secs'] ? Number(opts['max-wait-secs']) : null;
@@ -134,7 +136,7 @@ process.on('SIGINT',()=>{cleanup();process.exit(130)});
 process.on('SIGTERM',()=>{cleanup();process.exit(143)});
 class Client {
  constructor(index, target=lobbyPort, identity=null, mode={}) {
-  this.index=index;this.port=target;this.autoHandoff=mode.autoHandoff!==false;this.autoQueue=mode.autoQueue!==false;this.autoJoin=mode.autoJoin!==false;this.preference=mode.preference || preferences[index] || preferences[0];this.active=true;this.createdAt=performance.now();this.runningBytes=0;this.worldSnapshots=0;this.bootstrapSnapshots=0;this.joinAttempts=0;this.allocationsSeen=[];this.profileResponses=new Map();this.key=identity?.key || crypto.generateKeyPairSync('ed25519').privateKey;
+  this.index=index;this.port=target;this.autoHandoff=mode.autoHandoff!==false;this.autoQueue=mode.autoQueue!==false;this.autoJoin=mode.autoJoin!==false;this.autoReady=mode.autoReady!==false;this.preference=mode.preference || preferences[index] || preferences[0];this.active=true;this.createdAt=performance.now();this.runningBytes=0;this.worldSnapshots=0;this.bootstrapSnapshots=0;this.joinAttempts=0;this.allocationsSeen=[];this.profileResponses=new Map();this.key=identity?.key || crypto.generateKeyPairSync('ed25519').privateKey;
   this.publicKey=crypto.createPublicKey(this.key).export({type:'spki',format:'der'}).subarray(-32).toString('hex');
   this.session=identity?.session || `mvp-${Date.now()}-${index}`;this.nickname=identity?.nickname || `Probe-${index}`;
   this.packets=0;this.bytes=0;this.sentPackets=0;this.sentBytes=0;this.transforms=0;this.lastInput=0;this.firstTransform=null;this.lastTransform=null;this.snapshots=0;this.gaps=[];this.frames=new Map();this.errors=[];this.stage='probing';this.next=0;this.queueId=1;
@@ -198,7 +200,7 @@ class Client {
    }
   }
   if(now-this.lastSend<300)return;this.lastSend=now;this.gameplay({type:'ping'});
-  if(this.port===lobbyPort){if(this.autoQueue&&now-this.lastQueue>2000){this.lastQueue=now;this.account({action:'find_match',request_id:this.queueId,preference:this.preference});}return;}
+  if(this.port===lobbyPort){if(this.autoQueue&&now-this.lastQueue>500){const ready=this.career?.match_service;if(this.autoReady&&ready?.state==='ready_check'&&!ready.accepted){this.lastQueue=now;this.account({action:'ready_match',request_id:this.queueId,check_id:ready.check_id,accepted:true});}else if(now-this.lastQueue>2000){this.lastQueue=now;this.account({action:'find_match',request_id:this.queueId,preference:this.preference});}}return;}
   if(!this.autoJoin)return;
   const s=this.snapshot;
   if(!s?.players?.some(p=>p.id===s.your_id)) {this.join();return;}
@@ -234,6 +236,57 @@ function assertRoster(client, expected) {
  assert.equal(ids(client.snapshot).length,10,'running match must retain ten participants');
  assert.deepEqual(ids(client.snapshot),expected,'a fresh identity entered or replaced an allocated participant');
  assert.equal(new Set(ids(client.snapshot)).size,10,'duplicate player identity');
+}
+async function gracefulTermination(original) {
+ const allocation=original.allocation, progress=careerProgress(original);
+ const before=allocationStatus(allocation.allocation_id);
+ assert.equal(before.phase,'running'); assert(before.result_id);
+ const observer=new Client(6000,lobbyPort,original,{autoQueue:false,autoJoin:false,autoHandoff:false});all.push(observer);
+ await pumpUntil('termination observer authentication',()=>!!observer.auth);
+ const worker=ownedWorkerPid(original.port), started=performance.now();
+ process.kill(worker,'SIGTERM'); original.close();
+ let query=600, nextQuery=0;
+ await pumpUntil('SIGTERM persists an interrupted result before worker exit',()=>observer.lastDetail?.result_id===before.result_id&&observer.lastDetail.saved&&allocationStatus(allocation.allocation_id)?.phase==='failed',20000,now=>{
+  if(now>=nextQuery){nextQuery=now+1000;observer.account({action:'detail',request_id:++query,result_id:before.result_id});}
+ });
+ const saved=observer.lastDetail;
+ assert.equal(saved.outcome,'interrupted');assert.equal(saved.rated,false);
+ assert(saved.participants.every(p=>p.progression_xp_gained===0&&p.rating==null));
+ assert.equal(saved.server_epoch,before.server_epoch);
+ const log=fs.readFileSync(path.join(root,'matches',allocation.allocation_id,'worker.log'),'utf8');
+ assert(log.includes('SHUTDOWN_METRIC terminal_outbox=durable'),'worker exited without confirming durable outbox');
+ nextQuery=0;const profileRequest=++query;
+ await pumpUntil('interrupted match is counted exactly once',()=>observer.profileResponses.get(String(profileRequest))?.matches_played===progress.matches_played+1,10000,now=>{
+  if(now>=nextQuery){nextQuery=now+1000;observer.account({action:'profile',request_id:profileRequest,profile_id:progress.profile_id});}
+ });
+ for(const key of ['rating','rated_matches','progression_xp','wins','losses'])assert.equal(observer.profile[key],progress[key],`SIGTERM changed ${key}`);
+ report.termination={status:'PASS',signal:'SIGTERM',worker_pid:worker,terminal_result:saved.result_id,outcome:saved.outcome,outbox_durable:true,elapsed_seconds:(performance.now()-started)/1000};
+ report.scenarios.push('sigterm_interrupts_and_fsyncs_terminal_result');
+}
+async function readyCheckLifecycle() {
+ const workers = () => fs.readdirSync(path.join(root,'matches'),{withFileTypes:true}).filter(e=>e.isDirectory()&&fs.existsSync(path.join(root,'matches',e.name,'manifest.json'))).length;
+ const before=workers();
+ const roster=Array.from({length:10},(_,i)=>new Client(5000+i,lobbyPort,null,{preference:'humans_only',autoHandoff:false,autoReady:i!==9}));
+ all.push(...roster); const missing=roster[9];
+ await pumpUntil('nine explicit confirmations',()=>roster.every(c=>c.career?.match_service?.state==='ready_check')&&roster[0].career.match_service.accepted_count===9,20000);
+ const check=roster[0].career.match_service.check_id;
+ assert(roster.every(c=>c.career.match_service.check_id===check));
+ assert.equal(workers(),before,'worker launched without unanimous consent');
+ await pumpUntil('15-second ready timeout',()=>missing.career?.match_service?.state==='failed'&&missing.career.match_service.code==='dodge_cooldown'&&roster.slice(0,9).every(c=>c.career?.match_service?.state==='waiting'),20000);
+ assert.equal(workers(),before,'an expired roster launched a worker');
+ for(const c of roster.slice(0,9))assert(c.career.match_service.elapsed_secs>=15,'requeue lost FIFO age');
+ missing.autoQueue=false;
+ missing.account({action:'ready_match',request_id:missing.queueId,check_id:check,accepted:true});
+ await pumpFor(500); assert.equal(workers(),before,'late accept revived an expired check');
+ const replacement=new Client(5010,lobbyPort,null,{preference:'humans_only',autoHandoff:false});all.push(replacement);
+ const accepted=[...roster.slice(0,9),replacement];
+ await pumpUntil('replacement unanimously accepts a new roster',()=>accepted.every(c=>c.career?.match_service?.state==='assigned'),25000);
+ const allocation=accepted[0].career.match_service.allocation;
+ assert(accepted.every(c=>c.career.match_service.allocation.allocation_id===allocation.allocation_id));
+ assert.equal(workers(),before+1,'one unanimous roster must start exactly one worker');
+ for(const c of [...roster,replacement]){c.autoQueue=false;c.close();}
+ report.ready_check={status:'PASS',window_secs:15,accepted_before_timeout:9,worker_count_before_unanimity:0,fifo_age_preserved:true,late_accept_rejected:true,replacement_allocation:allocation.allocation_id};
+ report.scenarios.push('unanimous_15s_ready_timeout_fifo_replacement');
 }
 async function lifecycle(original) {
  console.log(wire({phase:'lifecycle',action:'humans_only_cancel'}));
@@ -581,6 +634,8 @@ try {
  const gaps=all.flatMap(c=>c.gaps).sort((a,b)=>a-b);report.snapshot_gap_ms={p50:gaps[Math.floor(gaps.length*.5)],p95:gaps[Math.floor(gaps.length*.95)],p99:gaps[Math.floor(gaps.length*.99)],max:gaps.at(-1)};
  measure(allocations, runningAt);
  }
+ if(scenario==='termination')await gracefulTermination(all[0]);
+ if(scenario==='ready-check')await readyCheckLifecycle();
  if(scenario==='lifecycle')await lifecycle(all[0]);
  if(scenario==='abandoned')await abandoned(all[0]);
  if(scenario==='capacity-wait')await capacityWait();

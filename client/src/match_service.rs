@@ -28,6 +28,7 @@ pub(crate) struct MatchServiceClient {
     pub allocation: Option<MatchAllocation>,
     pub active: bool,
     request_id: u64,
+    ready_answer: Option<(String, bool)>,
     last_request: Option<Instant>,
     /// The lock-in that started the current search: Play again queues it
     /// again after an allocated match (DECISIONS R7.4).
@@ -211,6 +212,31 @@ impl MatchServiceClient {
         .flatten()
     }
 
+    pub(crate) fn ready_check<'a>(&self, view: &'a CareerView) -> Option<(&'a str, bool)> {
+        match self.answer(view)? {
+            MatchServiceView::ReadyCheck {
+                check_id,
+                accepted,
+                remaining_secs,
+                ..
+            } if *remaining_secs > 0 => {
+                let pending = self
+                    .ready_answer
+                    .as_ref()
+                    .is_some_and(|(id, _)| id == check_id);
+                Some((check_id, *accepted || pending))
+            }
+            _ => None,
+        }
+    }
+    /// Called only by an explicit click on the current check. Never reused for a new roster.
+    pub(crate) fn respond_ready(&mut self, view: &CareerView, accepted: bool) {
+        if let Some((id, false)) = self.ready_check(view) {
+            self.ready_answer = Some((id.to_owned(), accepted));
+            self.last_request = None;
+        }
+    }
+
     /// The running match that still holds this player's seat, as the lobby
     /// answered this search (LR-13): the searching screen offers Resume.
     pub fn in_match<'a>(&self, view: &'a CareerView) -> Option<(&'a MatchAllocation, InMatch)> {
@@ -316,6 +342,7 @@ impl MatchServiceClient {
         }
         let destination = allocation.and(self.lobby_addr.take());
         self.active = false;
+        self.ready_answer = None;
         self.resume_scope = None;
         self.resuming = false;
         self.also_casual = false;
@@ -348,7 +375,11 @@ fn worker_lost_before_start(
 ) -> bool {
     session.server_addr() == allocation.endpoint
         && !match_started(snapshot)
-        && (session.join_blocked()
+        && (snapshot
+            .prematch
+            .as_ref()
+            .is_some_and(|p| p.error.as_deref() == Some("allocation_cancelled_or_expired"))
+            || session.join_blocked()
             || session.reconnect_expired_before_start()
             || (session.state() == crate::net::ClientConnectionState::Disconnected
                 && !session.has_committed_join()))
@@ -440,7 +471,8 @@ fn update_match_service(
         // A terminal receipt ends gameplay even when its durable save is pending.
         // Keep the transport for receipt updates, but never rejoin this round.
         if career.view.last_result.as_ref().is_some_and(|result| {
-            result.server_epoch == snapshot.meta.server_epoch
+            result.gameplay_started
+                && result.server_epoch == snapshot.meta.server_epoch
                 && result.match_id == snapshot.meta.match_id
         }) {
             session.abandon_join();
@@ -495,13 +527,35 @@ fn update_match_service(
         .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(2))
     {
         flow.last_request = Some(now);
-        requests.write(NetworkCommand::Career(
-            shared::career::CareerRequest::FindMatch {
-                request_id: flow.request_id,
-                preference: flow.preference,
-                also_casual: flow.also_casual,
-            },
-        ));
+        let ready = match flow.answer(&career.view) {
+            Some(MatchServiceView::ReadyCheck {
+                check_id,
+                accepted: false,
+                ..
+            }) => flow
+                .ready_answer
+                .as_ref()
+                .filter(|(id, _)| id == check_id)
+                .cloned(),
+            _ => None,
+        };
+        if let Some((check_id, accepted)) = ready {
+            requests.write(NetworkCommand::Career(
+                shared::career::CareerRequest::ReadyMatch {
+                    request_id: flow.request_id,
+                    check_id,
+                    accepted,
+                },
+            ));
+        } else {
+            requests.write(NetworkCommand::Career(
+                shared::career::CareerRequest::FindMatch {
+                    request_id: flow.request_id,
+                    preference: flow.preference,
+                    also_casual: flow.also_casual,
+                },
+            ));
+        }
     }
 }
 
@@ -608,8 +662,28 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
             capacity_wait,
             searching,
             capacity_line,
+            party_gathering,
             ..
         } => {
+            if let Some(gathering) = party_gathering {
+                return if gathering.missing.is_empty() {
+                    trf(
+                        "queue.party_wait",
+                        &[
+                            ("count", &gathering.needed),
+                            ("seconds", &gathering.remaining_secs),
+                        ],
+                    )
+                } else {
+                    trf(
+                        "queue.party_wait_named",
+                        &[
+                            ("names", &gathering.missing.join(", ")),
+                            ("seconds", &gathering.remaining_secs),
+                        ],
+                    )
+                };
+            }
             if *capacity_wait {
                 return capacity_text(capacity_line.as_ref());
             }
@@ -642,6 +716,24 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
                 None => waiting,
             }
         }
+        MatchServiceView::ReadyCheck {
+            accepted,
+            accepted_count,
+            needed,
+            remaining_secs,
+            ..
+        } => trf(
+            if *accepted {
+                "queue.ready.accepted"
+            } else {
+                "queue.ready.found"
+            },
+            &[
+                ("count", accepted_count),
+                ("needed", needed),
+                ("seconds", remaining_secs),
+            ],
+        ),
         MatchServiceView::Allocating => tr("searching.match.allocating").into(),
         MatchServiceView::Assigned {
             in_match: Some(state),
@@ -917,6 +1009,7 @@ mod tests {
             })
             .add_systems(Update, update_match_service);
         let result = MatchResult {
+            gameplay_started: true,
             result_id: "abandoned".into(),
             server_epoch: 7,
             match_id: 1,
@@ -1507,6 +1600,7 @@ mod tests {
             casual_offer_after_secs: Some(300),
             also_casual: false,
             capacity_line: None,
+            party_gathering: None,
         });
         assert!(text.contains("3/10"));
         assert!(text.contains("no bots"));
@@ -1528,6 +1622,7 @@ mod tests {
                 casual_offer_after_secs: Some(300),
                 also_casual,
                 capacity_line: None,
+                party_gathering: None,
             }),
             ..default()
         }
@@ -1779,6 +1874,7 @@ mod tests {
             casual_offer_after_secs: None,
             also_casual: false,
             capacity_line: None,
+            party_gathering: None,
         };
         let failed = MatchServiceView::Failed {
             code: "no_capacity".into(),
@@ -1822,6 +1918,7 @@ mod tests {
             casual_offer_after_secs: None,
             also_casual: false,
             capacity_line: line,
+            party_gathering: None,
         }
     }
 
@@ -1905,6 +2002,93 @@ mod tests {
         assert!(
             !MatchServiceClient::default().offers_offline(&full),
             "not searching"
+        );
+    }
+    #[test]
+    fn ready_is_explicit_and_an_answer_cannot_accept_another_roster() {
+        let lobby = "127.0.0.1:4000";
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .init_resource::<CareerClient>()
+            .insert_resource(CareerIdentity::authenticated_for_test(lobby, 9, "seat-a"))
+            .insert_resource(ClientSessionId("seat-a".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(9, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, update_match_service);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test(lobby);
+        app.insert_resource(session);
+        app.insert_resource(MatchServiceClient {
+            active: true,
+            ..default()
+        });
+        let ready = |id: &str, accepted| CareerView {
+            match_service_request_id: Some(0),
+            match_service: Some(MatchServiceView::ReadyCheck {
+                check_id: id.into(),
+                preference: MatchPreference::Ranked,
+                accepted,
+                accepted_count: u32::from(accepted),
+                needed: 10,
+                remaining_secs: 15,
+            }),
+            ..default()
+        };
+        let sent = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter_map(|c| match c {
+                    NetworkCommand::Career(shared::career::CareerRequest::ReadyMatch {
+                        check_id,
+                        accepted,
+                        ..
+                    }) => Some((check_id, accepted)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        app.world_mut().resource_mut::<CareerClient>().view = ready("first", false);
+        app.update();
+        assert!(
+            sent(&mut app).is_empty(),
+            "a found match never auto-accepts"
+        );
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .respond_ready(&ready("first", false), true);
+        app.update();
+        assert_eq!(sent(&mut app), [("first".into(), true)]);
+        assert_eq!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .ready_check(&ready("first", false)),
+            Some(("first", true))
+        );
+        app.world_mut().resource_mut::<CareerClient>().view = ready("second", false);
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .last_request = None;
+        app.update();
+        assert!(sent(&mut app).is_empty(), "a new roster needs a new click");
+        assert_eq!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .ready_check(&ready("second", false)),
+            Some(("second", false))
+        );
+        let mut stale = ready("second", false);
+        stale.match_service_request_id = Some(99);
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .respond_ready(&stale, true);
+        assert_eq!(
+            app.world().resource::<MatchServiceClient>().ready_answer,
+            Some(("first".into(), true))
         );
     }
 }

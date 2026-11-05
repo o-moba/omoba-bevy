@@ -101,6 +101,8 @@ pub struct DraftPlayer {
 /// Epoch and match identity come from the enclosing snapshot metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrematchSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_remaining_ms: Option<u32>,
     pub generation: u64,
     pub phase: PrematchPhase,
     /// Server-owned phase deadline. Draft is zero while gathering the roster

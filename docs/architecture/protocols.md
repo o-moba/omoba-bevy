@@ -24,12 +24,12 @@ Snapshot: game dev 6d34f98, portal dev 604bc34, 2026-10-24. See [README](README.
 
 | Marker | Value | Defined in |
 | --- | --- | --- |
-| `PROTOCOL_VERSION` | `12` (tier aura styles, LR-67) | `shared/src/protocol.rs` |
+| `PROTOCOL_VERSION` | `13` (unanimous 15-second match confirmation) | `shared/src/protocol.rs` |
 | `HANDSHAKE_VERSION` | `1` | `shared/src/compatibility.rs` |
 | `CATALOG_REVISION` | `standard-kits-8` | `shared/src/loadout.rs` |
 | `GEOMETRY_ID` | `verdant-confluence-compact-v2` | `shared/src/map.rs` |
 | `GAMEPLAY_REVISION` | `dawnweaver-2026-10-11-reference` | `shared/src/compatibility.rs` |
-| `POLICY_PROTOCOL_VERSION` / `POLICY_HANDSHAKE_VERSION` | `12` / `1` | `shared/src/protocol/wire_enums.rs` |
+| `POLICY_PROTOCOL_VERSION` / `POLICY_HANDSHAKE_VERSION` | `13` / `1` | `shared/src/protocol/wire_enums.rs` |
 | Snapshot fragment magic | `OMB1` | `shared/src/transport.rs` |
 | Allocation manifest | `version: 1` (exact) | `server/src/match_allocation.rs` (`Manifest::validate`) |
 | Portal schema | `[1..=7, 9]` required exactly (8 reserved for LR-20) | `account-api/src/lib.rs` (`PORTAL_SCHEMA`, `validate_portal_schema`) |
@@ -546,3 +546,20 @@ Tracked on other pages: per-IP rate limits behind the hosted dev ingress's `X-Re
 7. **`TransportChallenge.lobby`** is sent by the server but ignored by the client's `handle_challenge`, so its purpose is unclear.
 8. **Idempotency-Key bounds differ.** The BFF forwards keys of 16–128 `[A-Za-z0-9_-]`, but `accounts.rs` accepts only 16–80 `[A-Za-z0-9-]`, so some keys the BFF accepts end as `invalid_request`.
 9. **Career-schema startup message.** A career schema other than `[1, 2, 3, 4, 5]` makes the Account API exit with `Account API: invalid_request`, because `game_error` maps the store's message to that code. An operator cannot tell it apart from other invalid-request failures without reading the code.
+
+### Match confirmation (protocol 13)
+
+The public lobby freezes a selected human roster for exactly 15 seconds before
+creating a worker. Each recipient sees `ready_check` with its opaque `check_id`,
+own `accepted` flag, accepted/needed counts and server-derived remaining seconds.
+A signed `ready_match {request_id, check_id, accepted}` is bound to the current
+authenticated profile/session and search. Late, replayed or stale-check answers
+cannot revive a cancelled roster. All accepts are required; bots have no vote.
+A decline requeues everyone else; a timeout requeues only those who accepted,
+preserving queue order and age. Never-accepting humans leave the queue.
+The host persists escalating dodge cooldowns (60/300/900/3600 seconds within
+24 hours) under its existing locked match root. Cross-host sharing remains a
+directory/central-penalty follow-up in P7; the file must accompany host recovery.
+
+Clients and lobby/workers must ship together: protocol 12 clients cannot decode
+`ready_check` and are rejected by the compatibility preflight.

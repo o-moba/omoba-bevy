@@ -131,10 +131,12 @@ pub(crate) enum Job {
         action: CareerAction,
     },
     Record(Box<PendingRecord>),
+    Flush(u64),
     Presence(Vec<(String, Option<String>)>),
 }
 pub(crate) enum Reply {
     RecoveryChecked,
+    Flushed(u64, bool),
     RefreshAccess {
         addr: SocketAddr,
         nonce: String,
@@ -353,6 +355,7 @@ impl MemoryLink {
                 }
                 RecordKind::Checkpoint | RecordKind::Rejected => {}
             },
+            Job::Flush(generation) => self.replies.push_back(Reply::Flushed(generation, true)),
             Job::Presence(_) => {}
         }
     }
@@ -393,9 +396,13 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     cancelled: Vec<SocketAddr>,
     social: Vec<(SocketAddr, shared::social::SocialRequest)>,
     match_requests: Vec<crate::career_port::MatchRequest>,
+    ready_requests: Vec<crate::career_port::ReadyRequest>,
     last_presence: Instant,
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
+    record_generation: u64,
+    flush_requested: Option<u64>,
+    flushed_generation: Option<u64>,
     rejected: HashMap<String, String>,
     limits: Limits,
     /// The database-wide chat switch as last read; `None` before the first
@@ -417,9 +424,13 @@ impl<L: JobLink> CareerBackend<L> {
             cancelled: Vec::new(),
             social: Vec::new(),
             match_requests: Vec::new(),
+            ready_requests: Vec::new(),
             last_presence: Instant::now(),
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
+            record_generation: 0,
+            flush_requested: None,
+            flushed_generation: None,
             rejected: HashMap::new(),
             limits: Limits::default(),
             chat_switch: None,
@@ -558,6 +569,7 @@ impl<L: JobLink> CareerBackend<L> {
             recovered_live: false,
         })));
         if accepted {
+            self.record_generation = self.record_generation.saturating_add(1);
             self.pending_ids.insert(result.result_id.clone());
         }
         if accepted && matches!(kind, RecordKind::Start) {
@@ -718,6 +730,9 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn recovery_confirmed_since(&self, since: Instant) -> bool {
         self.recovery_checked.is_some_and(|at| at >= since)
     }
+    fn take_ready_requests(&mut self) -> Vec<crate::career_port::ReadyRequest> {
+        std::mem::take(&mut self.ready_requests)
+    }
     fn take_match_requests(&mut self) -> Vec<crate::career_port::MatchRequest> {
         std::mem::take(&mut self.match_requests)
     }
@@ -771,6 +786,21 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     }
     fn settle(&mut self, result: MatchResult) -> bool {
         self.record(RecordKind::Settle, result)
+    }
+    fn flush_outbox(&mut self) -> bool {
+        if !self.enabled()
+            || self
+                .flushed_generation
+                .is_some_and(|g| g >= self.record_generation)
+        {
+            return true;
+        }
+        if self.flush_requested != Some(self.record_generation)
+            && self.link.try_send(Job::Flush(self.record_generation))
+        {
+            self.flush_requested = Some(self.record_generation);
+        }
+        false
     }
     fn handle(&mut self, addr: SocketAddr, request: CareerRequest) {
         if !self.enabled() {
@@ -909,6 +939,25 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     }
                     return;
                 }
+                if let CareerAction::ReadyMatch {
+                    request_id,
+                    check_id,
+                    accepted,
+                } = action
+                {
+                    if c.view.profile.is_some()
+                        && check_id.len() == 32
+                        && self.ready_requests.len() < MAX_JOBS
+                    {
+                        self.ready_requests.push(crate::career_port::ReadyRequest {
+                            addr,
+                            request_id,
+                            check_id,
+                            accepted,
+                        });
+                    }
+                    return;
+                }
                 if matches!(action, CareerAction::CancelQueue) {
                     self.cancelled.push(addr);
                     return;
@@ -948,6 +997,14 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn poll(&mut self) {
         while let Some(reply) = self.link.try_recv() {
             match reply {
+                Reply::Flushed(generation, success) => {
+                    if success {
+                        self.flushed_generation =
+                            Some(self.flushed_generation.unwrap_or(0).max(generation));
+                    } else if self.flush_requested == Some(generation) {
+                        self.flush_requested = None;
+                    }
+                }
                 Reply::RecoveryChecked => {
                     self.recovery_checked = Some(Instant::now());
                 }
@@ -1229,7 +1286,8 @@ fn authorized_supporter_aura(
 
 fn action_id(action: &CareerAction) -> Option<u64> {
     match action {
-        CareerAction::FindMatch { request_id, .. }
+        CareerAction::ReadyMatch { request_id, .. }
+        | CareerAction::FindMatch { request_id, .. }
         | CareerAction::SupporterStatus { request_id }
         | CareerAction::EquipSupporterAura { request_id, .. }
         | CareerAction::History { request_id, .. }
@@ -1286,7 +1344,9 @@ async fn account_action(
         CareerAction::Rename { nickname, .. } => {
             view.profile = Some(store.rename(id, &nickname).await?)
         }
-        CareerAction::CancelQueue | CareerAction::FindMatch { .. } => {}
+        CareerAction::CancelQueue
+        | CareerAction::FindMatch { .. }
+        | CareerAction::ReadyMatch { .. } => {}
         CareerAction::Social { .. } => {
             return Err("Social requests are handled by the game server.".into());
         }
@@ -1589,6 +1649,14 @@ fn worker(
             }
         }
         match jobs.recv_timeout(Duration::from_millis(100)) {
+            Ok(Job::Flush(generation)) => {
+                let flushed = pending
+                    .values()
+                    .all(|record| write_record(&outbox, record).is_ok());
+                // Shutdown keeps polling the receiver; unlike an optional view,
+                // this durability acknowledgement must not be dropped on a full channel.
+                let _ = replies.send(Reply::Flushed(generation, flushed));
+            }
             Ok(Job::Record(record)) => {
                 let mut record = *record;
                 let id = record.result.result_id.clone();
@@ -2328,6 +2396,7 @@ mod tests {
     }
     fn outbox_result(id: &str, outcome: MatchOutcome) -> MatchResult {
         MatchResult {
+            gameplay_started: true,
             result_id: id.into(),
             server_epoch: 1,
             match_id: 1,
@@ -2627,6 +2696,7 @@ mod tests {
                 .unwrap()
                 .as_millis() as u64;
             let mut result = MatchResult {
+                gameplay_started: true,
                 result_id: random_id::<16>(),
                 server_epoch: now,
                 match_id: if terminal { 1 } else { 2 },
@@ -2713,6 +2783,80 @@ mod tests {
         drop(backend);
         rt.block_on(pool.close());
         fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn ready_answers_require_a_signature_and_bind_check_identity_and_acceptance() {
+        let addr = "127.0.0.1:30009".parse().unwrap();
+        let mut backend = MemoryCareer::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Player".into()),
+            "session",
+        );
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let nonce = "b".repeat(64);
+        let action = CareerAction::ReadyMatch {
+            request_id: 7,
+            check_id: "c".repeat(32),
+            accepted: true,
+        };
+        let signature = hex(&key
+            .sign(&authorized_signing_bytes(9, &nonce, 1, &action))
+            .to_bytes());
+        backend.handle(
+            addr,
+            CareerRequest::ReadyMatch {
+                request_id: 7,
+                check_id: "c".repeat(32),
+                accepted: true,
+            },
+        );
+        assert!(backend.take_ready_requests().is_empty());
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(
+            addr,
+            CareerRequest::Authorized {
+                session_nonce: nonce.clone(),
+                sequence: 1,
+                action: CareerAction::ReadyMatch {
+                    request_id: 7,
+                    check_id: "d".repeat(32),
+                    accepted: true,
+                },
+                signature: signature.clone(),
+            },
+        );
+        assert!(backend.take_ready_requests().is_empty());
+        let valid = CareerRequest::Authorized {
+            session_nonce: nonce,
+            sequence: 1,
+            action,
+            signature,
+        };
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, valid.clone());
+        let answers = backend.take_ready_requests();
+        assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0].request_id, 7);
+        assert!(answers[0].accepted);
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, valid);
+        assert!(backend.take_ready_requests().is_empty());
+    }
+    #[test]
+    fn flush_barrier_requires_an_ack_and_is_invalidated_by_a_later_record() {
+        let mut backend = MemoryCareer::immediate(9);
+        assert!(!backend.flush_outbox());
+        backend.poll();
+        assert!(backend.flush_outbox());
+        let result = outbox_result("flush-order", MatchOutcome::Interrupted);
+        assert!(backend.start(result));
+        assert!(
+            !backend.flush_outbox(),
+            "a previous barrier cannot cover a later record"
+        );
+        backend.poll();
+        assert!(backend.flush_outbox());
     }
 }
 

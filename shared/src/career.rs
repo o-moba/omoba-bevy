@@ -112,8 +112,19 @@ pub enum MatchOutcome {
     Interrupted,
 }
 
+fn legacy_gameplay_started() -> bool {
+    true
+}
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MatchResult {
+    /// Durable allocation is not proof that gameplay began. Aborted drafts
+    /// settle for recovery/auditing without entering player career totals.
+    #[serde(default = "legacy_gameplay_started", skip_serializing_if = "is_true")]
+    pub gameplay_started: bool,
     pub result_id: String,
     pub server_epoch: u64,
     pub match_id: u64,
@@ -266,6 +277,12 @@ pub enum CareerAction {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         also_casual: bool,
     },
+    /// Explicit answer to this immutable roster's 15-second ready check.
+    ReadyMatch {
+        request_id: u64,
+        check_id: String,
+        accepted: bool,
+    },
     SupporterStatus {
         request_id: u64,
     },
@@ -334,6 +351,12 @@ pub enum CareerRequest {
         /// See [`CareerAction::FindMatch`].
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         also_casual: bool,
+    },
+    /// Explicit answer to this immutable roster's 15-second ready check.
+    ReadyMatch {
+        request_id: u64,
+        check_id: String,
+        accepted: bool,
     },
     SupporterStatus {
         request_id: u64,
@@ -407,6 +430,15 @@ impl CareerRequest {
                 request_id: *request_id,
                 preference: *preference,
                 also_casual: *also_casual,
+            },
+            Self::ReadyMatch {
+                request_id,
+                check_id,
+                accepted,
+            } => CareerAction::ReadyMatch {
+                request_id: *request_id,
+                check_id: check_id.clone(),
+                accepted: *accepted,
             },
             Self::SupporterStatus { request_id } => CareerAction::SupporterStatus {
                 request_id: *request_id,

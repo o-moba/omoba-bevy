@@ -20,8 +20,14 @@
   "queue.failed.profile_has_another_session": "Этот аккаунт уже находится в матче с другого устройства.\nЗавершите игру там или отмените поиск и попробуйте позже.",
   "queue.failed.worker_spawn_failed": "Сервер не смог запустить арену. Повторяем попытку…",
   "queue.failed.lobby_busy": "Сервер перегружен. Повторяем попытку…",
-  "queue.failed.dodge_cooldown": "Вы вышли из найденного рейтингового матча. Новый поиск через минуту.\nОтмените поиск и начните его снова позже.",
+  "queue.failed.dodge_cooldown": "Вы отказались от матча или пропустили подтверждение.\nПоиск временно недоступен; повторные срывы увеличивают ожидание.",
   "queue.failed.party_member_left": "Участник группы вышел из поиска. Начните поиск снова.",
   "queue.failed.capacity_busy": "Все арены заняты. Повторяем попытку…",
-  "queue.requeue.worker_lost": "Матч не начался: один из игроков не подключился. Ищем матч снова…"
+  "queue.requeue.worker_lost": "Матч не начался: один из игроков не подключился. Ищем матч снова…",
+  "queue.party_wait": "Ждём участников группы: {count} · ещё до {seconds} с",
+  "queue.party_wait_named": "Ждём: {names} · ещё до {seconds} с",
+  "queue.ready.found": "Матч найден · подтвердили {count}/{needed}\nПодтвердите за {seconds} с",
+  "queue.ready.accepted": "Вы подтвердили · готовы {count}/{needed}\nЖдём остальных · {seconds} с",
+  "queue.ready.accept": "Принять матч",
+  "queue.ready.decline": "Отклонить"
 }

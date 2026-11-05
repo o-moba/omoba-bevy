@@ -1243,7 +1243,15 @@ fn update_selection_clock(
         return;
     };
     let value = if draft.remaining_ms == 0 {
-        tr("draft.timer.gathering").to_owned()
+        draft.join_remaining_ms.map_or_else(
+            || tr("draft.timer.gathering").to_owned(),
+            |ms| {
+                trf(
+                    "draft.timer.join_remaining",
+                    &[("seconds", &ms.div_ceil(1000))],
+                )
+            },
+        )
     } else {
         trf(
             "draft.timer.remaining",
@@ -1399,6 +1407,7 @@ mod tests {
         game.meta.server_epoch = 10;
         game.meta.match_id = 3;
         game.prematch = Some(shared::prematch::PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 4,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,
@@ -1941,6 +1950,7 @@ mod tests {
             ..default()
         };
         game.prematch = Some(shared::prematch::PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,

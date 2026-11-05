@@ -94,7 +94,9 @@ impl Plugin for FrontendQaPlugin {
                 dimension("OMOBA_QA_WIDTH", 1280),
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
-            stage: if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
+            stage: if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1") {
+                4
+            } else if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
                 && crate::connection_profile::selectable()
             {
                 10
@@ -118,6 +120,12 @@ impl Plugin for FrontendQaPlugin {
             prepare_help_buttons.after(bevy::ui::UiSystems::Focus),
         )
         .add_systems(Update, accept_party_invite)
+        .add_systems(
+            Update,
+            seed_ready_fixture
+                .after(crate::net::SessionReactions)
+                .before(crate::frontend::searching::SearchingViews),
+        )
         .add_systems(
             Update,
             drive
@@ -232,6 +240,25 @@ fn result_fixture_label(mut commands: Commands) {
         ResultFixtureLabel,
         Name::new("FrontendQaResultFixture"),
     ));
+}
+
+fn seed_ready_fixture(
+    mut matchmaking: ResMut<crate::match_service::MatchServiceClient>,
+    mut career: ResMut<crate::career::CareerClient>,
+) {
+    if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1") {
+        matchmaking.active = true;
+        matchmaking.preference = shared::match_service::MatchPreference::Ranked;
+        career.view.match_service_request_id = Some(0);
+        career.view.match_service = Some(shared::match_service::MatchServiceView::ReadyCheck {
+            check_id: "qa-only".into(),
+            preference: shared::match_service::MatchPreference::Ranked,
+            accepted: false,
+            accepted_count: 6,
+            needed: 10,
+            remaining_secs: 15,
+        });
+    }
 }
 
 fn drive(
@@ -413,6 +440,7 @@ fn observe(
         qa.applied_stage = None;
         if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
             || std::env::var("OMOBA_HOME_ONLY_QA").as_deref() == Ok("1")
+            || std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1")
         {
             qa.stage = VIEWS.len();
         } else if qa.stage == 11 && !mobile.enabled {
@@ -546,6 +574,9 @@ fn observe(
             "AvatarEquip",
         ],
         3 => &["HeroSelectBack", "FindMatchButton"],
+        4 if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1") => {
+            &["SearchingAccept", "SearchingDecline"]
+        }
         4 => &["SearchingCancel"],
         6 => &["PostMatchPlayAgain", "PostMatchBackToMenu"],
         7 if mobile.enabled => &[

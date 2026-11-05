@@ -105,6 +105,7 @@ fn allocation(profile: &ProfileSummary) -> MatchResult {
         .unwrap()
         .as_millis() as u64;
     MatchResult {
+        gameplay_started: true,
         result_id: random_id::<16>(),
         server_epoch: now,
         match_id: 1,

@@ -1147,7 +1147,7 @@ mod tests {
     #[test]
     fn protocol_12_carries_tier_auras_and_tier_status() {
         use crate::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
-        assert_eq!(crate::protocol::PROTOCOL_VERSION, 12);
+        assert_eq!(crate::protocol::PROTOCOL_VERSION, 13);
         let equip = ClientPacket::Career {
             request: crate::career::CareerRequest::EquipSupporterAura {
                 request_id: 5,

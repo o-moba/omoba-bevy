@@ -31,5 +31,8 @@
   "draft.tab.classes": "职业",
   "draft.error.roster_changed": "阵容已变化。请确认队伍后重新锁定。",
   "draft.error.loading_timeout": "有玩家未能及时加载完成。请重新锁定或退出。",
-  "draft.error.start_timeout": "对局启动时间过长。请重新锁定或退出。"
+  "draft.error.start_timeout": "对局启动时间过长。请重新锁定或退出。",
+  "draft.timer.join_remaining": "等待玩家 · {seconds} 秒",
+  "draft.error.allocation_cancelled_or_expired": "有玩家未能连接，正在重新匹配…",
+  "draft.error.durable_start_pending": "正在保存对局，请稍候…"
 }

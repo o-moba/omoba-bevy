@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs
@@ -298,6 +299,49 @@ class CapacityTest(MonitorCase):
         self.report()
         self.monitor().alert_check()
         self.assertIn("arena capacity: ok again", self.telegram.sent[-1])
+
+
+class SettlementTest(MonitorCase):
+    def receipt(self, root, name, kind, age):
+        folder = Path(self.p(root))
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / (name + ".json")
+        path.write_text(json.dumps({"kind": kind, "result": {"nickname": "never expose this"}}))
+        os.utime(path, (self.host.clock - age, self.host.clock - age))
+        return path
+
+    def test_terminal_receipts_age_while_live_checkpoints_do_not_alert(self):
+        root = ru_monitor.MATCH_ROOT + "/" + "a" * 32 + "/outbox"
+        self.receipt(root, "live", "Checkpoint", 7200)
+        self.receipt(ru_monitor.LOBBY_OUTBOX, "new", "Settle", 299)
+        self.assertTrue(self.check()["ok"])
+        pending = self.receipt(root, "waiting", "Settle", 300)
+        report = self.check()
+        self.assertEqual(report["codes"], ["settlement:outbox"])
+        self.assertEqual(report["facts"]["settlements"]["stale"], 1)
+        self.assertNotIn("never expose this", str(report))
+        pending.unlink()
+        self.assertTrue(self.check()["ok"])
+
+    def test_broken_receipts_and_scan_limits_are_actionable(self):
+        path = self.receipt(ru_monitor.LOBBY_OUTBOX, "broken", "Settle", 301)
+        path.write_text("{")
+        self.assertEqual(self.check()["facts"]["settlements"]["unreadable"], 1)
+        path.unlink()
+        self.receipt(ru_monitor.LOBBY_OUTBOX, "one", "Start", 900)
+        self.receipt(ru_monitor.LOBBY_OUTBOX, "two", "Start", 900)
+        with mock.patch.object(ru_monitor, "MAX_OUTBOX_RECORDS", 1):
+            report = self.check()
+        self.assertEqual(report["codes"], ["settlement:outbox"])
+        self.assertTrue(report["facts"]["settlements"]["scan_limited"])
+
+    def test_receipts_symlinked_outside_the_outbox_are_not_read(self):
+        path = self.receipt(ru_monitor.LOBBY_OUTBOX, "live", "Start", 900)
+        outside = Path(self.root) / "outside.json"
+        path.rename(outside)
+        path.symlink_to(outside)
+        self.assertTrue(self.check()["ok"])
+        self.assertEqual(self.check()["facts"]["settlements"]["scanned"], 0)
 
 
 class AlertTest(MonitorCase):

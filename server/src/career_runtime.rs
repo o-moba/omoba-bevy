@@ -187,6 +187,10 @@ pub(crate) fn encode_career_datagrams(
 }
 
 impl ServerRuntime {
+    pub(crate) fn flush_career_for_shutdown(&mut self, now: Instant) -> bool {
+        self.poll_career(now);
+        self.career.pending.is_empty() && self.career.backend.flush_outbox()
+    }
     pub(crate) fn career_worker_terminal(&self) -> bool {
         self.career
             .round
@@ -590,7 +594,8 @@ impl ServerRuntime {
         if self.match_service.worker().is_some_and(|w| {
             w.recovery
                 || w.cancelled()
-                || crate::match_allocation::unix_ms() > w.manifest.join_deadline_ms
+                || (crate::match_allocation::unix_ms() > w.manifest.join_deadline_ms
+                    && w.manifest.preference.rated())
         }) && self.match_started_at.is_none()
         {
             return false;
@@ -626,6 +631,7 @@ impl ServerRuntime {
             } // Pure simulation fixtures.
             let eligibility = self.rating_eligibility(&roster);
             let result = MatchResult {
+                gameplay_started: false,
                 result_id: self.career.backend.new_result_id(),
                 server_epoch: self.server_epoch,
                 match_id: self.match_id,
@@ -709,6 +715,7 @@ impl ServerRuntime {
                 }
                 return false;
             }
+            round.result.gameplay_started = true;
             round.started_at = now;
             round.checkpoint_at = now;
             self.career.queue.commit_selection();
@@ -821,7 +828,14 @@ impl ServerRuntime {
             round.result.winner = None;
             if !self.rules.local_results {
                 // A stable code (LR-31): the client and the portal localize it.
-                round.result.unrated_reason = Some("not_completed".into());
+                round.result.unrated_reason = Some(
+                    if round.result.gameplay_started {
+                        "not_completed"
+                    } else {
+                        "prematch_abandoned"
+                    }
+                    .into(),
+                );
             }
         }
         for participant in &round.result.participants {
@@ -897,6 +911,25 @@ impl ServerRuntime {
         if self.detach_running_seat(addr, now) {
             return;
         }
+        if self.match_started_at.is_none()
+            && let Some(session) = self.career.backend.authenticated_session(addr)
+            && let Some(profile) = self.career.backend.profile(addr)
+            && let crate::match_service::MatchService::Worker(worker) = &mut self.match_service
+            && !worker.manifest.preference.rated()
+            && worker
+                .manifest
+                .humans
+                .iter()
+                .any(|h| h.session_id == session && h.profile_id == profile.profile_id)
+            && !worker.released.contains(&session)
+        {
+            worker.released.push(session);
+            worker.aborted = worker
+                .manifest
+                .humans
+                .iter()
+                .all(|h| worker.released.contains(&h.session_id));
+        }
         let Some(player) = self.world.players.get_mut(&addr) else {
             return;
         };
@@ -953,6 +986,29 @@ impl ServerRuntime {
                 id,
                 self.elapsed_match_ms(now)
             );
+        }
+        if self.match_started_at.is_none()
+            && self
+                .match_service
+                .worker()
+                .is_some_and(|w| !w.manifest.preference.rated())
+        {
+            if self
+                .world
+                .players
+                .values()
+                .any(|p| p.joined && !p.hero.identity.is_bot)
+            {
+                self.fill_practice_bots(now);
+            } else if let crate::match_service::MatchService::Worker(worker) =
+                &mut self.match_service
+            {
+                worker.aborted = worker
+                    .manifest
+                    .humans
+                    .iter()
+                    .all(|h| worker.released.contains(&h.session_id));
+            }
         }
     }
 
@@ -1062,6 +1118,9 @@ impl ServerRuntime {
                     continue;
                 }
                 let party = self.party_tag(addr);
+                if let Some((id, members)) = self.queue_party_roster(addr) {
+                    self.match_service.set_party_roster(id, members);
+                }
                 let search = crate::match_service::Search {
                     preference: request.preference,
                     also_casual: request.also_casual,
@@ -1077,10 +1136,34 @@ impl ServerRuntime {
                 );
             }
         }
+        for request in self.career.backend.take_ready_requests() {
+            if let (Some(profile), Some(session)) = (
+                self.career.backend.profile(request.addr),
+                self.career.backend.authenticated_session(request.addr),
+            ) {
+                self.match_service.respond_ready(
+                    &profile.profile_id,
+                    &session,
+                    request.request_id,
+                    &request.check_id,
+                    request.accepted,
+                    now,
+                );
+            }
+        }
         self.handle_rejected_career_start(now);
         for addr in self.career.backend.take_cancelled() {
             if let Some(profile) = self.career.backend.profile(addr) {
                 self.match_service.cancel(&profile.profile_id, now);
+            }
+            if self.match_started_at.is_none()
+                && self
+                    .match_service
+                    .worker()
+                    .is_some_and(|w| !w.manifest.preference.rated())
+            {
+                self.leave_match(addr, now);
+                continue;
             }
             if let Some(worker) = self.match_service.worker() {
                 let member = self
@@ -1269,6 +1352,7 @@ impl ServerRuntime {
         if let Some(error) = self.career.errors.get(&addr) {
             view.error = Some(error.clone());
         }
+        view.last_result = view.last_result.filter(|result| result.gameplay_started);
         view
     }
 

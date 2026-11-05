@@ -5,6 +5,34 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Server SIGTERM/SIGINT handling finalizes an interrupted/aborted round and
+  waits for a generation-bound fsync acknowledgement before exit, with a
+  15-second stop budget. Lobby shutdown preserves independently running workers.
+
+- RU monitor detects terminal result receipts pending for at least five minutes
+  in lobby and worker outboxes, including unreadable receipts and bounded-scan
+  overflow. Active match checkpoints do not trigger settlement alerts (C9).
+
+- Match confirmation: every human has 15 seconds to accept this exact roster.
+  No worker is spawned before unanimous acceptance; a timeout returns accepted
+  players with their original queue age. Declines and missed confirmations have
+  a persisted host-local cooldown (60/300/900/3600 seconds within 24 hours).
+  Protocol 13 adds the signed ready answer and recipient-specific ready state;
+  native client and server must ship together.
+- Unplayed draft/loading allocations settle without matches, XP, rating,
+  history or analytics credit. Casual loading timeouts replace only missing
+  humans with bots while keeping survivor picks; Ranked timeouts abort for
+  re-search. Draft shows the join deadline, Loading names missing players.
+
+- Public groups now report who has not joined the search and continue with
+  present members after 60 seconds without losing queue age (#18). Exact
+  bounded two-team packing finds valid rosters such as 3+2 versus 3+2 behind
+  older parties of four, instead of starving a feasible full match (#29).
+
+- Product-completion work now tracks every remaining lobby finding and critic
+  item sequentially in `docs/plans/TODO-LOBBY-2026-11-05.md`, including the
+  previously deferred ready-check, fair-play, recovery and scaling work.
+
 - Matchmaking readiness for the RU launch (LR-32 minimum, LR-35, LR-47, ADR-027):
   an allocation that ends before its match starts re-queues the other humans
   with their place and the client searches again with a notice; cancelling a
