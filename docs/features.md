@@ -41,7 +41,18 @@ it exactly once with settlement and migrates trusted historical completions.
 New Ranked searches read current progress asynchronously; new allocations check
 all profiles under locks. Existing allocations/recovery remain usable. Home
 shows completed-public progress and disables Ranked until it reaches10. Linking
-VK is optional. Core schema9 is required; full acceptance is still pending.
+VK is optional. Core schema9 is required. Full software/public CI proves wire
+denial at0/9 and acceptance after a real tenth standard-map public completion
+without VK; fresh affected-screen native visual acceptance remains pending.
+
+## TLS dependency maintenance (unreleased)
+
+The existing HTTP/database TLS dependency is locked to Rustls0.23.46, covering
+the four open0.23.25 advisory ranges found during release review. The update
+adds no packages and keeps certificate validation enabled. See the upstream
+[release and advisories](https://github.com/rustls/rustls/releases/tag/v/0.23.46).
+Local650 PG/API/server tests and strict affected-crate clippy pass; fresh full
+CI is still required. This is not a complete dependency security audit.
 
 ## Classic hero design authoring foundation
 

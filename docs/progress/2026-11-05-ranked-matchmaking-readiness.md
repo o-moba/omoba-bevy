@@ -493,3 +493,38 @@ follow-up query source needs its own committed full gate.1000 playing, egress,
 remote pools, RU-host proof, P8/P9 and pending native/mobile acceptance remain
 mandatory. No production configuration, credential, dependency/schema/protocol
 change or RU deployment occurred.
+
+### P7 bounded queue committed acceptance — 2026-11-06
+
+64e777be CI42116356054 passes all7 jobs and18 PG/public stages in2593.95s.
+Artifact13458588706 SHA256
+`2a494d6208d8efb6ac5c68cfb01a58786a251df12462b03210439b0e8eae33e5`
+checked before safe extraction; private fixture absent. Independent exact award,
+profile/history and participation checks PASS for ten-human Ranked base victory
+599786f987e9722c70ea4f4589f4075a (421719ms gameplay), plus real tenth public
+completion and0/9 denial→10 acceptance without VK. Capacity1 early-crash recovery
+reuses the same port in1764.28ms after durable cleanup. Finding21 is done;
+follow-up0c596fab CI42123329169 is still running.1000-playing/RU/P8/P9 remain.
+
+P9 dependency review additionally finds four open rustls alerts (#21–24) against
+locked0.23.25. Prepared compatible0.23.46 changes only its version/checksum;
+no package identities, manifests, TLS validation, CI/configuration or deployment
+changes. Frozen criteria and upstream advisory references are saved in
+`.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p9-rustls-spec.md`; fresh affected
+PG/API/server tests are running. Do not call the new lock accepted before checks.
+
+P9 local TLS lock acceptance PASS:650 real PG/API/server checks in18 suites,
+zero failures/skips;58 passport/HTTP checks pass with3 pre-existing live
+paired-account/Studio/registry-approval integrations ignored. Strict all-target
+clippy across store/API/server/passport/arena-sync and formatting pass. Only
+rustls version/checksum changed; full CI of the saved commit remains required.
+
+P7 egress prototype (not applied):40 byte-exact standard-map running snapshots
+from frozen0c596fab binary total695213 bytes. Draft bounded level1 zlib codec
+produces145459 envelope bytes (-79.08%),614→141 UDP frames. Local encode median
+51.58us/max64.42us, decode median33.85us/max42.53us; these are microbenchmarks,
+not runtime capacity proof. Seven prototype transport/adversarial tests, exact
+Node/Python cross-decode and120 Node truncation/trailing/concatenation refusals
+PASS. Direct production use of already-locked flate2=1.1.0 awaits owner approval
+under the root AGENTS dependency rule. No production transport/protocol/manifest
+change has been applied. Specs/draft/corpus/results are retained under task proof.

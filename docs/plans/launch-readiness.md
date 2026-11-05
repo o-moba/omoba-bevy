@@ -1491,19 +1491,19 @@ Area: bot fill · **major** · L · code
 Area: ranked integrity · **major** · L · code+ops (owner sets thresholds)
 - **Now:**
   - A fresh install gets a fresh newcomer profile at 1000 (`career-store/src/career_store.rs:276-319`).
-  - Ranked has no gate, and the docs disclaim smurf prevention (`docs/match-progression.md:85-91,155-156`).
+  - C6 now enforces ten completed public matches with an authoritative counter (core schema9). Remakes, interruptions, custom/offline practice and proved personal AFK/leaves do not qualify. This limits immediate Ranked entry; it does not establish smurf prevention.
   - The matchmaker rejects only duplicate ids (`career-store/src/matchmaking.rs:110-124`), with no same-IP rule.
   - Receipts are immutable, and there is no void-match path or ranked ban (`account-api/src/main.rs:13`; `server/src/bin/migrate-career.rs` only).
 - **Requirement:**
-  - Ranked unlocks at the owner's chosen level or match count. In RU it also needs a linked VK ID, one per profile (O-3).
+  - Owner decision2026-11-06 (O-3): Ranked unlocks after ten completed public matches. Linking VK is optional; it must not be an eligibility condition in RU or another market.
   - Same-IP profiles are never on opposing teams in a rated match, and same-IP pairs are flagged.
   - A periodic anomaly report lists suspicious pairs.
   - An operator CLI writes a compensating "voided" record that reverts rating, XP and W/L in one transaction, with an audit row.
   - A ranked ban is applied through the LR-15 sanctions.
   - RUNBOOK gets a section.
 - **Acceptance:**
-  - [ ] Below the threshold, the player sees "Ranked unlocks at level N".
-  - [ ] The RU build requires VK for Ranked (test).
+  - [x] Below ten completions, Home displays completed-public progress and disables Ranked; native state tests pass. Fresh affected-screen visual acceptance remains C6.
+  - [x] Real public-protocol acceptance denies Ranked at0/9 and permits it after a real tenth standard-map completion without VK (CI42083864979 and later18-stage repeats).
   - [ ] A matchmaker test shows a same-IP pair never on opposing teams.
   - [ ] The anomaly report finds a seeded colluding pair.
   - [ ] Voiding a match restores all 10 participants exactly.
@@ -2114,7 +2114,7 @@ single, documented setting the owner can change later.
 | --- | --- | --- |
 | O-1 | **Ranked at launch**: humans-only 5v5, rated, never bot-filled. The searching screen shows how many players search in the queue; after 5 minutes it offers switching to Casual without losing the place in Ranked. | LR-08, `docs/match-progression.md` |
 | O-2 | **Casual PvP**: unrated, awards XP, groups every human in the queue regardless of rating or newcomer cohort, then bot-fills after 30 s. **vs Bots** stays a separate choice. | LR-08 |
-| O-3 | Owner update 2026-11-06: Ranked opens after 10 completed public matches; linking VK is not mandatory. This supersedes the previous no-entry-gate launch default. Implementation and acceptance remain C6/LR-37. | LR-08, LR-37 |
+| O-3 | Owner update 2026-11-06: Ranked opens after 10 completed public matches; linking VK is not mandatory. This supersedes the previous no-entry-gate launch default. C6 software/public acceptance passes; native visual and other LR-37 integrity requirements remain open. | LR-08, LR-37 |
 | O-6, O-7 | Online bot difficulty and the hero roster stay as they are (LR-43, LR-45 later). | — |
 | O-8 | Hard match cap **45 minutes**. A capped or abandoned match settles as **Interrupted** (unrated, never counted twice), reusing the existing semantics. | LR-11, LR-12 |
 | O-9 | **RU chat off** at launch: a server-wide chat switch (`OMOBA_CHAT=off` in the RU lobby unit); reactions/emotes stay. Turning it on later needs the owner's legal check (ОРИ, 149-FZ). | LR-15, LR-41 |

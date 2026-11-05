@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Update the existing Rustls lock entry from0.23.25 to0.23.46 for four upstream
+  TLS security advisories. No new packages, feature changes or TLS validation
+  bypasses. All650 real PG/API/server tests and strict affected-crate clippy
+  pass; committed full CI remains required. Align the old LR-37 requirements
+  with the approved ten-public-match Ranked gate and optional VK linking.
+
 - Read supporter grants, points and aura preference with one database statement,
   preserving one snapshot and explicit opt-out behavior. The independent legacy
   oracle and650 real PG/API/server tests pass. Actual signed1000-client queue
@@ -34,8 +40,9 @@ All notable changes are recorded here. The canonical version is
   Lobby maintenance runs once per tick while verified consent/cancel remains
   immediate; lobby receive uses8ms/128 packets and workers retain2ms/128.
   All1000 probe targets reach Waiting with authentication intact, but final
-  Busy messages still fail acceptance. Full CI and throughput correction remain
-  in progress; no1000-playing or RU capacity claim is made.
+  Busy messages still fail acceptance in that saved candidate. Its full7-job/
+  18-stage CI42116356054 now passes; the follow-up query fix above passes actual
+  1000 queue/presence. No1000-playing or RU capacity claim is made.
 
 - Share bounded worker status/cancellation snapshots across a whole player-view
   batch (#54), preserving fresh search/cancel admission and monotonic observed
