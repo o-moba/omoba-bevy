@@ -297,3 +297,21 @@ budget and always-uploaded diagnostics excluding `native-private.json`.
 The exact patch passes reverse-apply validation. The complete gate previously
 passed all 13 stages locally; #31 stays partial until this head passes in CI.
 No production deployment, credentials or host configuration changes are included.
+
+
+## Verified complete-gameplay CI gate (#31 / P4)
+
+[CI run 42005385554](https://github.com/o-moba/omoba-bevy/actions/runs/42005385554)
+for `e3b09429ed9629ab46aea05532d2b6bf21bea7da` finished successfully in every
+job. The new complete PostgreSQL/player-journey step passed all 13 stages in
+1097.16 seconds on Linux. Artifact `postgres-harness` (13406071476) was downloaded
+through the GitHub connector and its SHA-256 verified. The report confirms
+private fixture removal; the archive contains no `native-private.json`.
+
+Standard-rules Ranked Victory `6c0685c716dfa96d0afdb684dedd08a8` passed in
+437.11 seconds total with no map override and every participant's result,
+profile/history, rating and XP checked. Fresh API enrollment, native signed
+registration/reconnect, 300-client restart admission, ready timeout/replacement,
+party exits, early crash and SIGTERM all passed in the same automated gate.
+Local extracted reports: `.agent/codex-ranked-readiness/ci-e3-postgres-harness/`.
+Finding #31 and P4 are done. P5–P9 remain required for full product readiness.
