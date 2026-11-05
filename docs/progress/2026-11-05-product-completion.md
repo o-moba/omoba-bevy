@@ -376,3 +376,27 @@ and is not counted as passing. No cache was removed and no heavy local build is
 allowed until disk headroom returns. Latest integrated source requires the CI
 client gate and native Home capture. P5 remains open until its required evidence
 is obtained; Android vibration remains pending explicit approval.
+
+
+### P5 complete-gate fixture correction
+
+CI 42013272058 passed all 567 PostgreSQL/API/store/server tests, Android compile,
+Python tooling and headless gameplay. Its combined journey gate exposed a stale
+lifecycle expectation: the test still required abandoned search to expire within
+22 seconds, although C3 deliberately changed intent retention to 60 seconds.
+The failure report showed the same search still Waiting at age 21 seconds; no
+worker was allocated. Artifact 13408452002 SHA-256 was verified and its bounded
+reports retained at `.agent/codex-ranked-readiness/ci-p5-lifecycle-failure/`.
+
+The lifecycle scenario now actually waits 30 seconds, asserts the same search ID
+and retained age while signed Home heartbeats continue, then requires expiry at
+~60 seconds (bounded 75-second total). This checks retention and eventual expiry
+rather than merely extending a timeout. The independent 15-second ready-check
+scenario remains unchanged. JavaScript syntax and diff checks pass; repeat CI is
+due. No server workaround or test-rule acceleration was added.
+
+Original findings #53/#54 are explicitly reopened for P7. Their earlier
+“left out” labels do not satisfy the owner's all-findings completion instruction.
+The prepared Android haptic patch's blank context lines were normalized; it
+still passes `git apply --check`, without adding production dependencies or
+permissions before approval.

@@ -2,7 +2,7 @@
 +++ b/client/Cargo.toml
 @@ -31,6 +31,7 @@
  ekza-bevy-sdk = { workspace = true, features = ["default"] }
- 
+
  [target.'cfg(target_os = "android")'.dependencies]
 +jni = "=0.21.1"
  bevy = { version = "0.19.1", default-features = false, features = [
@@ -37,7 +37,7 @@
 +#[cfg(target_os = "android")]
 +mod android;
  mod policy;
- 
+
  pub(super) fn install(app: &mut App) {
 @@ -105,7 +107,8 @@
          }
@@ -47,7 +47,7 @@
 +    #[cfg(target_os = "android")]
 +    android::match_found();
  }
- 
+
  #[cfg(test)]
 --- /dev/null
 +++ b/client/src/platform/match_attention/android.rs

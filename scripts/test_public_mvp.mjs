@@ -455,9 +455,20 @@ async function lifecycle(original) {
  const abandonedAt=performance.now();
  // Deliberately send neither cancellation packet. Home-style signed heartbeats
  // continue, but no explicit FindMatch retry may renew the queue lease.
- await pumpUntil('abandoned queue expires despite authenticated heartbeat',()=>waiting.career?.match_service?.state==='idle',22000);
+ // C3 keeps search intent for 60 s, independently of the 15 s ready deadline.
+ // Prove both sides: a short suspension preserves age, heartbeats cannot keep
+ // an abandoned queue alive forever. The former 22 s expectation was stale.
+ const heartbeatPackets=waiting.sentPackets;
+ await pumpFor(30000);
+ assert.equal(waiting.career?.match_service?.state,'waiting','short mobile pause lost queue intent');
+ assert.equal(waiting.career.match_service_request_id,waiting.queueId);
+ assert(waiting.career.match_service.elapsed_secs>=29,'short mobile pause reset FIFO age');
+ assert(waiting.sentPackets>heartbeatPackets,'fixture must keep signed Home heartbeats active');
+ await pumpUntil('60-second abandoned queue expires despite authenticated heartbeat',()=>waiting.career?.match_service?.state==='idle',45000);
+ const expiredAfter=performance.now()-abandonedAt;
+ assert(expiredAfter>=59000,'queue expired before its 60-second intent lease');
  assert.equal(waiting.allocationsSeen.length,0);
- checks.checks.push({name:'lost_cancel_expires_with_home_heartbeat',status:'PASS',elapsed_ms:performance.now()-abandonedAt,allocations:0});
+ checks.checks.push({name:'lost_cancel_expires_with_home_heartbeat',status:'PASS',short_pause_preserves_fifo:true,intent_lease_secs:60,elapsed_ms:expiredAfter,allocations:0});
  report.scenarios.push('abandoned_queue_expires_despite_authenticated_heartbeat');
 
  console.log(wire({phase:'lifecycle',action:'stranger_denied'}));

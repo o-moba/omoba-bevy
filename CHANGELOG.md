@@ -18,6 +18,8 @@ All notable changes are recorded here. The canonical version is
   entries expire at 60 seconds. Foreground mobile search/draft/loading/play keeps
   the screen awake. A long resume refreshes the same search before displaying
   ready state; live unanswered checks sound once and vibrate on iOS (C3).
+  The process gate verifies retained FIFO after a 30-second pause and eventual
+  60-second expiry despite continued signed Home heartbeats.
 
 - Verify the native Russian 15-second match confirmation at 852×393: visible
   acceptance count, countdown and separate Accept/Decline controls. This is a
