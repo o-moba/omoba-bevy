@@ -1638,3 +1638,21 @@ Real signed ready-timeout/FIFO/replacement, party departure and unique-draft
 journeys pass, as does a ten-client queue/presence smoke. The1000-client run
 reaches all targets Waiting but FAILs final Busy-error acceptance; throughput
 work continues. This is not a capacity certification.
+
+### Verified local queue and arena samples
+
+The follow-up query candidate passes650 real PG/API/server tests. One statement
+returns the same bounded supporter grants, points and optional aura preference
+as the old read-only transaction, including explicit opt-out and expiry rules.
+This removes repeated account-refresh roundtrips without weakening access checks.
+
+Actual signed1000-client Casual search now passes with all targets Waiting, no
+final account/socket errors or ServerFull, fresh request-correlated career views
+and1000 fresh DB presence rows. The disclosed capacity-holder is excluded from
+target counts. A separate raw transport probe admits2048 endpoints and returns
+non-amplifying ServerFull to the next; global and per-source limits are both2048
+in that proof, not independently distinguished. It creates no accounts/arenas.
+
+A100-arena vs-Bots sample passes with100 connected humans and900 server bots.
+These are local Mac measurements;1000 connected playing humans, reduced snapshot
+traffic and measured RU-host capacity remain required.

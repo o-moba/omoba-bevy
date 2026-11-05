@@ -448,3 +448,48 @@ Pool5c's separate release-build workflow42097650568 has Windows/Linux/Android
 success, macOS cancelled and draft-release skipped. Its seven-job CI and all18
 public/PG stages are fully green; the cancelled macOS job is not release proof.
 No RU deployment, production infrastructure/credentials or dependency changes.
+
+### P7 account-read/queue/admission/arena proof — 2026-11-06
+
+Follow-up source reads supporter time, bounded active-first grants, stable points
+and optional aura preference in one SQL statement. Independent legacy-snapshot
+comparison covers no preference, explicit NULL, insufficient styles, future/
+revoked and more-than-limit grants; career totals are unchanged. Local samples
+of20 reads: empty422.22→40.13ms, bounded-active136.69→37.09ms. These are query
+samples, not a universal speed guarantee. Strict store/server clippy and all650
+real PG/API/server tests in18 suites PASS,0 failures/skips.
+
+Fresh server SHA-256
+`4ea743f96a5ae3d8c9a26da89134c5eba93f523423e0c7af0d83645dd3d1d74a`.
+Actual queue v6 PASS: all1000 signed targets Waiting with no final account/socket
+errors or ServerFull, current request correlation and no world/worker handoff.
+All1000 DB presence rows are fresh under the same lobby owner. Response gap
+p95=276.61ms/p99=294.61ms; maximum current age168.84ms. Sign-in-to-queue
+p95=5.62s/max11.56s includes the probe's ordinary retry pacing. The server group
+(lobby plus one disclosed ordinary capacity-holder, excluding Node/DB) sampled
+43.39% interval-mean CPU and47.25MiB peak RSS. Per-source fixture allowances are
+logged; this is not a production NAT or playing-capacity claim.
+
+Raw boundary v2 PASS in5.15s:2048 admitted paths, endpoint2049 gets correlated
+72-byte ServerFull for a495-byte probe. Global and per-source caps are both2048;
+the wire proof does not independently distinguish them. No accounts or arenas
+are created; the disposable DB only supports mandatory startup/heartbeat. Initial
+4096 per-source configuration failed before clients and remains FAIL.
+
+100-arena sample PASS:100 connected humans/900 server bots,101 server processes,
+maximum time-to-Running30.16s. Snapshot gap p95=200.72ms/p99=413.20ms; downlink
+per player p50=221481/p95=286318 bytes/s. Whole server-group CPU149.7% (about1.5
+cores) and peak RSS1538.4MiB on Apple M4 Pro; no cgroup/RU constraint was applied.
+The owned test PostgreSQL max_connections was temporarily100→200 with0 clients,
+then restored to100 after owned workers stopped. This is not1000 connected humans.
+
+Retained reports: `.agent/codex-ranked-readiness/p7-queue-1000-v6/`,
+`p7-admission-boundary-2048-v2/`, `p7-hundred-arenas/`; hashes/specs/evidence
+under `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p7-supporter-read-*`.
+All earlier failed candidates remain retained.64e777be is pushed;
+[CI42116356054](https://github.com/o-moba/omoba-bevy/actions/runs/42116356054)
+has six successful jobs and the complete PG/gameplay gate still running. The
+follow-up query source needs its own committed full gate.1000 playing, egress,
+remote pools, RU-host proof, P8/P9 and pending native/mobile acceptance remain
+mandatory. No production configuration, credential, dependency/schema/protocol
+change or RU deployment occurred.

@@ -427,3 +427,20 @@ Lobby queue views share indexed counters at the existing250ms cadence. Immediate
 account responses target their requester without resetting periodic broadcasts.
 Exact capacity-line recomputation occurs from tick only, and heartbeat-only
 renewals reuse it. Party/cohort/FIFO and ready-consent policies are unchanged.
+
+The optional raw admission boundary is separate from account/gameplay load:
+
+```bash
+HARNESS_SERVER_BIN="$CARGO_TARGET_DIR/debug/server" \
+  node scripts/test_public_transport_capacity.mjs --allow-large \
+  --output=.agent/admission-boundary
+```
+
+Use the same isolated loopback `OMOBA_TEST_DATABASE_URL`. The lobby requires that
+database for startup/heartbeat; this probe sends no account or search commands.
+It holds2048 return-path-validated endpoints and requires a nonce-correlated
+ServerFull for endpoint2049, no larger than its probe. Both global and per-source
+limits are2048 in this test, so the wire proof does not distinguish them. Exact
+u64 epochs are preserved. `--smoke=8` tests only a small per-source fixture; the
+large run requires `--allow-large`. It binds only its owned loopback lobby and
+changes no OS/network setting or production cap.

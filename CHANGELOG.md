@@ -5,6 +5,18 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Read supporter grants, points and aura preference with one database statement,
+  preserving one snapshot and explicit opt-out behavior. The independent legacy
+  oracle and650 real PG/API/server tests pass. Actual signed1000-client queue
+  and all1000 fresh presence rows PASS without Busy or ServerFull; response gaps
+  p99=295ms on the local Mac. Add a guarded raw transport boundary probe:
+  2048 admitted paths and correlated72-byte ServerFull for the2049th (495-byte
+  probe), covering the combined global/per-source boundary.100 actual arenas
+  also PASS with100 connected humans/900 server bots; the temporary local DB
+  connection limit is restored.1000 connected playing humans, egress reduction
+  and RU capacity/deployment remain required. No schema/protocol/dependency or
+  production configuration changes.
+
 - Bound Ranked cohort selection to rating sweeps and a fixed set of oldest party
   sizes, preserving exact5+5 packing, FIFO, shared widening and mandatory anchors
   (#21). Queue counters use common indexed snapshots; the exact capacity line is

@@ -29,3 +29,11 @@ class PublicQueuePolicyTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("queue_only_policy: PASS (7", result.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "transport capacity probe requires Node")
+    def test_transport_boundary_requires_local_explicit_bounds_and_preserves_u64_epochs(self):
+        script = Path(__file__).with_name("test_public_transport_capacity.mjs")
+        result = subprocess.run(["node", str(script), "--self-test-policy"],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("transport_capacity_policy: PASS", result.stdout)

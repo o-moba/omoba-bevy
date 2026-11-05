@@ -138,43 +138,35 @@ impl CareerStore {
             AuraStyle, STATUS_GRANT_LIMIT, SupporterGrantSummary, SupporterStatus, tier_points,
         };
         let unavailable = |_| "Supporter storage is unavailable.".to_string();
-        let mut tx = self.pool.begin().await.map_err(unavailable)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(unavailable)?;
-        let (now, points): (i64, i64) = sqlx::query_as(
-            "SELECT EXTRACT(EPOCH FROM now())::bigint, portal.supporter_points($1, EXTRACT(EPOCH FROM now())::bigint)",
+        // One statement gives time, grants, points and preference one MVCC
+        // snapshot without a transaction's repeated network roundtrips.
+        let row = sqlx::query(
+            "SELECT n.read_at, portal.supporter_points($1,n.read_at) AS points, \
+             (p.profile_id IS NOT NULL) AS preference_set,p.aura, \
+             (SELECT coalesce(jsonb_agg(to_jsonb(g)-'active' ORDER BY g.active DESC,g.valid_until DESC),'[]'::jsonb) \
+              FROM (SELECT provider,valid_from,valid_until,(revoked_at IS NOT NULL) AS revoked,renewal_enabled,tier_points, \
+                    (revoked_at IS NULL AND valid_from<=n.read_at AND valid_until>n.read_at) AS active \
+                    FROM portal.supporter_grants WHERE profile_id=$1 \
+                    ORDER BY active DESC,valid_until DESC LIMIT $2) g) AS grants \
+             FROM (SELECT EXTRACT(EPOCH FROM now())::bigint AS read_at) n \
+             LEFT JOIN portal.supporter_preferences p ON p.profile_id=$1"
         )
         .bind(profile_id)
-        .fetch_one(&mut *tx)
+        .bind(STATUS_GRANT_LIMIT)
+        .fetch_one(&self.pool)
         .await
         .map_err(unavailable)?;
-        let rows = sqlx::query("SELECT provider, valid_from, valid_until, revoked_at, renewal_enabled, tier_points FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=$2 AND valid_until>$2) DESC, valid_until DESC LIMIT $3")
-            .bind(profile_id).bind(now).bind(STATUS_GRANT_LIMIT).fetch_all(&mut *tx).await.map_err(unavailable)?;
-        let grants = rows
-            .iter()
-            .map(|row| SupporterGrantSummary {
-                provider: row.get("provider"),
-                valid_from: row.get("valid_from"),
-                valid_until: row.get("valid_until"),
-                revoked: row.get::<Option<i64>, _>("revoked_at").is_some(),
-                renewal_enabled: row.get("renewal_enabled"),
-                tier_points: tier_points(i64::from(row.get::<i32, _>("tier_points"))),
-            })
-            .collect();
-        let preference: Option<Option<String>> =
-            sqlx::query_scalar("SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1")
-                .bind(profile_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(unavailable)?;
-        tx.commit().await.map_err(unavailable)?;
+        let Json(grants): Json<Vec<SupporterGrantSummary>> =
+            row.try_get("grants").map_err(unavailable)?;
+        let aura: Option<String> = row.try_get("aura").map_err(unavailable)?;
+        let preference = row
+            .get::<bool, _>("preference_set")
+            .then(|| aura.as_deref().and_then(AuraStyle::from_id));
         Ok(SupporterStatus::from_grants(
             grants,
-            now,
-            tier_points(points),
-            preference.map(|aura| aura.as_deref().and_then(AuraStyle::from_id)),
+            row.get("read_at"),
+            tier_points(row.get("points")),
+            preference,
         ))
     }
 
