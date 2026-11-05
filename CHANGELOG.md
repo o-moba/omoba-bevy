@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fix the AFK notice QA identifier: the new UI test could not find the rendered
+  label by its stable ID. CI caught this after typechecking; the notice now carries
+  the ID used by the existing test. Full CI is being repeated.
+
 - In progress (#34): account for human connected/disconnected and AI-control
   time, with 90-second AFK/reconnect grace and sticky abandon status. Winning
   leavers lose rating and earn no XP; innocent losing teammates receive half

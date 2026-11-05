@@ -178,6 +178,7 @@ fn render(
                     },
                     TextColor(Color::WHITE),
                     Name::new("AfkControlNotice"),
+                    crate::ui::TestId::new("AfkControlNotice"),
                 ));
             }
             if signature.seats.is_empty() {
