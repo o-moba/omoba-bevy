@@ -47,11 +47,19 @@ struct CliArgs {
     count: usize,
     server: SocketAddr,
     telemetry: bool,
+    public: bool,
+    exit_after_result: bool,
+    rush_objectives: bool,
+    preference: shared::match_service::MatchPreference,
 }
 
 fn parse_args() -> CliArgs {
     let mut count = 9usize;
     let mut telemetry = false;
+    let mut public = false;
+    let mut exit_after_result = false;
+    let mut rush_objectives = false;
+    let mut preference = shared::match_service::MatchPreference::Ranked;
     let mut server: SocketAddr = "127.0.0.1:4000".parse().expect("default addr parses");
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -81,8 +89,26 @@ fn parse_args() -> CliArgs {
                     });
             }
             "--telemetry" => telemetry = true,
+            "--public" => public = true,
+            "--exit-after-result" => exit_after_result = true,
+            "--rush-objectives" => rush_objectives = true,
+            "--preference" => {
+                preference = match args.next().as_deref() {
+                    Some("humans_only") => shared::match_service::MatchPreference::Ranked,
+                    Some("quick") => shared::match_service::MatchPreference::Casual,
+                    Some("bot_practice") => shared::match_service::MatchPreference::BotPractice,
+                    _ => {
+                        eprintln!(
+                            "Invalid --preference: expected humans_only, quick or bot_practice"
+                        );
+                        std::process::exit(2);
+                    }
+                };
+            }
             "--help" | "-h" => {
-                println!("Usage: bots [--count 1..10] [--server IP:PORT] [--telemetry]");
+                println!(
+                    "Usage: bots [--count 1..10] [--server IP:PORT] [--telemetry] [--public] [--exit-after-result] [--rush-objectives] [--preference humans_only|quick|bot_practice]"
+                );
                 std::process::exit(0);
             }
             other => {
@@ -91,10 +117,22 @@ fn parse_args() -> CliArgs {
             }
         }
     }
+    if exit_after_result && !public {
+        eprintln!("--exit-after-result requires --public");
+        std::process::exit(2);
+    }
+    if rush_objectives && !server.ip().is_loopback() {
+        eprintln!("--rush-objectives is a loopback rehearsal option");
+        std::process::exit(2);
+    }
     CliArgs {
         count,
         server,
         telemetry,
+        public,
+        exit_after_result,
+        rush_objectives,
+        preference,
     }
 }
 
@@ -130,15 +168,24 @@ fn main() {
 
     let mut runners: Vec<BotRunner> = Vec::with_capacity(args.count);
     for index in 0..args.count {
-        let bot = Bot::connect_framed(args.server);
         let team = if index % 2 == 0 {
             Team::Blue
         } else {
             Team::Green
         };
         let class = class_for_bot(index);
-        let avatar = AVATARS[index % AVATARS.len()];
-        bot.join_with_loadout(team, Character::Ipfs, class, avatar);
+        let avatar = if args.public {
+            None
+        } else {
+            AVATARS[index % AVATARS.len()]
+        };
+        let bot = if args.public {
+            Bot::connect_public(args.server, args.preference, class, format!("Fill-{index}"))
+        } else {
+            let bot = Bot::connect_framed(args.server);
+            bot.join_with_loadout(team, Character::Ipfs, class, avatar);
+            bot
+        };
         println!(
             "bot#{index}: join sent ({:?}, lane {:?}, avatar {})",
             class,
@@ -200,9 +247,18 @@ fn main() {
             runner.bot.ping();
 
             let Some(snapshot) = snapshot else {
+                if args.public && index == 0 && last_status.elapsed() >= STATUS_INTERVAL {
+                    last_status = Instant::now();
+                    println!(
+                        "PUBLIC_BOT {}",
+                        serde_json::to_string(&runner.bot.public_status())
+                            .expect("public status serializes")
+                    );
+                }
                 // UDP joins can be lost while the server is still starting:
                 // resend until the bot sees itself in a snapshot.
-                if runner.my_id.is_none()
+                if !args.public
+                    && runner.my_id.is_none()
                     && runner.last_join_sent.elapsed() > Duration::from_secs(1)
                 {
                     let (team, class, avatar) = loadouts[index];
@@ -253,7 +309,7 @@ fn main() {
             } else {
                 runner.my_id = None;
                 runner.position = None;
-                if runner.last_join_sent.elapsed() > Duration::from_secs(1) {
+                if !args.public && runner.last_join_sent.elapsed() > Duration::from_secs(1) {
                     let (team, class, avatar) = loadouts[index];
                     runner
                         .bot
@@ -333,7 +389,35 @@ fn main() {
                         brain
                     });
                     let view = WorldView::from_snapshot(&snapshot, my_id, team);
-                    let decision = brain.decide(x, z, &view);
+                    let mut decision = brain.decide(x, z, &view);
+                    // A disposable custom-map rehearsal can focus objectives
+                    // instead of waiting for the lane AI's midgame rally. All
+                    // movement, range, cooldown and damage remain authoritative.
+                    if args.rush_objectives
+                        && let Some(objective) = view
+                            .structures
+                            .iter()
+                            .filter(|s| !view.protected_structures.contains(&s.id))
+                            .min_by(|a, b| {
+                                let distance =
+                                    |p: &harness::bot_ai::EnemyRef| (p.x - x).hypot(p.z - z);
+                                distance(a).total_cmp(&distance(b))
+                            })
+                    {
+                        let dx = x - objective.x;
+                        let dz = z - objective.z;
+                        let distance = dx.hypot(dz);
+                        decision.move_target = (distance > 6.0).then(|| {
+                            (
+                                objective.x + dx / distance * 6.0,
+                                objective.z + dz / distance * 6.0,
+                            )
+                        });
+                        decision.cast = Some(harness::TargetId {
+                            kind: objective.kind,
+                            id: objective.id,
+                        });
+                    }
                     let structures: Vec<_> = snapshot
                         .structures()
                         .iter()
@@ -405,7 +489,7 @@ fn main() {
                 last_phase = phase.to_owned();
                 let players: Vec<_> = snapshot.players().iter().map(|p| serde_json::json!({
                     "id":p.id, "team":format!("{:?}",p.team), "class":p.hero_class,
-                    "level":p.level, "xp":p.xp, "gold":p.gold, "ranks":p.ranks,
+                    "is_bot":p.is_bot, "level":p.level, "xp":p.xp, "gold":p.gold, "ranks":p.ranks,
                     "inventory":p.inventory, "item_bonuses":p.item_bonuses, "shop_available":p.shop_available, "last_purchase":p.last_purchase,
                     "hp":p.hp, "max_hp":p.max_hp, "mana":p.mana, "max_mana":p.max_mana,
                     "x":p.x,"z":p.z,"action_sequence":p.action_sequence,"action_slot":p.action_slot
@@ -414,7 +498,8 @@ fn main() {
                     "id":s.id,"team":format!("{:?}",s.team),"hp":s.hp,"protected":s.protected
                 })).collect();
                 let peers: Vec<_> = runners.iter().map(|r| serde_json::json!({
-                    "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis())
+                    "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis()),
+                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"error":s.error}))
                 })).collect();
                 println!(
                     "BOT_SAMPLE {}",
@@ -426,6 +511,31 @@ fn main() {
                         "join_error":format!("{:?}",snapshot.join_error())
                     })
                 );
+            }
+        }
+        if args.exit_after_result {
+            let statuses: Vec<_> = runners
+                .iter()
+                .filter_map(|r| r.bot.public_status())
+                .collect();
+            if statuses.len() == args.count
+                && statuses.iter().all(|s| {
+                    let (Some(result), Some(profile), Some(initial), Some(history)) =
+                        (&s.result, &s.profile, &s.initial_profile, &s.history)
+                    else {
+                        return false;
+                    };
+                    result.saved
+                        && result.outcome == shared::career::MatchOutcome::Completed
+                        && profile.matches_played == initial.matches_played + 1
+                        && history.iter().any(|r| r.result_id == result.result_id)
+                })
+            {
+                println!(
+                    "BOT_RESULT {}",
+                    serde_json::to_string(&statuses).expect("saved results serialize")
+                );
+                return;
             }
         }
         std::thread::sleep(TICK_INTERVAL);

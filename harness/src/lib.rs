@@ -32,6 +32,8 @@ pub mod bot;
 pub mod bot_ai;
 pub mod navigation;
 pub mod protocol;
+mod public_client;
+pub use public_client::PublicBotStatus;
 pub mod server;
 
 pub use bot::Bot;

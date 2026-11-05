@@ -8,6 +8,7 @@
 //! `expect` with descriptive messages rather than bare `unwrap`.
 
 use std::{
+    cell::RefCell,
     io::{self, ErrorKind},
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
@@ -29,6 +30,7 @@ const DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 /// A connected bot client.
 pub struct Bot {
     socket: UdpSocket,
+    public: Option<RefCell<crate::public_client::PublicSession>>,
     /// Cached own player id, learned from the first snapshot.
     my_id: Option<u64>,
     /// Reusable receive buffer, allocated once instead of per `recv` call.
@@ -58,6 +60,7 @@ impl Bot {
             .expect("bot failed to set a socket read timeout");
         Self {
             socket,
+            public: None,
             my_id: None,
             recv_buf: vec![0u8; DATAGRAM_RECEIVE_CAPACITY],
             assembler: Default::default(),
@@ -77,11 +80,43 @@ impl Bot {
         bot
     }
 
+    /// Starts an asynchronous signed lobby handshake. Call `ping` and
+    /// `recv_snapshot` for every bot while waiting; no roster blocks creation
+    /// of its remaining peers. Public fill clients explicitly accept each
+    /// ready check, then lock and load their selected hero in the worker.
+    pub fn connect_public(
+        server_addr: SocketAddr,
+        preference: shared::match_service::MatchPreference,
+        class: HeroClass,
+        nickname: String,
+    ) -> Self {
+        let mut bot = Self::connect(server_addr);
+        bot.framed = true;
+        bot.public = Some(RefCell::new(crate::public_client::PublicSession::new(
+            preference, class, nickname,
+        )));
+        bot.ping();
+        bot
+    }
+
+    pub fn public_status(&self) -> Option<crate::PublicBotStatus> {
+        self.public
+            .as_ref()
+            .map(|session| session.borrow().status.clone())
+    }
+
     fn decode_received(&mut self, len: usize) -> Option<ServerPacket> {
         let bytes = self
             .assembler
             .push(&self.recv_buf[..len], Instant::now())
             .ok()??;
+        if let Some(session) = &self.public
+            && let Ok(packet) =
+                serde_json::from_slice::<shared::public_transport::PublicServerDatagram>(&bytes)
+        {
+            session.borrow_mut().transport(&self.socket, packet);
+            return None;
+        }
         let packet: ServerPacket = match serde_json::from_slice(&bytes) {
             Ok(packet) => packet,
             Err(error) => {
@@ -95,14 +130,42 @@ impl Bot {
                 return None;
             }
         };
+        if let Some(session) = &self.public
+            && let ServerPacket::Career {
+                server_epoch,
+                career,
+                ..
+            } = packet
+        {
+            if let Some(endpoint) = session.borrow_mut().career(server_epoch, career) {
+                self.socket
+                    .connect(endpoint)
+                    .expect("connect allocated worker");
+                self.assembler = Default::default();
+                self.order = Default::default();
+                self.my_id = None;
+                self.dash_sequence = 0;
+            }
+            return None;
+        }
         // Scenarios read gameplay snapshots; social and career envelopes use
         // their own datagram paths and are not surfaced here.
         if !matches!(packet, ServerPacket::Snapshot { .. }) {
             return None;
         }
+        if self
+            .public
+            .as_ref()
+            .is_some_and(|session| !session.borrow().accepts(packet.meta().server_epoch))
+        {
+            return None;
+        }
         if (self.framed || packet.meta().protocol_version != 0) && !self.order.accept(packet.meta())
         {
             return None;
+        }
+        if let Some(session) = &self.public {
+            session.borrow_mut().snapshot(&self.socket, &packet);
         }
         self.dash_sequence = packet
             .players()
@@ -115,6 +178,10 @@ impl Bot {
     // --- Outbound packet helpers -------------------------------------------
 
     fn send(&self, packet: &ClientPacket) {
+        if let Some(session) = &self.public {
+            session.borrow_mut().send(&self.socket, packet);
+            return;
+        }
         let bytes = serde_json::to_vec(packet).expect("client packet should serialize to JSON");
         self.socket
             .send(&bytes)
@@ -250,6 +317,10 @@ impl Bot {
 
     /// Sends a keep-alive ping (also registers the bot with the server).
     pub fn ping(&self) {
+        if let Some(session) = &self.public {
+            session.borrow_mut().tick(&self.socket);
+            return;
+        }
         if self.framed {
             self.send(&ClientPacket::Hello {
                 protocol_version: shared::protocol::PROTOCOL_VERSION,

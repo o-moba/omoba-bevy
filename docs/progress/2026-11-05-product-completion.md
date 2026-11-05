@@ -25,38 +25,37 @@ This checkpoint does not close that entire scope or authorize RU deployment.
 
 ## Verification actually completed
 
-- Full `make check`: 2486 Rust tests passed, 94 ignored; 628 script tests with
-  nine skips; 62 iOS-tooling tests. This precedes the final ready-fixture ordering
-  follow-up and its new UI regression. No physical-device installation occurred.
-- Full disposable PostgreSQL 18 gate: 562 tests passed, none ignored. Covers
-  unplayed settlement/recovery, API history/analytics, cooldown restoration,
-  party opt-out regression and outbox barrier acknowledgement.
-- Final `cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings`
-  passed after the last changes; formatting, diff whitespace and Node syntax pass.
-- Current server ready-check process rehearsal PASS: nine accepts, 15 s timeout,
-  no worker before unanimity, FIFO age retained, late answer ignored, one worker
-  after a replacement roster unanimously accepts. Local evidence:
+- Full local `make check`: 2490 Rust tests passed, 95 intentional ignores;
+  634 Python tests with nine skips; 62 iOS-tooling tests. Both readiness
+  regressions pass locally. No physical-device installation occurred.
+- Full disposable PostgreSQL 18 gate: 564 tests passed, none ignored. Covers
+  allocation/gameplay commitment, unplayed recovery/history/analytics,
+  cooldown restoration, party opt-outs and the outbox barrier.
+- Final workspace/all-target clippy with warnings denied, formatting, diff
+  whitespace and six rehearsal-validator tests pass. Headless harness:
+  55 passed, two opt-in scenarios ignored.
+- Ready-check process rehearsal PASS: nine accepts, 15 s timeout, no early
+  worker, retained FIFO, rejected stale answer and one unanimous replacement.
   `.agent/codex-ranked-readiness/product-ready-check-confirmed/report.json`.
-- Current server termination process rehearsal PASS: SIGTERM to the owned worker,
-  one saved Interrupted result, no Elo/XP changes; completed in 1.56 s. Evidence:
-  `.agent/codex-ranked-readiness/product-termination-final/report.json`.
+- Termination process rehearsal PASS: one saved Interrupted result, no Elo/XP,
+  1.56 s. `.agent/codex-ranked-readiness/product-termination-final/report.json`.
+  The later full Ranked proof also preserves its already completed/rated Victory
+  after owned-worker shutdown, verified directly in PostgreSQL.
+- Ten-human standard Ranked Victory and early crash, plus explicit custom
+  unrated Victory, pass as detailed below. All owned probe processes were stopped.
 - Monitor: 24 isolated Python tests pass. No actual alerts were sent.
 
 ## Pending verification and product work
 
-The Russian 852x393 native visual capture has no successful screenshot. The
-computer-use service reports that the Mac is locked. The capture exposed fixture
-scheduling that could hide the ready state; the source now explicitly orders it
-and adds a renderer-free accept/decline regression. Its repeat was interrupted
-while generating native code when system free space fell to ~17 GiB, as required
-by the umbrella AGENTS.md. This last test is **not** claimed as passed locally.
-The current source is statically checked; CI must execute that regression.
-No further heavy client build is started. No cargo cache or user files were deleted.
+The Russian 852x393 native capture is still pending: the computer-use service
+reports the Mac is locked. The fixture ordering fix and both readiness
+regressions passed in CI; no native screenshot is claimed. No further heavy
+native client build is needed for the current harness work.
 
-Full Ranked victory/crash/party journeys, AFK/leaver/remake/surrender policy,
+Full party/draft journeys, AFK/leaver/remake/surrender policy,
 remaining client findings, multi-host/cross-host penalties, snapshot traffic,
 1000-player evidence, drain, PITR and real RU capacity/deployment remain in TODO.
-The first-ten-seconds crash case must durably distinguish gameplay from a draft.
+The first-ten-seconds crash case is now closed below.
 No production host, database, secret, CI configuration or deployment was changed.
 
 ## Durable gameplay / Ranked early-crash continuation
@@ -75,7 +74,7 @@ confirmed initially rated=true, verdant-default-v1, committed gameplay and ten
 humans/zero bots. Evidence is in
 `.agent/codex-ranked-readiness/ranked-early-recovery/report.json`.
 
-Current verification: 563 full PostgreSQL-backed API/store/server tests passed
+Durable-gameplay checkpoint verification: 563 full PostgreSQL-backed API/store/server tests passed
 with no ignores; server/store all-target clippy, formatting and Node syntax pass.
 The full lifecycle process probe also passed after the new gameplay gate.
 The added ordinary-checkpoint/Interrupted no-downgrade and pre-start-cancel
@@ -87,7 +86,69 @@ regressions. The main runner was externally shut down on its first attempt;
 a rerun completed and every CI job for 548d152 is green. Current backend changes
 have not required a new client/native build or any dependency/schema change.
 
-P4 remains open for completed rated Victory (#14), public signed AI clients
-(#40), loopback-only victory tooling (#42), and party/draft process evidence
-(#43). The native RU screenshot and all other unresolved P5–P9 work remain
+P4 remains open for party/draft process evidence (#43) and remaining CI automation (#31). The native RU screenshot and all other unresolved P5–P9 work remain
 explicitly pending. No production deployment or configuration was changed.
+
+
+## Public signed AI continuation
+
+Finding #40 is implemented. Ten independent ephemeral-key AI clients authenticated
+at the public lobby, explicitly accepted its ready roster, followed the one
+rated allocation, re-authenticated in the worker, locked/loaded and entered live
+5v5 Ranked play. Normal movement, purchases and casts were observed. Keys never
+enter diagnostics or evidence files. The initial process smoke passed; see
+`.agent/codex-ranked-readiness/signed-ai-bots/report.json`.
+
+A reusable loopback-only rehearsal now verifies identity/liveness under fog of
+war. Its full terminal mode checks a saved completed result and each player's
+profile, rating/XP and exactly one history row. The standard-rules run in
+`.agent/codex-ranked-readiness/ranked-ai-victory/report.json` PASSED: canonical
+verdant-default-v1, result `99e131dbd302451ee593eac48cba0ee4`, real Victory after
+406.115 s, all ten profiles credited once. Winners +16 rating /150 XP, losers
+-16 /100 XP, exactly one history entry each. Total wall time 422.50 s; all owned
+processes were stopped. No custom map, shortened cooldown, damage override or
+direct settlement was used. Finding #14 is closed.
+
+Current verification: full local `make check` passed 2490 Rust tests (95
+intentional ignores), 634 Python tests (nine skips) and 62 iOS-tooling tests.
+Both readiness regressions pass locally as well as in CI. The headless harness
+passed 55 tests (two opt-in ignores); six rehearsal validator tests pass.
+The final objective CLI follow-up passes server/harness all-target clippy and
+the real signed terminal rehearsal below.
+
+
+## Loopback terminal accelerator
+
+Finding #42 is closed. Explicit map forwarding checks both actual bind addresses;
+workers independently reject the override for an exposed bind and remove the
+test setting from their inherited environment. Eight pool tests cover the guard,
+IPv4/IPv6 and ordinary override removal. Public client `--rush-objectives` is
+loopback-only and uses ordinary signed movement/casts, with all gameplay checks
+left authoritative. The standard Ranked proof above does not use it.
+
+The original custom-map run with strategic lane AI hit its 300 s deadline. The
+explicit objective strategy completed the replacement proof in 50.87 s total,
+33.629 s played: saved Completed `fd3dd7e0aaeed5a9d798d95690cf447a`, ten humans,
+custom-unrated-v1, zero Elo/XP for every fresh profile and one matching history
+entry each. PostgreSQL confirms both durable allocation and result unrated.
+Evidence: `.agent/codex-ranked-readiness/custom-unrated-objective-victory/report.json`.
+All probe processes were stopped; the old timed-out evidence is retained.
+
+Previous pushed head b027ba7 is fully green in CI. The next head has not yet
+completed CI. No production host, service configuration, secrets, deployment or
+CI workflow files were changed in this continuation. Native RU visual evidence
+still needs the Mac unlocked; other product findings retain their full scope.
+
+
+Final full PostgreSQL gate for the public-AI/loopback-map continuation passed
+564 API/store/server tests, zero ignores and zero failures. Final formatting,
+whitespace and server/harness all-target clippy pass. The latest headless unit
+rerun passed 25 tests. Full local build stayed above the 20 GiB system-disk
+threshold and used only the existing shared cache B; no cargo caches were removed.
+
+
+The final rebuilt objective binary was rechecked with a fresh owned fixture:
+`.agent/codex-ranked-readiness/custom-unrated-objective-confirmed/report.json`,
+saved result `e577592f609e17ac2fece91beb6649fc`, 49.05 s wall /33.741 s played,
+all ten profiles/history checked with zero rating/XP. Final workspace/all-target
+clippy passes after that CLI follow-up.

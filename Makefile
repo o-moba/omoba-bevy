@@ -164,8 +164,10 @@ play-bots: play ## Alias for play
 # Usage: make bots [BOTS=4] [BOTS_SERVER=127.0.0.1:4000]
 BOTS ?= 9
 BOTS_SERVER ?= 127.0.0.1:4000
+BOTS_PUBLIC ?= 0
+BOTS_PREFERENCE ?= humans_only
 bots: ## Join external harness bots to an existing server
-	cargo run -p harness --bin bots -- --count $(BOTS) --server $(BOTS_SERVER)
+	cargo run -p harness --bin bots -- --count $(BOTS) --server $(BOTS_SERVER) $(if $(filter 1,$(BOTS_PUBLIC)),--public --preference $(BOTS_PREFERENCE))
 
 # Terminate any running server, client, and bot processes started above.
 stop: ## Stop matching local dev processes (broad legacy cleanup)

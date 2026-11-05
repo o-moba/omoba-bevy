@@ -41,6 +41,7 @@ pub(crate) struct Pool {
     bind_ip: String,
     public_host: String,
     first_port: u16,
+    test_map: Option<PathBuf>,
 }
 fn setting<T: std::str::FromStr>(name: &str, default: T) -> Result<T, String> {
     std::env::var(name).map_or(Ok(default), |v| {
@@ -98,6 +99,16 @@ pub(crate) fn public_worker_host(
     Ok(public_host.to_owned())
 }
 
+/// Explicit rehearsal override, allowed only when both UDP listeners are local.
+/// Ordinary OMOBA_MAP_CONFIG is always stripped from allocated workers.
+fn loopback_test_map(
+    configured: Option<PathBuf>,
+    lobby_bind: SocketAddr,
+    worker_bind: std::net::IpAddr,
+) -> Option<PathBuf> {
+    configured.filter(|_| lobby_bind.ip().is_loopback() && worker_bind.is_loopback())
+}
+
 impl Pool {
     /// `lobby_bind` is the lobby's own bound UDP address (`SERVER_ADDR`).
     pub fn from_env(lobby_bind: SocketAddr) -> Result<Self, String> {
@@ -130,6 +141,18 @@ impl Pool {
                 || std::env::current_exe().map_err(|_| "Cannot find worker executable".to_string()),
                 Ok,
             )?;
+        let configured_test_map =
+            std::env::var_os("OMOBA_MATCH_TEST_MAP_CONFIG").map(PathBuf::from);
+        let requested = configured_test_map.is_some();
+        let test_map = loopback_test_map(configured_test_map, lobby_bind, worker_bind.ip())
+            .map(fs::canonicalize)
+            .transpose()
+            .map_err(|_| "Cannot resolve loopback rehearsal map")?;
+        if requested && test_map.is_none() {
+            eprintln!(
+                "Ignoring OMOBA_MATCH_TEST_MAP_CONFIG: lobby and workers must both bind loopback"
+            );
+        }
         let mut pool = Self {
             lock,
             slots: HashMap::new(),
@@ -139,6 +162,7 @@ impl Pool {
             bind_ip,
             public_host,
             first_port,
+            test_map,
         };
         let entries = fs::read_dir(&pool.root).map_err(|_| "Cannot inspect workers")?;
         for (index, entry) in entries.flatten().take(4097).enumerate() {
@@ -224,7 +248,13 @@ impl Pool {
         }
         match_allocation::atomic_json(&directory.join("manifest.json"), &manifest)
             .map_err(|_| "Cannot persist allocation")?;
-        let child = match spawn(&self.executable, &directory, &manifest, false) {
+        let child = match spawn(
+            &self.executable,
+            &directory,
+            &manifest,
+            false,
+            self.test_map.as_deref(),
+        ) {
             Ok(child) => child,
             Err(_) => {
                 let status = Status {
@@ -355,7 +385,13 @@ impl Pool {
                 };
                 drop(probe);
                 recovery_launches += 1;
-                if let Ok(child) = spawn(&self.executable, &slot.directory, &slot.manifest, true) {
+                if let Ok(child) = spawn(
+                    &self.executable,
+                    &slot.directory,
+                    &slot.manifest,
+                    true,
+                    self.test_map.as_deref(),
+                ) {
                     slot.child = Some(child);
                     slot.recovering = true;
                 }
@@ -449,12 +485,13 @@ fn spawn(
     directory: &std::path::Path,
     m: &Manifest,
     recovery: bool,
+    test_map: Option<&std::path::Path>,
 ) -> io::Result<Child> {
     let output = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(directory.join("worker.log"))?;
-    worker_command(executable, directory, m, recovery)
+    worker_command(executable, directory, m, recovery, test_map)
         .stdin(Stdio::null())
         .stdout(Stdio::from(output.try_clone()?))
         .stderr(Stdio::from(output))
@@ -464,11 +501,14 @@ fn spawn(
 /// A worker inherits the lobby's environment except its own settings and the
 /// local-only overrides: a map file, targeting QA, and the practice bot level,
 /// so an operator setting on the lobby host can never weaken online bots.
+/// The explicit test map has already passed the pool's two-loopback guard;
+/// altered map stats remain ineligible for Ranked credit.
 fn worker_command(
     executable: &std::path::Path,
     directory: &std::path::Path,
     m: &Manifest,
     recovery: bool,
+    test_map: Option<&std::path::Path>,
 ) -> Command {
     let mut command = Command::new(executable);
     command
@@ -480,8 +520,16 @@ fn worker_command(
         .env("OMOBA_TEAM_SIZE", "5")
         .env("OMOBA_MATCH_MODE", m.match_mode().id())
         .env_remove("OMOBA_MAP_CONFIG")
+        .env_remove("OMOBA_MATCH_TEST_MAP_CONFIG")
         .env_remove("OMOBA_TARGETING_QA")
         .env_remove(shared::bot_profile::BotDifficulty::ENV);
+    if let Some(path) = test_map
+        && m.bind
+            .parse::<SocketAddr>()
+            .is_ok_and(|addr| addr.ip().is_loopback())
+    {
+        command.env("OMOBA_MAP_CONFIG", path);
+    }
     command
 }
 
@@ -552,6 +600,7 @@ impl Pool {
             bind_ip: "127.0.0.1".into(),
             public_host: "127.0.0.1".into(),
             first_port: 45000,
+            test_map: None,
         }
     }
 }
@@ -585,10 +634,12 @@ mod tests {
             std::path::Path::new("/tmp/allocation"),
             &manifest('a'),
             false,
+            None,
         );
         let envs: HashMap<_, _> = command.get_envs().collect();
         for removed in [
             "OMOBA_MAP_CONFIG",
+            "OMOBA_MATCH_TEST_MAP_CONFIG",
             "OMOBA_TARGETING_QA",
             shared::bot_profile::BotDifficulty::ENV,
         ] {
@@ -606,6 +657,56 @@ mod tests {
             envs.get(std::ffi::OsStr::new("OMOBA_MATCH_MODE")),
             Some(&Some(std::ffi::OsStr::new("practice")))
         );
+    }
+
+    #[test]
+    fn rehearsal_map_requires_loopback_lobby_and_workers_including_ipv6() {
+        let path = PathBuf::from("/tmp/rehearsal-map.json");
+        for lobby in [
+            "127.0.0.1:4000",
+            "[::1]:4000",
+            "0.0.0.0:4000",
+            "[::]:4000",
+            "192.0.2.1:4000",
+        ] {
+            for worker in ["127.0.0.1", "::1", "0.0.0.0", "::", "192.0.2.1"] {
+                let lobby: SocketAddr = lobby.parse().unwrap();
+                let worker: std::net::IpAddr = worker.parse().unwrap();
+                assert_eq!(
+                    loopback_test_map(Some(path.clone()), lobby, worker).is_some(),
+                    lobby.ip().is_loopback() && worker.is_loopback()
+                );
+            }
+        }
+        let mut m = manifest('a');
+        m.bind = "127.0.0.1:41000".into();
+        let command = worker_command(
+            std::path::Path::new("server"),
+            std::path::Path::new("/tmp/allocation"),
+            &m,
+            false,
+            Some(&path),
+        );
+        let envs: HashMap<_, _> = command.get_envs().collect();
+        assert_eq!(
+            envs[std::ffi::OsStr::new("OMOBA_MAP_CONFIG")],
+            Some(path.as_os_str())
+        );
+        assert_eq!(
+            envs[std::ffi::OsStr::new("OMOBA_MATCH_TEST_MAP_CONFIG")],
+            None
+        );
+        // Even a caller mistake cannot apply a test map to an exposed worker.
+        m.bind = "0.0.0.0:41000".into();
+        let command = worker_command(
+            std::path::Path::new("server"),
+            std::path::Path::new("/tmp/allocation"),
+            &m,
+            false,
+            Some(&path),
+        );
+        let envs: HashMap<_, _> = command.get_envs().collect();
+        assert_eq!(envs[std::ffi::OsStr::new("OMOBA_MAP_CONFIG")], None);
     }
 
     #[test]

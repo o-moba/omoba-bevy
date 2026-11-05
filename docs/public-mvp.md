@@ -292,3 +292,55 @@ checkpoint. It verifies all ten profiles and histories, unchanged rating/XP,
 the actual >=120 s recovery gate and re-entry into a unanimously accepted roster.
 Casual (`--preference=quick`, one roster of up to ten) is accepted too. Recovery
 keeps its real wall-clock gates; no timeout or lease is accelerated.
+
+
+## Signed AI fill clients and a full Ranked rehearsal
+
+Build the server and headless tooling in the repository's assigned cargo cache:
+
+```sh
+cargo build --locked -p server -p harness --bin server --bin bots
+make bots BOTS_PUBLIC=1 BOTS=9 BOTS_SERVER=127.0.0.1:4000
+```
+
+Public fill clients default to Ranked (`BOTS_PREFERENCE=humans_only`). They keep
+throwaway keys only in memory, explicitly accept the 15-second ready check,
+follow the worker handoff, re-authenticate, lock/load and play with the existing
+lane AI. `BOTS_PREFERENCE=quick` selects Casual and `bot_practice` selects vs Bots.
+A single developer plus nine clients can form ten authenticated Ranked seats.
+
+For an owned loopback lobby and disposable migrated PostgreSQL database:
+
+```sh
+export OMOBA_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/omoba_test'
+python3 scripts/public_bots_rehearsal.py \
+  --server-bin "$CARGO_TARGET_DIR/debug/server" \
+  --bots-bin "$CARGO_TARGET_DIR/debug/bots" \
+  --output .agent/ranked-ai-smoke
+```
+
+This requires exactly ten clients for Ranked, creates its own lobby/worker root,
+raises only its own loopback admission limits and stops only processes it owns.
+It checks each client's own identity/fresh snapshot rather than requiring all
+opponents to be visible through fog of war. Output roots must be new.
+
+Add `--require-victory --timeout 3600` to play the standard map/rules to a real
+result. The clients request saved history and fresh profiles before exiting;
+the rehearsal checks every participant's rating delta, XP and exactly one
+history result. This can take a full match. The standard run does not alter the
+server clock, map HP, damage, debug privileges or Ranked eligibility. A started
+run is not a passed terminal proof; its `report.json` is authoritative after
+completion.
+
+For a separate **unrated** fast terminal-path check, add
+`--test-map examples/maps/rehearsal-victory.json --require-victory --timeout 300`.
+This explicit test map disables towers and gives Blue's base one HP. The runner
+selects loopback-only `bots --rush-objectives`, which focuses normal movement
+and casts on attackable structures rather than waiting for midgame rallies.
+Its result
+must have zero rating/XP credit, even from the Ranked queue. The runner copies
+the fixture into its own root. `OMOBA_MATCH_TEST_MAP_CONFIG` is forwarded to an
+allocated worker only if both actual lobby and worker binds are loopback; an
+exposed lobby ignores it and logs why. Ordinary map/targeting/bot-difficulty
+overrides are still stripped. This fast custom proof never substitutes for the
+standard rated match above.

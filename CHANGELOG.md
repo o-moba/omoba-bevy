@@ -5,6 +5,18 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Allocated workers accept an explicit rehearsal map only when both lobby and
+  worker bind loopback; exposed listeners ignore it. A fast custom-map objective
+  run verifies saved Victory with zero rating/XP, separately from the real
+  standard-rules Ranked win. Existing local overrides remain stripped (#42).
+
+- Headless fill clients can join the signed public lobby (`bots --public`),
+  explicitly accept ready checks, authenticate again at the assigned worker,
+  lock/load their hero and play with the existing legal lane AI. Throwaway keys
+  stay in memory. `--exit-after-result` waits for durable results and each
+  profile's history; an isolated loopback rehearsal checks all ten Ranked
+  profiles, Elo and XP without changing map or gameplay rules (#40, #14).
+
 - Commit gameplay activation to PostgreSQL before combat or income begins,
   separately from the allocation acknowledgement. A crash in the first seconds
   now recovers a played Interrupted match; an explicit pre-start cancellation
