@@ -40,13 +40,6 @@ impl Plugin for HomeScreenPlugin {
                     .after(UiSet::Dispatch)
                     .before(crate::net::ClientNetPipeline::SendCommands)
                     .run_if(in_state(AppScreen::Home)),
-            )
-            .add_systems(
-                PostUpdate,
-                fit_home_nickname
-                    .after(crate::i18n::I18nSystems::Font)
-                    .before(bevy::ui::UiSystems::Layout)
-                    .run_if(in_state(AppScreen::Home)),
             );
     }
 }
@@ -79,38 +72,6 @@ enum HomeAction {
     Protect,
     /// "Not now" on the protect-progress card.
     DeclineProtect,
-}
-
-#[derive(Component)]
-struct FittedHomeNickname;
-
-/// The initial glyph budget is only an estimate: W and other wide letters
-/// can exceed it. Use the production shaper's previous layout to elide before
-/// this frame's layout, retaining the readable font size and real profile name.
-fn fit_home_nickname(
-    mut names: Query<
-        (&mut Text, &bevy::text::TextLayoutInfo, &ComputedNode),
-        With<FittedHomeNickname>,
-    >,
-) {
-    for (mut text, layout, node) in &mut names {
-        if node.size().x <= 2.0 || layout.glyphs.is_empty() {
-            continue;
-        }
-        let ink_right = layout
-            .glyphs
-            .iter()
-            .map(|g| g.position.x + g.atlas_info.rect.width() * 0.5)
-            .fold(0.0_f32, f32::max);
-        if layout.size.x.max(ink_right) <= node.size().x - 2.0 {
-            continue;
-        }
-        let mut prefix = text.0.strip_suffix('…').unwrap_or(&text.0).to_owned();
-        if prefix.pop().is_some() {
-            prefix.push('…');
-            text.0 = prefix;
-        }
-    }
 }
 
 #[derive(Component)]
@@ -802,7 +763,8 @@ fn spawn_home(
                 &career.nickname,
                 &thumbnails,
                 if phone
-                    && (party_line.invite.is_some() || update_banner.is_some() || protect_banner)
+                    && (party_line.invite.is_some() || update_banner.is_some() || protect_banner
+                        || required.is_some() || session.compatibility_issue.is_some())
                 {
                     None
                 } else {
@@ -964,25 +926,12 @@ fn spawn_home(
                         ..default()
                     });
                 }
-                if let Some((latest, link)) = &required {
-                    spawn_update_required(column, latest.as_deref(), *link, phone, unit);
-                } else if session.compatibility_issue.is_some() {
-                    column.spawn((
-                        widgets::label(
-                            crate::net::link_status(&session)
-                                .detail()
-                                .unwrap_or_default(),
-                            if phone { 10.0 * unit } else { 13.0 },
-                            color::TEXT_DANGER,
-                        ),
-                        Node {
-                            width: Val::Percent(100.0),
-                            padding: UiRect::all(Val::Px(4.0 * unit)),
-                            ..default()
-                        },
-                        BackgroundColor(theme::PANEL),
-                        Name::new("HomeCompatibilityDetail"),
-                    ));
+                if !phone {
+                    if let Some((latest, link)) = &required {
+                        spawn_update_required(column, latest.as_deref(), *link, false, unit);
+                    } else if session.compatibility_issue.is_some() {
+                        spawn_compatibility_detail(column, &session, false, unit);
+                    }
                 }
                 if !phone {
                     let mode = party_line.party.as_ref().and_then(|(_, leader, leads)| {
@@ -1060,7 +1009,7 @@ fn spawn_home(
                                     id.into(),
                                     (),
                                 );
-                                if !session.is_connected()
+                                if !session.is_connected() || required.is_some() || session.compatibility_issue.is_some()
                                     || (action == HomeAction::Ranked && (career.view.ranked_season_open == Some(false) || career.view.profile.as_ref().is_none_or(|p| !p.ranked_unlocked())))
                                 {
                                     row.commands().entity(button).insert(Pressable {
@@ -1166,7 +1115,26 @@ fn spawn_home(
                 }
             });
 
-            if let Some((party_id, from)) = &party_line.invite {
+            if phone && (required.is_some() || session.compatibility_issue.is_some()) {
+                // Long admission/update copy has its own left-hand slot. It
+                // cannot displace Offline practice onto the bottom navigation.
+                root.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(63.0 * unit), top: Val::Px(84.0 * unit),
+                        width: Val::Px(300.0 * unit),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                    Name::new("HomeAdmissionNotice"),
+                )).with_children(|notice| {
+                    if let Some((latest, link)) = &required {
+                        spawn_update_required(notice, latest.as_deref(), *link, true, unit);
+                    } else {
+                        spawn_compatibility_detail(notice, &session, true, unit);
+                    }
+                });
+            } else if let Some((party_id, from)) = &party_line.invite {
                 spawn_invite_banner(root, *party_id, from, phone, platform.is_mobile(), fit);
             } else if let Some(version) = &update_banner {
                 spawn_update_banner(root, version, phone, platform.is_mobile(), fit);
@@ -1370,7 +1338,7 @@ fn spawn_home_identity(
                     ..default()
                 },
                 Name::new("HomeNickname"),
-                FittedHomeNickname,
+                widgets::FittedLabel,
             ));
             text.spawn(widgets::label(
                 &format!(
@@ -1476,6 +1444,19 @@ fn home_actions(
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
     for Activated { action, .. } in activated.read() {
+        if matches!(
+            action,
+            HomeAction::Play | HomeAction::Ranked | HomeAction::BotPractice
+        ) && (session.compatibility_issue.is_some()
+            || update
+                .as_ref()
+                .and_then(|u| u.offer(&session))
+                .is_some_and(|offer| matches!(offer, crate::update::UpdateOffer::Required { .. })))
+        {
+            // A stale activation cannot bypass a newly required update. Resume
+            // keeps its owning-worker compatibility checks; offline stays usable.
+            continue;
+        }
         if *action == HomeAction::Ranked && career.view.ranked_season_open == Some(false) {
             career.view.error = Some(shared::career::error_code::RANKED_SEASON_ENDED.into());
             career.view.error_code = Some(shared::career::error_code::RANKED_SEASON_ENDED.into());
@@ -1727,6 +1708,30 @@ fn spawn_protect_banner(parent: &mut ChildSpawnerCommands, phone: bool, mobile: 
     );
 }
 
+fn spawn_compatibility_detail(
+    parent: &mut ChildSpawnerCommands,
+    session: &ClientSession,
+    phone: bool,
+    unit: f32,
+) {
+    parent.spawn((
+        widgets::label(
+            crate::net::link_status(session)
+                .detail()
+                .unwrap_or_default(),
+            if phone { 10.0 * unit } else { 13.0 },
+            color::TEXT_DANGER,
+        ),
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(if phone { 8.0 } else { 4.0 } * unit)),
+            ..default()
+        },
+        BackgroundColor(theme::PANEL),
+        Name::new("HomeCompatibilityDetail"),
+    ));
+}
+
 /// "Update required" under the update button: what happened and, when there
 /// is no download link, where the update comes from (the App Store or
 /// TestFlight on iPhone, otherwise the official site).
@@ -1795,7 +1800,7 @@ fn spawn_choice_banner(
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(if phone { 68.0 } else { 178.0 - button_height }),
+                top: Val::Px(if phone { 84.0 } else { 178.0 - button_height }),
                 left: Val::Px(if phone { 63.0 } else { HOME_INSET }),
                 width: Val::Px(if phone { 230.0 } else { 380.0 }),
                 height: Val::Px(66.0 + button_height),
@@ -2507,6 +2512,70 @@ mod tests {
                 (home_actions, refresh_home).chain().after(UiSet::Dispatch),
             );
         app
+    }
+
+    #[test]
+    fn required_catalog_blocks_every_new_queue_and_stale_activation_but_keeps_offline() {
+        use crate::ui::test_id::harness;
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        session.server_contract = Some(shared::compatibility::ReleaseContract::current());
+        let mut update =
+            crate::update::ClientUpdate::for_test(Some("https://portal.example"), || Ok(vec![]));
+        update.require_for_test("999.0.0");
+        let mut app = update_home(update, session);
+        let mut profile = shared::career::ProfileSummary::new("a".repeat(64), "Player".into());
+        profile.completed_public_matches = 10;
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view.profile = Some(profile);
+            career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
+        }
+        app.update();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<ClientSession>()
+                .compatibility_issue
+                .is_none(),
+            "catalog minimum alone must enforce the update"
+        );
+        for (id, action) in [
+            ("HomeRanked", HomeAction::Ranked),
+            ("HomeBotPractice", HomeAction::BotPractice),
+        ] {
+            let source = harness::find(app.world_mut(), id).unwrap();
+            assert!(app.world().get::<Pressable>(source).unwrap().disabled);
+            app.world_mut().write_message(Activated { action, source });
+        }
+        app.world_mut().write_message(Activated {
+            action: HomeAction::Play,
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert!(matches!(
+            *app.world().resource::<NextState<AppScreen>>(),
+            NextState::Unchanged
+        ));
+        harness::press(app.world_mut(), "HomeOfflinePractice");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::net::SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, crate::net::SessionUiCommand::StartOffline))
+        );
+        assert!(matches!(
+            *app.world().resource::<NextState<AppScreen>>(),
+            NextState::Pending(AppScreen::HeroSelect)
+        ));
     }
 
     /// LR-18 acceptance: a fresh install is asked to protect its progress

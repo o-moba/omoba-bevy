@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Prepare shared actual-glyph fitting for Home/Lobby/Draft labels and a separate
+  phone Home admission/update notice slot so Offline practice stays above the
+  navigation. Guard every new Home queue action against a required catalog update,
+  including stale activations. Formatting PASS; Rust/visual acceptance pending
+  because root disk is below the20GiB build threshold.
+
 - Fence live public-probe UDP traffic by the current peer address/port before
   decoding. An OS-reused endpoint could receive old lobby views and corrupt the
   new worker context. Real3-socket regression, failing negative control,5 policy

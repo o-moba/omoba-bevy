@@ -729,6 +729,13 @@ fn spawn_nameplates(
                             theme::IVORY,
                         ),
                         TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                        Node {
+                            max_width: Val::Percent(100.0),
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
+                        widgets::FittedLabel,
+                        Name::new(format!("LobbyMemberName-{index}")),
                     ));
                     plate.spawn((
                         label(
@@ -737,6 +744,13 @@ fn spawn_nameplates(
                             if you { theme::GOLD } else { color },
                         ),
                         TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                        Node {
+                            max_width: Val::Percent(100.0),
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
+                        widgets::FittedLabel,
+                        Name::new(format!("LobbyMemberStatus-{index}")),
                     ));
                 });
             }

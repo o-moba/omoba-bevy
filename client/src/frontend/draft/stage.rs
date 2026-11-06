@@ -188,7 +188,7 @@ pub(crate) fn spawn_team_stage(
                                 } else {
                                     player.nickname.clone()
                                 };
-                                for (text, ink, size) in [
+                                for (line, (text, ink, size)) in [
                                     (
                                         identity.as_str(),
                                         theme::IVORY,
@@ -223,7 +223,10 @@ pub(crate) fn spawn_team_stage(
                                         },
                                         if compact { 9.0 } else { 10.0 },
                                     ),
-                                ] {
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                {
                                     let size: f32 = size;
                                     // Menu typography raises phone labels to its
                                     // readable minimum. Budget at that actual
@@ -243,6 +246,16 @@ pub(crate) fn spawn_team_stage(
                                         widgets::label(fitted, size, ink),
                                         TextLayout::justify(Justify::Center)
                                             .with_linebreak(LineBreak::NoWrap),
+                                        Node {
+                                            max_width: Val::Percent(100.0),
+                                            min_width: Val::Px(0.0),
+                                            ..default()
+                                        },
+                                        widgets::FittedLabel,
+                                        Name::new(format!(
+                                            "PrematchStageText-{}-{line}",
+                                            player.player_id
+                                        )),
                                         Pickable::IGNORE,
                                     ));
                                 }

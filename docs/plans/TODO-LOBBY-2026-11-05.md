@@ -1910,3 +1910,31 @@ Fresh complete CI after this fix is still required. UI-2/UI-3 follow-up remains
 unverified WIP: no heavy client test/build launched while root disk is below
 20GiB. No additional original finding is closed by this harness repair, and no
 production deployment or physical/RU/scale acceptance is implied.
+
+
+### UI-2/UI-3 follow-up candidate saved — verification pending
+
+Generalize the previously accepted Home glyph fitter into an explicit shared
+single-line label marker, and apply it to actual Lobby and Draft name/status
+plates. Add bounded label geometry to the existing native recorder. This retains
+readable font sizes and the original full nickname; widest-name frames are still
+required before accepting UI-2. The repository capture helper now hashes the
+shared widgets source as part of its source provenance.
+
+Move phone Home required-update/compatibility copy into a left-hand notice slot,
+reserve identity-chip space and keep it out of the right-hand Offline practice
+column. Preserve desktop presentation. A separate reviewed functional gap was
+found: a compatible server plus a newer catalog minimum disabled the primary
+Play button but left side Ranked/vs-Bots entries active. Disable all new queue
+entries and ignore stale activation events after either requirement appears;
+offline practice stays available. Add a connected/catalog-only regression for
+all three stale queue activations and actual offline entry. This test has not yet
+executed, so the candidate is not certified.
+
+`cargo fmt --all -- --check`, source review and diff whitespace checks PASS.
+The guarded targeted Rust test and RU clippy/native build both refused to launch
+before any Cargo child because root free space was below20GiB. Approved A/B
+caches already point to Orico. No cache deletion, foreign-process shutdown or OS
+settings change was performed. Save this as an intermediate source candidate for
+existing CI; UI-2 remains partial and UI-3 remains open until tests/native pixels
+pass. This does not add a production dependency or alter the CI workflow.

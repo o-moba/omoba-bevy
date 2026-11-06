@@ -19,6 +19,7 @@ SOURCE_FILES = ("client/src/lib.rs", "client/src/qa/mod.rs",
                 "client/src/net/session.rs", "client/src/pause_menu/match_votes.rs",
                 "client/src/world.rs", "client/src/platform.rs",
                 "client/src/frontend/mod.rs", "client/src/frontend/home.rs",
+                "client/src/frontend/widgets.rs",
                 "client/src/frontend/lobby.rs", "client/src/frontend/draft.rs",
                 "client/src/frontend/draft/stage.rs", "client/src/party.rs",
                 "client/src/ui/widgets/surfaces.rs")

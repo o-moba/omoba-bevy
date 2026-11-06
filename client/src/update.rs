@@ -317,6 +317,12 @@ impl ClientUpdate {
     }
 
     #[cfg(test)]
+    pub(crate) fn require_for_test(&mut self, version: &str) {
+        self.publish_for_test(version);
+        self.newest.as_mut().unwrap().min_release = Some(version.to_owned());
+    }
+
+    #[cfg(test)]
     pub(crate) fn for_test(portal: Option<&str>, fetch: fn() -> CatalogResult) -> Self {
         Self {
             portal: portal.map(str::to_owned),

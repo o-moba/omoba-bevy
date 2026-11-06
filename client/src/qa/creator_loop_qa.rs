@@ -76,7 +76,7 @@ const LAUNCHER_TIP: [f32; 3] = [0.0, 0.13, 0.81];
 /// A flash this close to a tip (in the weapon's own frame) belongs to it.
 const TIP_TOLERANCE: f32 = 0.08;
 /// Labels whose text the state file reports.
-const LABELS: [&str; 11] = [
+const LABELS: [&str; 15] = [
     "CollectionAccountStatus",
     "SelectedWeaponStatus",
     "CollectionWeaponMarketHint",
@@ -88,6 +88,10 @@ const LABELS: [&str; 11] = [
     "HomeConnectionStatus",
     "HomeNickname",
     "HomeRating",
+    "HomeCompatibilityDetail",
+    "HomeOfflineNotice",
+    "HomeUpdateRequiredTitle",
+    "HomeUpdateRequiredBody",
 ];
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -1148,7 +1152,11 @@ fn return_state(
     let mut texts = serde_json::Map::new();
     let mut label_geometry = serde_json::Map::new();
     for (key, text, node, transform, clip, font, layout) in labels.iter() {
-        if LABELS.contains(&key.as_str()) {
+        if LABELS.contains(&key.as_str())
+            || key.as_str().starts_with("PrematchStageText-")
+            || key.as_str().starts_with("LobbyMemberName-")
+            || key.as_str().starts_with("LobbyMemberStatus-")
+        {
             texts.insert(key.as_str().to_owned(), text.0.clone().into());
             label_geometry.insert(key.as_str().to_owned(), serde_json::json!({
                 "node_size": node.map(|n| n.size().to_array()),
