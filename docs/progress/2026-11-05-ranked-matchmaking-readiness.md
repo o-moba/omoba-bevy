@@ -1113,3 +1113,27 @@ intentionally interrupted during fixture review (transport isolation, then
 receipt coherence); their negative exits/logs are retained. No third cache,
 cleanup, dependency, workflow or production change. Original59/7/1/1 statuses,
 C5/C7 and all other outstanding gates remain unchanged until actual acceptance.
+
+
+### Native fair-play checkpoint — C7 feedback accepted; C5 failure retained
+
+f2214c66 RU build v3 PASS:1047.03s,min root35.08GiB,binary69dc09cc… . Five
+accepted exact PNGs/readback/source hashes are preserved in
+[the evidence pack](../evidence/fair-play-2026-11-06/README.md). C7 Taken feedback
+is now done in software. The Search warning and returning-user vote menu/both
+prompts are readable; vote targets are44px. No main-list count changes:59 done,
+7 partial,1 open,1 mostly refuted.
+
+Automatic green checks were insufficient for the first remake-menu frame: the
+first-match guide occluded it. Default-guide prompt initialization twice panicked
+with an invalid/despawned entity; original logs/backtrace/timeout/manual-stop
+results are retained. Home warning over an empty backdrop and the blocked result
+attempt are not accepted. Result QA omitted its synthetic player, now corrected.
+Render ordering now flushes replacement vote controls before decoration; a new
+real kit-decorator/modal-cycle regression is running, along with cacheB native
+v4. Capture also requires its real root and no obstructing help/modal. C5/#45,
+remaining P5/P6 and all scale/operations/release requirements stay open.
+
+Directory2a45600c CI42201671041 has now completed successfully (all7 jobs),
+separate from current f2214c66 CI42206582628 and this newer uncommitted fix.
+No production deployment, dependencies, workflow or owner preferences changed.

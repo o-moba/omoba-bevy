@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify/preserve native C7 Taken feedback, Search restart notice and returning-
+  user remake/surrender menu/prompts; exact PNGs and hashes in the fair-play
+  evidence pack. C7 software criterion is complete. Reject the guide-obscured
+  menu, incomplete Home and missing-player result attempt. Default-guide prompt
+  initialization twice exposed an entity-despawn crash; render-order regression/
+  fix, stricter modal/root gates and corrected result fixture are in verification.
+
 - Add one-state opt-in native QA for Taken feedback, party/search restart
   notifications, remake/surrender voting and result presentation. It removes
   transport before supplying labelled synthetic views; required localized text,
