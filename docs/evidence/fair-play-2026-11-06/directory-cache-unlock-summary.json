@@ -1,5 +1,5 @@
 {
-  "status": "targeted_component_pass_full_client_suite_pending",
+  "status": "all_10_local_directory_and_full_linux_client_tests_pass_full_branch_ci_pending",
   "reason": "CI42233107055 dev-client test expired_cache_survives_restart_as_a_rollback_and_equivocation_fence failed with CacheBusy; parallel fork can retain a flock open-file description after parent close",
   "fix": "private CacheLock guard explicitly unlocks before closing; stable lock inode and nonblocking contention behavior preserved",
   "regression": "child retains duplicate via stdin until parent has checked contention while held and reacquisition after drop; exact production guard module compiled through a std-only test wrapper",
@@ -154,5 +154,38 @@
     ],
     "minimum_root_gib": 27.142532348632812
   },
-  "limits": "local macOS test; complete client directory suite running separately; actual Linux branch CI remains required"
+  "limits": "all10 integrated local directory tests, RU strict clippy and the full Linux dev-client suite pass; full branch PostgreSQL/core jobs are still in progress",
+  "integrated_directory_regression": {
+    "source_parent": "e2ac9146cc69180b490dd7352a16e519fa208f27",
+    "working_diff_sha256": "59a4fdf2bd3dcd782dbb890c6a4db6845559d0075e5b501b60cca3f7c9094540",
+    "untracked": [
+      "client/src/game_directory/cache_lock.rs"
+    ],
+    "market": "global-default",
+    "steps": [
+      {
+        "name": "offscreen-tests",
+        "exit": 0,
+        "seconds": 885.13,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/d1-cache-unlock-v1-offscreen-tests.log"
+      }
+    ],
+    "minimum_root_gib": 23.102794647216797
+  },
+  "linux_client_ci": {
+    "commit": "8a02d375a882584f01c6617dae86b400cd69162b",
+    "run_id": 42238965581,
+    "job_id": 127963924108,
+    "url": "https://github.com/o-moba/omoba-bevy/actions/runs/42238965581/job/127963924108",
+    "status": "success",
+    "passed": 1591,
+    "failed": 0,
+    "ignored": 1,
+    "seconds": 12.61,
+    "regressions": [
+      "game_directory::cache_lock::tests::inherited_descriptor_does_not_keep_a_released_cache_busy",
+      "game_directory::tests::expired_cache_survives_restart_as_a_rollback_and_equivocation_fence"
+    ]
+  }
 }

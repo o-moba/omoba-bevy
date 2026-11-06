@@ -14,8 +14,9 @@ All notable changes are recorded here. The canonical version is
 - Explicitly release the signed-directory cache OS lock before closing its file.
   A parallel fork can otherwise retain the shared lock and cause false CacheBusy
   on the next read. Real inherited-descriptor regression passes30 repetitions;
-  removing the fix fails deterministically. RU strict client/test clippy PASS;
-  complete directory/client CI gates remain required.
+  removing the fix fails deterministically. All10 integrated directory cases,
+  RU strict clippy and full Linux dev-client suite1591/0/1 PASS. Complete branch
+  PostgreSQL/core gates remain required.
 
 - Allow the Fair Play harness to render the actual Home shell. The missing menu
   came from world-only automation classification, not failed offscreen rendering.

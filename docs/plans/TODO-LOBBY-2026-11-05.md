@@ -1698,3 +1698,32 @@ New defects discovered on supported long nicknames remain explicitly OPEN:
   AI avatar assets are not loaded in these frames; investigate actual source before
   claiming team-stage visual completeness.
 Functional row65 acceptance does not promote these images to full layout acceptance.
+
+
+D1 cache-lock follow-up: the actual integrated client suite finished:10/10
+`game_directory::` tests PASS, no ignored/failed,0.30s after885.13s compile. This
+includes cryptographic scope, expired rollback/equivocation fences, corruption,
+independent-process contention and the inherited-descriptor regression. Minimum
+root space stayed above20GiB. Linux/current full branch CI remains required.
+
+Actual local restart attempts are retained under ignored
+`.agent/ui-proof/p5-native-public-restarts-v1` and `...-v2`. The first captured
+reconnecting clients and pressed Play before it was enabled; rejected. The
+second restored real clients after both owned lobby restarts, but Home captures
+missed the group-loss toast and the later Searching capture still showed the
+group-loss wording. Do not count these as the intended Home/solo-search warning
+acceptance or close45. Add observable actual party/profile/toast state to the
+Creator Loop readout, then wait for the correct event and inspect the matching
+frame. No production/dev service was restarted.
+
+UI-1/UI-2 fixes are prepared: one-line bounded Home nickname plus enough chip
+height for the rating, and per-slot name/class/role ellipsis in Draft at the
+actual readable phone font minimum. Verification/build is in progress. These
+new layout defects remain open until native long-name images are inspected.
+
+
+D1 cache-lock Linux confirmation: CI42238965581 at8a02d375, dev-client job
+127963924108 SUCCESS:1591 passed/0 failed/1 ignored,12.61s. Both the previously
+failing expired-cache restart test and inherited-descriptor regression pass.
+Android, Python, gameplay harness and bot jobs also pass; core/PostgreSQL public
+journeys remain active. This is a full client gate, not a full branch/release gate.
