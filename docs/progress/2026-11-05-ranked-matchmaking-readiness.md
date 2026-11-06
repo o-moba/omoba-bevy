@@ -797,3 +797,17 @@ headless harness and both client clippy configurations PASS. Two client-test job
 fail the same font coverage check: the CJK display subset lacks休/季/闲 from new
 translations (1572 other client tests PASS). Full public journeys still running.
 Repair the font in its own checkpoint; this CI is not green.
+
+
+### P6 CI repair — Chinese display font (2026-11-06)
+
+Rebuild the CJK display subset from the existing cached Noto Serif SC600 upstream
+face with the handoff FontTools subset settings, preserving every old codepoint.
+Exactly休/季/闲 were added (465556 bytes, +1680). Installed manifest/font package
+sizes updated; asset-budget/license consistency check PASS. No upstream UI files
+or production dependencies changed. FontTools4.59.0 was installed only in the
+ignored task tooling directory. Source/before/after hashes and cmap verification:
+.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p6-cjk-font-rebuild.json.
+All supported current dictionary characters and every old cmap entry are present.
+This repairs the specific CI42165588927 missing-glyph failure; native test
+execution must still be confirmed by the next full CI, not inferred from cmap.

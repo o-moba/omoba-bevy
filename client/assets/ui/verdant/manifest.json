@@ -8,8 +8,8 @@
   "backgrounds": 139636,
   "living-1080": 2956364,
   "living-720": 1540429,
-  "fonts": 1858112,
-  "total": 6905856
+  "fonts": 1859792,
+  "total": 6907536
  },
  "assets": [
   {
@@ -2368,7 +2368,7 @@
   },
   {
    "path": "fonts/NotoSerifSC-SemiBold-subset.ttf",
-   "bytes": 463876,
+   "bytes": 465556,
    "tintable": true,
    "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
    "attribution": "Noto Serif SC © 2017 Google Inc. / Adobe"

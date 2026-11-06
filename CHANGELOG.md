@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Repair the schema10 CI font-coverage failure by adding Chinese休/季/闲 to
+  the display subset, preserving all old codepoints (+1680 bytes). Update the
+  installed asset budget; cmap/dictionary and asset consistency checks PASS.
+  Native test execution is pending the next CI.
+
 - Serve current-season progress and the latest ten archived seasons under existing
   profile/statistics privacy rules, including self reads through the restricted
   portal role. Rank the ladder by current-season calibration/counts while keeping
