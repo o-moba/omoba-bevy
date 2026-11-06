@@ -162,3 +162,82 @@ fn runtime_environment_cannot_replace_compiled_trust() {
     );
     assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
 }
+
+#[test]
+fn input_audit_uses_the_real_trust_parser_without_certifying_the_binary() {
+    let audit = audit_input(spec().to_string().as_bytes(), "production").unwrap();
+    assert_eq!(audit["input_valid"], true);
+    assert_eq!(audit["compiled_configuration_checked"], false);
+    assert_eq!(audit["audit"]["contour"], "production");
+    assert_eq!(audit["audit"]["regions"][0]["pins"][0], pin("current"));
+    assert_eq!(
+        audit["audit"]["regions"][0]["concrete_endpoints"][0],
+        "212.113.117.105:4000"
+    );
+    assert!(audit_input(spec().to_string().as_bytes(), "dev").is_err());
+    assert!(audit_input(spec().to_string().as_bytes(), "production ").is_err());
+    let mut input = spec();
+    input["regions"][0]["pins"][0]["public_key"] = json!("0".repeat(64));
+    assert!(audit_input(input.to_string().as_bytes(), "production").is_err());
+    input = spec();
+    input["regions"][0]["fallback"]["addresses"] = json!(["77.246.105.57"]);
+    assert!(audit_input(input.to_string().as_bytes(), "production").is_err());
+}
+
+#[test]
+fn input_audit_bounds_stream_reads_and_never_echoes_private_or_io_details() {
+    let mut bytes = spec().to_string().into_bytes();
+    bytes.resize(1024 * 1024, b' ');
+    let mut large = std::io::Cursor::new(bytes);
+    assert!(audit_input(&mut large, "production").is_err());
+    assert_eq!(large.position(), MAX_BUILD_BYTES as u64 + 1);
+    assert!(audit_input(&[0xff_u8][..], "production").is_err());
+    let mut input = spec();
+    input["regions"][0]["pins"][0]["seed"] = json!("private-input-must-not-be-echoed");
+    let error = audit_input(input.to_string().as_bytes(), "production").unwrap_err();
+    assert!(!format!("{error:?}").contains("private-input"));
+    struct FailedRead;
+    impl std::io::Read for FailedRead {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("private-io-error-detail"))
+        }
+    }
+    let error = audit_input(FailedRead, "production").unwrap_err();
+    assert!(!format!("{error:?}").contains("private-io"));
+    for input in ["", "null", "{}", "{invalid"] {
+        assert!(audit_input(input.as_bytes(), "production").is_err());
+    }
+}
+
+#[test]
+fn operator_audit_bad_arguments_never_fall_through_or_read_unrelated_stdin() {
+    struct NeverRead;
+    impl std::io::Read for NeverRead {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            panic!("this command must not consume stdin")
+        }
+    }
+    assert!(audit_cli(&[], NeverRead).is_none());
+    assert!(audit_cli(&["--ordinary-game-option".into()], NeverRead).is_none());
+    assert!(audit_cli(&["--check-directory-trust".into()], NeverRead).is_some());
+    for args in [
+        vec!["--check-directory-trust-input"],
+        vec!["--check-directory-trust", "unexpected-file.json"],
+        vec!["--check-directory-trust-input", "production", "unexpected"],
+        vec!["--check-directory-trust-input", "unknown-contour"],
+    ] {
+        let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        assert!(audit_cli(&args, NeverRead).unwrap().is_err());
+    }
+}
+
+#[test]
+fn operator_input_command_requires_explicit_contour_and_returns_public_audit() {
+    let args = vec!["--check-directory-trust-input".into(), "production".into()];
+    let input = spec().to_string();
+    let result = audit_cli(&args, input.as_bytes()).unwrap().unwrap();
+    assert_eq!(result["input_valid"], true);
+    assert_eq!(result["compiled_configuration_checked"], false);
+    assert_eq!(result["audit"]["regions"][0]["pins"][1], pin("overlap"));
+    assert!(audit_cli(&args, "not-json".as_bytes()).unwrap().is_err());
+}

@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add a desktop operator public-directory input audit using the exact native
+  trust parser before account/network/UI initialization. Bound stdin to16KiB,
+  require explicit contour, sanitize errors and distinguish input validity from
+  actual compiled trust. Reject malformed audit arguments without starting the
+  game. Four regressions added; formatting PASS, execution/full CI pending.
+  Explicit package configuration and actual live multi-host/RU proof stay open.
+
 - Preserve the C2 host-drain/update/rollback review patch, composed on unapplied
   C4.28 new fault/CLI cases PASS;184 combined tests,1 expected skip. Correct stale
   restart acknowledgement and operation history; report late marker-removal

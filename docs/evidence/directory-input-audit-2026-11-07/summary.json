@@ -1,0 +1,30 @@
+{
+  "status": "IMPLEMENTED_EXECUTION_PENDING_CI",
+  "parent_commit": "850b908d1d2a45e0140a6559ff9137846dad3b87",
+  "scope": "Canonical desktop operator input validation for future explicit packaging; not a configured/released binary or live directory activation",
+  "source_sha256": {
+    "client/src/game_directory/config.rs": "2f749d0be737d03b244e1a7f36af265cfd781f2c1daa68b5ccc520599952521e",
+    "client/src/game_directory/config/tests.rs": "2bc29387975ad8ae651599742d9869982a592a1abe07741e3b162163571e0544",
+    "client/src/main.rs": "5233b261baf58505159c1e981557df8701af35a8c2a6cd755a25bca38e23c7dd"
+  },
+  "local_checks": {
+    "cargo_fmt_all_check": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "new_tests": {
+    "count": 4,
+    "status": "NOT_EXECUTED_PENDING_CI",
+    "names": [
+      "input_audit_uses_the_real_trust_parser_without_certifying_the_binary",
+      "input_audit_bounds_stream_reads_and_never_echoes_private_or_io_details",
+      "operator_audit_bad_arguments_never_fall_through_or_read_unrelated_stdin",
+      "operator_input_command_requires_explicit_contour_and_returns_public_audit"
+    ]
+  },
+  "limitations": [
+    "Root disk19GiB: no heavy local Bevy compilation; existing user authorization routes full execution to CI",
+    "No release.py, CI workflow or mobile packaging changes",
+    "No live key provisioned, build bundle selected or RU/production service changed",
+    "Input audit explicitly does not certify compiled binary trust; actual artifact audit still required"
+  ]
+}

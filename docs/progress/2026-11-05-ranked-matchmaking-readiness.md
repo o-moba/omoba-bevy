@@ -1308,3 +1308,19 @@ C2 stays PARTIAL: owner approval under the supplied AGENTS is required for host
 deployment-tool changes. The pending C4 question does not authorize C2 or real
 RU operations. Tracked integration/full CI and actual service acceptance remain.
 Original68 ledger62/5/1 and other physical/capacity/RU gates are unchanged.
+
+
+## 2026-11-07: D1 public input audit implemented; execution pending CI
+
+Add an operator-only --check-directory-trust-input production|dev over bounded
+stdin, using the exact existing native parser/curve/destination guards before
+account/network/settings/cache/UI initialization. Input success explicitly says
+it has not checked compiled binary trust; the separate compiled audit is still
+required. Strict audit arguments cannot silently launch the game or certify an
+ignored input file. Four regressions added; formatting/diff PASS, execution/full
+current CI pending. [Source fingerprints and limits](../evidence/directory-input-audit-2026-11-07/summary.json).
+
+This is a prerequisite for safe explicit packaging, not completion of #12/D1.
+No release.py/workflow/mobile packaging edits, public key provisioning, published
+directory or service changes. Both C4/C2 review patches remain unapplied pending
+owner answers. Original68 ledger62/5/1 and RU/physical/capacity gates unchanged.

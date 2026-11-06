@@ -441,3 +441,38 @@ cross-host discipline/party discovery, real host/WAN/load and RU deployment stil
 remain. #12/P7 and the overall release checklist stay incomplete.
 
 [Exact source fingerprint and validation scope](../evidence/directory-runtime-2026-11-07/summary.json).
+
+
+## Canonical public input audit — 2026-11-07
+
+A new desktop operator mode reads the proposed public bundle from stdin before
+any account/network/settings/cache/UI initialization:
+
+```sh
+path/to/new-client --check-directory-trust-input production < approved-public-trust.json
+# A separately reviewed dev bundle must explicitly use dev instead.
+path/to/new-client --check-directory-trust
+```
+
+The first mode uses the exact existing BuildTrust parser, Ed25519 curve-strength
+and destination/region rules, not a second Python/JavaScript trust implementation.
+It reads at most16385 bytes and rejects input over16KiB, bad UTF-8/JSON, weak public keys,
+private/unknown fields, wrong scope and invalid destinations. Errors
+do not echo raw input or detailed underlying I/O errors. Recognized audit flags
+with bad arguments return failure instead of starting the game. Ordinary game
+arguments and the compiled-only audit consume no stdin. The compiled flag now
+refuses extra arguments instead of silently ignoring a supposed input filename.
+
+An input success emits input_valid:true and compiled_configuration_checked:false
+plus the parsed public audit. It does not change or certify the running binary's
+compiled trust. The existing compiled audit remains separately required on the
+actual artifact, and unconfigured binaries still fail that check. A new binary
+containing this change is required; existing older Mac artifacts cannot prove it.
+
+Four regressions are added for exact parser reuse/authority, bounded streams and
+sanitized errors, strict dispatch/no accidental stdin, and actual operator-mode
+output. Formatting/source checks pass; execution and the full corrected-source
+gate are pending CI. [Exact source and scope](../evidence/directory-input-audit-2026-11-07/summary.json).
+No release script, workflow or mobile packaging is changed. The explicit reviewed
+public bundle option across all platforms, live keys/publication, actual
+configured artifacts and real multi-host/RU acceptance remain open.

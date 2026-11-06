@@ -11,6 +11,7 @@ use shared::{
     region::RegionId,
 };
 use std::{
+    io::Read,
     net::IpAddr,
     path::{Path, PathBuf},
 };
@@ -209,6 +210,56 @@ pub fn audit_compiled() -> Result<serde_json::Value, DirectoryError> {
         .ok_or(DirectoryError::Invalid(
             "build has no directory trust configuration",
         ))
+}
+
+/// Operator input check for release preparation. It reuses the runtime parser,
+/// including curve-strength and destination checks; it never changes compiled
+/// trust or initializes accounts, networking, settings, caches, or the UI.
+pub fn audit_input(
+    input: impl Read,
+    expected_contour: &str,
+) -> Result<serde_json::Value, DirectoryError> {
+    if !matches!(expected_contour, "production" | "dev") {
+        return Err(DirectoryError::Invalid(
+            "input audit requires an explicit production or dev contour",
+        ));
+    }
+    let mut raw = Vec::new();
+    input
+        .take(MAX_BUILD_BYTES as u64 + 1)
+        .read_to_end(&mut raw)
+        .map_err(|_| DirectoryError::Invalid("cannot read directory build input"))?;
+    let raw = std::str::from_utf8(&raw)
+        .map_err(|_| DirectoryError::Invalid("directory build input must be UTF-8"))?;
+    let bundle = BuildTrust::parse(Some(raw), expected_contour)?.ok_or(DirectoryError::Invalid(
+        "directory build input must be configured",
+    ))?;
+    Ok(serde_json::json!({
+        "input_valid": true,
+        "compiled_configuration_checked": false,
+        "audit": bundle.audit(),
+    }))
+}
+
+/// A recognized operator command always returns a result (including bad usage),
+/// so invalid audit arguments cannot accidentally launch the game. Unrelated
+/// game arguments retain the ordinary entry path and do not consume input.
+pub fn audit_cli(
+    args: &[String],
+    input: impl Read,
+) -> Option<Result<serde_json::Value, DirectoryError>> {
+    match args.first().map(String::as_str) {
+        Some("--check-directory-trust") if args.len() == 1 => Some(audit_compiled()),
+        Some("--check-directory-trust-input") if args.len() == 2 => {
+            Some(audit_input(input, &args[1]))
+        }
+        Some("--check-directory-trust" | "--check-directory-trust-input") => {
+            Some(Err(DirectoryError::Invalid(
+                "use --check-directory-trust, or --check-directory-trust-input production|dev with public JSON on stdin",
+            )))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
