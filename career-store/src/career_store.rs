@@ -1234,6 +1234,7 @@ fn profile_row(row: &PgRow) -> StoreResult<ProfileSummary> {
             .map_err(|_| "Invalid stored profile counter.".into())
     };
     Ok(ProfileSummary {
+        ranked: None,
         completed_public_matches: counter("completed_public_matches")?,
         profile_id: row.try_get("profile_id")?,
         nickname: row.try_get("nickname")?,

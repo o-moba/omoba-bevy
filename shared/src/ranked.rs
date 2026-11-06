@@ -73,6 +73,41 @@ impl InputKind {
     }
 }
 
+/// Current-season progress is distinct from lifetime career/eligibility totals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeasonProfile {
+    pub season_id: u64,
+    pub started_at_ms: u64,
+    pub ends_at_ms: u64,
+    pub rated_matches: u32,
+    pub wins: u32,
+    pub losses: u32,
+    pub completed_matches: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_badge: Option<SeasonBadge>,
+}
+
+impl SeasonProfile {
+    pub fn active_at(&self, now_ms: u64) -> bool {
+        self.started_at_ms <= now_ms && now_ms < self.ends_at_ms
+    }
+
+    pub fn calibrated_tier(&self, rating: i32) -> Option<Tier> {
+        calibrated_tier(rating, self.rated_matches)
+    }
+}
+
+/// Cosmetic participation award; provisional seasons have no calibrated tier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeasonBadge {
+    pub season_id: u64,
+    pub ended_at_ms: u64,
+    pub rating: i32,
+    pub rated_matches: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<Tier>,
+}
+
 /// Counts, rather than rounded percentages, keep small/unknown samples visible.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputStatistics {
@@ -179,5 +214,40 @@ mod tests {
             serde_json::to_string(&InputKind::Mixed).unwrap(),
             "\"mixed\""
         );
+    }
+}
+
+#[cfg(test)]
+mod season_profile_tests {
+    use super::*;
+    #[test]
+    fn season_placements_do_not_reset_lifetime_totals_or_public_access() {
+        let mut profile = crate::career::ProfileSummary::new("a".repeat(64), "Hero".into());
+        profile.rated_matches = 100;
+        profile.matches_played = 150;
+        profile.completed_public_matches = 150;
+        assert!(!profile.newcomer());
+        assert!(!serde_json::to_string(&profile).unwrap().contains("ranked"));
+        profile.ranked = Some(SeasonProfile {
+            season_id: 2,
+            started_at_ms: 1000,
+            ends_at_ms: 1000 + SEASON_DURATION_MS,
+            rated_matches: 0,
+            wins: 0,
+            losses: 0,
+            completed_matches: 0,
+            latest_badge: None,
+        });
+        assert!(profile.newcomer() && profile.ranked_unlocked());
+        assert_eq!((profile.rated_matches, profile.matches_played), (100, 150));
+        let season = profile.ranked.as_mut().unwrap();
+        assert!(!season.active_at(999));
+        assert!(season.active_at(1000));
+        assert!(season.active_at(season.ends_at_ms - 1));
+        assert!(!season.active_at(season.ends_at_ms));
+        assert_eq!(season.calibrated_tier(1500), None);
+        season.rated_matches = 20;
+        assert_eq!(season.calibrated_tier(1500), Some(Tier::Gold));
+        assert!(!profile.newcomer());
     }
 }

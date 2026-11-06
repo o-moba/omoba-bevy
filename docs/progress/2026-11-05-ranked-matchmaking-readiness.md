@@ -702,3 +702,20 @@ Received cadence/latency SLA, sustained load, real uplink and RU capacity remain
 open; do not infer production1000-player acceptance from this bounded proof.
 P6 input persistence/query is implemented; seasons/archive/badges and their
 native/portal presentation remain the next product integration work.
+
+
+P6 season schema/contract checkpoint (not runtime integration): SeasonProfile
+separates current placements from lifetime totals; SeasonBadge supports a
+provisional participation award.193 shared tests and strict five-crate all-target
+clippy PASS. New migration010 is drafted with a90-day initial window, FK-checked
+profile season snapshots/counters, immutable allocation mapping/archive/closure
+receipts and deferred exactly-one-open-window protection. Registration takes a
+shared season lock before stamping metadata. An owned local transaction applies
+all migrations, verifies unchanged2300 rating/40 lifetime Ranked/55 played/50
+public/12000XP, zero initial season counters, new registration and immutable
+season deletion, then ROLLBACKs. Existing test DB remains schema9.
+SCHEMA_VERSIONS remains9; profile reads still return no season summary. Migration
+activation, allocation/settlement locks/counters, explicit close command, durable
+season identity through manifests/results/recovery, queue expiry/cached profiles,
+role-grant draft, full PG concurrency/rollback tests and UI remain required.
+No production season or rating reset has been performed.

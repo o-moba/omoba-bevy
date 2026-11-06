@@ -15,6 +15,7 @@ fn waiter(
     let queued = now - Duration::from_secs(age);
     Waiting {
         profile: ProfileSummary {
+            ranked: None,
             completed_public_matches: 10,
             rating,
             rated_matches: if newcomer { 0 } else { 20 },

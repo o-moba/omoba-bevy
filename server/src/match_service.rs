@@ -2059,6 +2059,7 @@ mod tests {
     fn w(id: u64, p: MatchPreference, now: Instant) -> Waiting {
         Waiting {
             profile: ProfileSummary {
+                ranked: None,
                 completed_public_matches: 10,
                 ..ProfileSummary::new(format!("{id:064x}"), "Player".into())
             },
@@ -2606,6 +2607,7 @@ mod tests {
         rt.career.backend.test_authenticated(
             player,
             ProfileSummary {
+                ranked: None,
                 completed_public_matches: 10,
                 ..ProfileSummary::new("c".repeat(64), "Rude#0001".into())
             },

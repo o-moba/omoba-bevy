@@ -14,6 +14,7 @@ fn waiter(
 ) -> Waiting {
     Waiting {
         profile: ProfileSummary {
+            ranked: None,
             completed_public_matches: 10,
             rating,
             rated_matches: if newcomer { 0 } else { 20 },

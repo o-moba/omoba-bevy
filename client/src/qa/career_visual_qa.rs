@@ -118,6 +118,7 @@ fn watermark(mut commands: Commands) {
 
 fn profile(id: char, nickname: &str) -> ProfileSummary {
     ProfileSummary {
+        ranked: None,
         completed_public_matches: 10,
         profile_id: id.to_string().repeat(64),
         nickname: format!("{nickname}#{:04}", id as u32),

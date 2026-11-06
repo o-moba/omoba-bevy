@@ -1157,6 +1157,7 @@ mod tests {
                 auth_nonce: Some(challenge.nonce.clone()),
                 challenge: Some(challenge.clone()),
                 profile: Some(shared::career::ProfileSummary {
+                    ranked: None,
                     completed_public_matches: 0,
                     profile_id: "b".repeat(64),
                     nickname: "小明".into(),

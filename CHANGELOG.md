@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Prepare a distinct current-season profile/badge contract and migration010
+  draft with immutable season history and registration/rollover coordination.
+  193 shared tests, five-crate strict clippy and a rolled-back local PostgreSQL
+  migration/invariant probe PASS. Runtime remains schema9; season close,
+  settlement/admission integration, role grants and presentation remain pending.
+
 - Independently verify repeated1000-client gameplay on frozen78070b27:100 arenas,
   ten signed native AI peers each, zero server bots and60s all-playing PASS.
   Current hashes, manifests, unique identities, snapshots and cleanup verified;

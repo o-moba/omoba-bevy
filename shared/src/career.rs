@@ -206,6 +206,8 @@ pub struct MatchSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProfileSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranked: Option<crate::ranked::SeasonProfile>,
     /// Completed approved public games, excluding this player's proved abandons.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub completed_public_matches: u32,
@@ -223,6 +225,7 @@ pub struct ProfileSummary {
 impl ProfileSummary {
     pub fn new(profile_id: String, nickname: String) -> Self {
         Self {
+            ranked: None,
             completed_public_matches: 0,
             abandons: 0,
             profile_id,
@@ -235,8 +238,13 @@ impl ProfileSummary {
             progression_xp: 0,
         }
     }
+    pub fn placement_matches(&self) -> u32 {
+        self.ranked
+            .as_ref()
+            .map_or(self.rated_matches, |season| season.rated_matches)
+    }
     pub fn newcomer(&self) -> bool {
-        self.rated_matches < NEWCOMER_MATCHES
+        self.placement_matches() < NEWCOMER_MATCHES
     }
     pub fn ranked_unlocked(&self) -> bool {
         self.completed_public_matches >= RANKED_REQUIRED_PUBLIC_MATCHES
