@@ -1,7 +1,8 @@
 # Game directory and server routing
 
 Status: **P7 in progress** (2026-11-06). D1's bounded contract, routing policy
-and offline signer/verifier are implemented and locally verified. No directory
+and offline signer/verifier plus opt-in Account API/portal HTTP delivery are
+implemented and locally verified. No directory
 is published or used by the running client yet. Fetch/cache/fallback, trusted
 key provisioning, operator publication, cross-host penalties/party/Resume
 behavior and actual second-host/capacity proof remain required. D0/D1 are now
@@ -88,8 +89,9 @@ queue times, fill rate, match start latency.
 
 ## Open questions
 
-1. Where the directory lives: a Vercel route in omoba-web, or a static signed file
-   on the game host behind Caddy (simpler, no serverless cold start).
+1. Delivery implementation: the fixed regional portal route proxies a signed file
+   served by the regional Account API. Reviewed live publication/key provisioning
+   remains pending; no live endpoint has been activated.
 2. Regions worth having for the first players. Beijing and Moscow latency differ a lot.
 3. Whether the matchmaker in D3 belongs to the Account API or is a separate service.
 4. What happens to LAN and self-hosted servers in production builds. Today the plan
@@ -182,3 +184,54 @@ Remaining D1 integration gates:
   and a reviewed publication kit; preserve party grouping when routing changes.
 - Cross-host ready/dodge discipline and real two-lobby/worker process proof, then
   measured RU/WAN operation. No item is closed by these primitives alone.
+
+
+## Implemented D1 HTTP delivery checkpoint — 2026-11-06
+
+The regional portal exposes anonymous `GET`/`HEAD /api/game/directory`. It
+fetches only its configured Account API's `GET /v1/game-directory`; browser
+cookies, authorization and forwarding headers never select the upstream or
+become upstream account credentials. Existing hosted ingress authentication is
+applied from server configuration only. Query-selected region/contour is rejected.
+The route checks its configured Host, region, contour, freshness, strict UTF-8,
+envelope shape and bounded streamed body before forwarding the original bytes.
+It does not reserialize JSON or round the directory's u64 sequence. The portal
+is a transport guard; cryptographic authority remains the pinned Rust verifier,
+and native independent verification is still required before using destinations.
+
+Account API configuration is optional and all-or-none:
+
+```text
+OMOBA_GAME_DIRECTORY_FILE=/absolute/path/to/reviewed-signed-directory.json
+OMOBA_GAME_DIRECTORY_KEY_ID=<reviewed public key identifier>
+OMOBA_GAME_DIRECTORY_PUBLIC_KEY=<32-byte lowercase public key hex>
+```
+
+Unset configuration leaves the route unavailable and existing account behavior
+unchanged. Partial/invalid configuration fails startup. Region and contour come
+from the API build, never a request. The source must be a bounded regular file;
+it is signature/schema/scope/time checked on each read. Responses preserve exact
+signed wire bytes and use JSON, `no-store` and `nosniff`; missing, expired,
+tampered or wrong-scope input returns generic503 without reflecting paths/data.
+A reviewed regular-file atomic replacement becomes visible without restarting
+the API or portal. This server does not keep a sequence high-water mark; native
+durable rollback/equal-sequence fencing and monotonic operator publication remain
+required. No signer or private signing key runs in either service.
+
+Verification:4 API cases PASS, including the explicitly executed real migrated
+PostgreSQL/router case and real loopback HTTP replacement; strict all-target API
+clippy/build PASS. Portal257 tests PASS/3 pre-existing expected skips; typecheck
+and RU production build PASS. Seven real Rust API/PostgreSQL/production Next
+checks PASS, including native offline verification of the portal-delivered file,
+HEAD/method/query boundaries, corruption503 and hot signed replacement. The
+publicly known fixture private file was removed before services started. Summary:
+[HTTP proof](../evidence/fair-play-2026-11-06/directory-http-summary.json).
+
+Reproduce with an already migrated loopback `omoba_test`, prebuilt RU API and
+signer, and an RU/production portal build; from the portal checkout run
+`npm run test:game-directory` with `OMOBA_DIRECTORY_API_BIN`,
+`OMOBA_DIRECTORY_SIGNER_BIN`, `OMOBA_TEST_DATABASE_URL` and a fresh
+`OMOBA_DIRECTORY_EVIDENCE_DIR`. This starts only owned loopback processes and
+uses a publicly known test pin. It does not establish live HTTPS, native routing,
+key rotation, any second host, WAN capacity or release readiness. No live key,
+service settings, deployment, workflow, dependency or migration was changed.

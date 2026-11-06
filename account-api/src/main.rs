@@ -1,4 +1,7 @@
-use omoba_account_api::{App, Config, crypto, migrate, moderation, router};
+use omoba_account_api::{
+    App, Config, crypto, game_directory::DirectorySource, migrate, moderation,
+    router_with_game_directory,
+};
 use omoba_career_store::career_store::CareerStore;
 use std::net::SocketAddr;
 
@@ -61,6 +64,7 @@ async fn run() -> Result<(), String> {
     if !bind.ip().is_loopback() {
         return Err("Bind Account API to loopback behind a trusted TLS ingress".into());
     }
+    let directory = DirectorySource::from_env()?;
     let app = App::connect(
         &url,
         Config {
@@ -121,7 +125,8 @@ async fn run() -> Result<(), String> {
     println!("Account API listening on {bind}");
     axum::serve(
         listener,
-        router(app).into_make_service_with_connect_info::<SocketAddr>(),
+        router_with_game_directory(app, directory)
+            .into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async {
         let _ = tokio::signal::ctrl_c().await;

@@ -5,6 +5,7 @@ pub mod class_builds;
 pub mod crypto;
 pub mod devices;
 pub mod ekza_library;
+pub mod game_directory;
 pub mod moderation;
 pub mod read;
 pub mod social;
@@ -285,7 +286,11 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 pub fn router(app: App) -> Router {
+    router_with_game_directory(app, game_directory::DirectorySource::default())
+}
+pub fn router_with_game_directory(app: App, directory: game_directory::DirectorySource) -> Router {
     Router::new()
+        .merge(game_directory::routes(directory))
         .route(
             "/health/live",
             get(|| async { Json(json!({"status":"alive"})) }),

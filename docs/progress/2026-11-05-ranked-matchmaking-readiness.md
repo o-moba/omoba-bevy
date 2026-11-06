@@ -1176,3 +1176,16 @@ FIFO/party recovery, actual10th completion/noVK, crash, unique picks, remake and
 surrender proofs pass. Sanitized summary:../evidence/fair-play-2026-11-06/ci-2a-summary.json.
 This predates the new modal fix and is not WAN/RU-host/hardware/provider evidence.
 All remaining original/critic/operations/release requirements retain full scope.
+
+
+## 2026-11-06 — Signed directory HTTP transport
+
+Implemented optional Account API signed-file delivery and exact-byte anonymous
+regional portal proxy.4 API cases (including real migrated PG/router), strict
+API clippy/build,257 portal tests/3 expected skips, typecheck, RU production build
+and7 real Rust API/PostgreSQL/Next checks PASS. Known private fixture removed
+before startup; no live signing identity, settings or deployment changed.
+[Delivery plan and remaining gates](../plans/game-directory.md#implemented-d1-http-delivery-checkpoint--2026-11-06).
+#12 stays partial until native verification/cache/routing and all multi-host
+conditions pass. The e85875ba modal regression now executed successfully in CI
+(1579 client cases PASS,1 ignored); actual fixed native pixels remain pending.

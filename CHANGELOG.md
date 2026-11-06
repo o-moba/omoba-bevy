@@ -5,6 +5,17 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add opt-in anonymous signed-directory HTTP delivery in Account API and the
+  regional portal. Verify bounded regular signed files against the configured
+  public pin/build scope; forward exact bytes without browser account material,
+  and support atomic replacement without restarts.4 API and7 real API/PostgreSQL/
+  production Next checks PASS; portal257 tests PASS/3 expected skips, typecheck
+  and RU production build PASS. Native fetch/cache/routing and live publication
+  remain pending; no service or key was provisioned.
+- Verify the actual decorator/20-modal-cycle regression in e85875ba CI:1579
+  client tests PASS,1 ignored. Preserve sanitized evidence; fixed-state native
+  screenshots remain pending and the redundant local compile was stopped.
+
 - Native e85875ba RU build and strict client/test-target clippy PASS; fixed-state
   pixel acceptance and the real decorator regression are still pending. Preserve
   the independently checked directory2a45600c full7-job/18-stage CI summary:
