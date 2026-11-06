@@ -99,7 +99,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 | 42 | minor | gap | Allocated workers cannot be brought to a legitimate Victory in a test: no sanctioned accelerator survives the worker env scrub | `server/src/match_pool.rs:418` | Add a loopback-only passthrough: when `OMOBA_MATCH_BIND_IP` is loopback (match_pool.rs already distinguishes exposed vs loopback lobbies, test `exposed_lobby_refuses_a_loopback_or_unset_public_worker_host` 608), forward `OMOBA_MATCH_TEST_MAP_CONFIG` to the worker as `OMOBA_MAP_CONFIG`; an exposed lobby ignores it and logs a warning. Add a unit test next to 517 asserting an exposed lobby still strips it. The harness t | done — explicit test-map forwarding requires both lobby and worker loopback binds; IPv4/IPv6/exposed guard tests pass. Ten signed humans completed a custom-map Victory in 33.629 s with zero Elo/XP and saved history; full probe wall time 50.87 s. |
 | 43 | minor | gap | Party Ranked and leave-during-draft have unit tests only; no process-level path exists and the probe cannot form a party | `server/src/match_service.rs:1348` | In the shared `public_client` helper from finding 1 add `invite/accept` via the existing social CareerActions so a 5-stack can queue; add a `--party=5` option to the probe; add one harness scenario where peer #3 stops sending during Draft and assert the other 9 see `PrematchPhase::Draft` restart (today) or the LR-32 re-queue once it lands. | done — signed five-stack plus solos, explicit Leave and silent disconnect, all nine receive the return code, FIFO/group retained, all ten career/history unchanged, only explicit leaver cooled once, fresh unanimous Ranked roster reaches Running. Process evidence below. |
 | 44 | minor | gap | No invite throttle, block or cooldown; a stranger can keep an invite toast on Home | `server/src/party.rs:254` | In PartyState keep `declined: HashMap<(from,to), Instant>` and refuse re-invites for 60 s after a decline, plus at most 10 invites per minute per sender (new PartyError codes surfaced via the error field above). Full block list stays LR-39. | done — decline cooldown 60 s, 10 invites per minute |
-| 45 | minor | gap | Parties and queue vanish silently on every lobby restart/deploy | `server/src/party.rs:5` | Show a one-line notice ('Соединение с лобби было восстановлено, группа распущена') when PartyClient clears a non-empty party on epoch change; persistence of parties (LR-55) stays out of this iteration. | partial — global one-shot restart toast implemented for party and solo search, preserves party-loss evidence through stale-view expiry; functional regression and baseline full client gate pass. |
+| 45 | minor | gap | Parties and queue vanish silently on every lobby restart/deploy | `server/src/party.rs:5` | Show a one-line notice ('Соединение с лобби было восстановлено, группа распущена') when PartyClient clears a non-empty party on epoch change; persistence of parties (LR-55) stays out of this iteration. | done — global one-shot warning verified on actual loopback lobby restarts: both native party clients on Home see group dissolved; solo Searching sees distinct search restarted wording. Real party/profile/toast observations and inspected RU852×393 images committed; current full CI remains an independent release gate. |
 | 46 | minor | scale | Settlement needs one Postgres connection per arena; 100 arenas exceed PostgreSQL's default max_connections | `/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/src/career_store.rs:1213` | In ops/vps/ru/ru_host.py bootstrap write `max_connections = 256` (and `shared_buffers` accordingly) to a conf.d drop-in, document it in the README 'Arena capacity' table as capacity + 32, and make ru_host.py refuse a kit whose OMOBA_MATCH_CAPACITY + 32 exceeds the configured max_connections. | done — ru_host.py checks max_connections ≥ capacity + 32 (not written by the kit) |
 | 47 | minor | scale | Portal polls /v1/me every 5 s unconditionally and /v1/me/matches every 5 s; each call writes to Postgres | `/Users/wotori/git/ekza/_workspace/worktrees/mm-web/src/components/portal.tsx:278` | Change portal.tsx:278 to 30 s and gate on `document.visibilityState==='visible'` (as useData already does); keep 5 s for `me/matches` only while `pending_results>0` or for 60 s after a focus event; in accounts::settings replace the unconditional INSERT with SELECT-then-INSERT-on-miss. Optionally serve history from portal.player_match_facts (facts_profile_date index) once avatar is added to the facts table. | done — 30 s visible-only polling |
 | 48 | minor | scale | nftables arena rule is 1200 pkt/s per source across the whole arena range: ~48 in-match players behind one NAT IP, then kernel drops for all of them | `ops/vps/ru/nftables-omoba.conf:58` | S: key the meter on `ip saddr . udp dport` (per source per arena) or raise the arena rate to 6000/s burst 12000; keep the per-endpoint 120 pkt/s game limit as the real anti-flood bound. | done — arena rule 6000/s burst 12000 (saddr.dport keying left as the next step) |
@@ -1754,3 +1754,33 @@ existing toast text; no toast delivery/timing policy changes. The reusable skill
 now explains waiting for real new-epoch events and an empty bot search gate, and
 its helper records Home/draft/party/toast sources too. Skill validation and helper
 syntax PASS. Current native build/pixel verification is still required.
+
+
+### P5 native restart acceptance — row45 done; nickname follow-up remains
+
+Native build PASS746.61s, RU strict clippy PASS26.11s, binaryb2609614… , minimum
+root22.01GiB. Both actual native clients form a party using real UI invitation.
+After returning Home, restart only the owned loopback lobby. Wait for the actual
+new-epoch party view and current group-loss toast, then capture: both Home
+perspectives show the readable dissolved-party warning. Start a real solo public
+search, restart that owned lobby again, wait for the distinct actual search
+restart toast, then capture. Search resumes1/10 and the correct wording is visible.
+All processes stop through their owned groups; no production/dev service changes.
+Row45 is done in software. Ledger:61 done (including3 minimum),5 partial,1 open,
+1 mostly refuted. Full corrected branch CI remains required for release/C5.
+
+The changed UI revision also repeats the actual two-native party public journey:
+Home→Searching→15s ready→one Draft each, all10 actual worker joins, party on the
+same side. Long Draft identities/class/roles/status now fit their own slots with
+ellipses; no adjacent text overlap in either perspective. **UI-2 done** for this
+RU852×393 case. Empty AI plinths reflect missing/unrevealed fixture avatar choices;
+these frames are not a complete five-avatar asset/render certificate.
+
+**UI-1 remains partial:** the long nickname is one line and the rating now fits
+inside its taller chip; however, the leader name end/ellipsis can still be clipped.
+Use the actual glyph/layout bounds or correct the constrained text width, then
+repeat only this failed Home check. Do not mark it done based only on fitting
+rating geometry or the member name's successful ellipsis. Preserve all exact
+images/source/build/event evidence in [the follow-up pack](../evidence/native-public-ui-2026-11-06/restart-and-names-summary.json).
+The earlier restartv1/v2 attempts remain rejected for their intended warning
+acceptance; the event-drivenv3 is the actual successful proof.

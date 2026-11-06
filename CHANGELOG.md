@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify actual local lobby-restart warnings on native Home/group and solo
+  Searching: wait for real new-epoch party/toast state, preserve inspected images,
+  close row45. Repeat public party admission on the new build; Draft text now fits
+  its slots (UI-2). Home rating fits, but one nickname end still clips (UI-1 partial).
+  Current full branch CI and RU/physical release requirements remain open.
+
 - Expose actual party/profile/toast observations and bounded Home labels to the
   opt-in Creator Loop recorder. Exclude hidden/zero-size controls from its button
   inventory. Save the event-driven restart recipe and broader UI source hashes
