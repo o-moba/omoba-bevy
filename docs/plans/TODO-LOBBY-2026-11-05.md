@@ -1397,3 +1397,23 @@ at2a45600c have a separate current CI run42201671041 in progress.
 Sanitized [committed summary](../evidence/ranked-2026-11-06/ci-93-summary.json).
 No original-finding status changes:59 done,7 partial,1 open,1 mostly refuted;
 remaining critic/UI/scale/operations/release gates stay required.
+
+
+### Focused remaining native presentation proof — in progress
+
+The opt-in fair_play_qa harness selects one of8 explicit states in one language/
+viewport: Taken, party/search epoch toasts, remake menu, remake/surrender prompt
+and both result presentations. It removes real transport before holding a
+synthetic session, preserves production rendering/kit activation/epoch reaction,
+and checks visible copy, fitting controls, vote targets and actual color data.
+Remake uses the authoritative remake reason,95s window and an absent teammate;
+the innocent local player receives zero XP/no rating change. Its scope excludes
+actual admission/gameplay/accounts/phones; those have separate acceptance.
+
+Strict RU client/lib/test-target clippy PASS; all5 map cases and static64-screen/
+13-gap registry check PASS. Guarded v3 cacheB build is still live; no actual new
+capture or completed finding is claimed. Earlier owned builds v1/v2 were
+intentionally interrupted during fixture review (transport isolation, then
+receipt coherence); their negative exits/logs are retained. No third cache,
+cleanup, dependency, workflow or production change. Original59/7/1/1 statuses,
+C5/C7 and all other outstanding gates remain unchanged until actual acceptance.

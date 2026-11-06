@@ -466,6 +466,16 @@ impl ClientSession {
         self.is_connected() && self.admitted
     }
 
+    /// Presentation-only opt-in QA: discard the real transport before holding
+    /// an admitted UI state. No Join, identity or server receipt is made.
+    #[cfg(feature = "qa")]
+    pub(crate) fn hold_presentation_fixture(&mut self, commands: &mut Commands) {
+        commands.remove_resource::<NetworkChannels>();
+        self.state = ClientConnectionState::Connected;
+        self.admitted = true;
+        self.last_qualifying_snapshot_wall = Some(Instant::now());
+    }
+
     /// A join the client still stands behind: locked in, and neither left nor
     /// abandoned. It survives a transport teardown, which is what tells a
     /// reconnect apart from "the player is back in the menus".

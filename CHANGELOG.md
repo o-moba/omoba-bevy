@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add one-state opt-in native QA for Taken feedback, party/search restart
+  notifications, remake/surrender voting and result presentation. It removes
+  transport before supplying labelled synthetic views; required localized text,
+  fitting controls, vote touch targets and color readback gate the capture.
+  Strict RU client/test-target clippy and all5 screen-map checks PASS. Native
+  build and actual pixel acceptance are in progress; no finding is closed yet.
+
 - Independently verify93a769ab complete CI:all7 jobs/18 public-PG stages PASS.
   Actual463497ms Ranked victory has exact all-ten rating/XP/history/season
   updates and zeroAFK/disconnection;15s consent, party recovery, actual10th

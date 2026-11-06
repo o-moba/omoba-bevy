@@ -1086,6 +1086,7 @@
     "client/src/qa/dagger_qa.rs": "Focused Adventurer class preview and normal offline Q/W/E/R casts, plus clearly labelled synthetic rare-hit receipt presentation (OMOBA_DAGGER_QA_DIR). English852x393 only; optional synthetic focus, no raw-touch/device/RNG claims.",
     "client/src/qa/equipped_skills_qa.rs": "Focused synthetic accepted hybrid HUD and held-skill card (OMOBA_EQUIPPED_SKILLS_QA_DIR). English 852x393 only; actual input and UI readback, separate real-server harness proof. Not physical-device or multiplayer proof.",
     "client/src/qa/boot_qa.rs": "boot splash and the Home it reveals (OMOBA_BOOT_SPLASH_SHOTS); a transient overlay, not an AppScreen",
-    "client/src/qa/account_region_qa.rs": "Focused native RU account-region confirmation and cold-switch proof (OMOBA_ACCOUNT_REGION_QA), one ru 852x393 desktop phone preview; isolated dev settings and offline game transport. Not a physical-device certification."
+    "client/src/qa/account_region_qa.rs": "Focused native RU account-region confirmation and cold-switch proof (OMOBA_ACCOUNT_REGION_QA), one ru 852x393 desktop phone preview; isolated dev settings and offline game transport. Not a physical-device certification.",
+    "client/src/qa/fair_play_qa.rs": "One selected opt-in synthetic fair-play state (OMOBA_FAIR_PLAY_QA_OUTPUT, OMOBA_FAIR_PLAY_QA_SCENE): Taken class, actual party-epoch toast reaction, remake menu/prompt, surrender prompt and result presentation. Real UI-kit class-tab activation and state-gated bounded native readback, one viewport/locale; no admission, gameplay, account or physical-device proof."
   }
 }

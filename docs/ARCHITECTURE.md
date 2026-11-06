@@ -69,6 +69,19 @@ to register at all; the QA plugins come last, so their
 production values. Frame order comes from the system sets below, never from
 the group order.
 
+The focused `OMOBA_FAIR_PLAY_QA_OUTPUT=<directory>` harness accepts one
+`OMOBA_FAIR_PLAY_QA_SCENE`: `taken`, `party-restart`, `search-restart`,
+`remake-menu`, `remake-prompt`, `surrender-prompt`, `remade-result` or
+`surrender-result`. It removes its transport and supplies labelled synthetic
+session/views to the production renderer. Class-tab activation and the party
+epoch-change toast use their real client paths. `fair-play.png` is captured only
+with the expected visible localized text and fitting required controls (vote
+targets at least44px); `qa-summary.json` records the scope. Missing state/text,
+readback, color pixels or output fails. Use isolated returning-user settings and
+no live server. This is presentation proof, separate from real public gameplay,
+account/consent, keep-awake/haptics or physical-phone acceptance. Select one
+language/viewport and only the changed cases; this does not enable a full matrix.
+
 QA harnesses live in `client/src/qa/` behind the `qa` cargo feature. It is on
 by default, so `cargo run -p client`, packaging, the mobile builds and the
 capture scripts compile them as before. Each harness is dormant unless its

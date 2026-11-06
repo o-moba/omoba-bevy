@@ -171,6 +171,56 @@ fn fixture_label(mut commands: Commands) {
 
 const YOUR_ID: u64 = 11;
 
+/// Reuse the result renderer's coherent own-player fixture for fair-play pixels.
+pub(super) fn fair_play_fixture(
+    remade: bool,
+    game: &mut GameStateSnapshot,
+    career: &mut CareerClient,
+    team: &mut Team,
+) {
+    apply_fixture(Fixture::Saved, game, career, team);
+    let result = career.view.last_result.as_mut().expect("saved fixture");
+    result.end_reason = Some(if remade { "remake" } else { "surrender" }.into());
+    if remade {
+        result.outcome = MatchOutcome::Remade;
+        result.winner = None;
+        result.rated = false;
+        result.unrated_reason = Some("remake".into());
+        result.duration_ms = 95_000;
+        result.ended_at_ms = 95_000;
+        if let Some(scoreboard) = game.scoreboard.as_mut() {
+            scoreboard.elapsed_secs = 95;
+            for player in &mut scoreboard.players {
+                player.kills = 0;
+                player.deaths = 0;
+                player.assists = 0;
+                player.earned_gold = 1000;
+                player.level = 1;
+            }
+        }
+        for participant in &mut result.participants {
+            participant.rating = None;
+            participant.progression_xp_gained = 0;
+            participant.stats = Default::default();
+            participant.stats.earned_gold = Some(1000);
+            participant.stats.final_level = 1;
+            let absent = participant.player_id == YOUR_ID + 1;
+            participant.disconnected = absent;
+            participant.participation = Some(shared::career::Participation {
+                connected_ms: if absent { 0 } else { 95_000 },
+                disconnected_ms: if absent { 95_000 } else { 0 },
+                afk_ms: 0,
+                abandoned: absent,
+            });
+        }
+        if let Some(scoreboard) = game.scoreboard.as_mut() {
+            for player in &mut scoreboard.players {
+                player.connected = player.player_id != YOUR_ID + 1;
+            }
+        }
+    }
+}
+
 fn live_row(team: shared::map::Team) -> LiveScoreboard {
     LiveScoreboard {
         elapsed_secs: 720,

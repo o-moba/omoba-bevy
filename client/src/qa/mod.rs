@@ -24,6 +24,7 @@ mod creator_loop_qa;
 mod dagger_qa;
 mod demo_qa;
 mod equipped_skills_qa;
+mod fair_play_qa;
 mod forest_pickup_qa;
 mod frontend_flow_qa;
 mod frontend_qa;
@@ -78,6 +79,7 @@ impl PluginGroup for QaPlugins {
             .add(demo_qa::DemoQaPlugin)
             .add(dagger_qa::DaggerQaPlugin)
             .add(equipped_skills_qa::EquippedSkillsQaPlugin)
+            .add(fair_play_qa::FairPlayQaPlugin)
             .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
             .add(help_qa::HelpQaPlugin)
