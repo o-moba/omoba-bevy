@@ -92,8 +92,15 @@ No production migration, reset, role change or RU deployment was performed.
 - Earlier schema9 checkpoint ddc59e1d has independently rechecked full7-job/
   18-stage CI42153618597 PASS. New schema10 source needs its own full run.
 
-Still required: privacy-preserving API/current-season ladder and archive reads;
-native/portal season/tier/badge/promotion surfaces and affected RU visual proof;
+Privacy-preserving profile/current-season ladder and bounded archive reads are
+implemented. All11 Account API PostgreSQL cases, including actual restricted
+portal grants, and strict store/API all-target clippy PASS. The ladder keeps
+lifetime fields but uses seasonal calibration/tie-breaks and hides old badges.
+The first fresh full schema10 run stopped on a device-test startup503; unchanged
+focused migration and all8 device cases PASS afterwards. Cause is unconfirmed;
+full PostgreSQL and public journeys must rerun on current source.
+
+Still required: native/portal season/tier/badge/promotion surfaces and affected RU visual proof;
 expiry/cache refresh UX; complete restricted-role/public
 journeys; current final CI; reviewed deployment/drain/rollback integration.
 Follow the full lobby TODO for all other findings and release gates.

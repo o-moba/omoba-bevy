@@ -1069,3 +1069,34 @@ permission delta, registration/temp-shadow and post-reset runtime gameplay tests
 PASS. Fresh full installation/role/public verification is starting in a new owned
 local PostgreSQL fixture; the older test fixture remains for prior evidence.
 No production role or deployment action was taken.
+
+
+### P6 checkpoint — season profile/archive API and seasonal ladder (2026-11-06)
+
+Profile reads now select season metadata and a bounded latest10 archive in the
+same MVCC statement as privacy flags. Hidden statistics expose neither season,
+archive nor badge; self/contact access follows existing rules. Self reads preserve
+lifetime/XP/public eligibility fields. Ladder calibration and tie-breaks now use
+season_rated_matches and the schema10 partial index, while lifetime fields remain
+in the response. Ladder listing alone never exposes historical badges.
+
+All11 Account API PostgreSQL tests PASS, including restricted portal reads,
+archive ordering/bounds, public/private transitions and a1000-lifetime/19-season
+newcomer excluded from the ladder. Strict store/API all-target clippy PASS.
+Logs: .agent/tasks/RANKED-LAUNCH-READINESS-20261105/p6-season-api-postgres-v2.log
+and p6-season-api-clippy-v1.log. The first API test attempt failed on its synthetic
+privacy fixture setting public=false/stats=true; corrected both flags together,
+without weakening the database constraint.
+
+Fresh schema10 full-run v1 installed the actual approved grants, then stopped on
+App::connect503 in the device-migration case. No backend SQL error identified;
+unchanged focused migration and all8 device cases subsequently PASS. Root cause
+is unconfirmed and v1 remains failed. Full current-source PostgreSQL/public and
+CI verification are still required. Portal/native presentation, promotion/expiry
+UX and release/ops gates remain open; overall TODO counts are unchanged.
+
+Current schema10 CI42165588927: PostgreSQL Rust tests, Android compile, Python,
+headless harness and both client clippy configurations PASS. Two client-test jobs
+fail the same font coverage check: the CJK display subset lacks休/季/闲 from new
+translations (1572 other client tests PASS). Full public journeys still running.
+Repair the font in its own checkpoint; this CI is not green.

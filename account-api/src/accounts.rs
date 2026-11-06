@@ -32,13 +32,9 @@ async fn settings(app: &App, id: &str) -> Result<Value> {
     )
 }
 pub async fn me(app: &App, s: &Session) -> Result<Value> {
-    let profile = app
-        .career
-        .profile(&s.profile_id)
-        .await
-        .map_err(game_error)?;
+    let profile = player(app, Some(s), &s.profile_id).await?["profile"].clone();
     Ok(
-        json!({"profile":profile_dto(&profile),"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id},"social":social::linked(app,&s.profile_id).await?}),
+        json!({"profile":profile,"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id},"social":social::linked(app,&s.profile_id).await?}),
     )
 }
 pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
@@ -47,11 +43,16 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
     }
     let actor = s.map(|s| s.profile_id.as_str()).unwrap_or("");
     // Access flags and public fields come from one MVCC snapshot, avoiding privacy TOCTOU.
-    let row=sqlx::query("SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.matches_played,p.wins,p.losses,p.abandons,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact,
-        coalesce(pref.recognition_visible,false) AS supporter_visible,credit.months_supported,credit.hero_until
+    let row=sqlx::query("SELECT p.*,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact,
+        coalesce(pref.recognition_visible,false) AS supporter_visible,credit.months_supported,credit.hero_until,history.entries AS ranked_archive
         FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id)
         LEFT JOIN portal.supporter_preferences pref USING(profile_id)
         CROSS JOIN LATERAL (SELECT count(*) AS months_supported,max(valid_until) FILTER (WHERE valid_from<=$3 AND valid_until>$3) AS hero_until FROM portal.supporter_grants g WHERE g.profile_id=p.profile_id AND g.revoked_at IS NULL) credit
+        CROSS JOIN LATERAL (SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.season_id DESC),'[]'::jsonb) AS entries FROM (
+          SELECT ar.season_id,se.started_at_ms,se.ends_at_ms,ar.rating,ar.rated_matches,ar.wins,ar.losses,ar.completed_matches,ar.badge
+          FROM career_ranked_archives ar JOIN career_ranked_seasons se USING(season_id)
+          WHERE ar.profile_id=p.profile_id ORDER BY ar.season_id DESC LIMIT 10
+        ) a) history
         WHERE p.profile_id=$2")
         .bind(actor).bind(id).bind(now()).fetch_optional(&app.pool).await?.ok_or_else(forbidden)?;
     let contact: bool = row.try_get("contact")?;
@@ -61,6 +62,12 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
     let mut p = json!({"profile_id":id,"nickname":row_text(&row,"nickname")?});
     if contact || row.try_get::<bool, _>("stats")? {
         p["rating"] = json!(row.try_get::<i32, _>("rating")?);
+        p["ranked"] = json!(CareerStore::ranked_profile_from_row(&row).map_err(game_error)?);
+        p["ranked_archive"] = row.try_get::<Value, _>("ranked_archive")?;
+        if actor == id {
+            p["completed_public_matches"] =
+                json!(row.try_get::<i64, _>("completed_public_matches")?);
+        }
         for field in [
             "rated_matches",
             "matches_played",
@@ -142,8 +149,14 @@ pub async fn search(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> 
     }
     Ok(json!({"players":players}))
 }
-/// The rating ladder (LR-47): the top profiles past the newcomer bracket that have
-/// not opted out, plus the caller's own position under the same order and filter.
+fn ladder_ranked(row: &sqlx::postgres::PgRow) -> Result<shared::ranked::SeasonProfile> {
+    let mut ranked = CareerStore::ranked_profile_from_row(row).map_err(game_error)?;
+    // Listing the current rating does not publish private historical awards.
+    ranked.latest_badge = None;
+    Ok(ranked)
+}
+
+/// The current-season rating ladder and caller's position under the same filter.
 pub async fn leaderboard(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> {
     let q = parameters(raw)?;
     if q.keys().any(|k| k != "limit") {
@@ -158,23 +171,23 @@ pub async fn leaderboard(app: &App, s: &Session, raw: Option<&str>) -> Result<Va
     if !(1..=100).contains(&limit) {
         return Err(invalid());
     }
-    // The bracket is a compile-time rule, inlined so the planner can always match
-    // the partial index `career_profiles_ladder` (career schema 6), whose predicate
-    // a bound parameter could not prove. A profile without a settings row is listed.
+    // Use this season's calibration and tie-break count, matching the schema10
+    // partial index. Lifetime totals remain separate response fields.
+    // A profile without a settings row is listed.
     let eligible = |profile: &str, settings: &str| {
         format!(
-            "{profile}.rated_matches>={} AND coalesce({settings}.leaderboard_listed,true)",
+            "{profile}.season_rated_matches>={} AND coalesce({settings}.leaderboard_listed,true)",
             shared::career::NEWCOMER_MATCHES
         )
     };
     let top = format!(
-        "SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.wins,p.losses FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id) WHERE {} ORDER BY p.rating DESC,p.rated_matches DESC,p.profile_id LIMIT $1",
+        "SELECT p.* FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id) WHERE {} ORDER BY p.rating DESC,p.season_rated_matches DESC,p.profile_id LIMIT $1",
         eligible("p", "s")
     );
     // The caller's rank counts the listed, eligible profiles ordered strictly
     // before it: higher rating, then more rated matches, then a smaller id.
     let mine = format!(
-        "SELECT me.rating,me.rated_matches,coalesce(s.leaderboard_listed,true) AS listed,CASE WHEN {} THEN (SELECT count(*)+1 FROM career_profiles o LEFT JOIN portal.profile_settings os USING(profile_id) WHERE {} AND (o.rating>me.rating OR (o.rating=me.rating AND (o.rated_matches>me.rated_matches OR (o.rated_matches=me.rated_matches AND o.profile_id<me.profile_id))))) END AS rank FROM career_profiles me LEFT JOIN portal.profile_settings s USING(profile_id) WHERE me.profile_id=$1",
+        "SELECT me.*,coalesce(s.leaderboard_listed,true) AS listed,CASE WHEN {} THEN (SELECT count(*)+1 FROM career_profiles o LEFT JOIN portal.profile_settings os USING(profile_id) WHERE {} AND (o.rating>me.rating OR (o.rating=me.rating AND (o.season_rated_matches>me.season_rated_matches OR (o.season_rated_matches=me.season_rated_matches AND o.profile_id<me.profile_id))))) END AS rank FROM career_profiles me LEFT JOIN portal.profile_settings s USING(profile_id) WHERE me.profile_id=$1",
         eligible("me", "s"),
         eligible("o", "os")
     );
@@ -198,6 +211,7 @@ pub async fn leaderboard(app: &App, s: &Session, raw: Option<&str>) -> Result<Va
             "nickname": row_text(row, "nickname")?,
             "rating": row.try_get::<i32, _>("rating")?,
             "rated_matches": row.try_get::<i64, _>("rated_matches")?,
+            "ranked": ladder_ranked(row)?,
             "wins": row.try_get::<i64, _>("wins")?,
             "losses": row.try_get::<i64, _>("losses")?,
         }));
@@ -208,6 +222,7 @@ pub async fn leaderboard(app: &App, s: &Session, raw: Option<&str>) -> Result<Va
             "rank": me.try_get::<Option<i64>, _>("rank")?,
             "rating": me.try_get::<i32, _>("rating")?,
             "rated_matches": me.try_get::<i64, _>("rated_matches")?,
+            "ranked": ladder_ranked(&me)?,
             "listed": me.try_get::<bool, _>("listed")?,
         },
         "min_rated_matches": shared::career::NEWCOMER_MATCHES,

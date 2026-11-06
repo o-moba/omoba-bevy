@@ -905,7 +905,7 @@ async fn leaderboard_orders_ties_hides_newcomers_and_opt_outs_and_ranks_caller()
                 .authenticate(&crypto::hex(key.verifying_key().as_bytes()), nickname)
                 .await
                 .unwrap();
-            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$3,wins=$4,losses=$3-$4 WHERE profile_id=$1")
+            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$3,wins=$4,losses=$3-$4,season_rated_matches=$3,season_wins=$4,season_losses=$3-$4,season_completed_matches=$3 WHERE profile_id=$1")
                 .bind(&profile.profile_id).bind(rating).bind(rated).bind(wins)
                 .execute(&app.pool).await.unwrap();
             (profile.profile_id, key)
@@ -918,6 +918,14 @@ async fn leaderboard_orders_ties_hides_newcomers_and_opt_outs_and_ranks_caller()
     let (tie_b, key_b) = seed("Ladder-tie-b", 4970, 25, 14).await;
     let (newcomer, newcomer_key) = seed("Ladder-newcomer", 5000, 19, 19).await;
     let (hidden, hidden_key) = seed("Ladder-hidden", 5000, 50, 50).await;
+    // Lifetime experience neither bypasses seasonal placement nor wins a tie.
+    sqlx::query("UPDATE career_profiles SET rated_matches=1000,matches_played=1000 WHERE profile_id=ANY($1)")
+        .bind(vec![&newcomer, &third]).execute(&app.pool).await.unwrap();
+    let without_ranked = |value: &Value| {
+        let mut value = value.clone();
+        value.as_object_mut().unwrap().remove("ranked");
+        value
+    };
     let (fourth, fifth, fourth_key, fifth_key) = if tie_a < tie_b {
         (tie_a, tie_b, key_a, key_b)
     } else {
@@ -1002,13 +1010,17 @@ async fn leaderboard_orders_ties_hides_newcomers_and_opt_outs_and_ranks_caller()
         assert!(entry["rated_matches"].as_i64().unwrap() >= 20);
     }
     assert_eq!(
-        entries[0],
+        without_ranked(&entries[0]),
         json!({"rank":1,"profile_id":first,"nickname":entries[0]["nickname"],"rating":4990,"rated_matches":40,"wins":30,"losses":10})
     );
     assert_eq!(
-        board["me"],
+        without_ranked(&board["me"]),
         json!({"rank":4,"rating":4970,"rated_matches":25,"listed":true})
     );
+    assert_eq!(entries[0]["ranked"]["rated_matches"], 40);
+    assert_eq!(entries[2]["ranked"]["rated_matches"], 25);
+    assert_eq!(entries[2]["rated_matches"], 1000);
+    assert_eq!(board["me"]["ranked"]["rated_matches"], 25);
     assert_eq!(board["min_rated_matches"], NEWCOMER_MATCHES);
     assert!(board["data_as_of"].as_str().unwrap().ends_with('Z'));
     for bad in [
@@ -1043,15 +1055,15 @@ async fn leaderboard_orders_ties_hides_newcomers_and_opt_outs_and_ranks_caller()
         .unwrap()["me"]
         .clone();
     assert_eq!(
-        mine,
-        json!({"rank":null,"rating":5000,"rated_matches":19,"listed":true})
+        without_ranked(&mine),
+        json!({"rank":null,"rating":5000,"rated_matches":1000,"listed":true})
     );
     let mine = accounts::leaderboard(&app, &hidden_session, None)
         .await
         .unwrap()["me"]
         .clone();
     assert_eq!(
-        mine,
+        without_ranked(&mine),
         json!({"rank":null,"rating":5000,"rated_matches":50,"listed":false})
     );
 
@@ -1329,4 +1341,109 @@ async fn fair_play_personal_history_filters_and_projection_agree() {
             );
         }
     }
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner and restricted portal PostgreSQL URLs"]
+async fn ranked_season_reads_preserve_privacy_bound_archives_and_use_runtime_grants() {
+    let owner = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    let restricted = std::env::var("OMOBA_PORTAL_ROLE_TEST_URL").unwrap();
+    let config = || Config {
+        origin: "https://players.example".into(),
+        secret: [47; 32],
+        trust_loopback_proxy: false,
+        release_file: None,
+    };
+    let app = App::connect(&owner, config()).await.unwrap();
+    let mut seed = [0; 32];
+    getrandom::fill(&mut seed).unwrap();
+    let key = SigningKey::from_bytes(&seed);
+    let profile = app
+        .career
+        .authenticate(
+            &crypto::hex(key.verifying_key().as_bytes()),
+            "Season-reader",
+        )
+        .await
+        .unwrap();
+    let (session, _) = login(&app, &key).await;
+    // Synthetic historical records exercise reads without closing/resetting the
+    // shared fixture's active season. Store tests prove the real close operation.
+    let mut ids = Vec::new();
+    for n in 0..12_i64 {
+        let start = n * 7776000000;
+        let id: i64 = sqlx::query_scalar("INSERT INTO career_ranked_seasons(started_at_ms,ends_at_ms,closed_at_ms) VALUES($1,$1+7776000000,$1+7776000000) RETURNING season_id")
+            .bind(start).fetch_one(&app.pool).await.unwrap();
+        sqlx::query("INSERT INTO career_ranked_archives(season_id,profile_id,rating,rated_matches,wins,losses,completed_matches,badge) VALUES($1,$2,2300,20,12,8,20,$3)")
+            .bind(id).bind(&profile.profile_id).bind(json!({"season_id":id,"ended_at_ms":start+7776000000,"rating":2300,"rated_matches":20,"tier":"platinum"}))
+            .execute(&app.pool).await.unwrap();
+        ids.push(id);
+    }
+    let badge = json!({"season_id":ids[11],"ended_at_ms":12_i64*7776000000,"rating":2300,"rated_matches":20,"tier":"platinum"});
+    sqlx::query("UPDATE career_profiles SET rated_matches=100,matches_played=100,completed_public_matches=10,season_rated_matches=20,season_completed_matches=20,latest_ranked_badge=$2 WHERE profile_id=$1")
+        .bind(&profile.profile_id).bind(&badge).execute(&app.pool).await.unwrap();
+    sqlx::query("INSERT INTO portal.profile_settings(profile_id,public_profile_enabled,public_stats_enabled) VALUES($1,true,false) ON CONFLICT(profile_id) DO UPDATE SET public_profile_enabled=true,public_stats_enabled=false")
+        .bind(&profile.profile_id).execute(&app.pool).await.unwrap();
+    let limited = App::connect(&restricted, config()).await.unwrap();
+    let public = accounts::player(&limited, None, &profile.profile_id)
+        .await
+        .unwrap();
+    for field in ["rating", "ranked", "ranked_archive"] {
+        assert!(public["profile"].get(field).is_none(), "hidden {field}");
+    }
+    let me = accounts::me(&limited, &session).await.unwrap();
+    assert_eq!(me["profile"]["rated_matches"], 100);
+    assert_eq!(me["profile"]["completed_public_matches"], 10);
+    assert_eq!(me["profile"]["ranked"]["rated_matches"], 20);
+    assert_eq!(me["profile"]["ranked"]["latest_badge"], badge);
+    let archive = me["profile"]["ranked_archive"].as_array().unwrap();
+    assert_eq!(archive.len(), 10);
+    assert_eq!(archive[0]["season_id"], ids[11]);
+    assert_eq!(archive[9]["season_id"], ids[2]);
+    assert_eq!(archive[0]["badge"], badge);
+    assert_eq!(archive[0]["rating"], 2300);
+    let board = accounts::leaderboard(&limited, &session, None)
+        .await
+        .unwrap();
+    assert!(board["me"]["ranked"].get("latest_badge").is_none());
+    assert!(
+        board["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["ranked"].get("latest_badge").is_none())
+    );
+    sqlx::query("UPDATE portal.profile_settings SET public_stats_enabled=true WHERE profile_id=$1")
+        .bind(&profile.profile_id)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let public = accounts::player(&limited, None, &profile.profile_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        public["profile"]["ranked_archive"],
+        me["profile"]["ranked_archive"]
+    );
+    assert_eq!(public["profile"]["ranked"], me["profile"]["ranked"]);
+    sqlx::query(
+        "UPDATE portal.profile_settings SET public_profile_enabled=false,public_stats_enabled=false WHERE profile_id=$1",
+    )
+    .bind(&profile.profile_id)
+    .execute(&app.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        accounts::player(&limited, None, &profile.profile_id)
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        accounts::me(&limited, &session).await.unwrap()["profile"]["ranked_archive"],
+        me["profile"]["ranked_archive"]
+    );
+    limited.pool.close().await;
+    app.pool.close().await;
 }

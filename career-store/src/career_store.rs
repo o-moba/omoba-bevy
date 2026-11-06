@@ -128,6 +128,12 @@ where
 }
 
 impl CareerStore {
+    /// Decode season columns selected alongside a profile in the caller's snapshot.
+    /// Authorization and selection of visible profile fields remain with the caller.
+    pub fn ranked_profile_from_row(row: &PgRow) -> Result<shared::ranked::SeasonProfile, String> {
+        seasons::profile(row).map_err(|error| error.to_string())
+    }
+
     /// Read only provider-verified grants. Missing billing migrations fail closed.
     /// One read-only snapshot: the bounded grant list (active first), the Hero
     /// tier sum (`portal.supporter_points`) and the stored aura, combined by the

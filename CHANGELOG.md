@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Serve current-season progress and the latest ten archived seasons under existing
+  profile/statistics privacy rules, including self reads through the restricted
+  portal role. Rank the ladder by current-season calibration/counts while keeping
+  lifetime totals separate; ladder listing does not disclose historical badges.
+  All11 Account API PostgreSQL cases and strict store/API all-target clippy PASS.
+  The first full schema10 PostgreSQL run stopped on a device-test startup503;
+  unchanged focused migration and all8 device cases subsequently PASS. Its cause
+  remains unconfirmed; a complete current-source/public-game rerun is required.
+
 - Apply owner-approved schema10 runtime permission patch: metadata/portal archive
   reads and immutable game allocation inserts, with operator season sequence
   access revoked from runtimes. Closing/archiving/reset writes remain operator
