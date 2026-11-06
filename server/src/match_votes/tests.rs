@@ -63,6 +63,7 @@ impl Game {
             terminal_at: None,
             saw_human: false,
             released: Vec::new(),
+            last_release_scan: None,
         });
         let peers: Vec<_> = (0..10)
             .map(|i| format!("127.0.0.1:{}", 60500 + i).parse().unwrap())

@@ -15,6 +15,8 @@ use shared::wire::ClientPacket;
 use crate::runtime::ServerRuntime;
 use crate::session::normalize_session_id;
 
+pub(crate) mod releases;
+
 pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -22,7 +24,7 @@ pub(crate) fn unix_ms() -> u64 {
         .as_millis()
         .min(u64::MAX as u128) as u64
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct AllocatedHuman {
     pub profile_id: String,
     pub session_id: String,
@@ -182,6 +184,7 @@ pub(crate) struct Worker {
     /// aborts early instead of holding its arena for the whole join deadline.
     pub saw_human: bool,
     pub released: Vec<String>,
+    pub last_release_scan: Option<Instant>,
 }
 impl Worker {
     pub fn cancelled(&self) -> bool {
@@ -384,6 +387,7 @@ pub(crate) mod runtime_tests {
             terminal_at: None,
             saw_human: false,
             released: Vec::new(),
+            last_release_scan: None,
         });
         let join = ClientPacket::Join {
             handheld: Default::default(),
@@ -695,6 +699,7 @@ pub(crate) mod runtime_tests {
                 terminal_at: None,
                 saw_human: false,
                 released: Vec::new(),
+                last_release_scan: None,
             });
             let now = Instant::now();
             for (i, human) in humans.iter().enumerate() {

@@ -1,0 +1,146 @@
+{
+  "status": "PASS",
+  "scope": "real isolated loopback PostgreSQL55582, signed public Casual admission,10 automated human accounts, one owned lobby and worker; cancellation before worker Join,9 survivors plus1 replacement bot reach Running, late cancellation preserves running admission. No completed-match/physical/WAN/RU host evidence.",
+  "source_parent": "6a61a7acf8419be3669b81e1df0bfc8894212ac8",
+  "candidate_source_files": {
+    "server/src/match_allocation.rs": "83a0d3264b3b7f7839ac935585e8ff332c604cfdca34f1086799dfb340b8b754",
+    "server/src/match_allocation/releases.rs": "7c5996f36914a26d35828a98ee2ebd2951335ba1f78ea5ce160bbb9addcf9da3",
+    "server/src/match_pool.rs": "995c0749d9af20a4e6c1bcd4b4c3f627825f9b8b371d91414d3acf7d5b350b3e",
+    "server/src/match_service.rs": "dd2a267fab5c079229660cff047732699bd666e0a243019cbf50e225cb8f46c0",
+    "server/src/career_runtime.rs": "e2534cb64fe41fb0743bf1f67a21944afdff83aee534c24a82d24c4471e2ef9c",
+    "scripts/test_public_mvp.mjs": "853ffa26b1ab46e8db0ec7ff7841c8c7524e9d7083f62500e05fb7a4da683438"
+  },
+  "server_binary_sha256": "04950a93d8fe6593bbf228c6cb1c88d248e0302d04f7fe2de123258b04dfc950",
+  "process_report": {
+    "scenario": "handoff-release",
+    "clients": 10,
+    "preference": "quick",
+    "capacity": 1,
+    "limits": {},
+    "max_wait_secs": null,
+    "protocol": 16,
+    "host": {
+      "platform": "darwin",
+      "cpus": 14,
+      "cpu_model": "Apple M4 Pro",
+      "memory_gib": 48
+    },
+    "input_hz_requested": 5,
+    "input_model": "signed_current_pose_transform",
+    "soak_seconds": 1,
+    "started_at": "2026-11-06T17:55:00.248Z",
+    "scenarios": [
+      "raw_ping_no_replication",
+      "casual_handoff_release_ack_bot_fill_same_worker_and_running_race"
+    ],
+    "status": "PASS",
+    "handoff_release": {
+      "allocation_id": "f5fe6be0b771578ec3827d66bd5442ed",
+      "checks": [
+        {
+          "name": "unjoined_cancel_is_worker_acknowledged_and_only_its_seat_is_bot_filled",
+          "status": "PASS",
+          "surviving_humans": 9,
+          "bots": 1,
+          "manifest_humans": 10
+        },
+        {
+          "name": "nine_original_humans_reach_running_without_new_search_or_worker",
+          "status": "PASS"
+        },
+        {
+          "name": "unjoined_canceller_receives_no_match_xp_or_rating",
+          "status": "PASS"
+        },
+        {
+          "name": "start_wins_late_cancel_keeps_admission_and_resume_without_aborting_other_players",
+          "status": "PASS"
+        }
+      ]
+    },
+    "total_transforms_sent": 243,
+    "total_sent_datagrams": 846,
+    "total_sent_bytes": 411019,
+    "resources": []
+  },
+  "unit_and_strict_gate": {
+    "source_parent": "6a61a7acf8419be3669b81e1df0bfc8894212ac8",
+    "working_diff_sha256": "f1233da908f755e86a63ec177cfc83dc40bd0d1845467274308c83734571384c",
+    "untracked": [
+      "server/src/match_allocation/releases.rs"
+    ],
+    "market": "global-default",
+    "steps": [
+      {
+        "name": "clippy",
+        "exit": 0,
+        "seconds": 4.01,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-handoff-release-gate-v2-clippy.log"
+      },
+      {
+        "name": "server-tests",
+        "exit": 0,
+        "seconds": 60.12,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-handoff-release-gate-v2-server-tests.log"
+      },
+      {
+        "name": "server-build",
+        "exit": 0,
+        "seconds": 24.04,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-handoff-release-gate-v2-server-build.log"
+      }
+    ],
+    "minimum_root_gib": 31.363758087158203
+  },
+  "units": {
+    "passed": 502,
+    "failed": 0,
+    "ignored": 4,
+    "seconds": 7.76
+  },
+  "targeted_regression": {
+    "source_parent": "6a61a7acf8419be3669b81e1df0bfc8894212ac8",
+    "working_diff_sha256": "92b8cd52cff10d0125db0dd798fa42548f1ee43d4ec07efcaa2a48647580a24f",
+    "untracked": [
+      "server/src/match_allocation/releases.rs"
+    ],
+    "market": "global-default",
+    "steps": [
+      {
+        "name": "handoff-tests",
+        "exit": 0,
+        "seconds": 28.05,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-handoff-release-v3-handoff-tests.log"
+      }
+    ],
+    "minimum_root_gib": 32.006988525390625
+  },
+  "command": [
+    "node",
+    "scripts/test_public_mvp.mjs",
+    "--scenario=handoff-release",
+    "--clients=10",
+    "--preference=quick",
+    "--capacity=1",
+    "--seconds=1",
+    "--input-hz=5",
+    "--port=25133",
+    "--worker-port=25233",
+    "--output=<fresh ignored owned directory>"
+  ],
+  "environment": "OMOBA_TEST_DATABASE_URL=owned loopback /omoba_test; HARNESS_SERVER_BIN=verified candidate server",
+  "notes": [
+    "Manifest stays immutable; release intent is durably written, only owning worker acknowledges unused exact profile/session.",
+    "Intent after durable roster freeze does not alter participants; running assignment remains resumable.",
+    "Explicitly cancelled searches are removed from parked requeue intent, while assignment is retained until ACK.",
+    "Request scan bounded to4Hz before start plus final formation boundary; no gameplay scan.",
+    "The same public regression runs after unique-draft in the existing PostgreSQL harness without workflow changes.",
+    "Initial local regression was corrected to use a valid Casual roster (the first BotPractice fixture incorrectly split its two humans across teams); old failure is retained in ignored logs.",
+    "Full current branch CI remains required.",
+    "Terminal receipt racing with cached Forming takes the existing terminal path: exclude the canceller and requeue only survivors. Existing terminal-receipt regression now covers both Ranked and Casual."
+  ]
+}

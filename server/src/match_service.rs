@@ -817,6 +817,7 @@ impl MatchService {
                     terminal_at: None,
                     saw_human: false,
                     released: Vec::new(),
+                    last_release_scan: None,
                 }))
             }
             Some(_) => Err("Invalid OMOBA_SERVER_ROLE".into()),
@@ -1109,6 +1110,31 @@ impl MatchService {
         let Some(id) = lobby.assignments.get(profile).cloned() else {
             return;
         };
+        if lobby
+            .pool
+            .slots
+            .get(&id)
+            .is_some_and(|slot| !slot.manifest.preference.rated() && !slot.terminal())
+        {
+            if lobby.pool.request_release(&id, profile)
+                && let Some(entries) = lobby.parked.get_mut(&id)
+            {
+                // Stop automatic re-queue even if the worker later dies, but
+                // retain the assignment/admission until its actual release ACK.
+                entries.retain(|w| w.profile.profile_id != profile);
+            }
+            // Refresh inside request_release may have observed a terminal
+            // receipt after the cached check above. Let the terminal path
+            // below exclude the canceller and restore only the survivors.
+            if !lobby
+                .pool
+                .slots
+                .get(&id)
+                .is_some_and(|slot| slot.terminal())
+            {
+                return;
+            }
+        }
         if !lobby.pool.cancel(&id) {
             if let Some(slot) = lobby.pool.slots.get(&id).filter(|s| s.terminal()) {
                 if !slot.ran() {
@@ -1306,6 +1332,18 @@ impl MatchService {
         lobby.last_poll = Some(now);
         lobby.drain.poll(lobby.pool.root());
         lobby.pool.poll();
+        // Direct worker Leave and lobby handoff cancellation share the same
+        // release ACK. Never resurrect those cancelled queue intents on failure.
+        for (id, entries) in &mut lobby.parked {
+            if let Some(status) = lobby
+                .pool
+                .slots
+                .get(id)
+                .and_then(|slot| slot.status.as_ref())
+            {
+                entries.retain(|w| !status.released_sessions.contains(&w.session));
+            }
+        }
         lobby.last_handoff_refresh = Some(now);
         lobby.turnover.observe(lobby.pool.occupied(), now);
         // A match that started keeps its seats (LR-13); its parked entries are
@@ -1964,6 +2002,7 @@ impl ServerRuntime {
         }
     }
     pub(crate) fn tick_match_service(&mut self, now: Instant) {
+        self.apply_allocated_releases(now, false);
         // Only explicit FindMatch retries renew queue intent. An authenticated
         // Home heartbeat must not keep an abandoned queue alive after packet loss.
         self.match_service.tick(now);
@@ -2546,21 +2585,102 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_after_terminal_receipt_never_invents_a_dodge() {
-        for (phase, played) in [
-            (Phase::Finished, true),
-            (Phase::Failed, false),
-            (Phase::Failed, true),
-        ] {
+    fn handoff_release_keeps_admission_until_worker_ack_and_never_aborts_survivors() {
+        for start_wins in [false, true] {
             let now = Instant::now();
-            let entries: Vec<_> = (1..=10)
-                .map(|id| w(id, MatchPreference::Ranked, now))
+            let entries: Vec<_> = (1..=2)
+                .map(|id| w(id, MatchPreference::Casual, now))
                 .collect();
             let mut pool = crate::match_pool::Pool::for_test();
             let directory = pool.test_directory().to_owned();
             let id = pool
-                .allocate(manifest_for(&entries, MatchPreference::Ranked))
+                .allocate(manifest_for(&entries, MatchPreference::Casual))
                 .unwrap();
+            pool.adopt_for_test(&id);
+            let mut status = Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms(),
+                phase: Phase::Forming,
+                result_id: None,
+                ends_by_ms: None,
+                joined_sessions: entries.iter().map(|w| w.session.clone()).collect(),
+                released_sessions: Vec::new(),
+            };
+            pool.write_status_for_test(&id, &status);
+            let mut service = MatchService::Lobby(Lobby {
+                assignments: entries
+                    .iter()
+                    .map(|w| (w.profile.profile_id.clone(), id.clone()))
+                    .collect(),
+                parked: HashMap::from([(id.clone(), entries.clone())]),
+                ..Lobby::new(pool, Limits::default())
+            });
+            service.cancel(&entries[0].profile.profile_id, now);
+            let MatchService::Lobby(lobby) = &mut service else {
+                unreachable!()
+            };
+            assert_eq!(lobby.assignments.len(), 2, "intent is not a release ACK");
+            assert_eq!(
+                lobby.parked[&id].len(),
+                1,
+                "explicitly cancelled search must not resurrect after crash"
+            );
+            assert!(lobby.waiting.is_empty() && lobby.penalties.is_empty());
+            let slot = &lobby.pool.slots[&id];
+            assert_eq!(
+                slot.manifest.humans.len(),
+                2,
+                "immutable manifest is unchanged"
+            );
+            let release =
+                crate::match_allocation::releases::read(&directory.join(&id), &slot.manifest)
+                    .unwrap();
+            assert_eq!(release, [slot.manifest.humans[0].clone()]);
+            assert!(!directory.join(&id).join("cancel.json").exists());
+            if start_wins {
+                status.phase = Phase::Running;
+                status.result_id = Some("result".into());
+            } else {
+                status.released_sessions.push(entries[0].session.clone());
+            }
+            lobby.pool.write_status_for_test(&id, &status);
+            service.tick(now + Duration::from_secs(1));
+            let MatchService::Lobby(lobby) = &service else {
+                unreachable!()
+            };
+            assert!(
+                lobby
+                    .assignments
+                    .contains_key(&entries[1].profile.profile_id)
+            );
+            assert_eq!(
+                lobby
+                    .assignments
+                    .contains_key(&entries[0].profile.profile_id),
+                start_wins
+            );
+            assert!(lobby.waiting.is_empty());
+            assert!(!directory.join(&id).join("cancel.json").exists());
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn cancellation_after_terminal_receipt_never_invents_a_dodge() {
+        for (phase, played, queue) in [
+            (Phase::Finished, true, MatchPreference::Ranked),
+            (Phase::Failed, false, MatchPreference::Ranked),
+            (Phase::Failed, true, MatchPreference::Ranked),
+            (Phase::Finished, true, MatchPreference::Casual),
+            (Phase::Failed, false, MatchPreference::Casual),
+            (Phase::Failed, true, MatchPreference::Casual),
+        ] {
+            let now = Instant::now();
+            let entries: Vec<_> = (1..=10).map(|id| w(id, queue, now)).collect();
+            let mut pool = crate::match_pool::Pool::for_test();
+            let directory = pool.test_directory().to_owned();
+            let id = pool.allocate(manifest_for(&entries, queue)).unwrap();
             pool.adopt_for_test(&id);
             let mut status = Status {
                 allocation_id: id.clone(),
@@ -2644,6 +2764,7 @@ mod tests {
             terminal_at: None,
             saw_human: false,
             released: Vec::new(),
+            last_release_scan: None,
         };
         let lobby = Lobby::new(pool, Limits::default());
         for role in [

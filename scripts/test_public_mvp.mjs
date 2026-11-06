@@ -131,9 +131,10 @@ const scenario = opts.scenario || 'load';
 const draftExit=opts['draft-exit']||'leave';
 const exerciseStaleHandoff='exercise-stale-handoff' in opts;
 assert(['leave','disconnect'].includes(draftExit)&&(!opts['draft-exit']||scenario==='party-draft'), '--draft-exit=leave|disconnect is a party-draft option');
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','unique-draft','remake','surrender','drain'].includes(scenario), 'unknown scenario');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','unique-draft','handoff-release','remake','surrender','drain'].includes(scenario), 'unknown scenario');
 if(['remake','surrender','unique-draft'].includes(scenario)) assert(!mix&&preference==='humans_only'&&clientsCount===10, `${scenario} uses --clients=10 --preference=humans_only`);
 else if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
+else if(scenario==='handoff-release') assert(!mix&&preference==='quick'&&clientsCount===10&&isolatedQueueDatabase(process.env.OMOBA_TEST_DATABASE_URL), 'handoff-release requires10 Casual humans and the isolated loopback omoba_test database');
 else if(['recovery','early-recovery'].includes(scenario)) assert(!mix&&((preference==='humans_only'&&clientsCount===10)||(preference!=='humans_only'&&clientsCount>=1&&clientsCount<=10)), `${scenario} uses one roster (Ranked: ten humans)`);
 else if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
 for(const [queue,count] of mix ?? [[preference,clientsCount]])assert(queue!=='humans_only'||count%10===0, 'Ranked (humans_only) forms only full ten-player matches: use a multiple of 10');
@@ -418,6 +419,64 @@ async function pumpFor(ms, onTick=()=>{}) {
 // Vision filters the snapshot's players; the live scoreboard lists every participant.
 const ids = snapshot => (snapshot.scoreboard?.players??[]).map(p=>String(p.player_id)).sort();
 const careerProgress = client => Object.fromEntries(['profile_id','rating','rated_matches','matches_played','wins','losses','progression_xp'].map(k=>[k,client.profile[k]]));
+
+// The lobby may record intent, but only the owning worker can release a seat.
+// One player cancels without ever joining; nine reach Running in the same arena.
+async function casualHandoffReleaseLifecycle() {
+ const peers=Array.from({length:10},(_,i)=>new Client(10000+i,lobbyPort,null,{preference:'quick',autoHandoff:false,autoLock:false}));
+ all.push(...peers);
+ await pumpUntil('ten Casual humans accept one real allocation',()=>peers.every(c=>c.allocation),45000);
+ const allocation=peers[0].allocation, leaver=peers[0], survivors=peers.slice(1);
+ assert(peers.every(c=>c.allocation.allocation_id===allocation.allocation_id));
+ assert.equal(allocation.human_count,10);assert.equal(allocation.bot_count,0);assert.equal(allocation.rated,false);
+ for(const c of peers)c.autoQueue=false;
+ for(const c of survivors)c.autoHandoff=true;
+ await pumpUntil('nine humans reach held Draft without the canceller',()=>survivors.every(c=>c.snapshot?.prematch?.phase==='draft'&&c.snapshot.prematch.players.length===9),30000);
+ assert.equal(leaver.port,lobbyPort);assert.equal(leaver.joinAttempts,0);
+ const workerPort=Number(allocation.endpoint.split(':').at(-1)), workerPid=ownedWorkerPid(workerPort);
+ const originalIds=survivors.map(c=>String(c.snapshot.your_id)).sort();
+ const baseline=careerProgress(leaver), checks=report.handoff_release={allocation_id:allocation.allocation_id,checks:[]};
+ let nextCancel=0;
+ await pumpUntil('owning worker acknowledges exact handoff release',()=>allocationStatus(allocation.allocation_id)?.released_sessions?.includes(leaver.session),10000,now=>{
+  if(now>=nextCancel){nextCancel=now+300;leaver.account({action:'cancel_queue'});}
+  assert(survivors.every(c=>!c.firstRunning),'held Draft ran early');
+ });
+ const releaseFile=path.join(root,'matches',allocation.allocation_id,'release-requests.json');
+ const requests=JSON.parse(fs.readFileSync(releaseFile,'utf8'));
+ assert.equal(requests.length,1);assert.equal(requests[0].profile_id,leaver.profile.profile_id);assert.equal(requests[0].session_id,leaver.session);
+ assert(!fs.existsSync(path.join(root,'matches',allocation.allocation_id,'cancel.json')));
+ assert.equal(ownedWorkerPid(workerPort),workerPid);
+ assert.equal(allocationManifests().find(m=>m.allocation_id===allocation.allocation_id).humans.length,10,'immutable manifest changed');
+ await pumpUntil('survivors keep ten-seat draft with one bot replacement',()=>survivors.every(c=>c.snapshot?.prematch?.players.length===10&&c.snapshot.prematch.players.filter(p=>p.is_bot).length===1),10000);
+ checks.checks.push({name:'unjoined_cancel_is_worker_acknowledged_and_only_its_seat_is_bot_filled',status:'PASS',surviving_humans:9,bots:1,manifest_humans:10});
+ for(const c of survivors)c.autoLock=true;
+ await pumpUntil('nine survivors start the same Casual arena',()=>survivors.every(c=>c.stage==='running')&&allocationStatus(allocation.allocation_id)?.phase==='running',45000);
+ assert.equal(ownedWorkerPid(workerPort),workerPid);
+ assert(survivors.every(c=>c.allocation.allocation_id===allocation.allocation_id));
+ assert.deepEqual(survivors.map(c=>String(c.snapshot.your_id)).sort(),originalIds);
+ assert(survivors.every(c=>ids(c.snapshot).length===10));
+ checks.checks.push({name:'nine_original_humans_reach_running_without_new_search_or_worker',status:'PASS'});
+ const requestId=700001;let nextProfile=0;
+ await pumpUntil('cancelled unjoined profile has fresh unchanged durable progress',()=>leaver.profileResponses.has(String(requestId)),10000,now=>{
+  if(now>=nextProfile){nextProfile=now+1000;leaver.account({action:'profile',request_id:requestId,profile_id:baseline.profile_id});}
+ });
+ const actual=leaver.profileResponses.get(String(requestId));
+ for(const [key,value] of Object.entries(baseline))assert.equal(actual[key],value,`unplayed canceller changed ${key}`);
+ checks.checks.push({name:'unjoined_canceller_receives_no_match_xp_or_rating',status:'PASS'});
+ const observer=new Client(11000,lobbyPort,survivors[0],{preference:'quick',autoHandoff:false,autoQueue:false,autoReady:false});
+ all.push(observer);
+ await pumpUntil('running survivor authenticates its original lobby session',()=>Boolean(observer.auth),15000);
+ await pumpFor(150);observer.account({action:'cancel_queue'});
+ await pumpFor(1500);
+ await pumpUntil('late lobby cancellation retains resumable running assignment',()=>observer.career?.match_service?.state==='assigned'&&Boolean(observer.career.match_service.in_match),10000);
+ const status=allocationStatus(allocation.allocation_id);
+ assert.equal(status.phase,'running');assert.deepEqual(status.released_sessions,[leaver.session]);
+ assert.equal(JSON.parse(fs.readFileSync(releaseFile,'utf8')).length,1,'late cancel wrote another release intent');
+ assert(!fs.existsSync(path.join(root,'matches',allocation.allocation_id,'cancel.json')));
+ assert.equal(ownedWorkerPid(workerPort),workerPid);
+ checks.checks.push({name:'start_wins_late_cancel_keeps_admission_and_resume_without_aborting_other_players',status:'PASS'});
+ report.scenarios.push('casual_handoff_release_ack_bot_fill_same_worker_and_running_race');
+}
 function assertRoster(client, expected) {
  assert.equal(ids(client.snapshot).length,10,'running match must retain ten participants');
  assert.deepEqual(ids(client.snapshot),expected,'a fresh identity entered or replaced an allocated participant');
@@ -1196,7 +1255,8 @@ try {
  assert(lobby.exitCode===null, 'lobby failed to start');
  // A raw pre-admission ping must not receive any response or allocate an endpoint.
  const stranger=dgram.createSocket('udp4');let reflected=0;stranger.on('message',b=>reflected+=b.length);stranger.send(Buffer.from('{"type":"ping"}'),lobbyPort,'127.0.0.1');await delay(700);stranger.close();assert.equal(reflected,0);report.scenarios.push('raw_ping_no_replication');
- if(scenario==='unique-draft')await uniqueDraftLifecycle();
+ if(scenario==='unique-draft'){await uniqueDraftLifecycle();await casualHandoffReleaseLifecycle();}
+ else if(scenario==='handoff-release')await casualHandoffReleaseLifecycle();
  else if(scenario==='party-draft')await partyDraftLifecycle();
  else {
  if(queueOnly){

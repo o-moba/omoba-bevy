@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Preserve a Casual/vs-Bots arena when one player cancels during lobby handoff:
+  durable exact-seat release intent, owning-worker ACK, bot replacement and
+  admission fencing through start/freeze races. Keep immutable manifests and
+  Ranked FIFO/dodge behavior.4 new regressions,502 normal server tests, strict
+  clippy and actual10-human PostgreSQL journey PASS; fresh full branch CI pending.
+
+- Accept corrected full7-job CI42243761726 at6a61a7ac for existing fair-play/C5
+  software readiness. It includes PostgreSQL journeys, full client/core, Android
+  and gameplay harness; it is separate from deployment and subsequent gates.
+
 - Verify actual local lobby-restart warnings on native Home/group and solo
   Searching: wait for real new-epoch party/toast state, preserve inspected images,
   close row45. Repeat public party admission on the new build; Draft text now fits

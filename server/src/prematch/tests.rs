@@ -968,6 +968,7 @@ fn allocated_loading_roster(
         terminal_at: None,
         saw_human: true,
         released: Vec::new(),
+        last_release_scan: None,
     });
     for (i, human) in humans.iter().enumerate() {
         let addr = address(i as u16 + 1);

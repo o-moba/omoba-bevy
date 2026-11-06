@@ -308,6 +308,23 @@ impl Pool {
         );
         Ok(id)
     }
+    pub fn request_release(&mut self, id: &str, profile: &str) -> bool {
+        let Some(slot) = self.slots.get_mut(id) else {
+            return false;
+        };
+        slot.refresh_status();
+        if slot.terminal()
+            || slot.ran()
+            || slot
+                .status
+                .as_ref()
+                .is_some_and(|s| matches!(s.phase, Phase::Running | Phase::Settling))
+        {
+            return false;
+        }
+        match_allocation::releases::request(&slot.directory, &slot.manifest, profile).is_ok()
+    }
+
     pub fn cancel(&mut self, id: &str) -> bool {
         let Some(slot) = self.slots.get_mut(id) else {
             return true;
