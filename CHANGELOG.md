@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Expose actual party/profile/toast observations and bounded Home labels to the
+  opt-in Creator Loop recorder. Exclude hidden/zero-size controls from its button
+  inventory. Save the event-driven restart recipe and broader UI source hashes
+  in the repository skill; no synthetic view is used to certify a real journey.
+
 - Bound mobile Home nicknames to one line and reserve enough identity-chip height
   for the rating. Fit Draft identity/class/role/status lines to their own slots
   using the actual readable phone font minimum. RU strict clippy PASS; native

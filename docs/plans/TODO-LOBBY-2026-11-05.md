@@ -1745,3 +1745,12 @@ first compile attempt exposed an ambiguous float and Bevy system parameter limit
 in the new QA readout; both were corrected (typed font size, grouped optional
 resources, both gated and ordinary return paths updated) before the successful
 check. Native build is still running; neither layout defect is marked closed.
+
+
+Creator Loop QA now reports actual public party/profile state, current party
+notice and active toast texts; its visible-button inventory checks display and
+computed size as well as inherited visibility. Add `UiToastText` name to the
+existing toast text; no toast delivery/timing policy changes. The reusable skill
+now explains waiting for real new-epoch events and an empty bot search gate, and
+its helper records Home/draft/party/toast sources too. Skill validation and helper
+syntax PASS. Current native build/pixel verification is still required.

@@ -17,7 +17,11 @@ SOURCE_FILES = ("client/src/lib.rs", "client/src/qa/mod.rs",
                 "client/src/qa/offscreen.rs", "client/src/qa/fair_play_qa.rs",
                 "client/src/qa/result_qa.rs", "client/src/qa/creator_loop_qa.rs",
                 "client/src/net/session.rs", "client/src/pause_menu/match_votes.rs",
-                "client/src/world.rs", "client/src/platform.rs")
+                "client/src/world.rs", "client/src/platform.rs",
+                "client/src/frontend/mod.rs", "client/src/frontend/home.rs",
+                "client/src/frontend/lobby.rs", "client/src/frontend/draft.rs",
+                "client/src/frontend/draft/stage.rs", "client/src/party.rs",
+                "client/src/ui/widgets/surfaces.rs")
 
 
 def sha(path):

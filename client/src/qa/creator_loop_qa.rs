@@ -76,7 +76,7 @@ const LAUNCHER_TIP: [f32; 3] = [0.0, 0.13, 0.81];
 /// A flash this close to a tip (in the weapon's own frame) belongs to it.
 const TIP_TOLERANCE: f32 = 0.08;
 /// Labels whose text the state file reports.
-const LABELS: [&str; 9] = [
+const LABELS: [&str; 11] = [
     "CollectionAccountStatus",
     "SelectedWeaponStatus",
     "CollectionWeaponMarketHint",
@@ -86,6 +86,8 @@ const LABELS: [&str; 9] = [
     "DraftWeaponStatus",
     "DraftNotice",
     "HomeConnectionStatus",
+    "HomeNickname",
+    "HomeRating",
 ];
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -900,10 +902,19 @@ fn observe(
     cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::MainCamera>>,
     labels: Query<(super::QaName, &Text)>,
     pressables: Query<
-        (&crate::ui::TestId, Option<&InheritedVisibility>),
+        (
+            &crate::ui::TestId,
+            &ComputedNode,
+            &Node,
+            Option<&InheritedVisibility>,
+        ),
         With<crate::ui::Pressable>,
     >,
-    context: Res<crate::input_context::GameplayInputContext>,
+    (context, party, career): (
+        Res<crate::input_context::GameplayInputContext>,
+        Option<Res<crate::party::PartyClient>>,
+        Option<Res<crate::career::CareerClient>>,
+    ),
 ) {
     let frame = lp.frame;
     lp.input = serde_json::json!({"running": context.running, "modal_open": context.modal_open,
@@ -1000,6 +1011,8 @@ fn observe(
                     &actors,
                     &labels,
                     &pressables,
+                    party.as_deref(),
+                    career.as_deref(),
                 );
                 return;
             }
@@ -1067,6 +1080,8 @@ fn observe(
         &actors,
         &labels,
         &pressables,
+        party.as_deref(),
+        career.as_deref(),
     );
 }
 
@@ -1089,9 +1104,16 @@ fn return_state(
     )>,
     labels: &Query<(super::QaName, &Text)>,
     pressables: &Query<
-        (&crate::ui::TestId, Option<&InheritedVisibility>),
+        (
+            &crate::ui::TestId,
+            &ComputedNode,
+            &Node,
+            Option<&InheritedVisibility>,
+        ),
         With<crate::ui::Pressable>,
     >,
+    party: Option<&crate::party::PartyClient>,
+    career: Option<&crate::career::CareerClient>,
 ) {
     lp.reads = reads;
     if lp.last_state.is_some_and(|at| at.elapsed() < STATE_EVERY) {
@@ -1115,8 +1137,12 @@ fn return_state(
     }
     let mut buttons: Vec<&str> = pressables
         .iter()
-        .filter(|(_, visible)| visible.is_some_and(|v| v.get()))
-        .map(|(id, _)| id.as_str())
+        .filter(|(_, computed, node, visible)| {
+            node.display != Display::None
+                && computed.size().min_element() > 1.0
+                && visible.is_some_and(|v| v.get())
+        })
+        .map(|(id, ..)| id.as_str())
         .collect();
     buttons.sort_unstable();
     buttons.truncate(300);
@@ -1155,6 +1181,11 @@ fn return_state(
         "selection": {"handheld": serde_json::to_value(&selection.handheld).unwrap_or_default(),
             "class": selection.hero_class.id(), "item": selected},
         "labels": texts,
+        "active_toasts": labels.iter().filter(|(name, _)| name.as_str() == "UiToastText")
+            .map(|(_, text)| text.0.clone()).collect::<Vec<_>>(),
+        "party": party.map(|p| &p.view),
+        "party_notice": party.and_then(|p| p.notice(Instant::now())).map(|notice| format!("{notice:?}")),
+        "career_profile": career.and_then(|c| c.view.profile.as_ref()),
         "buttons": buttons,
         "players": players,
         "local_level": lp.level,

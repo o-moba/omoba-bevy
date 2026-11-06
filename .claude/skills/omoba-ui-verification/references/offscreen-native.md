@@ -104,6 +104,22 @@ the flag also works with `OMOBA_CREATOR_LOOP_QA=<owned-dir>` and image screensho
 but it supplies no gameplay fixture, account or real server: use the separately
 authorized scenario and do not confuse it with the fair-play fixture helper.
 
+For real Home/party/search journeys, wait for actual observations rather than a
+fixed sleep after a restart. A new UDP connection may precede career sign-in and
+the first new-epoch party view. Creator Loop's `qa-state.json` reports the public
+`career_profile`, `party`, `party_notice`, `active_toasts`, `HomeNickname` and
+`HomeRating` labels on clients with those diagnostics. Wait for the intended
+party change/toast text, then issue the real `shot` command and inspect the
+image. Do not mistake an earlier group-loss toast for a solo-search restart.
+These are observations; never seed them to prove a real network journey.
+
+The current button inventory excludes `Display::None`, zero-size and inherited
+hidden controls. It still does not certify hit testing, clipping, enabled state
+or physical touch. Earlier clients reported hidden searching buttons as well:
+their presence alone did not prove a ready-check panel was visible. For public
+AI peers, the existing loopback-only `bots --search-gate FILE` opens search only
+for a **regular empty file**; a nonempty file deliberately keeps it closed.
+
 Verified2026-11-06: real RU852×393 `remade-result` with the new application
 renderer, readable Remake/no ordinary rewards/zero XP result; Mac reported
 locked at launch. The bundled helper also produced inspected surrender-result,
