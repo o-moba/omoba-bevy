@@ -42,6 +42,7 @@ pub struct PostMatchScreenPlugin;
 impl Plugin for PostMatchScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<PostMatchAction>()
+            .add_message::<crate::ui::widgets::surfaces::ToastRequest>()
             .init_resource::<PostMatchLatch>()
             .add_systems(
                 OnEnter(AppScreen::PostMatch),
@@ -53,6 +54,7 @@ impl Plugin for PostMatchScreenPlugin {
                 (
                     post_match_actions.after(UiSet::Dispatch),
                     refresh_post_match,
+                    announce_ranked_change.after(crate::net::ClientNetPipeline::ApplySnapshot),
                     (sync_post_match, animate_post_match)
                         .after(refresh_post_match)
                         .before(UiSet::Paint),
@@ -590,6 +592,62 @@ impl ScreenInputs<'_> {
                 .map(|profile| profile.progression_xp),
             has_live_row: latch.live.is_some(),
         }
+    }
+}
+
+/// The latched round owns this notification, including after worker retirement.
+/// Historical receipts and repeated snapshots cannot announce another promotion.
+fn announce_ranked_change(
+    inputs: ScreenInputs,
+    mut announced: Local<Option<String>>,
+    mut toasts: MessageWriter<crate::ui::widgets::surfaces::ToastRequest>,
+) {
+    let latch = inputs.latch();
+    let Some(namespace) = latch.namespace else {
+        return;
+    };
+    let Some(result) = inputs.career.view.last_result.as_ref().filter(|result| {
+        namespace == (result.server_epoch, result.match_id) && latch.accepts_result(result)
+    }) else {
+        return;
+    };
+    if announced.as_deref() == Some(result.result_id.as_str()) {
+        return;
+    }
+    let Some(profile) = inputs.career.view.profile.as_ref() else {
+        return;
+    };
+    let Some(participant) = crate::career::local_participant(result, &inputs.career)
+        .filter(|p| p.profile_id.as_deref() == Some(profile.profile_id.as_str()))
+    else {
+        return;
+    };
+    let Some(change) = participant.rating.as_ref() else {
+        return;
+    };
+    if let Some(notice) =
+        crate::career::ranked::rank_change_notice(profile, result.ranked_season_id, change)
+    {
+        // A personal penalty can lower the tier even on an otherwise neutral
+        // interruption. Celebrate only an honest, completed Ranked result.
+        if !notice.demotion
+            && (!result.rated
+                || result.outcome != MatchOutcome::Completed
+                || participant
+                    .participation
+                    .is_some_and(|evidence| evidence.abandoned))
+        {
+            return;
+        }
+        toasts.write(crate::ui::widgets::surfaces::ToastRequest {
+            kind: if notice.demotion {
+                crate::ui::widgets::surfaces::ToastKind::Warning
+            } else {
+                crate::ui::widgets::surfaces::ToastKind::Success
+            },
+            text: notice.text,
+        });
+        *announced = Some(result.result_id.clone());
     }
 }
 
@@ -2149,6 +2207,164 @@ mod tests {
             "disconnected":false,"rating":null,"progression_xp_gained":150
         })).unwrap()).collect();
         result
+    }
+
+    #[test]
+    fn promotion_waits_for_the_scoped_profile_and_is_not_repeated_after_retirement() {
+        use crate::ui::widgets::surfaces::ToastRequest;
+        let mut receipt = full_receipt();
+        receipt.rated = true;
+        receipt.unrated_reason = None;
+        receipt.ranked_season_id = Some(2);
+        receipt.participants[0].rating = Some(shared::career::RatingChange {
+            before: 1490,
+            after: 1510,
+            delta: 20,
+        });
+        let mut profile = shared::career::ProfileSummary::new("p-1".into(), "Ranked".into());
+        profile.rating = 1510;
+        profile.rated_matches = 100;
+        profile.ranked = Some(shared::ranked::SeasonProfile {
+            season_id: 2,
+            started_at_ms: 0,
+            ends_at_ms: shared::ranked::SEASON_DURATION_MS,
+            rated_matches: 21,
+            wins: 1,
+            losses: 0,
+            completed_matches: 21,
+            latest_badge: None,
+        });
+        let mut career = CareerClient::default();
+        career.public_profile_id = Some("p-1".into());
+        career.view.last_result = Some(receipt.clone());
+        let mut app = App::new();
+        app.init_resource::<GameStateSnapshot>()
+            .insert_resource(career)
+            .init_resource::<PostMatchLatch>()
+            .add_message::<ToastRequest>()
+            .add_systems(Update, announce_ranked_change);
+        let mut cursor = app
+            .world()
+            .resource::<Messages<ToastRequest>>()
+            .get_cursor();
+        app.update();
+        assert_eq!(
+            cursor
+                .read(app.world().resource::<Messages<ToastRequest>>())
+                .count(),
+            0
+        );
+        // A historical receipt has no right to announce without a latched round.
+        app.world_mut().resource_mut::<CareerClient>().view.profile = Some(profile);
+        app.update();
+        assert_eq!(
+            cursor
+                .read(app.world().resource::<Messages<ToastRequest>>())
+                .count(),
+            0
+        );
+        app.world_mut().resource_mut::<PostMatchLatch>().namespace =
+            Some((receipt.server_epoch, receipt.match_id));
+        app.update();
+        let messages: Vec<_> = cursor
+            .read(app.world().resource::<Messages<ToastRequest>>())
+            .collect();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            messages[0].text,
+            trf(
+                "ranked.promoted",
+                &[(
+                    "tier",
+                    &crate::career::ranked::tier_name(shared::ranked::Tier::Gold)
+                )]
+            )
+        );
+        app.update();
+        assert_eq!(
+            cursor
+                .read(app.world().resource::<Messages<ToastRequest>>())
+                .count(),
+            0
+        );
+        // The default (retired) transport stays clear; the accepted receipt was
+        // scoped by the latch, not by an unrelated new game snapshot.
+        assert_eq!(
+            app.world()
+                .resource::<GameStateSnapshot>()
+                .meta
+                .server_epoch,
+            0
+        );
+    }
+
+    #[test]
+    fn personal_penalty_can_warn_of_demotion_but_never_celebrates_a_promotion() {
+        use crate::ui::widgets::surfaces::{ToastKind, ToastRequest};
+        for (before, after, expected) in [(1490, 1510, 0), (1510, 1490, 1)] {
+            let mut receipt = full_receipt();
+            receipt.rated = false;
+            receipt.outcome = MatchOutcome::Interrupted;
+            receipt.winner = None;
+            receipt.ranked_season_id = Some(2);
+            receipt.participants[0].rating = Some(shared::career::RatingChange {
+                before,
+                after,
+                delta: after - before,
+            });
+            receipt.participants[0].participation = Some(shared::career::Participation {
+                abandoned: true,
+                ..default()
+            });
+            let mut profile = shared::career::ProfileSummary::new("p-1".into(), "Ranked".into());
+            profile.rating = after;
+            profile.rated_matches = 100;
+            profile.ranked = Some(shared::ranked::SeasonProfile {
+                season_id: 2,
+                started_at_ms: 0,
+                ends_at_ms: shared::ranked::SEASON_DURATION_MS,
+                rated_matches: 21,
+                wins: 0,
+                losses: 1,
+                completed_matches: 0,
+                latest_badge: None,
+            });
+            let mut career = CareerClient::default();
+            career.public_profile_id = Some("p-1".into());
+            career.view.profile = Some(profile);
+            career.view.last_result = Some(receipt.clone());
+            let mut app = App::new();
+            app.init_resource::<GameStateSnapshot>()
+                .insert_resource(career)
+                .insert_resource(PostMatchLatch {
+                    namespace: Some((receipt.server_epoch, receipt.match_id)),
+                    ..default()
+                })
+                .add_message::<ToastRequest>()
+                .add_systems(Update, announce_ranked_change);
+            let mut cursor = app
+                .world()
+                .resource::<Messages<ToastRequest>>()
+                .get_cursor();
+            app.update();
+            let messages: Vec<_> = cursor
+                .read(app.world().resource::<Messages<ToastRequest>>())
+                .collect();
+            assert_eq!(messages.len(), expected);
+            if expected == 1 {
+                assert_eq!(messages[0].kind, ToastKind::Warning);
+                assert_eq!(
+                    messages[0].text,
+                    trf(
+                        "ranked.demoted",
+                        &[(
+                            "tier",
+                            &crate::career::ranked::tier_name(shared::ranked::Tier::Silver)
+                        )]
+                    )
+                );
+            }
+        }
     }
 
     #[test]

@@ -1796,8 +1796,15 @@ Area: secrets · **major** · M · ops+code
 #### LR-53 — Ranked ladder presentation: tiers, placement, seasons, cross-play data
 Area: rating model · **minor** · L · code+owner
 - **Now:**
-  - Rating uses K=48 for the first20 rated games, then K=32; Home shows placement progress. Tier/season implementation remains pending.
-  - There is one lifetime rating and no seasons (`001_career.sql:5`).
+  - Schema10 stores distinct seasonal placement/counters and immutable allocation
+    identity. K=48 for the first20 games of each season, then32; lifetime/XP/
+    public eligibility are preserved. Explicit atomic close archives, awards
+    eligible badges and resets toward1000. Production application is separate.
+  - Profile/archive API and current-season ladder reads pass actual PostgreSQL
+    privacy/runtime-role tests. Portal fa4dc7f tier/badge/archive UI passes unit,
+    type/build and focused RU browser fixtures. Native Home/profile/friend badges
+    and scoped calibration/promotion/demotion notices compile under strict clippy;
+    execution/current native pixels and complete public/final CI remain required.
   - Native signed movement records declared touch/mouse/mixed/unknown controls per participant; no platform/device identifier is collected. Durable checkpoints and a bounded win-rate comparison are implemented (see `docs/ranked-input-statistics.md`).
 - **Requirement:**
   - `tier(rating, rated_matches)` with owner-set thresholds.
@@ -2081,9 +2088,9 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 |---|---|---|
 | O-1 | Is Ranked available at launch or only later? At low population: a minimum-population gate, ranked hours, a smaller ranked format, or wider rating windows? (Bots are never rated.) | LR-08, LR-35 |
 | O-2 | Should bots fill Casual PvP, and after how long (30 s today)? Should Casual merge cohorts or wait longer while other humans are online? | LR-08, LR-36 |
-| O-3 | Ranked entry gate: what career level or match count, and must the player link VK ID in RU? | LR-37 |
+| O-3 | Decided: Ranked opens after10 completed public matches, without mandatory VK. Server admission and native gate implemented; actual tenth-public/noVK journey passed prior full CI. | LR-37 |
 | O-4 | Ranked parties: solo/duo only, or full premade against premade? | LR-55 |
-| O-5 | Decided2026-11-06:20 placements; Bronze<1000/Silver<1500/Gold<2000/Platinum<2500/Diamond<3000/Master3000+;90-day seasons, half-distance reset toward1000, archived results and seasonal badge. Production reset is separate. Local schema10 storage/atomic close/operator tests pass; role approval, API/native/portal presentation and full current gates remain pending. | LR-53 |
+| O-5 | Decided2026-11-06:20 placements; Bronze<1000/Silver<1500/Gold<2000/Platinum<2500/Diamond<3000/Master3000+;90-day seasons, half-distance reset toward1000, archived results and seasonal badge. Production reset is separate. Local schema10 storage/atomic close/operator and669 full PostgreSQL tests pass; approved roles and profile/archive/seasonal-ladder API are implemented. Portal presentation passes focused tests/build/RU browser fixtures. Native presentation/notices compile under strict clippy; current execution/visual/full public/CI and deployment/rollback gates remain pending. | LR-53 |
 | O-6 | Online bot difficulty: keep Elite for all, or easier for newcomers' first matches? Should Server bot match offer a level picker? | LR-43 |
 | O-7 | Launch hero roster: which of the 17 classes are allowed in public and ranked play? | LR-45, LR-58 |
 | O-8 | Match length target, max duration, the minute from which surrender is allowed, map tier preset for casual and bot play | LR-11, LR-34 |

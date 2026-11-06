@@ -1114,3 +1114,38 @@ ignored task tooling directory. Source/before/after hashes and cmap verification
 All supported current dictionary characters and every old cmap entry are present.
 This repairs the specific CI42165588927 missing-glyph failure; native test
 execution must still be confirmed by the next full CI, not inferred from cmap.
+
+
+### P6 checkpoint — native seasonal presentation (2026-11-06)
+
+Native Home now shows the calibrated tier or the current-season placement count.
+Own/visited/friend profiles show a tier/placement pill; profile cards add the
+current window and the already earned old-season badge/final rating. Lifetime
+statistics remain separate. Post-match notices use the latched round, the local
+immutable award and matching current season/profile rating; repeated snapshots,
+stale seasons and historical/unscoped receipts cannot announce a rank change.
+The first calibrated rank, promotion and demotion have distinct copy. A personal
+penalty may warn of a demotion after interruption; an abandonment/unrated result
+never triggers a positive celebration. No extra result-strip height was added.
+
+Strict native test-target clippy PASS (100.09s, minimum root40.88GiB), compiling
+four new helper/system tests and the extended RU Home calibration/tier test.
+Execution of these tests is pending current CI, not claimed from compilation.
+Formatting PASS. Added eight CJK glyphs, preserved the old cmap, updated installed
+asset bytes; dictionary coverage and asset-budget/license checks PASS.
+Proofs: .agent/codex-ranked-readiness/p6-native-season-ui-clippy-v1-report.json and
+.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p6-native-season-cjk-font-rebuild.json.
+Native main/screenshots are still required; previous ebf captures do not prove
+this new interface. Portal fa4dc7f is pushed:247 tests+3 expected skips, typecheck,
+production build and six RU852x393 real Chrome/Next fixture scenarios PASS.
+Portal browser data is synthetic; actual API privacy/grants are tested separately.
+
+Current core236d1c13 local full PostgreSQL run PASS:669 tests across18 suites,
+zero failed/ignored, actual approved role installation. The public pipeline v2
+then stopped during ready-check fixture setup (7/10 qualification writes completed
+before its20s consent wait expired, only6 had searched, no ready check started).
+The fixed targeted scenario now prepares all qualified accounts before Search;
+its strict15s timeout, nine accepts, no premature worker, FIFO preservation,
+late-accept rejection and replacement allocation PASS. This harness fix is the
+next separate checkpoint. Complete public/core+new-native CI and visual gates
+remain required. Overall68-finding status counts remain unchanged.

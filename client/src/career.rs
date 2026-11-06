@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 mod devices;
 #[path = "career_protection.rs"]
 pub(crate) mod protection;
+#[path = "ranked_presentation.rs"]
+pub(crate) mod ranked;
 #[path = "career_web.rs"]
 mod web;
 
@@ -1761,15 +1763,7 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             ui::IVORY,
             "CareerProfileProgress",
         );
-        if profile.newcomer() {
-            label(
-                parent,
-                tr("career.profile.newcomer"),
-                14.0,
-                ui::JADE,
-                "CareerNewcomer",
-            );
-        }
+        ranked_profile_labels(parent, profile);
     } else {
         label(
             parent,
@@ -1889,6 +1883,24 @@ fn friend_code_label(parent: &mut ChildSpawnerCommands, handle: &str) {
     label(parent, handle, 20.0, ui::JADE, "CareerFriendCode");
 }
 
+fn ranked_badge(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary, name: &'static str) {
+    use crate::ui::widgets::surfaces::{BadgeKind, badge};
+    let kind = if profile.newcomer() {
+        BadgeKind::Muted
+    } else {
+        BadgeKind::Gold
+    };
+    let entity = badge(parent, ranked::progress_text(profile), kind, false);
+    parent.commands().entity(entity).insert(Name::new(name));
+}
+
+fn ranked_profile_labels(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) {
+    ranked_badge(parent, profile, "CareerRankedProgress");
+    for (name, text) in ranked::profile_lines(profile) {
+        label(parent, text, 14.0, ui::JADE, name);
+    }
+}
+
 fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) {
     label(
         parent,
@@ -1904,15 +1916,7 @@ fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) 
         ui::IVORY,
         "CareerVisitedStats",
     );
-    if profile.newcomer() {
-        label(
-            parent,
-            tr("career.profile.newcomer"),
-            14.0,
-            ui::JADE,
-            "CareerVisitedNewcomer",
-        );
-    }
+    ranked_profile_labels(parent, profile);
     friend_code_label(parent, &profile.nickname);
 }
 
@@ -1961,6 +1965,7 @@ fn friend_row(
                 },
                 "CareerFriendPresence",
             );
+            ranked_badge(row, &friend.profile, "CareerFriendRanked");
             row.spawn(row_node()).with_children(|buttons| {
                 button(
                     buttons,

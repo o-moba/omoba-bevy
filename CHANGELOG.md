@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add native seasonal tier/placement badges on own, visited and friend profiles;
+  Home shows the calibrated tier or current-season calibration. Profile windows
+  and earned historical badges stay distinct from lifetime totals. Scoped,
+  deduplicated post-match notices cover calibration, promotion and demotion,
+  including personal penalty demotions after an interrupted match. Honest-match
+  guards prevent celebrating an abandonment. RU/EN/ZH copy and eight additional
+  CJK display glyphs included. Strict native test-target clippy, formatting and
+  asset/cmap checks PASS; test execution and native pixels remain pending.
+
 - Repair the schema10 CI font-coverage failure by adding Chinese休/季/闲 to
   the display subset, preserving all old codepoints (+1680 bytes). Update the
   installed asset budget; cmap/dictionary and asset consistency checks PASS.

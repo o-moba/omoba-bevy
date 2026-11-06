@@ -98,9 +98,21 @@ portal grants, and strict store/API all-target clippy PASS. The ladder keeps
 lifetime fields but uses seasonal calibration/tie-breaks and hides old badges.
 The first fresh full schema10 run stopped on a device-test startup503; unchanged
 focused migration and all8 device cases PASS afterwards. Cause is unconfirmed;
-full PostgreSQL and public journeys must rerun on current source.
+The repeat local core236d1c13 PostgreSQL run passes all669 tests across18 suites,
+including actual role installation. Public v2 then failed during ready-check
+fixture preparation; a targeted setup-before-Search fix passes unchanged15s
+consent/FIFO/replacement assertions. Complete public journeys still must pass.
 
-Still required: native/portal season/tier/badge/promotion surfaces and affected RU visual proof;
-expiry/cache refresh UX; complete restricted-role/public
-journeys; current final CI; reviewed deployment/drain/rollback integration.
+Portal fa4dc7f season/tier/badge/archive presentation is implemented:247 tests,
+3 expected skips, typecheck/build and six RU852x393 Chrome/Next fixture scenarios
+PASS. Browser fixture evidence is separate from actual PostgreSQL API proof.
+Native Home/own/visited/friend tiers, seasonal windows/badges and scoped
+calibration/promotion/demotion notices are implemented. Strict native test-target
+clippy compiles the four new helper/system tests and extended RU Home test;
+execution and current native screenshots remain required. Eight added CJK glyphs
+preserve old coverage; asset and formatting checks PASS.
+
+Still required: current native test execution and affected RU visual proof;
+expiry/cache refresh UX; complete current public journeys and final CI;
+reviewed deployment/drain/rollback integration.
 Follow the full lobby TODO for all other findings and release gates.

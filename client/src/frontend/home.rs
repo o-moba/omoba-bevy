@@ -130,6 +130,10 @@ fn rating_line(profile: Option<&shared::career::ProfileSummary>) -> String {
         },
         &[
             ("rating", &profile.rating),
+            (
+                "tier",
+                &crate::career::ranked::tier_name(shared::ranked::Tier::for_rating(profile.rating)),
+            ),
             ("played", &profile.placement_matches()),
             ("total", &shared::career::NEWCOMER_MATCHES),
         ],
@@ -2578,7 +2582,7 @@ mod tests {
         app.update();
         assert_eq!(
             named_text(&mut app, "HomeRating").as_deref(),
-            Some("Рейтинг 1199 · Новичок 19/20")
+            Some("Рейтинг 1199 · Калибровка 19/20")
         );
         let button = harness::find(app.world_mut(), "HomeRanked").unwrap();
         assert!(
@@ -2675,7 +2679,19 @@ mod tests {
         app.update();
         assert_eq!(
             named_text(&mut app, "HomeRating").as_deref(),
-            Some("Рейтинг 1200 · Новичок 0/20")
+            Some("Рейтинг 1200 · Калибровка 0/20")
+        );
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            let profile = career.view.profile.as_mut().unwrap();
+            profile.rating = 1500;
+            profile.ranked.as_mut().unwrap().rated_matches = 20;
+        }
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1500 · Золото")
         );
     }
 
