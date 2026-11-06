@@ -1198,3 +1198,14 @@ PASS. Fixed regional portal URL, no ambient account material, bounded streaming,
 redirect/error boundaries and5s total/3s connect deadlines are implemented.
 This returns untrusted bytes only; native pin/cache/routing integration remains
 in progress and no live key/service/player route was activated.
+
+
+## 2026-11-06 — Native directory trust/cache
+
+Nine native crypto/cache/process cases,9 endpoint guard cases and strict client
+lib/test-target clippy PASS. Exact-byte Ed25519 verification, explicit regional/
+contour destination guards, durable expired sequence history/equal-sequence
+immutability, backwards-clock rejection and cross-process atomic cache storage
+are implemented. Four anonymous transport cases also PASS. [Proof](../evidence/fair-play-2026-11-06/directory-native-summary.json).
+These APIs are not wired to live UDP admission yet; pin configuration, lifecycle,
+fallback/policy UI, party/Resume and actual multi-host acceptance remain required.

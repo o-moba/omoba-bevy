@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add independent native directory signature/authority checks and a durable
+  exact-byte cache. Expired history still fences rollback and changed payloads
+  reusing a sequence; corrupt state and backwards clocks fail closed. A stable
+  OS lock and synced atomic replacement protect concurrent processes. All9
+  native/9 endpoint cases,18 post-match cases and strict client test-target
+  clippy PASS; no live pins/routing were activated or dependencies added.
+
 - Add native anonymous game-directory transport using the account region's
   fixed HTTPS portal, no ambient service override/session/cookies, no redirects,
   bounded JSON response streaming and total/connect deadlines. All4 real local

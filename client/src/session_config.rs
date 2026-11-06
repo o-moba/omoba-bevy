@@ -82,8 +82,18 @@ pub(crate) fn startup_server_addr() -> String {
 /// refuses the production lobby and every production `omoba.io` / `ekza.io` / `omoba.ru` name.
 /// This build's rule is `endpoint_allowed_for(BUILD_CONTOUR, host)`.
 pub(crate) fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
-    if let Some(region) = shared::region::active()
-        && !region_endpoint_allowed(region.id, host)
+    endpoint_allowed_in_region(contour, shared::region::active().map(|r| r.id), host)
+}
+
+/// The same guard with an explicit authority, for signed directory validation
+/// before a process-global account region or network transport is installed.
+pub(crate) fn endpoint_allowed_in_region(
+    contour: Option<&str>,
+    region: Option<shared::region::RegionId>,
+    host: &str,
+) -> bool {
+    if let Some(region) = region
+        && !region_endpoint_allowed(region, host)
     {
         return false;
     }

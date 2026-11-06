@@ -235,3 +235,49 @@ signer, and an RU/production portal build; from the portal checkout run
 uses a publicly known test pin. It does not establish live HTTPS, native routing,
 key rotation, any second host, WAN capacity or release readiness. No live key,
 service settings, deployment, workflow, dependency or migration was changed.
+
+
+## Native trust/cache integration checkpoint — targeted checks PASS
+
+Native trust and storage now have an explicit reusable API in
+`client/src/game_directory.rs`; anonymous fixed-origin fetch is in
+`passport/src/game_directory.rs`. This is not yet wired to live UDP admission.
+No live pin was generated/baked/provisioned, and the existing ready native UI
+binary is preserved for the outstanding captures.
+
+- Trust comes from a separate caller-supplied set of up to4 public pins (unique
+  key IDs). Strict Ed25519 verification authenticates the exact signing domain,
+  key identity and UTF-8 payload before returning an immutable typed view.
+- Every directory and cached document is bound to the exact account region and
+  contour. Known foreign regional labels and IPs are checked independently;
+  production also refuses the documented dev namespaces/VPS IP and mapped IPv6
+  aliases. A valid signature never bypasses these destination guards.
+- The regular-file cache contains the original signed envelope, retaining its
+  u64 sequence after expiry. Expired data yields no admission destination, but
+  remains an authenticated rollback/equal-sequence fence across restart. Same
+  sequence with different signed payload is refused; outer JSON whitespace is
+  irrelevant. Corrupt/unreadable/nonregular state is not silently reset to zero.
+  A backwards clock returns an error instead of pretending known policy is absent.
+- A separate stable OS file-lock inode serializes compare-and-publish across
+  independently opened cache instances/processes. Contention is bounded/fails
+  busy; process death releases the lock. New bytes are written/synced to a unique
+  sibling, renamed and (on Unix) the directory is synced before exposure. Failure
+  must not permit falling back to an older open policy after a newer closed one.
+- Pin rotation requires an overlap and an advanced publication sequence before
+  retiring the cached document's old verifier. This disk cache is not hardware
+  monotonic storage and does not defend against an owner deleting/replacing the
+  entire application state or an untrusted process owning its storage directory.
+- Public transport derives its HTTPS URL from region/contour, ignores ambient
+  service overrides, has no account token/cookie jar, refuses redirects/non-JSON
+  or unsuccessful replies, and enforces a5s total/3s connect limit and64KiB
+  streamed cap. Only private test construction permits a loopback HTTP fixture.
+
+Verification:all9 native signature/cache cases and4 actual HTTP transport cases
+PASS, including an actual independently launched process blocked by the OS cache
+lock. All9 endpoint guard and18 post-match cases PASS; strict client lib/test-
+target and RU passport all-target clippy PASS. The first cacheA client test
+compile took1941.09s; subsequent test execution took0.12s and no new cargo cache
+was created. [Source hashes/proof](../evidence/fair-play-2026-11-06/directory-native-summary.json).
+Runtime pin configuration,
+fetch/cache/fallback lifecycle, policy UI, party/Resume ownership and actual
+multi-host/WAN remain required D1/P7 work.

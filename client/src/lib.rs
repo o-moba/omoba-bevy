@@ -23,6 +23,7 @@ mod edge_hud;
 mod equipped_skills;
 mod frontend;
 mod game_audio;
+pub mod game_directory;
 mod game_state;
 mod game_vfx;
 mod gamepad;
