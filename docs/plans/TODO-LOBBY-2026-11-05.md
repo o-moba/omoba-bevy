@@ -2126,3 +2126,21 @@ source and needs a fresh gate of its own. Original ledger remains62 done,
 remain. No release/deployment readiness is claimed from this candidate.
 
 [Exact source fingerprint and validation scope](../evidence/directory-runtime-2026-11-07/summary.json).
+
+
+### Native runtime regressions executed; shipped CJK subset corrected
+
+Source97732182 CI42292829206 dev-client job128150400206 actually executes all11
+new networking/Home/update cases: PASS. The overall dev-client run is rejected:
+1620 PASS,1 FAIL,1 ignored, with the existing complete-dictionary CJK guard finding
+missing兼(U+517C) and维(U+7EF4). This is a packaged font defect, not a passing gate.
+Rebuild only the installed Serif SC subset from the same pinned upstream face,
+retain every prior codepoint, add the two glyphs (+844bytes), and update its byte
+counts. Actual production Rust cmap parser over all shipped dictionary values
+with exact is_cjk ranges: PASS; whole installed asset size/manifest check: PASS.
+Do not synchronize unrelated dirty omoba-ui assets or change Chinese wording to
+avoid the guard. [Exact source/job and font proof](../evidence/directory-runtime-2026-11-07/summary.json),
+[font hashes/coverage](../evidence/directory-runtime-2026-11-07/font-fix.json).
+
+Fresh corrected-source CI is required. Native pixels/physical acceptance and all
+remaining original/critic/RU requirements are unchanged; original ledger62/5/1.

@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Execute all11 native-directory regression cases in CI: PASS. The broader
+  dev-client run reports1620 PASS,1 FAIL,1 ignored because the shipped CJK font
+  lacks two new policy-message glyphs. Rebuild that subset from the same upstream
+  face, preserve old coverage and add兼/维 (+844bytes); update the asset manifest.
+  Exact production Rust cmap/dictionary and package-budget checks PASS locally.
+  Current full corrected-source CI and rendered pixels remain required.
+
 - Bind configured native directory routing to the legal/region startup gate,
   background refresh and exact-IP UDP. Preserve original lobby/worker ownership
   across Resume, returns, reconnects and temporary authority failures; bound saved

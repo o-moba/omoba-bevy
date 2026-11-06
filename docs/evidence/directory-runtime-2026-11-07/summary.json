@@ -51,7 +51,7 @@
     }
   ],
   "new_cases": {
-    "status": "ADDED_AND_COMPILE; EXECUTION_PENDING_CI",
+    "status": "PASS_EXECUTED_IN_DEV_CLIENT_CI",
     "count": 11,
     "names": [
       "pending_or_malformed_authority_never_opens_legacy_transport",
@@ -65,19 +65,39 @@
       "returning_party_keeps_original_lobby_through_maintenance_and_weight_changes",
       "frontend::home::tests::directory_policy_blocks_stale_queue_actions_and_offers_retry_without_blocking_offline",
       "update::tests::signed_directory_requires_update_without_udp_and_keeps_portal_link_rules"
+    ],
+    "job_id": 128150400206,
+    "execution_log": [
+      "2026-11-06T21:08:06.1400750Z test net::directory::tests::pending_or_malformed_authority_never_opens_legacy_transport ... ok",
+      "2026-11-06T21:08:06.1330613Z test net::directory::tests::boot_uses_signed_concrete_ip_despite_unresolvable_label ... ok",
+      "2026-11-06T21:08:06.1444025Z test net::directory::tests::resume_selects_original_owner_before_new_search_policy_and_normalizes_hint ... ok",
+      "2026-11-06T21:08:06.1366368Z test net::directory::tests::expired_worker_authority_keeps_pending_handoff_without_transport ... ok",
+      "2026-11-06T21:08:06.1413199Z test net::directory::tests::maintenance_blocks_new_search_but_preserves_fifo_cancel_and_resume ... ok",
+      "2026-11-06T21:08:06.1439971Z test net::directory::tests::removed_owner_cannot_borrow_another_lobbys_worker_authority ... ok",
+      "2026-11-06T21:08:06.1329608Z test net::directory::tests::command_dispatch_guard_runs_before_new_search_interception ... ok",
+      "2026-11-06T21:08:06.1395266Z test net::directory::tests::lifecycle_retry_preserves_pending_allocation_until_authority_refreshes ... ok",
+      "2026-11-06T21:08:06.1502410Z test net::directory::tests::returning_party_keeps_original_lobby_through_maintenance_and_weight_changes ... ok",
+      "2026-11-06T21:08:03.0187679Z test frontend::home::tests::directory_policy_blocks_stale_queue_actions_and_offers_retry_without_blocking_offline ... ok",
+      "2026-11-06T21:08:11.1975784Z test update::tests::signed_directory_requires_update_without_udp_and_keeps_portal_link_rules ... ok"
     ]
   },
   "full_ci": {
-    "status": "REQUIRED_ON_CANDIDATE",
-    "parent_run": 42289126392,
-    "parent_status": "six jobs PASS; postgres public journeys still in progress at checkpoint; not inherited"
+    "status": "NOT_ACCEPTED_DEV_CLIENT_FONT_FAILURE",
+    "run_id": 42292829206,
+    "dev_client_job": 128150400206,
+    "passed": 1620,
+    "failed": 1,
+    "ignored": 1,
+    "failure": "ui::theme::tests::the_display_subset_covers_every_zh_hans_dictionary_character: missing U+517C and U+7EF4",
+    "fresh_corrected_source_gate_required": true
   },
   "limitations": [
     "No live public trust provisioned or package option applied",
     "No configured released binary or published live directory",
     "No actual alternate-host/WAN/RU capacity or cross-host discipline proof",
     "No current native pixels or physical device acceptance",
-    "Local linked test/game build not performed below disk guard; cached targeted lint checks only",
-    "Initial private-import, initializer, status/weight test-fixture errors corrected before final checks"
-  ]
+    "Initial private-import, initializer, status/weight test-fixture errors corrected before final checks",
+    "Runtime regression execution is now verified in CI; one shipped-font coverage failure requires the current isolated font correction and a fresh full gate"
+  ],
+  "candidate_commit": "97732182f5282e5fada582205962ed0c0ecbb58e"
 }
