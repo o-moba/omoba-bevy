@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Preserve six inspected native offscreen fair-play images and exact source/
+  binary/PNG hashes: remake entry/availability, both44px vote prompts, real first-
+  match guide dismissal and coherent remake/surrender results. New Home fixture
+  is rejected for missing content. C5 visuals pass; corrected full branch CI and
+  other release requirements remain pending.
+
 - Save the verified locked-Mac native capture recipe and a standard-library
   single-scene runner in the repository's OMOBA UI skill. It uses isolated RU
   fixture settings/closed loopback endpoints and keeps failures/provenance;

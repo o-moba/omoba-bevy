@@ -50,3 +50,34 @@ preference changes. It only establishes feasibility: application integration and
 actual fair-play/game frames still need verification. Its own source/binary/PNG/
 report are retained under `.agent/codex-ranked-readiness/offscreen-probe-v1*`.
 This diagnostic is not added to the accepted game-image manifest.
+
+
+## Actual offscreen game frames — inspected PASS
+
+[offscreen-manifest.json](offscreen-manifest.json) binds the six unchanged PNGs
+below to production UI source710063a7 and RU binaryd8d0bf61… . All relevant source
+hashes were compared with that commit. Two camera/opt-in regressions, strict RU
+clippy, native build and5 screen-map cases PASS. Each launch recorded a locked
+Mac; no OS window, desktop screenshot, unlock or power assertion was used.
+
+- [Remade result](native-offscreen-remade-result.png): coherent Remade receipt,
+  no winner/ordinary reward/rating, zero XP, complete team tables and saved state.
+- [Surrender result](native-offscreen-surrender-result.png):12min surrendered
+  match, supplied +16/+150 shown and saved. This is not a rating-formula test.
+- [First-match guide](native-offscreen-remake-guide.png) then
+  [restored remake vote](native-offscreen-remake-vote.png): real Creator Loop
+  shot/dismiss through the UI kit, no entity-despawn panic;1/3,0,27s,44px Yes/No.
+- [Surrender vote](native-offscreen-surrender-vote.png):1/4,0,27s,44px Yes/No.
+- [Remake menu](native-offscreen-remake-menu.png): required remake entry and
+ 510s surrender availability fit. Lower scroll-body controls were not exercised.
+
+These are one RU852×393 synthetic presentation fixture set. They do not prove
+OS window/focus/input, physical-phone/haptic/keep-awake, live admission/accounts,
+network vote dispatch or performance. Actual settlement/dispatch has separate
+process/PostgreSQL/unit evidence. The first-guide controller code matches the
+previous complete e85875ba CI; the newest full branch CI still must pass.
+
+The new [Home attempt](offscreen-home-rejected.json) is rejected: no underlying
+Home content appeared, so no screenshot was accepted and#45 remains partial.
+The reusable commands/helper are committed in
+[the repository skill](../../../.claude/skills/omoba-ui-verification/SKILL.md).
