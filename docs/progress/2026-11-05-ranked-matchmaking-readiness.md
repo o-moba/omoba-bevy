@@ -1245,3 +1245,21 @@ Current original68 ledger is62 done,5 partial,1 open after actual portal finding
 adjudication. Separate critic/physical/UI and P7–P9 release gates remain. No RU
 migration, key provision, service configuration or deployment occurred. Root disk
 remains below20GiB; caches already use Orico and a resource question is pending.
+
+
+## 2026-11-07: native directory regression execution and encrypted WAL transport
+
+Source97732182 dev-client job128150400206 executes all11 new runtime cases: PASS.
+The complete client run is not accepted (1620 PASS,1 FAIL,1 ignored): shipped CJK
+font coverage lacks兼/维 in new policy copy. Commitca32bce5 adds those glyphs from
+the same pinned source, preserves all prior coverage (+844bytes), and passes the
+actual production Rust cmap/dictionary and whole asset-budget checks. Fresh full
+corrected-source CI and current native pixels remain required.
+
+C4 adds a real pgBackRest2.58.0/PG18.6 encrypted SFTP base+WAL recovery proof with
+career10/portal11, named-point/latest exact synthetic rating/history, missing/
+corrupt WAL rejection, structured wrong-pin refusal and archive outage:7 PASS.
+All owned containers/network are removed. See [scope, source and logs](../evidence/pgbackrest-2026-11-07/README.md).
+The actual host kit/production dependencies are unchanged; C4 integration,
+operator approval and independent-storage/RU recovery acceptance remain open.
+No requirement is waived; original68 ledger remains62/5/1.

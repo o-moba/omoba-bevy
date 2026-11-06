@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify encrypted pgBackRest/SFTP recovery in two isolated local containers:
+  actual career10/portal11 tables, exact named-point/latest rating/history,
+  missing/corrupt post-base WAL rejection, structured wrong-host-pin refusal and
+  archive-outage detection. Seven checks PASS; owned containers/network removed.
+  Preserve exact runnable proof and rejected earlier attempts. This does not
+  install pgBackRest or change production backup tooling; C4 integration and
+  actual independent-storage/RU acceptance remain open.
+
 - Execute all11 native-directory regression cases in CI: PASS. The broader
   dev-client run reports1620 PASS,1 FAIL,1 ignored because the shipped CJK font
   lacks two new policy-message glyphs. Rebuild that subset from the same upstream
