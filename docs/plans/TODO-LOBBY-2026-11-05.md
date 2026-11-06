@@ -1601,3 +1601,14 @@ entity-despawn panic. These are synthetic presentation proof, not real admission
 physical phones or performance. Current full corrected branch CI remains required.
 The party-restart/Home attempt still has no underlying Home content and is
 rejected;#45 remains partial. No empty backdrop or false green was accepted.
+
+
+Owner-requested reusable method saved in the repository skill
+`.claude/skills/omoba-ui-verification/SKILL.md`, with
+`references/offscreen-native.md` and `scripts/capture_offscreen.py`. The runner
+needs no temporary-session code, creates only fresh ignored fixture output,
+clears inherited service overrides, uses closed loopback endpoints and records
+binary/source/runner hashes. Skill validator and Python syntax pass; actual
+locked-Mac surrender, guide/dismiss/prompt, menu and surrender-prompt calls pass
+and their images are inspected. The method does not grant legal consent,
+production access, extra UI matrix, physical-device or OS-window acceptance.

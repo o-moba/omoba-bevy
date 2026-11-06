@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Save the verified locked-Mac native capture recipe and a standard-library
+  single-scene runner in the repository's OMOBA UI skill. It uses isolated RU
+  fixture settings/closed loopback endpoints and keeps failures/provenance;
+  validates offscreen/native readback before manual image acceptance. Skill
+  validation and actual surrender/guide-dismiss/menu/vote captures pass.
+
 - Add explicit desktop QA rendering to an image without an OS window. Retain
   production main-camera/UI routing and virtual window metrics; preserve preview
   image targets and existing capture gates. RU strict clippy/build,2 camera/opt-in

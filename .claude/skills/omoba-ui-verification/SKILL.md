@@ -1,6 +1,6 @@
 ---
 name: omoba-ui-verification
-description: Plan and run economical OMOBA UI smoke checks and screenshot evidence in omoba-bevy or omoba-ui. Use when changing UI, checking layouts or localization, or preparing visual verification. Defaults to one language and one device; a full release matrix requires an explicit user request.
+description: Run focused OMOBA UI checks and screenshot evidence in omoba-bevy or omoba-ui, including native offscreen frames on a locked Mac. Use for UI changes, layouts, localization or visual verification. Defaults to one language and one device; a full release matrix requires an explicit user request.
 ---
 
 # OMOBA UI verification
@@ -23,6 +23,15 @@ Enable a full UI matrix only when the user explicitly requests it for the curren
 For an authorized full run, state the planned screens, languages, and device profiles, reuse existing builds, and execute that matrix once. Rerun only failed or newly affected cells. Record viewport/simulator/physical-device evidence accurately. Return to routine mode for subsequent tasks. This skill does not authorize CI, deployment, or production changes.
 
 ## Proof and reporting
+
+For native Bevy screenshots on a locked Mac, use the explicitly enabled
+offscreen renderer rather than requesting another unlock. Read
+[the native offscreen recipe](references/offscreen-native.md) for the supported
+harnesses, isolated settings, commands and acceptance gates. The bundled
+[capture helper](scripts/capture_offscreen.py) runs one selected fair-play state
+with no OS window or desktop capture. Reuse a matching QA-enabled build; do not
+rebuild just for skill/documentation changes. This supports rendering/layout
+proof; OS-window/input and physical-phone checks still need their own evidence.
 
 - Apply the same budget when freezing a task spec and when a fresh verifier reruns checks. Fresh verification does not imply a larger matrix.
 - If an older task spec assumes a broad matrix without the owner's explicit request, document a scope amendment reflecting this standing instruction before proceeding. Never mark untested criteria PASS.
