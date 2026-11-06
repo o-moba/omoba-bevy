@@ -5,6 +5,18 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify corrected715a8117 full CI: all7 jobs and18 public-journey stages PASS;
+  dev-client1621/0/1, including all11 directory cases and full CJK coverage.
+  Inspect exact artifact checksum, unanimous15s ready/FIFO and all10 AI-played
+  Ranked rating/public/season receipts. Physical/RU acceptance remains open.
+
+- Preserve a tested15-file C4 host-kit review patch without applying production
+  package/tooling changes: signed logical plus encrypted physical/WAL backup,
+  escrow, retention, minute health/alerts and isolated restore drill. Actual
+  PG16/18 combined rehearsals each18 PASS;156 unit tests,1 expected skip.
+  Include an SFTP unknown-link-count parser fix found by the actual upload.
+  Owner approval and independent-storage/RU recovery remain required.
+
 - Verify encrypted pgBackRest/SFTP recovery in two isolated local containers:
   actual career10/portal11 tables, exact named-point/latest rating/history,
   missing/corrupt post-base WAL rejection, structured wrong-host-pin refusal and

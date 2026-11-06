@@ -2172,3 +2172,28 @@ separate approved independent-storage/RU rollout. No production dependency,
 secret, service, host configuration or workflow is changed by this proof.
 Original ledger62 done,5 partial,1 open and every remaining physical/RU/final
 requirement stay in scope.
+
+
+### C4 full host-kit review candidate and current full CI
+
+The complete corrected715a8117 CI42295758507 passes all7 jobs, including the
+actual18-stage PostgreSQL/public journeys and1621/0/1 dev-client results. The11
+directory/Home/update regressions and full CJK coverage pass. Downloaded artifact
+SHA/size checked; all10 AI-played Ranked profile receipts independently checked
+for rating±24 and public/rated/season increments. Fifteen-second unanimous ready
+timeout/FIFO replacement passes. [Exact current gate and limitations](../evidence/full-ci-2026-11-07-715a/README.md).
+
+C4 now has a concrete [15-file review patch](reviews/C4-PITR-2026-11-07.md),
+not applied to tracked host tooling: combined signed logical and encrypted
+physical/WAL backups, escrow, retention, minute checks/alerts, isolated drill,
+required readiness and SFTP unknown-link-count correction.156 unit tests
+(155 pass,1 optional E2E skip); actual PG16.15 andPG18.6 complete combined
+rehearsals each18 PASS. Missing/corrupt WAL, wrong host pin, outage, repaired
+health, independent logical preservation and notification-state isolation are
+actually exercised. [Runnable exact proof](../evidence/pitr-kit-2026-11-07/README.md).
+
+C4 remains OPEN: new production package/kit integration requires owner approval
+under the user-provided AGENTS. No host installation, secrets, archive settings,
+service restart, workflow or RU deployment occurred. Actual independent-storage/
+RU recovery, C2/C3, UI-2/UI-3, scaling and final release acceptance remain. The
+original68 ledger remains62 done,5 partial,1 open; no remaining requirement waived.

@@ -99,5 +99,17 @@
     "Initial private-import, initializer, status/weight test-fixture errors corrected before final checks",
     "Runtime regression execution is now verified in CI; one shipped-font coverage failure requires the current isolated font correction and a fresh full gate"
   ],
-  "candidate_commit": "97732182f5282e5fada582205962ed0c0ecbb58e"
+  "candidate_commit": "97732182f5282e5fada582205962ed0c0ecbb58e",
+  "corrected_source_ci": {
+    "status": "PASS_ALL_SEVEN_JOBS",
+    "source_commit": "715a81173ac919cb48fd65d7df510c3f6daf4d72",
+    "run_id": 42295758507,
+    "dev_client_job": 128160434051,
+    "passed": 1621,
+    "failed": 0,
+    "ignored": 1,
+    "directory_regressions": 11,
+    "complete_cjk_guard": "PASS",
+    "evidence": "../full-ci-2026-11-07-715a/summary.json"
+  }
 }

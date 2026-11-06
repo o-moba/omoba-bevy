@@ -1,0 +1,1326 @@
+diff --git a/ops/vps/ru/README.md b/ops/vps/ru/README.md
+--- a/ops/vps/ru/README.md
++++ b/ops/vps/ru/README.md
+@@ -798,3 +798,87 @@
+ are kept; older ones are in the off-host sets), with the lobby and the Account API
+ stopped: `runuser -u postgres -- pg_restore --clean --if-exists -d omoba_ru < <dump>`.
+ Never drop the database or delete match directories.
++
++## C4: continuous WAL and physical recovery (review candidate)
++
++This kit requires pgBackRest2.58 or newer in addition to the signed nightly logical
++archive. Bootstrap installs the distribution package, the helper, a protected
++placeholder profile and a minute archive-check timer. It does not add package
++repositories, generate credentials, initialize remote storage, change PostgreSQL
++settings or restart a cluster. An old package or an unconfigured profile fails
++readiness. Review the available package/version before applying bootstrap.
++
++The physical repository uses pgBackRest AES-256-CBC and native checksums. Existing
++GnuPG signatures continue to protect the independent logical archives. Full
++physical copies are taken weekly (or on first run), differentials daily; keep
++three completed full copies and14 differentials. Native expiry retains the WAL
++needed by retained copies. The default provides roughly14–21 days of physical
++recovery after three weekly fulls exist; actual storage/RPO/RTO require a drill.
++A failed PITR phase reports failure while the independent signed logical copy
++still uploads. Its separate success record is not a combined success certificate.
++
++### Operator setup, after the separate host approval
++
++1. Verify PostgreSQL's actual major/data directory/socket and pgBackRest version.
++   The helper checks the live cluster identity/data path before physical work.
++2. Fill `/etc/pgbackrest/omoba-ru.conf` from the placeholder profile. Use an
++   independently operated RU SFTP or S3 repository with its own `/omoba-ru/pitr`
++   prefix. The operator verifies the storage location and failure domain.
++3. Keep the config root:postgres0640 in a root-owned0755 directory. Put the
++   physical repository's SSH private key directly in that directory with
++   root:postgres0640 (or postgres0600), its public key and provider-verified pinned
++   known_hosts beside it. All these files must be direct children and included in
++   secrets escrow. The logical archive uses its existing separate root0600 key.
++   `/etc/pgbackrest/empty` must be protected and empty; ambient pgBackRest options
++   are discarded. No credential is accepted on the command line.
++4. Run `ru_backup.py pitr-config --json` for the protected-profile check and exact
++   public archive command. Initialize the stanza with pgBackRest, explicitly
++   naming the same config, empty include directory and `omoba-ru` stanza as that
++   output. Use a clean environment and run the native command as postgres.
++5. Separately review/apply PostgreSQL `archive_mode=on`, `archive_timeout=60s`,
++   empty `archive_library`, and the exact emitted `archive_command`. Schedule any
++   required cluster restart through the normal drain/owner process. The helper
++   refuses a different command, async archive mode or a dropping queue limit.
++6. Escrow the protected config, cipher passphrase, keys and backup.env with the
++   established encrypted secrets procedure. A lost cipher passphrase makes the
++   physical archive unreadable. No real secret is supplied by the repository.
++7. Run the normal `ru_backup.py backup --reason manual`, `drill`,
++   `pitr-check --alert` and `check --json --remote`. The combined drill verifies the
++   signed logical snapshot plus a fresh named physical recovery target. RU
++   readiness requires an initial successful physical drill, not a grace period.
++
++S3 alternative: replace the SFTP-specific options with `repo1-type=s3`, the
++provider's `repo1-s3-endpoint`, `repo1-s3-bucket`, `repo1-s3-region`, access key and
++secret in this same protected file, `repo1-storage-verify-tls=y`, and the separate
++repository prefix. Never disable TLS verification. The checked local integration
++uses SFTP; the actual selected provider still requires the independent-storage
++and RU restore drill before deployment acceptance.
++
++### Health and restore boundaries
++
++`omoba-pitr-check-ru.timer` proves an actual WAL archive round every minute. Failed
++checks alert using the established journal/Telegram path. A dedicated locked
++PITR notification journal cannot overwrite long-running backup metadata. Normal
++backup health rejects a failed or older-than5-minute archive proof, physical base
++older than26h, missing/failed/older-than35-day physical drill, weak settings or
++missing escrow. `check --remote` also reads the actual physical repository without
++refreshing local success. The host refuses disabled PITR for a production launch.
++
++The scratch cluster lives in `/var/lib/omoba-ru-pitr`, independently traversable
++by postgres. The helper reserves space, creates a fresh owned directory/socket,
++restores only there, strips source network/preload/streaming settings, exposes no
++TCP listener and disables archiving on the restored cluster. It requires a
++completed named-target promotion, source system identifier, schema histories and
++WAL replay position. Merely accepting read-only connections is not success.
++Cleanup is mandatory; an un-stoppable scratch cluster is retained and reported as
++failure. No restore uses `--delta` or overwrites a primary directory.
++
++For a real incident, restore secrets and the selected pgBackRest archive to a new
++host of the same PostgreSQL major. Select the operator-approved point/time and a
++new empty data directory with the native pgBackRest restore command. Start it
++with reviewed isolated settings, prove recovery/data first, then switch services
++through a separate approved deployment. The automated drill never performs that
++switch or a production restore.
++
++The local proof uses real career10/portal11 data structures and explicit synthetic
++receipts in separate local containers; it is not an independent-host/RU RPO proof.
+diff --git a/ops/vps/ru/backup.env.example b/ops/vps/ru/backup.env.example
+--- a/ops/vps/ru/backup.env.example
++++ b/ops/vps/ru/backup.env.example
+@@ -41,3 +41,11 @@
+ # (journalctl -u omoba-backup-ru -u omoba-backup-check-ru).
+ #OMOBA_TELEGRAM_BOT_TOKEN=CHANGE_ME
+ #OMOBA_TELEGRAM_CHAT_ID=CHANGE_ME
++
++# C4: physical/WAL recovery is required before RU launch. Bootstrap installs only
++# an invalid placeholder profile; the operator fills /etc/pgbackrest/omoba-ru.conf,
++# escrows that folder, initializes the stanza and applies reviewed PostgreSQL
++# archive settings separately. Never disable this for a production launch.
++OMOBA_BACKUP_PITR_REQUIRED=1
++OMOBA_BACKUP_PITR_CONFIG=/etc/pgbackrest/omoba-ru.conf
++OMOBA_BACKUP_PITR_RUNTIME_DIR=/var/lib/omoba-ru-pitr
+diff --git a/ops/vps/ru/omoba-backup-check-ru.service b/ops/vps/ru/omoba-backup-check-ru.service
+--- a/ops/vps/ru/omoba-backup-check-ru.service
++++ b/ops/vps/ru/omoba-backup-check-ru.service
+@@ -20,6 +20,6 @@
+ ProtectKernelTunables=true
+ ProtectKernelModules=true
+ ProtectControlGroups=true
+-ReadWritePaths=/var/backups/omoba-ru
++ReadWritePaths=/var/backups/omoba-ru /var/lib/omoba-ru-pitr
+ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ MemoryMax=256M
+diff --git a/ops/vps/ru/omoba-backup-ru.service b/ops/vps/ru/omoba-backup-ru.service
+--- a/ops/vps/ru/omoba-backup-ru.service
++++ b/ops/vps/ru/omoba-backup-ru.service
+@@ -27,6 +27,6 @@
+ ProtectKernelTunables=true
+ ProtectKernelModules=true
+ ProtectControlGroups=true
+-ReadWritePaths=/var/backups/omoba-ru
++ReadWritePaths=/var/backups/omoba-ru /var/lib/omoba-ru-pitr
+ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ MemoryMax=1G
+diff --git a/ops/vps/ru/omoba-pitr-check-ru.service b/ops/vps/ru/omoba-pitr-check-ru.service
+new file mode 100644
+--- /dev/null
++++ b/ops/vps/ru/omoba-pitr-check-ru.service
+@@ -0,0 +1,22 @@
++# C4: force/check an actual archived WAL segment; no freshness from local files.
++[Unit]
++Description=OMOBA RU live WAL archive check
++After=network-online.target postgresql.service
++Wants=network-online.target postgresql.service
++OnFailure=omoba-alert-ru@%n.service
++
++[Service]
++Type=oneshot
++ExecStart=/usr/bin/python3 /opt/omoba-ru/backup/ru_backup.py pitr-check --alert
++TimeoutStartSec=3min
++UMask=0077
++NoNewPrivileges=true
++PrivateTmp=true
++ProtectSystem=strict
++ProtectHome=true
++ProtectKernelTunables=true
++ProtectKernelModules=true
++ProtectControlGroups=true
++ReadWritePaths=/var/backups/omoba-ru /var/lib/omoba-ru-pitr
++RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
++MemoryMax=256M
+diff --git a/ops/vps/ru/omoba-pitr-check-ru.timer b/ops/vps/ru/omoba-pitr-check-ru.timer
+new file mode 100644
+--- /dev/null
++++ b/ops/vps/ru/omoba-pitr-check-ru.timer
+@@ -0,0 +1,10 @@
++[Unit]
++Description=OMOBA RU minute WAL archive health
++
++[Timer]
++OnCalendar=*-*-* *:*:00 UTC
++RandomizedDelaySec=5s
++Persistent=true
++
++[Install]
++WantedBy=timers.target
+diff --git a/ops/vps/ru/omoba-restore-drill-ru.service b/ops/vps/ru/omoba-restore-drill-ru.service
+--- a/ops/vps/ru/omoba-restore-drill-ru.service
++++ b/ops/vps/ru/omoba-restore-drill-ru.service
+@@ -26,6 +26,6 @@
+ ProtectKernelTunables=true
+ ProtectKernelModules=true
+ ProtectControlGroups=true
+-ReadWritePaths=/var/backups/omoba-ru
++ReadWritePaths=/var/backups/omoba-ru /var/lib/omoba-ru-pitr
+ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ MemoryMax=1G
+diff --git a/ops/vps/ru/pgbackrest.conf.example b/ops/vps/ru/pgbackrest.conf.example
+new file mode 100644
+--- /dev/null
++++ b/ops/vps/ru/pgbackrest.conf.example
+@@ -0,0 +1,38 @@
++# C4: pgBackRest>=2.58; placeholder only. Root:postgres0640; no real credential is shipped.
++# Fill the actual primary data path and independent RU storage before use.
++# S3 profile alternative is documented in README; strict TLS is mandatory.
++[global]
++repo1-type=sftp
++repo1-path=/omoba-ru/pitr
++repo1-sftp-host=CHANGE_ME
++repo1-sftp-host-user=CHANGE_ME
++repo1-sftp-host-port=22
++repo1-sftp-private-key-file=/etc/pgbackrest/sftp-key
++repo1-sftp-public-key-file=/etc/pgbackrest/sftp-key.pub
++repo1-sftp-host-key-check-type=strict
++repo1-sftp-host-key-hash-type=sha256
++repo1-sftp-known-host=/etc/pgbackrest/known_hosts
++repo1-cipher-type=aes-256-cbc
++repo1-cipher-pass=CHANGE_ME
++repo1-retention-full=3
++repo1-retention-diff=14
++archive-async=n
++archive-check=y
++archive-copy=y
++archive-mode-check=y
++archive-timeout=60
++process-max=1
++start-fast=y
++compress-type=gz
++compress-level=3
++io-timeout=30
++protocol-timeout=180
++lock-path=/var/lib/omoba-ru-pitr/lock
++log-path=/var/lib/omoba-ru-pitr/log
++spool-path=/var/lib/omoba-ru-pitr/spool
++log-level-file=off
++[omoba-ru]
++pg1-path=/var/lib/postgresql/CHANGE_ME/main
++pg1-socket-path=/var/run/postgresql
++pg1-port=5432
++pg1-user=postgres
+diff --git a/ops/vps/ru/ru_backup.py b/ops/vps/ru/ru_backup.py
+--- a/ops/vps/ru/ru_backup.py
++++ b/ops/vps/ru/ru_backup.py
+@@ -94,7 +94,7 @@
+     "OMOBA_BACKUP_DIR": "/var/backups/omoba-ru",
+     "OMOBA_BACKUP_STATE_DIRS": "/var/lib/omoba-ru/matches:/var/lib/omoba-ru/lobby-outbox",
+     "OMOBA_BACKUP_ESCROW": "/opt/omoba-ru/account-api.env:/opt/omoba-ru/lobby.env:/opt/omoba-ru/portal.env:"
+-                           "/opt/omoba-ru/backup.env:/opt/omoba-ru/host.json:/opt/omoba-ru/backup-keys",
++                           "/opt/omoba-ru/backup.env:/opt/omoba-ru/host.json:/opt/omoba-ru/backup-keys:/etc/pgbackrest",
+     "OMOBA_BACKUP_RUN_AS": "postgres",
+     "OMOBA_BACKUP_GPG_RECIPIENT_FILE": "/opt/omoba-ru/backup-keys/backup-public.asc",
+     "OMOBA_BACKUP_GPG_IDENTITY_FILE": "/opt/omoba-ru/backup-keys/backup-secret.asc",
+@@ -105,6 +105,9 @@
+     "OMOBA_BACKUP_KEEP_LOCAL": "2",
+     # The host's one Telegram bot (LR-17, ru_monitor.py); used unless this file names its own.
+     "OMOBA_ALERTS_ENV": "/opt/omoba-ru/alerts.env",
++    "OMOBA_BACKUP_PITR_REQUIRED": "1",
++    "OMOBA_BACKUP_PITR_CONFIG": "/etc/pgbackrest/omoba-ru.conf",
++    "OMOBA_BACKUP_PITR_RUNTIME_DIR": "/var/lib/omoba-ru-pitr",
+ }
+ OPTIONAL_KEYS = ("OMOBA_BACKUP_TARGET", "OMOBA_BACKUP_S3_ENDPOINT", "OMOBA_BACKUP_S3_REGION",
+                  "OMOBA_BACKUP_S3_ACCESS_KEY_ID", "OMOBA_BACKUP_S3_SECRET_ACCESS_KEY",
+@@ -362,6 +365,12 @@
+                                              "with `ru_backup.py keygen`)"))
+     if cfg.values.get("OMOBA_TELEGRAM_BOT_TOKEN") and not cfg.get("OMOBA_TELEGRAM_CHAT_ID"):
+         problems.append(("config", "OMOBA_TELEGRAM_BOT_TOKEN is set without OMOBA_TELEGRAM_CHAT_ID"))
++    try:
++        import ru_pitr
++        if ru_pitr.required(cfg):
++            problems += ru_pitr.Pitr(cfg).problems()
++    except BackupError as error:
++        problems.append(("pitr-config", str(error)))
+     return problems
+ 
+ 
+@@ -700,7 +709,7 @@
+ class SftpTarget:
+     """An SFTP account (OpenSSH `sftp -b`), host key pinned in its own known_hosts file."""
+ 
+-    LISTING = re.compile(r"^[-dlcbps][-rwxsStT]{9}\S*\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(.+)$")
++    LISTING = re.compile(r"^-[-rwxsStT]{9}\S*\s+(?:\d+|\?)\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(.+)$")
+ 
+     def __init__(self, user: str, host: str, port: int, path: str, key: str, known_hosts: str):
+         self.user, self.host, self.port, self.path = user, host, port, path
+@@ -922,13 +931,17 @@
+ 
+ 
+ class Context:
+-    def __init__(self, cfg: Config, now=time.time, opener=None, notify_opener=None, stderr=None):
++    def __init__(self, cfg: Config, now=time.time, opener=None, notify_opener=None, stderr=None,
++                 state_name="state.json", topic="backups"):
+         self.cfg = cfg
+         self.now = now
+         self.opener = opener
+         self.notify_opener = notify_opener or urllib.request.urlopen
+         self.stderr = stderr or sys.stderr
+-        self.state_path = os.path.join(cfg.backup_dir, "state.json")
++        if state_name not in ("state.json", "pitr-alerts.json"):
++            raise BackupError("invalid backup state name")
++        self.topic = topic
++        self.state_path = os.path.join(cfg.backup_dir, state_name)
+         try:
+             self.state = json.loads(Path(self.state_path).read_text())
+         except (FileNotFoundError, ValueError):
+@@ -969,7 +982,7 @@
+             alerts[code] = now
+         self.save()
+         lines = "\n".join(f"- {text}" for _, text in problems)
+-        return self.telegram(f"OMOBA RU backups on {socket.gethostname()}:\n{lines}")
++        return self.telegram(f"OMOBA RU {self.topic} on {socket.gethostname()}:\n{lines}")
+ 
+     def resolve(self, codes) -> None:
+         """Forget alerts whose problem is gone; tell Telegram once when everything passes again."""
+@@ -980,7 +993,7 @@
+         if gone:
+             self.save()
+             if not alerts:
+-                self.telegram(f"OMOBA RU backups on {socket.gethostname()}: all checks pass again")
++                self.telegram(f"OMOBA RU {self.topic} on {socket.gethostname()}: all checks pass again")
+ 
+     def telegram(self, text: str) -> bool:
+         token, chat = self.cfg.telegram()
+@@ -1060,7 +1073,9 @@
+         raise BackupError(f"unknown reason {reason!r}")
+     if release is not None and not RELEASE.fullmatch(release):
+         raise BackupError("--release must be a release name like 0.45.1-ru-abc1234")
+-    problems = [] if local_only else config_problems(cfg)
++    all_problems = [] if local_only else config_problems(cfg)
++    problems = [problem for problem in all_problems if not problem[0].startswith("pitr-")]
++    pitr_problems = [problem for problem in all_problems if problem[0].startswith("pitr-")]
+     stamp = time.strftime(STAMP, time.gmtime(ctx.now()))
+     name = f"omoba-ru-{stamp}-{reason}.tar.gpg"
+     with locked(cfg):
+@@ -1072,6 +1087,16 @@
+             if problems:
+                 raise BackupError("backups are not configured: " + "; ".join(text for _, text in problems))
+             summary = backup_steps(ctx, name, stamp, reason, release, local_only)
++            if not local_only:
++                # Preserve the independent logical archive even if new PITR
++                # configuration is incomplete. The combined run still fails.
++                ctx.state["last_logical_success"] = {**summary, "at": iso(ctx.now())}
++                ctx.save()
++                import ru_pitr
++                if pitr_problems:
++                    raise BackupError("PITR is not configured: " + "; ".join(text for _, text in pitr_problems))
++                if ru_pitr.required(cfg):
++                    summary["pitr"] = ru_pitr.Pitr(cfg, ctx.now).backup()
+         except BaseException as error:
+             text = redact(str(error) or type(error).__name__, cfg.secrets())
+             attempt.update(finished_at=iso(ctx.now()), ok=False, error=text)
+@@ -1386,6 +1411,9 @@
+             work = tempfile.mkdtemp(prefix="drill-", dir=cfg.work_dir)
+             try:
+                 result.update(drill_steps(ctx, wanted, source, work))
++                import ru_pitr
++                if result.get("ok") and ru_pitr.required(cfg):
++                    result["pitr"] = ru_pitr.Pitr(cfg, ctx.now).drill()
+             finally:
+                 shutil.rmtree(work, ignore_errors=True)
+     except BaseException as error:
+@@ -1521,7 +1549,7 @@
+     cfg = ctx.cfg
+     now = ctx.now()
+     problems = list(config_problems(cfg))
+-    warnings, facts = [], {"config": cfg.path}
++    warnings, facts = [], {"config": cfg.path, "pitr_required": cfg.get("OMOBA_BACKUP_PITR_REQUIRED") == "1"}
+     try:
+         facts["target"] = ctx.target().describe() if cfg.get("OMOBA_BACKUP_TARGET") else None
+         if facts["target"] and facts["target"].startswith("file://"):
+@@ -1577,6 +1605,13 @@
+             elif now - set_time(latest).timestamp() > MAX_BACKUP_AGE_HOURS * 3600:
+                 problems.append(("off-host-stale", f"the newest off-host set {latest} is more than "
+                                                    f"{MAX_BACKUP_AGE_HOURS} h old"))
++    try:
++        import ru_pitr
++        if ru_pitr.required(cfg):
++            pitr_problems, facts["pitr"] = ru_pitr.health(ctx, remote=remote)
++            problems += pitr_problems
++    except BackupError as error:
++        problems.append(("pitr-health", str(error)))
+     seen, unique = set(), []
+     for code, text in problems:
+         if (code, text) not in seen:
+@@ -1721,6 +1756,10 @@
+     check.add_argument("--json", action="store_true")
+     check.add_argument("--remote", action="store_true", help="also list the off-host sets")
+     check.add_argument("--alert", action="store_true", help="alert on problems (journal, Telegram)")
++    pitr_config = sub.add_parser("pitr-config", help="validate protected PITR settings and print the public archive command")
++    pitr_config.add_argument("--json", action="store_true")
++    pitr = sub.add_parser("pitr-check", help="live WAL archive check; fail rather than certify an unreachable repository")
++    pitr.add_argument("--alert", action="store_true")
+     config = sub.add_parser("config", help="are the settings complete?")
+     config.add_argument("--json", action="store_true")
+     listing = sub.add_parser("list", help="sets on this host and off-host")
+@@ -1758,6 +1797,27 @@
+             result = run_drill(ctx, args.set, args.source)
+             print(json.dumps(result, indent=2, sort_keys=True), file=stdout)
+             return 0 if result["ok"] else 1
++        if args.command == "pitr-config":
++            import ru_pitr
++            pitr = ru_pitr.Pitr(ctx.cfg, ctx.now)
++            problems = pitr.problems()
++            if not ru_pitr.required(ctx.cfg): problems.append(("pitr-config", "PITR must be mandatory for RU"))
++            facts = {"config": pitr.path, "runtime": str(pitr.runtime), "archive_timeout_seconds": 60,
++                     "archive_command": None if problems else pitr.archive_command}
++            print_report({"ok": not problems, "problems": [text for _, text in problems], "warnings": [], "facts": facts}, args.json, stdout)
++            return 0 if not problems else 1
++        if args.command == "pitr-check":
++            import ru_pitr
++            try:
++                if not ru_pitr.required(ctx.cfg):
++                    raise BackupError("PITR must be enabled for the RU archive check")
++                result = ru_pitr.Pitr(ctx.cfg, ctx.now).check()
++            except BackupError as error:
++                if args.alert: ru_pitr.notify(ctx.cfg, str(error))
++                raise
++            if args.alert: ru_pitr.notify(ctx.cfg, None)
++            print(json.dumps(result, sort_keys=True), file=stdout)
++            return 0
+         if args.command == "check":
+             report = health(ctx, remote=args.remote)
+             if args.alert:
+@@ -1769,7 +1829,7 @@
+         if args.command == "config":
+             problems = config_problems(ctx.cfg)
+             print_report({"ok": not problems, "problems": [text for _, text in problems], "warnings": [],
+-                          "facts": {"config": ctx.cfg.path}}, args.json, stdout)
++                          "facts": {"config": ctx.cfg.path, "pitr_required": ctx.cfg.get("OMOBA_BACKUP_PITR_REQUIRED") == "1"}}, args.json, stdout)
+             return 0 if not problems else 1
+         if args.command == "list":
+             local = local_sets(ctx.cfg)
+diff --git a/ops/vps/ru/ru_host.py b/ops/vps/ru/ru_host.py
+--- a/ops/vps/ru/ru_host.py
++++ b/ops/vps/ru/ru_host.py
+@@ -113,14 +113,19 @@
+ # Backups (LR-03): ru_backup.py with its units and timers, its settings and keys.
+ BACKUP_TOOL_DIR = OPT + "/backup"
+ BACKUP_SCRIPT = BACKUP_TOOL_DIR + "/ru_backup.py"
++PITR_SCRIPT = BACKUP_TOOL_DIR + "/ru_pitr.py"
++PITR_CONFIG_DIR = "/etc/pgbackrest"
++PITR_CONFIG = PITR_CONFIG_DIR + "/omoba-ru.conf"
++PITR_RUNTIME = "/var/lib/omoba-ru-pitr"
+ BACKUP_KEYS = OPT + "/backup-keys"
+ BACKUP_ENV = OPT + "/backup.env"
+ BACKUP_ENV_EXAMPLE = "backup.env.example"
+ BACKUP_UNITS = ("omoba-backup-ru.service", "omoba-backup-ru.timer", "omoba-restore-drill-ru.service",
+-                "omoba-restore-drill-ru.timer", "omoba-backup-check-ru.service", "omoba-backup-check-ru.timer")
++                "omoba-restore-drill-ru.timer", "omoba-backup-check-ru.service", "omoba-backup-check-ru.timer",
++                "omoba-pitr-check-ru.service", "omoba-pitr-check-ru.timer")
+ BACKUP_TIMERS = tuple(name for name in BACKUP_UNITS if name.endswith(".timer"))
+ BACKUP_COMMANDS = {"omoba-backup-ru.service": "backup --reason nightly", "omoba-restore-drill-ru.service": "drill",
+-                   "omoba-backup-check-ru.service": "check --alert"}
++                   "omoba-backup-check-ru.service": "check --alert", "omoba-pitr-check-ru.service": "pitr-check --alert"}
+ # Monitoring and alerts (LR-17): ru_monitor.py, the OnFailure= alert every RU unit names, the
+ # 5-minute host check with its timer, alerts.env (the host's one Telegram bot and the alert
+ # thresholds) and the journal limits.
+@@ -160,7 +165,8 @@
+ DIRS = ((OPT, "root", "0755"), (RELEASES, "root", "0755"), (PORTAL, "root", "0755"),
+         (PORTAL_RELEASES, "root", "0755"), (NODE, "root", "0755"), (INCOMING, "root", "0700"),
+         *((path, USER, "0700") for path in STATE_DIRS),
+-        (BACKUP_TOOL_DIR, "root", "0755"), (BACKUP_KEYS, "root", "0700"), (BACKUPS, "root", "0700"),
++        (PITR_CONFIG_DIR, "root", "0755"), (PITR_CONFIG_DIR + "/empty", "root", "0755"),
++        (PITR_RUNTIME, "postgres", "0700"), (BACKUP_TOOL_DIR, "root", "0755"), (BACKUP_KEYS, "root", "0700"), (BACKUPS, "root", "0700"),
+         (DOWNLOADS, "root", "0755"), (CADDY_LOGS, CADDY_USER, "0750"), (MONITOR_TOOL_DIR, "root", "0755"))
+ USERS = {USER: STATE, PORTAL_USER: "/nonexistent"}
+ 
+@@ -177,7 +183,7 @@
+ MIN_POSTGRES = 16
+ MIN_UBUNTU = (24, 4)
+ MIN_NODE = (20, 9)        # Next.js 16
+-PACKAGES = ("postgresql", "caddy", "ufw", "nftables", "openssh-server", "gnupg")
++PACKAGES = ("postgresql", "caddy", "ufw", "nftables", "openssh-server", "gnupg", "pgbackrest")
+ # Per-source UDP limits (LR-16): ops/vps/ru/nftables-omoba.conf, loaded by its own
+ # oneshot unit. It replaces only its own table, never ufw's.
+ NFT_RULES = OPT + "/nftables-omoba.conf"
+@@ -316,7 +322,7 @@
+ 
+ 
+ ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDY_LOGS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
+-                  SSHD_DROPIN, JOURNALD_DROPIN, PG_ALERT_DROPIN,
++                  SSHD_DROPIN, JOURNALD_DROPIN, PG_ALERT_DROPIN, PITR_CONFIG_DIR, PITR_RUNTIME,
+                   *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS, *MONITOR_UNITS)),
+                   f"{UNIT_DIR}/{LIMITS_UNIT_FILE}")
+ 
+@@ -496,7 +502,7 @@
+     if name.endswith(".service"):
+         rules = {"Service.Type": "oneshot", "Service.ExecStart": f"{PYTHON} {BACKUP_SCRIPT} {BACKUP_COMMANDS[name]}",
+                  "Service.NoNewPrivileges": "true", "Service.ProtectSystem": "strict",
+-                 "Service.ProtectHome": "true", "Service.PrivateTmp": "true", "Service.ReadWritePaths": BACKUPS,
++                 "Service.ProtectHome": "true", "Service.PrivateTmp": "true", "Service.ReadWritePaths": BACKUPS + " " + PITR_RUNTIME,
+                  "Service.UMask": "0077", "Unit.OnFailure": ON_FAILURE}
+         if not directives.get("Service.TimeoutStartSec"):
+             problems.append(f"{name}: [Service] TimeoutStartSec is missing")
+@@ -606,6 +612,12 @@
+     script = backup.get("script")
+     if not isinstance(script, str) or not script.startswith("#!/usr/bin/env python3\n") or "LR-03" not in script:
+         problems.append("the backup kit lacks ru_backup.py")
++    pitr_script = backup.get("pitr_script")
++    if not isinstance(pitr_script, str) or not pitr_script.startswith("#!/usr/bin/env python3\n") or "C4" not in pitr_script:
++        problems.append("the backup kit lacks ru_pitr.py")
++    pitr_example = backup.get("pitr_example")
++    if not isinstance(pitr_example, str) or "repo1-cipher-pass=CHANGE_ME" not in pitr_example or "repo1-sftp-host=CHANGE_ME" not in pitr_example:
++        problems.append("the backup kit lacks a placeholder-only encrypted PITR profile")
+     example = backup.get("env_example")
+     if not isinstance(example, str) or "\nOMOBA_BACKUP_TARGET=" + PLACEHOLDER not in example:
+         problems.append(f"the backup kit lacks {BACKUP_ENV_EXAMPLE} with OMOBA_BACKUP_TARGET={PLACEHOLDER}")
+@@ -1844,6 +1856,10 @@
+         backup = self.payload_backup_kit(payload)
+         if self.read(BACKUP_SCRIPT) != backup["script"]:
+             would.append(f"install {BACKUP_SCRIPT}")
++        if self.read(PITR_SCRIPT) != backup["pitr_script"]:
++            would.append(f"install {PITR_SCRIPT}")
++        if self.read(PITR_CONFIG) is None:
++            would.append(f"write {PITR_CONFIG} placeholder; operator supplies escrowed credentials/archive settings separately")
+         would += [f"install {UNIT_DIR}/{name}" for name in BACKUP_UNITS
+                   if self.read(f"{UNIT_DIR}/{name}") != backup["units"][name]]
+         if not os.path.lexists(self.p(BACKUP_ENV)):
+@@ -2168,9 +2184,19 @@
+     def ensure_backup_kit(self, backup: dict) -> list:
+         """ru_backup.py, its units and timers, and backup.env with placeholders (never replaced)."""
+         done = []
++        if self.read(PITR_SCRIPT) != backup["pitr_script"]:
++            self._write(PITR_SCRIPT, backup["pitr_script"], 0o755)
++            done.append(f"install {PITR_SCRIPT}")
+         if self.read(BACKUP_SCRIPT) != backup["script"]:
+             self._write(BACKUP_SCRIPT, backup["script"], 0o755)
+             done.append(f"install {BACKUP_SCRIPT}")
++        if self.read(PITR_CONFIG) is None:
++            if os.path.lexists(self.p(PITR_CONFIG)):
++                raise Refused(f"{PITR_CONFIG} exists and is not a regular file")
++            self._write_secret(PITR_CONFIG, backup["pitr_example"])
++            self.command("chown", "root:postgres", self.p(PITR_CONFIG))
++            self.command("chmod", "640", self.p(PITR_CONFIG))
++            done.append(f"write {PITR_CONFIG} placeholder (root:postgres0640); PostgreSQL settings unchanged")
+         changed = False
+         for name in BACKUP_UNITS:
+             path = f"{UNIT_DIR}/{name}"
+@@ -2294,7 +2320,7 @@
+         """The backup kit as installed, its timers and `ru_backup.py check --remote` (LR-03)."""
+         backup = self.payload_backup_kit(payload)
+         problems, warnings = [], []
+-        script_ok = self.read(BACKUP_SCRIPT) == backup["script"]
++        script_ok = self.read(BACKUP_SCRIPT) == backup["script"] and self.read(PITR_SCRIPT) == backup["pitr_script"]
+         if not script_ok:
+             problems.append(f"{BACKUP_SCRIPT} is not ops/vps/ru/ru_backup.py (bootstrap installs it)")
+         for name in BACKUP_UNITS:
+@@ -2321,17 +2347,19 @@
+                 problems += [f"backups: {problem}" for problem in report["problems"]]
+                 warnings += [f"backups: {warning}" for warning in report.get("warnings") or []]
+                 facts = report.get("facts") or {}
++                if facts.get("pitr_required") is not True:
++                    problems.append("backups: PITR must be mandatory before RU launch")
+         return problems, warnings, facts
+ 
+     def backup_blockers(self, payload: dict) -> list:
+         """What stops the pre-migration backup of a ship (a schema exists)."""
+         backup = self.payload_backup_kit(payload)
+-        if self.read(BACKUP_SCRIPT) != backup["script"]:
++        if self.read(BACKUP_SCRIPT) != backup["script"] or self.read(PITR_SCRIPT) != backup["pitr_script"]:
+             return [f"{BACKUP_SCRIPT} is missing or older than ops/vps/ru/ru_backup.py (run bootstrap again)"]
+         if payload.get("local_backup_only"):
+             return []
+         code, report, errors = self.backup_tool("config", "--json")
+-        if code == 0 and isinstance(report, dict) and report.get("ok"):
++        if code == 0 and isinstance(report, dict) and report.get("ok") and (report.get("facts") or {}).get("pitr_required") is True:
+             return []
+         reasons = report.get("problems") if isinstance(report, dict) else [errors[-300:] or "no answer"]
+         return [f"backups are not configured ({'; '.join(map(str, reasons))}): fill {BACKUP_ENV} and the keys "
+@@ -2922,7 +2950,9 @@
+                  if is_foreign_name(token, own_zones)]
+     backup = {"script": (RU_DIR / "ru_backup.py").read_text(),
+               "units": {name: (RU_DIR / name).read_text() for name in BACKUP_UNITS},
+-              "env_example": (RU_DIR / BACKUP_ENV_EXAMPLE).read_text()}
++              "env_example": (RU_DIR / BACKUP_ENV_EXAMPLE).read_text(),
++              "pitr_script": (RU_DIR / "ru_pitr.py").read_text(),
++              "pitr_example": (RU_DIR / "pgbackrest.conf.example").read_text()}
+     problems += backup_kit_problems(backup, own_zones)
+     problems += backup_example_problems(backup["env_example"])
+     monitor = {"script": (RU_DIR / "ru_monitor.py").read_text(),
+@@ -2978,6 +3008,8 @@
+             ru_backup.DEFAULTS["OMOBA_BACKUP_STATE_DIRS"].split(":") != list(STATE_DIRS[1:]) or \
+             not ru_backup.DEFAULTS["OMOBA_BACKUP_GPG_RECIPIENT_FILE"].startswith(BACKUP_KEYS + "/"):
+         problems.append("ru_backup.py's host layout differs from ru_host.py's")
++    if values.get("OMOBA_BACKUP_PITR_REQUIRED") != "1" or values.get("OMOBA_BACKUP_PITR_CONFIG") != PITR_CONFIG or values.get("OMOBA_BACKUP_PITR_RUNTIME_DIR") != PITR_RUNTIME:
++        problems.append("backup.env.example must require the canonical PITR configuration/runtime")
+     return problems
+ 
+ 
+diff --git a/ops/vps/ru/ru_monitor.py b/ops/vps/ru/ru_monitor.py
+--- a/ops/vps/ru/ru_monitor.py
++++ b/ops/vps/ru/ru_monitor.py
+@@ -78,10 +78,11 @@
+ PG_ADDRESS = ("127.0.0.1", 5432)                    # DB_HOST, DB_PORT of ru_host.py
+ PG_ISREADY = {1: "it rejects connections: starting, stopping or recovering", 2: "no response",
+               3: "pg_isready made no attempt"}
+-JOBS = ("omoba-backup-ru.service", "omoba-restore-drill-ru.service", "omoba-backup-check-ru.service")
++JOBS = ("omoba-backup-ru.service", "omoba-restore-drill-ru.service", "omoba-backup-check-ru.service", "omoba-pitr-check-ru.service")
+ TIMERS = {"omoba-backup-ru.timer": "no nightly backup is made",
+           "omoba-restore-drill-ru.timer": "no monthly restore drill runs",
+-          "omoba-backup-check-ru.timer": "a missing or failed backup is no longer reported"}
++          "omoba-backup-check-ru.timer": "a missing or failed backup is no longer reported",
++          "omoba-pitr-check-ru.timer": "WAL archive failures are no longer reported"}
+ # Every filesystem the host writes to; one problem per filesystem.
+ DISK_PATHS = ("/", "/var/lib/postgresql", "/var/lib/omoba-ru", "/var/backups/omoba-ru", "/var/log", "/opt/omoba-ru")
+ # match_allocation.rs Phase: a worker in these phases writes a heartbeat every second or so.
+diff --git a/ops/vps/ru/ru_pitr.py b/ops/vps/ru/ru_pitr.py
+new file mode 100644
+--- /dev/null
++++ b/ops/vps/ru/ru_pitr.py
+@@ -0,0 +1,452 @@
++#!/usr/bin/env python3
++"""C4: physical/WAL recovery through pgBackRest; called by ru_backup (LR-03).
++This module never restarts/configures PostgreSQL, provisions credentials or restores
++into an existing data directory. Actual host installation is a separate action.
++"""
++from __future__ import annotations
++
++import configparser
++import contextlib
++import fcntl
++import json
++import os
++import re
++import shlex
++import shutil
++import stat
++import subprocess
++import tempfile
++import time
++import uuid
++from pathlib import Path
++
++import ru_backup as rb
++
++STANZA = 'omoba-ru'
++CONFIG = '/etc/pgbackrest/omoba-ru.conf'
++RUNTIME = '/var/lib/omoba-ru-pitr'
++CHECK_MAX_AGE = 300
++BACKUP_MAX_AGE = 26 * 3600
++DRILL_MAX_AGE = 35 * 86400
++FULL_INTERVAL = 7 * 86400
++DRILL_TIMEOUT = 3600
++SAFE_PATH = re.compile(r'/[A-Za-z0-9_./-]+')
++GLOBAL_KEYS = frozenset('repo1-type repo1-path repo1-cipher-type repo1-cipher-pass repo1-retention-full repo1-retention-diff repo1-sftp-host repo1-sftp-host-port repo1-sftp-host-user repo1-sftp-private-key-file repo1-sftp-public-key-file repo1-sftp-host-key-check-type repo1-sftp-host-key-hash-type repo1-sftp-known-host repo1-s3-bucket repo1-s3-endpoint repo1-s3-region repo1-s3-key repo1-s3-key-secret repo1-storage-verify-tls repo1-storage-port repo1-s3-uri-style archive-async archive-check archive-copy archive-mode-check archive-timeout process-max start-fast compress-type compress-level io-timeout protocol-timeout db-timeout lock-path log-path spool-path log-level-file'.split())
++PG_KEYS = frozenset(('pg1-path','pg1-socket-path','pg1-port','pg1-user'))
++SECRET_KEYS = ('repo1-cipher-pass','repo1-s3-key','repo1-s3-key-secret')
++RECOVERY_KEYS = frozenset(('restore_command','recovery_target_name','recovery_target_action','recovery_target_timeline','recovery_target_inclusive'))
++
++
++def required(cfg):
++    value = cfg.get('OMOBA_BACKUP_PITR_REQUIRED')
++    if value not in ('0','1'):
++        raise rb.BackupError('OMOBA_BACKUP_PITR_REQUIRED must be 0 or 1')
++    return value == '1'
++
++
++def private_file(path, label):
++    try:
++        info = Path(path).lstat()
++    except OSError:
++        return f'{label} is missing or unreadable'
++    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) not in (0o600,0o640):
++        return f'{label} must be a regular file with mode 0600 or 0640'
++    return None
++
++
++def public_file(path, label):
++    try:
++        info = Path(path).lstat()
++    except OSError:
++        return f'{label} is missing or unreadable'
++    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022 or info.st_size == 0:
++        return f'{label} must be a nonempty regular file without group/world write'
++    return None
++
++
++def actor_access(path,uid,gid,bits):
++    try:
++        path=Path(path)
++        for parent in path.parents:
++            mode=parent.stat()
++            shift=6 if mode.st_uid==uid else (3 if mode.st_gid==gid else 0)
++            if not (mode.st_mode>>shift)&1:return False
++        mode=path.stat();shift=6 if mode.st_uid==uid else (3 if mode.st_gid==gid else 0)
++        return ((mode.st_mode>>shift)&bits)==bits
++    except OSError:return False
++
++
++def within(path, parent):
++    try:
++        Path(path).resolve().relative_to(Path(parent).resolve())
++        return True
++    except (OSError, ValueError):
++        return False
++
++
++def lsn(value):
++    if not re.fullmatch(r'[0-9A-F]+/[0-9A-F]+', str(value)):
++        raise rb.BackupError('invalid WAL position in PITR response')
++    high, low = str(value).split('/')
++    return (int(high,16)<<32)+int(low,16)
++
++
++class Pitr:
++    def __init__(self, cfg, now=time.time):
++        self.cfg, self.now = cfg, now
++        self.path = cfg.get('OMOBA_BACKUP_PITR_CONFIG')
++        self.runtime = Path(cfg.get('OMOBA_BACKUP_PITR_RUNTIME_DIR'))
++        self.global_options, self.pg, self.hidden = {}, {}, []
++        self.errors = []
++        if not SAFE_PATH.fullmatch(self.path or '') or '..' in Path(self.path).parts:
++            self.errors.append('PITR config path must be a plain absolute path')
++            return
++        problem = private_file(self.path,'PITR config')
++        if problem:
++            self.errors.append(problem)
++            return
++        try:
++            if Path(self.path).stat().st_size > 16_384:
++                raise ValueError('size')
++            parser = configparser.ConfigParser(interpolation=None,strict=True)
++            parser.read_string(Path(self.path).read_text())
++            if set(parser.sections()) != {'global',STANZA} or parser.defaults():
++                raise ValueError('sections')
++            self.global_options = dict(parser['global'])
++            self.pg = dict(parser[STANZA])
++        except (OSError, ValueError, configparser.Error):
++            self.errors.append('PITR config is malformed, oversized or has unexpected sections')
++            return
++        self.hidden = [self.global_options.get(key,'') for key in SECRET_KEYS]
++        self._validate()
++
++    def _validate(self):
++        g, p, errors = self.global_options, self.pg, self.errors
++        if set(g)-GLOBAL_KEYS or set(p)-PG_KEYS:
++            errors.append('PITR config contains unsupported options')
++        for name,value in {'repo1-cipher-type':'aes-256-cbc','archive-async':'n','archive-check':'y',
++                'archive-copy':'y','archive-mode-check':'y','start-fast':'y','log-level-file':'off'}.items():
++            if g.get(name) != value:
++                errors.append(f'PITR {name} must be {value}')
++        if len(g.get('repo1-cipher-pass','')) < 32 or 'CHANGE_ME' in g.get('repo1-cipher-pass',''):
++            errors.append('PITR requires a separately escrowed cipher passphrase of at least32 characters')
++        for name,lo,hi in [('repo1-retention-full',2,52),('repo1-retention-diff',1,60),
++                          ('process-max',1,2),('archive-timeout',5,60),('io-timeout',5,60)]:
++            if not re.fullmatch(r'\d+',g.get(name,'')) or not lo <= int(g.get(name,'0')) <= hi:
++                errors.append(f'PITR {name} must be between {lo} and {hi}')
++        if g.get('compress-type') not in ('gz','lz4','zst'):
++            errors.append('PITR requires explicit supported compression')
++        if not SAFE_PATH.fullmatch(str(self.runtime)) or '..' in self.runtime.parts:
++            errors.append('PITR runtime must be a plain absolute path')
++        for name in ('lock-path','log-path','spool-path'):
++            if not SAFE_PATH.fullmatch(g.get(name,'')) or not within(g.get(name,''),self.runtime):
++                errors.append(f'PITR {name} must be within its separate runtime directory')
++        for name in ('pg1-path','pg1-socket-path'):
++            if not SAFE_PATH.fullmatch(p.get(name,'')) or '..' in Path(p.get(name,'')).parts or 'CHANGE_ME' in p.get(name,''):
++                errors.append(f'PITR {name} must be a plain absolute path')
++        if p.get('pg1-path') and (within(self.runtime,p['pg1-path']) or within(p['pg1-path'],self.runtime)):
++            errors.append('PITR runtime and primary data paths must be disjoint')
++        if not re.fullmatch(r'\d{1,5}',p.get('pg1-port','')) or not 1 <= int(p.get('pg1-port','0')) <= 65535:
++            errors.append('PITR pg1-port is invalid')
++        if p.get('pg1-user') != 'postgres':
++            errors.append('PITR local peer connection must use postgres')
++        if not SAFE_PATH.fullmatch(g.get('repo1-path','')) or g.get('repo1-path') == '/' or '..' in Path(g.get('repo1-path','')).parts:
++            errors.append('PITR repository needs its own absolute non-root prefix')
++        kind=g.get('repo1-type')
++        if kind=='sftp':
++            if g.get('repo1-sftp-host-key-check-type')!='strict' or g.get('repo1-sftp-host-key-hash-type')!='sha256':
++                errors.append('PITR SFTP requires strict SHA256 host-key checking')
++            for name,private in [('repo1-sftp-private-key-file',True),('repo1-sftp-public-key-file',False),('repo1-sftp-known-host',False)]:
++                problem=(private_file if private else public_file)(g.get(name,''),name)
++                if problem:errors.append(problem)
++                if Path(g.get(name,'')).parent.resolve()!=Path(self.path).parent.resolve():errors.append(f'PITR {name} must be a direct child of the escrowed config folder')
++            if not g.get('repo1-sftp-host-user'):
++                errors.append('PITR SFTP user is unset')
++            host=g.get('repo1-sftp-host','')
++        elif kind=='s3':
++            if g.get('repo1-storage-verify-tls')!='y':errors.append('PITR S3 must verify TLS')
++            for name in ('repo1-s3-bucket','repo1-s3-region','repo1-s3-key','repo1-s3-key-secret'):
++                if not g.get(name) or 'CHANGE_ME' in g[name]:errors.append(f'PITR {name} is unset')
++            host=g.get('repo1-s3-endpoint','')
++        else:
++            errors.append('PITR requires a remote SFTP or S3 repository')
++            host=''
++        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*',host) or host in ('localhost','127.0.0.1') or host.startswith('127.') or 'CHANGE_ME' in host:
++            errors.append('PITR repository host is unset or loopback')
++
++    def problems(self):
++        problems=list(self.errors)
++        if not self.errors:
++            try:
++                parent=Path(self.path).parent;empty=parent/'empty'
++                if Path(self.path).stat().st_uid != os.geteuid() or parent.stat().st_uid != os.geteuid() or parent.stat().st_mode & 0o022:
++                    problems.append('PITR config and its folder must belong to the root coordinator and reject group/world writes')
++                if not empty.is_dir() or empty.is_symlink() or empty.stat().st_uid != os.geteuid() or empty.stat().st_mode & 0o022 or any(empty.iterdir()):
++                    problems.append('PITR include folder must be protected and empty')
++                if self.global_options.get('repo1-type')=='sftp' and Path(self.global_options['repo1-sftp-known-host']).stat().st_uid != os.geteuid():
++                    problems.append('PITR SFTP host pins must belong to the root coordinator')
++                protected={Path(self.path).resolve()}
++                if self.global_options.get('repo1-type')=='sftp':
++                    protected.update(Path(self.global_options[name]).resolve() for name in ('repo1-sftp-private-key-file','repo1-sftp-public-key-file','repo1-sftp-known-host'))
++                if not protected <= {Path(path).resolve() for path in rb.escrow_paths(self.cfg)}:
++                    problems.append('PITR protected settings/keys must all be included in the secrets escrow')
++            except (OSError,KeyError):problems.append('PITR protected config/include/host-pin paths are unavailable')
++        if not self.runtime.is_dir() or self.runtime.is_symlink():
++            problems.append('PITR runtime directory is missing or a symlink; bootstrap creates it')
++        try:
++            actor=rb.db_user(self.cfg);uid=actor.get('user',os.geteuid());gid=actor.get('group',os.getegid())
++            paths=[(self.path,4),(Path(self.path).parent/'empty',5),(self.runtime,7)]
++            if self.global_options.get('repo1-type')=='sftp':
++                paths += [(self.global_options.get(name,''),4) for name in ('repo1-sftp-private-key-file','repo1-sftp-public-key-file','repo1-sftp-known-host')]
++            if any(not actor_access(path,uid,gid,bits) for path,bits in paths):
++                problems.append('PITR peer user cannot read protected settings/keys or access its runtime directory')
++        except rb.BackupError:problems.append('PITR local peer user is unavailable')
++        try:
++            rb.exe('pgbackrest')
++            if not problems and self.version() < (2,58,0):problems.append('PITR requires pgBackRest2.58 or newer; bootstrap does not add package repositories')
++        except rb.BackupError:problems.append('pgBackRest is unavailable or its version is unsupported')
++        return [('pitr-config',value) for value in dict.fromkeys(problems)]
++
++    def ready(self):
++        problems=self.problems()
++        if problems:raise rb.BackupError('; '.join(text for _,text in problems))
++
++    def env(self):
++        return {'PATH':os.environ.get('PATH') or rb.SAFE_PATH,'LANG':'C','PGCONNECT_TIMEOUT':'5',
++                'PGPASSFILE':str(Path(self.path).parent/'empty/no-password'),'PGSERVICEFILE':'/dev/null','PGSYSCONFDIR':'/dev/null'}
++
++    def run(self,args,timeout=120,check=True,input=None):
++        try:
++            result=subprocess.run(args,input=input,text=True,capture_output=True,env=self.env(),cwd='/',
++                    timeout=timeout,**rb.db_user(self.cfg))
++        except (OSError,subprocess.TimeoutExpired):
++            raise rb.BackupError('PITR command unavailable or timed out') from None
++        if check and result.returncode:
++            text=rb.redact(rb.tail(result.stderr or result.stdout,1200),self.hidden+self.cfg.secrets())
++            raise rb.BackupError(f'PITR {Path(args[0]).name} failed: {text}')
++        return result
++
++    def engine(self,*args,timeout=120,check=True):
++        return self.run([rb.exe('pgbackrest'),'--config='+self.path,
++                '--config-include-path='+str(Path(self.path).parent/'empty'),
++                '--stanza='+STANZA,'--log-level-console=warn','--log-level-file=off',*args],timeout,check)
++
++    def version(self):
++        result=self.run([rb.exe('pgbackrest'),'version'],timeout=10)
++        match=re.search(r'pgBackRest (\d+)\.(\d+)(?:\.(\d+))?',result.stdout)
++        if not match:raise rb.BackupError('PITR cannot verify pgBackRest version')
++        return tuple(int(value or '0') for value in match.groups())
++
++    def sql(self,statement,database=None,socket=None):
++        return self.run([rb.exe('psql'),'-X','-qAt','-v','ON_ERROR_STOP=1','-w',
++            '-h',socket or self.pg['pg1-socket-path'],'-p','6545' if socket else self.pg['pg1-port'],
++            '-U','postgres','-d',database or self.cfg.database],input=statement).stdout.strip()
++
++    @property
++    def archive_command(self):
++        parts=['/usr/bin/env','-i','PATH='+rb.SAFE_PATH,'LANG=C',rb.exe('pgbackrest'),
++            '--config='+self.path,'--config-include-path='+str(Path(self.path).parent/'empty'),
++            '--stanza='+STANZA,'--log-level-file=off','archive-push']
++        return ' '.join(shlex.quote(part) for part in parts)+" '%p'"
++
++    def source(self,archive=True):
++        self.ready()
++        data=json.loads(self.sql("SELECT json_build_object('system_id',system_identifier::text,'data',current_setting('data_directory'),'version',current_setting('server_version_num'),'archive_mode',current_setting('archive_mode'),'archive_command',current_setting('archive_command'),'archive_timeout',extract(epoch FROM current_setting('archive_timeout')::interval),'archive_library',current_setting('archive_library')) FROM pg_control_system()",'postgres'))
++        if Path(data['data']).resolve()!=Path(self.pg['pg1-path']).resolve():
++            raise rb.BackupError('PITR config does not name the connected primary data directory')
++        if archive and (data['archive_mode']!='on' or data['archive_library'] or data['archive_command']!=self.archive_command or not 1 <= float(data['archive_timeout']) <= 60):
++            raise rb.BackupError('PITR primary archive settings differ from the reviewed command/60s policy; no server setting was changed')
++        return data
++
++    def info(self,allow_empty=False):
++        try:
++            entries=json.loads(self.engine('--output=json','info').stdout)
++            if len(entries)!=1 or entries[0]['name']!=STANZA or entries[0]['status']['code'] not in ((0,2) if allow_empty else (0,)):
++                raise ValueError()
++            entry=entries[0]
++            if entry['status']['code']==2 and entry.get('backup'):raise ValueError()
++            if entry['cipher']!='aes-256-cbc' or any(repo['status']['code'] not in ((0,2) if allow_empty else (0,)) for repo in entry['repo']):raise ValueError()
++            return entry
++        except (ValueError,KeyError,TypeError):
++            raise rb.BackupError('PITR remote repository is missing, untrusted, unencrypted or unhealthy') from None
++
++    def versions(self,socket=None):
++        return json.loads(self.sql("SELECT json_build_object('career',(SELECT json_agg(version ORDER BY version) FROM public.career_schema_version),'portal',(SELECT json_agg(version ORDER BY version) FROM portal.schema_version))",socket=socket))
++
++    def state_path(self):return Path(self.cfg.backup_dir)/'pitr-state.json'
++
++    def state(self):
++        try:
++            path=self.state_path()
++            if path.is_symlink() or path.stat().st_size>65536:raise ValueError()
++            value=json.loads(path.read_text())
++            if not isinstance(value,dict):raise ValueError()
++            if any(not isinstance(record,dict) for record in value.values()):raise ValueError()
++            return value
++        except FileNotFoundError:return {}
++        except (ValueError,OSError):raise rb.BackupError('PITR state is unreadable or corrupt') from None
++
++    def record(self,slot,value):
++        root=Path(self.cfg.backup_dir);root.mkdir(mode=0o700,parents=True,exist_ok=True)
++        lock=root/'pitr-state.lock'
++        fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
++        try:
++            fcntl.flock(fd,fcntl.LOCK_EX)
++            state=self.state();state[slot]=value
++            fd2,tmp=tempfile.mkstemp(prefix='.pitr-',dir=root)
++            try:
++                with os.fdopen(fd2,'w') as stream:
++                    json.dump(state,stream,sort_keys=True);stream.flush();os.fsync(stream.fileno())
++                os.replace(tmp,self.state_path())
++                parent=os.open(root,os.O_RDONLY)
++                try:os.fsync(parent)
++                finally:os.close(parent)
++            finally:
++                with contextlib.suppress(FileNotFoundError):os.unlink(tmp)
++        finally:os.close(fd)
++
++    def check(self):
++        try:
++            source=self.source();self.engine('check',timeout=120)
++            info=self.info();backups=info['backup']
++            if not backups:raise rb.BackupError('PITR has no completed physical backup')
++            last=max(backups,key=lambda value:value['timestamp']['stop'])
++            if not 0 <= self.now()-last['timestamp']['stop'] <= BACKUP_MAX_AGE:raise rb.BackupError('PITR newest physical backup is older than26h')
++            report={'ok':True,'at':rb.iso(self.now()),'label':last['label'],'backup_at':rb.iso(last['timestamp']['stop']),
++                    'system_id':source['system_id'],'cipher':info['cipher']}
++        except BaseException as error:
++            text=rb.redact(str(error),self.hidden+self.cfg.secrets())
++            self.record('last_check',{'ok':False,'at':rb.iso(self.now()),'error':text})
++            if isinstance(error,(KeyboardInterrupt,SystemExit)):raise
++            raise rb.BackupError(text) from None
++        self.record('last_check',report)
++        return report
++
++    def backup(self):
++        self.source()
++        info=self.info(allow_empty=True)
++        full=[b for b in info['backup'] if b['type']=='full']
++        kind='full' if not full or self.now()-max(b['timestamp']['stop'] for b in full)>=FULL_INTERVAL else 'diff'
++        self.engine('--type='+kind,'backup',timeout=3*3600)
++        result=self.check();result['type']=kind;self.record('last_backup',result)
++        return result
++
++    def drill(self):
++        self.source();before=self.versions();source_id=self.sql('SELECT system_identifier FROM pg_control_system()','postgres')
++        target='omoba_pitr_'+uuid.uuid4().hex
++        target_lsn=self.sql("SELECT pg_create_restore_point('"+target+"')",'postgres')
++        self.engine('check',timeout=120)
++        info=self.info()
++        if not info['backup']:raise rb.BackupError('PITR drill has no physical base backup')
++        last=max(info['backup'],key=lambda value:value['timestamp']['stop'])
++        size=int(last['info']['size'])
++        if size<=0 or shutil.disk_usage(self.runtime).free < (1<<30)+2*size:raise rb.BackupError('PITR drill has insufficient space for an isolated restored cluster')
++        root=self.runtime/'drills';root.mkdir(mode=0o700,exist_ok=True)
++        work=Path(tempfile.mkdtemp(prefix='owned-',dir=root));data=work/'data';socket=work/'socket';log=work/'postgres.log'
++        owner=rb.db_user(self.cfg)
++        if 'user' in owner:os.chown(work,owner['user'],owner['group']);os.chown(root,owner['user'],owner['group'])
++        socket.mkdir(mode=0o700)
++        if 'user' in owner:os.chown(socket,owner['user'],owner['group'])
++        started=self.now();report={'ok':False,'started_at':rb.iso(started),'target':target,'target_lsn':target_lsn}
++        self.record('last_drill',report)
++        pg_ctl=None;failure=None
++        try:
++            self.engine('--pg1-path='+str(data),'--type=name','--target='+target,'--target-action=promote','restore',timeout=3*3600)
++            if (data/'standby.signal').exists() or not (data/'recovery.signal').is_file():raise rb.BackupError('PITR restore did not create isolated archive recovery')
++            auto=[]
++            for line in (data/'postgresql.auto.conf').read_text().splitlines():
++                match=re.match(r'^\s*([a-z_]+)\s*=',line)
++                if match and match.group(1) in RECOVERY_KEYS:auto.append(line)
++            if not any(line.lstrip().startswith('restore_command') for line in auto) or not any(target in line and line.lstrip().startswith('recovery_target_name') for line in auto):
++                raise rb.BackupError('PITR restore lost its named target/restore command')
++            files={'postgresql.auto.conf':'\n'.join(auto)+'\n',
++                'postgresql.conf':f"listen_addresses=''\nport=6545\nunix_socket_directories='{socket}'\nshared_buffers='16MB'\nmax_connections=20\narchive_mode=off\nssl=off\nshared_preload_libraries=''\n",
++                'pg_hba.conf':'local all all trust\n','pg_ident.conf':''}
++            for name,text in files.items():
++                (data/name).write_text(text)
++                if 'user' in owner:os.chown(data/name,owner['user'],owner['group'])
++            major=(data/'PG_VERSION').read_text().strip()
++            if not re.fullmatch(r'\d{2}',major):raise rb.BackupError('PITR restore has an unsupported server version')
++            bin_dir=Path('/usr/lib/postgresql')/major/'bin'
++            if not (bin_dir/'pg_ctl').is_file():bin_dir=Path(rb.exe('pg_ctl')).parent
++            pg_ctl=str(bin_dir/'pg_ctl')
++            version=self.run([str(bin_dir/'postgres'),'--version']).stdout
++            if not re.search(r'\b'+major+r'\.',version):raise rb.BackupError('PITR drill binaries do not match the restored cluster major')
++            result=self.run([pg_ctl,'-D',str(data),'-l',str(log),'-w','-t','120','start'],timeout=130,check=False)
++            if result.returncode:raise rb.BackupError('PITR drill PostgreSQL did not start; target recovery was not accepted')
++            deadline=time.monotonic()+DRILL_TIMEOUT
++            while time.monotonic()<deadline:
++                status=self.run([pg_ctl,'-D',str(data),'status'],check=False)
++                if status.returncode:raise rb.BackupError('PITR drill terminated before target recovery')
++                try:ready=self.sql('SELECT NOT pg_is_in_recovery()','postgres',str(socket))=='t'
++                except rb.BackupError:ready=False
++                if ready:break
++                time.sleep(1)
++            else:raise rb.BackupError('PITR drill target recovery timed out')
++            actual_id=self.sql('SELECT system_identifier FROM pg_control_system()','postgres',str(socket))
++            replay=self.sql('SELECT pg_last_wal_replay_lsn()','postgres',str(socket))
++            if actual_id!=source_id or lsn(replay)<lsn(target_lsn) or self.versions(str(socket))!=before:
++                raise rb.BackupError('PITR recovered system/schema/WAL position differs from the target')
++            if 'recovery stopping at restore point "'+target+'"' not in log.read_text():raise rb.BackupError('PITR named recovery stop is not proven in the server log')
++            report.update(ok=True,system_id=source_id,replay_lsn=replay,schema_versions=before)
++        except BaseException as error:
++            failure=error;report['error']=rb.redact(str(error),self.hidden+self.cfg.secrets())
++        finally:
++            stopped=True
++            if pg_ctl and (data/'postmaster.pid').exists():
++                try:
++                    self.run([pg_ctl,'-D',str(data),'-m','immediate','-w','-t','30','stop'],check=False,timeout=40)
++                    stopped=self.run([pg_ctl,'-D',str(data),'status'],check=False).returncode!=0
++                except BaseException:stopped=False
++            if stopped:
++                try:shutil.rmtree(work)
++                except OSError:stopped=False
++            if not stopped:
++                report.update(ok=False,error='PITR scratch cleanup failed; scratch retained for inspection')
++                failure=rb.BackupError(report['error'])
++            report.update(finished_at=rb.iso(self.now()),cleanup_complete=stopped)
++            self.record('last_drill',report)
++            if report['ok']:self.record('last_drill_success',report)
++        if failure:raise rb.BackupError(report.get('error','PITR drill failed')) from None
++        return report
++
++
++def health(ctx,remote=False):
++    pitr=Pitr(ctx.cfg,ctx.now);problems=pitr.problems();facts={}
++    if problems:return problems,facts
++    if remote:
++        try:
++            info=pitr.info()
++            if not info['backup'] or not 0 <= ctx.now()-max(b['timestamp']['stop'] for b in info['backup']) <= BACKUP_MAX_AGE:
++                raise rb.BackupError('PITR remote physical base is missing or stale')
++            facts['remote_cipher']=info['cipher']
++        except rb.BackupError as error:problems.append(('pitr-remote',str(error)))
++    try:state=pitr.state()
++    except rb.BackupError as error:return [('pitr-state',str(error))],facts
++    now=ctx.now()
++    for slot,age,code in [('last_check',CHECK_MAX_AGE,'archive'),('last_backup',BACKUP_MAX_AGE,'backup'),('last_drill_success',DRILL_MAX_AGE,'drill')]:
++        record=state.get(slot,{})
++        if not isinstance(record,dict):
++            problems.append(('pitr-state','PITR proof record is malformed'));continue
++        at=rb.parse_iso(record.get('at') or record.get('finished_at'))
++        if not record.get('ok') or at is None or not 0 <= now-at <= age:
++            problems.append(('pitr-'+code,f'PITR {code} has no recent successful proof'))
++        facts[slot]=record.get('at') or record.get('finished_at')
++    for slot in ('last_check','last_drill'):
++        record=state.get(slot,{})
++        if isinstance(record,dict) and record.get('ok') is False:problems.append(('pitr-failed',f'PITR {slot} failed; inspect the dedicated state and journal'))
++    return problems,facts
++
++
++def notify(cfg,error):
++    """A separate locked alert journal never overwrites long backup metadata."""
++    root=Path(cfg.backup_dir);root.mkdir(mode=0o700,parents=True,exist_ok=True)
++    fd=os.open(root/'pitr-notify.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
++    try:
++        fcntl.flock(fd,fcntl.LOCK_EX)
++        context=rb.Context(cfg,state_name='pitr-alerts.json',topic='WAL archive')
++        if error is None:context.resolve([])
++        else:
++            hidden=Pitr(cfg).hidden+cfg.secrets()
++            context.alert('pitr-archive',rb.redact(str(error),hidden))
++    finally:os.close(fd)
+diff --git a/scripts/test_ru_backup.py b/scripts/test_ru_backup.py
+--- a/scripts/test_ru_backup.py
++++ b/scripts/test_ru_backup.py
+@@ -63,6 +63,7 @@
+ 
+ 
+ def env_file(folder, **values) -> str:
++    values = {"OMOBA_BACKUP_PITR_REQUIRED": "0", **values}
+     return write(Path(folder) / "backup.env", "".join(f"{key}={value}\n" for key, value in values.items()))
+ 
+ 
+@@ -363,6 +364,17 @@
+         self.assertEqual(out.read_bytes(), self.local.read_bytes())
+         target.delete(self.NAMES[:2])
+         self.assertEqual(sorted(target.list()), self.NAMES[2:])
++
++    def test_sftp_regular_listing_accepts_unknown_link_count_but_not_links_or_directories(self):
++        target = rb.SftpTarget('backup','fixture',22,'/srv/backup','/key','/pins')
++        name = self.NAMES[0]
++        for count in ('1','?'):
++            line = f"-rw-------    {count} backup backup 276919 Nov  6 21:54 /srv/backup/{name}"
++            with mock.patch.object(target,'_batch',return_value='sftp> -ls -ln /srv/backup\n'+line):
++                self.assertEqual(target.list(),{name:276919})
++        for kind in ('l','d'):
++            line = f"{kind}rw------- 1 backup backup 276919 Nov 6 21:54 /srv/backup/{name}"
++            with mock.patch.object(target,'_batch',return_value=line):self.assertEqual(target.list(),{})
+ 
+     def test_a_folder(self):
+         folder = Path(self.work.name) / "off"
+diff --git a/scripts/test_ru_host.py b/scripts/test_ru_host.py
+--- a/scripts/test_ru_host.py
++++ b/scripts/test_ru_host.py
+@@ -218,12 +218,12 @@
+         if command == "config":
+             assert args[2:] == ["--json"], args
+             ok = self.backups_configured
+-            return (0 if ok else 1), json.dumps({"ok": ok, "problems": [] if ok else not_configured})
++            return (0 if ok else 1), json.dumps({"ok": ok, "problems": [] if ok else not_configured, "facts": {"pitr_required": True}})
+         if command == "check":
+             assert args[2:] == ["--json", "--remote"], args
+             ok = self.backups_configured
+             return (0 if ok else 1), json.dumps({"ok": ok, "problems": [] if ok else not_configured,
+-                                                 "warnings": [], "facts": {"off_host_sets": 3 if ok else 0}})
++                                                 "warnings": [], "facts": {"off_host_sets": 3 if ok else 0, "pitr_required": True}})
+         assert command == "backup" and args[2:6] == ["--reason", "pre-migration", "--release", args[5]], args
+         local_only = args[6:] == ["--local-only"]
+         assert local_only or args[6:] == [], args
+@@ -249,6 +249,7 @@
+     def install_package(self, package):
+         self.packages.add(package)
+         if package == "postgresql":
++            self.users["postgres"] = {"uid": os.getuid(), "home": "/var/lib/postgresql", "shell": "/usr/sbin/nologin"}
+             self.enabled.add("postgresql")
+             self.unit("postgresql")["active"] = True
+             self.tcp.add(("127.0.0.1", 5432))
+@@ -672,7 +673,7 @@
+                  **{name: text for name, text in backup["units"].items() if name.endswith(".service")},
+                  ru_host.MONITOR_SERVICE: monitor["units"][ru_host.MONITOR_SERVICE],
+                  ru_host.LIMITS_UNIT_FILE: KIT["limits_unit"]}
+-        self.assertEqual(len(named), 8)
++        self.assertEqual(len(named), 9)
+         for name, text in named.items():
+             self.assertEqual(ru_host.parse_unit(text)[0]["Unit.OnFailure"], ["omoba-alert-ru@%n.service"], name)
+         template = ru_host.parse_unit(monitor["units"][ru_host.ALERT_UNIT])[0]
+@@ -1016,6 +1017,11 @@
+         for name in ("vds-ru", NAMES["lobby"], NAMES["account_api"], NAMES["portal"], RU_IP, "postgresql.service"):
+             self.assertFalse(ru_host.is_foreign_name(name, own), name)
+ 
++    def test_pitr_runtime_is_traversable_by_its_separate_postgres_owner(self):
++        self.assertFalse(ru_host.within(ru_host.PITR_RUNTIME,ru_host.STATE))
++        self.assertIn((ru_host.PITR_RUNTIME,'postgres','0700'),ru_host.DIRS)
++        self.assertIn(ru_host.PITR_RUNTIME,ru_host.ALLOWED_WRITES)
++
+     def test_the_host_half_checks_the_names_it_is_given(self):
+         self.assertEqual(ru_host.names_problems(NAMES), [])
+         self.assertEqual(ru_host.names_problems(None), ["the payload lacks the RU names (scripts/markets.py)"])
+@@ -1109,7 +1115,7 @@
+         fake = self.fake
+         self.assertTrue({"postgresql", "caddy", "ufw"} <= fake.packages)
+         self.assertEqual(json.loads(Path(fake.p(ru_host.MARKER)).read_text())["ip"], RU_IP)
+-        self.assertEqual(set(fake.users), {"omoba-ru", "omoba-portal-ru", "caddy"}, "caddy is the package's")
++        self.assertEqual(set(fake.users), {"omoba-ru", "omoba-portal-ru", "caddy", "postgres"}, "caddy/postgres are the packages'")
+         self.assertEqual(fake.users["omoba-portal-ru"]["shell"], "/usr/sbin/nologin")
+         for path, _, mode in ru_host.DIRS:
+             self.assertEqual(oct(os.stat(fake.p(path)).st_mode & 0o777), oct(int(mode, 8)), path)
+@@ -1557,12 +1563,26 @@
+         self.assertIn("omoba-portal-ru is not enabled: it would not start after a reboot", problems)
+         self.assertIn("omoba-portal-ru is not running", problems)
+ 
++    def test_disabled_pitr_cannot_pass_ship_or_host_readiness(self):
++        self.ship()
++        host=self.fresh()
++        original=host.backup_tool
++        def legacy_only(*args,**kwargs):
++            code,report,errors=original(*args,**kwargs)
++            if isinstance(report,dict):
++                report.setdefault('facts',{})['pitr_required']=False
++            return code,report,errors
++        host.backup_tool=legacy_only
++        self.assertTrue(host.backup_blockers(self.payload()))
++        problems,_,_=host.backup_report(self.payload())
++        self.assertTrue(any('PITR must be mandatory' in value for value in problems))
++
+     def test_status_reports_the_backups(self):
+         self.ship()
+         self.ship_portal(portal_bundle(self.work.name))
+         report = self.fresh().status(self.payload())
+         self.assertTrue(report["ok"], report["problems"])
+-        self.assertEqual(report["facts"]["backups"], {"off_host_sets": 3})
++        self.assertEqual(report["facts"]["backups"], {"off_host_sets": 3, "pitr_required": True})
+         self.fake.backups_configured = False
+         self.fake.enabled.discard("omoba-backup-ru.timer")
+         Path(self.fake.p("/etc/systemd/system/omoba-restore-drill-ru.timer")).write_text("[Timer]\n")
+diff --git a/scripts/test_ru_pitr.py b/scripts/test_ru_pitr.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/test_ru_pitr.py
+@@ -0,0 +1,162 @@
++"""C4 safety and health boundaries; real PostgreSQL/SFTP has a separate fixture."""
++from __future__ import annotations
++import json,os,sys,tempfile,unittest
++from pathlib import Path
++from types import SimpleNamespace
++from unittest import mock
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT/'ops/vps/ru'))
++import ru_backup as rb
++import ru_pitr as rp
++NOW=1_790_000_000
++
++class PitrTest(unittest.TestCase):
++    def setUp(self):
++        work=tempfile.TemporaryDirectory();self.addCleanup(work.cleanup);self.root=Path(work.name)
++        self.profile=self.root/'profile';self.profile.mkdir(mode=0o755);(self.profile/'empty').mkdir(mode=0o755)
++        self.runtime=self.root/'runtime';self.runtime.mkdir(mode=0o700)
++        for name in ('key','key.pub','known_hosts'):
++            file=self.profile/name;file.write_text('synthetic fixture');file.chmod(0o600 if name=='key' else 0o644)
++        text=(ROOT/'ops/vps/ru/pgbackrest.conf.example').read_text()
++        for old,new in [('/etc/pgbackrest',str(self.profile)),('/var/lib/omoba-ru-pitr',str(self.runtime)),
++            ('/var/lib/postgresql/CHANGE_ME/main',str(self.root/'source-data')),
++            ('repo1-sftp-host=CHANGE_ME','repo1-sftp-host=repository'),('repo1-sftp-host-user=CHANGE_ME','repo1-sftp-host-user=fixture'),
++            ('repo1-cipher-pass=CHANGE_ME','repo1-cipher-pass='+'synthetic-secret-'*4),('/sftp-key.pub','/key.pub'),('/sftp-key','/key')]:text=text.replace(old,new)
++        self.path=self.profile/'omoba-ru.conf';self.path.write_text(text);self.path.chmod(0o600)
++        self.original=text
++        self.cfg=rb.Config(values={'OMOBA_BACKUP_DIR':str(self.root/'backups'),'OMOBA_BACKUP_RUN_AS':'',
++            'OMOBA_BACKUP_ESCROW':str(self.profile),'OMOBA_BACKUP_PITR_REQUIRED':'1','OMOBA_BACKUP_PITR_CONFIG':str(self.path),'OMOBA_BACKUP_PITR_RUNTIME_DIR':str(self.runtime)})
++        patch=mock.patch.object(rb,'exe',side_effect=lambda name:'/usr/bin/'+name);patch.start();self.addCleanup(patch.stop)
++        version=mock.patch.object(rp.Pitr,'version',return_value=(2,58,0));version.start();self.addCleanup(version.stop)
++    def pitr(self):return rp.Pitr(self.cfg,lambda:NOW)
++    def facts(self,stop=NOW):return {'name':'omoba-ru','cipher':'aes-256-cbc','status':{'code':0},'repo':[{'status':{'code':0}}],
++        'backup':[{'type':'full','label':'fixtureF','timestamp':{'stop':stop},'info':{'size':100}}]}
++    def test_profile_and_archive_command_strip_ambient_overrides(self):
++        p=self.pitr();self.assertEqual(p.problems(),[])
++        with mock.patch.dict(os.environ,{'PGBACKREST_REPO1_PATH':'/foreign','PGPASSWORD':'secret','PGHOST':'evil'}):env=p.env()
++        self.assertFalse({'PGBACKREST_REPO1_PATH','PGPASSWORD','PGHOST'}&set(env))
++        self.assertIn('/usr/bin/env -i',p.archive_command);self.assertNotIn('synthetic-secret',p.archive_command)
++        self.assertTrue(p.archive_command.endswith(" '%p'"))
++    def test_unencrypted_local_unpinned_async_or_foreign_repo_is_refused(self):
++        for old,new in [('repo1-type=sftp','repo1-type=posix'),('repo1-cipher-type=aes-256-cbc','repo1-cipher-type=none'),
++            ('repo1-sftp-host-key-check-type=strict','repo1-sftp-host-key-check-type=accept-new'),
++            ('repo1-sftp-host=repository','repo1-sftp-host=127.0.0.1'),('archive-async=n','archive-async=y')]:
++            self.path.write_text(self.original.replace(old,new));self.assertTrue(self.pitr().problems(),new)
++    def test_queue_caps_second_repositories_and_unknown_options_are_refused(self):
++        for line in ['archive-push-queue-max=1GiB','repo2-type=posix','repo1-command=evil','pg1-host=foreign']:
++            self.path.write_text(self.original.replace('[global]','[global]\n'+line));self.assertTrue(self.pitr().problems(),line)
++    def test_primary_and_scratch_must_be_disjoint(self):
++        self.path.write_text(self.original.replace('pg1-path='+str(self.root/'source-data'),'pg1-path='+str(self.runtime)))
++        self.assertTrue(self.pitr().problems())
++    def test_config_override_and_weak_permissions_are_refused(self):
++        file=self.profile/'empty/foreign.conf';file.write_text('[global]\nrepo1-type=posix\n')
++        self.assertTrue(self.pitr().problems());file.unlink();self.path.chmod(0o644);self.assertTrue(self.pitr().problems())
++    def test_symlinked_config_or_host_pins_are_refused(self):
++        for file in (self.path,self.profile/'known_hosts'):
++            saved=file.with_name(file.name+'.saved');file.rename(saved);file.symlink_to(saved)
++            self.assertTrue(self.pitr().problems());file.unlink();saved.rename(file)
++    def test_private_key_cannot_escape_escrow_folder(self):
++        outside=self.root/'outside';outside.write_text('synthetic');outside.chmod(0o600)
++        self.path.write_text(self.original.replace(str(self.profile/'key')+'\n',str(outside)+'\n'));self.assertTrue(self.pitr().problems())
++    def test_mandatory_default_and_invalid_boolean(self):
++        self.assertTrue(rp.required(rb.Config(values={})))
++        with self.assertRaises(rb.BackupError):rp.required(rb.Config(values={'OMOBA_BACKUP_PITR_REQUIRED':'false'}))
++    def test_info_nonzero_status_is_refused_even_after_zero_process_exit(self):
++        p=self.pitr()
++        for code in (1,2,99):
++            data=self.facts();data['status']['code']=code
++            with mock.patch.object(p,'engine',return_value=SimpleNamespace(stdout=json.dumps([data]))):
++                with self.assertRaises(rb.BackupError):p.info()
++        data=self.facts();data['status']['code']=2;data['repo'][0]['status']['code']=2;data['backup']=[]
++        with mock.patch.object(p,'engine',return_value=SimpleNamespace(stdout=json.dumps([data]))):self.assertEqual(p.info(allow_empty=True)['backup'],[])
++    def test_native_cipher_and_repo_status_are_verified(self):
++        p=self.pitr()
++        for bad in ('cipher','repo'):
++            data=self.facts()
++            if bad=='cipher':data['cipher']='none'
++            else:data['repo'][0]['status']['code']=99
++            with mock.patch.object(p,'engine',return_value=SimpleNamespace(stdout=json.dumps([data]))):
++                with self.assertRaises(rb.BackupError):p.info()
++    def test_source_must_match_real_primary_and_exact_archive_policy(self):
++        p=self.pitr();data={'system_id':'7','data':p.pg['pg1-path'],'version':'180006','archive_mode':'on',
++            'archive_timeout':60,'archive_library':'','archive_command':p.archive_command}
++        with mock.patch.object(p,'sql',return_value=json.dumps(data)):self.assertEqual(p.source()['system_id'],'7')
++        for key,value in [('data','/foreign'),('archive_mode','off'),('archive_timeout',61),('archive_command','cp %p /tmp/false'),('archive_library','custom')]:
++            with mock.patch.object(p,'sql',return_value=json.dumps({**data,key:value})):
++                with self.assertRaises(rb.BackupError):p.source()
++    def test_failure_is_recorded_without_cipher_leak(self):
++        p=self.pitr();secret=p.global_options['repo1-cipher-pass']
++        with mock.patch.object(p,'source',side_effect=rb.BackupError('bad '+secret)):
++            with self.assertRaises(rb.BackupError):p.check()
++        self.assertNotIn(secret,p.state_path().read_text());self.assertFalse(p.state()['last_check']['ok'])
++    def test_stale_and_future_remote_backups_cannot_refresh_proof(self):
++        for stop in (NOW-rp.BACKUP_MAX_AGE-1,NOW+1):
++            p=self.pitr()
++            with mock.patch.object(p,'source',return_value={'system_id':'7'}),mock.patch.object(p,'engine'),mock.patch.object(p,'info',return_value=self.facts(stop)):
++                with self.assertRaises(rb.BackupError):p.check()
++                self.assertFalse(p.state()['last_check']['ok'])
++    def test_health_requires_initial_drill_and_refuses_failed_recheck(self):
++        p=self.pitr();good={'ok':True,'at':rb.iso(NOW)};ctx=SimpleNamespace(cfg=self.cfg,now=lambda:NOW)
++        p.record('last_check',good);p.record('last_backup',good)
++        with mock.patch('ru_pitr.Pitr',return_value=p):self.assertIn('pitr-drill',[c for c,_ in rp.health(ctx)[0]])
++        p.record('last_drill_success',good)
++        with mock.patch('ru_pitr.Pitr',return_value=p):self.assertEqual(rp.health(ctx)[0],[])
++        p.record('last_check',{'ok':False,'at':rb.iso(NOW)})
++        with mock.patch('ru_pitr.Pitr',return_value=p):self.assertTrue(rp.health(ctx)[0])
++    def test_atomic_state_merge_and_corruption_rejection(self):
++        p=self.pitr();p.record('last_check',{'ok':True});p.record('last_backup',{'ok':True})
++        self.assertEqual(set(p.state()),{'last_check','last_backup'});p.state_path().write_text('{bad')
++        with self.assertRaises(rb.BackupError):p.state()
++    def test_full_then_daily_differential_and_weekly_full(self):
++        for full_age,expected in [(None,'full'),(1,'diff'),(rp.FULL_INTERVAL+1,'full')]:
++            p=self.pitr();facts=self.facts(NOW-(full_age or 0));facts['backup']=facts['backup'] if full_age is not None else []
++            with mock.patch.object(p,'source'),mock.patch.object(p,'info',return_value=facts),mock.patch.object(p,'engine') as engine,mock.patch.object(p,'check',return_value={'ok':True}):
++                self.assertEqual(p.backup()['type'],expected);engine.assert_called_once_with('--type='+expected,'backup',timeout=3*3600)
++    def test_read_only_remote_health_refuses_deleted_repository_without_refreshing_old_proof(self):
++        p=self.pitr();good={'ok':True,'at':rb.iso(NOW)}
++        for slot in ['last_check','last_backup','last_drill_success']:p.record(slot,good)
++        before=p.state_path().read_bytes();ctx=SimpleNamespace(cfg=self.cfg,now=lambda:NOW)
++        with mock.patch('ru_pitr.Pitr',return_value=p),mock.patch.object(p,'info',side_effect=rb.BackupError('missing repo')):
++            problems,_=rp.health(ctx,remote=True)
++        self.assertIn('pitr-remote',[code for code,_ in problems]);self.assertEqual(p.state_path().read_bytes(),before)
++    def test_peer_user_must_really_traverse_read_and_write_its_paths(self):
++        p=self.pitr()
++        with mock.patch.object(rb,'db_user',return_value={'user':os.getuid()+1,'group':os.getgid()+1}):
++            self.assertTrue(any('peer user cannot' in text for _,text in p.problems()))
++
++    def test_unsupported_package_version_is_a_readiness_failure(self):
++        with mock.patch.object(rp.Pitr,'version',return_value=(2,50,0)):
++            self.assertTrue(any('pgBackRest2.58' in text for _,text in self.pitr().problems()))
++
++    def test_nested_or_unescrowed_private_material_cannot_pass_readiness(self):
++        nested=self.profile/'nested';nested.mkdir();file=nested/'key';file.write_text('fixture');file.chmod(0o600)
++        self.path.write_text(self.original.replace(str(self.profile/'key')+'\n',str(file)+'\n'))
++        self.assertTrue(self.pitr().problems());self.path.write_text(self.original)
++        self.cfg.values['OMOBA_BACKUP_ESCROW']=''
++        self.assertTrue(any('included in the secrets escrow' in text for _,text in self.pitr().problems()))
++    def test_incomplete_pitr_preserves_logical_archive_but_does_not_certify_combined_success(self):
++        import io
++        ctx=rb.Context(self.cfg,now=lambda:NOW,stderr=io.StringIO())
++        with mock.patch.object(rb,'config_problems',return_value=[('pitr-config','incomplete')]),mock.patch.object(rb,'backup_steps',return_value={'name':'logical-uploaded'}) as backup:
++            with self.assertRaises(rb.BackupError):rb.run_backup(ctx,reason='manual')
++        backup.assert_called_once();self.assertEqual(ctx.state['last_logical_success']['name'],'logical-uploaded')
++        self.assertFalse(ctx.state['last_attempt']['ok']);self.assertNotIn('last_success',ctx.state)
++
++    def test_pitr_alert_journal_preserves_backup_metadata_and_redacts_its_own_secret(self):
++        ctx=rb.Context(self.cfg);ctx.state={'last_success':{'name':'independent-logical-copy'}};ctx.save()
++        before=Path(ctx.state_path).read_bytes();secret=self.pitr().global_options['repo1-cipher-pass']
++        with mock.patch.object(rb.Context,'telegram',return_value=True):
++            rp.notify(self.cfg,'failed '+secret);rp.notify(self.cfg,None)
++        self.assertEqual(Path(ctx.state_path).read_bytes(),before)
++        alerts=Path(self.cfg.backup_dir)/'pitr-alerts.json'
++        self.assertNotIn(secret,alerts.read_text());self.assertFalse(json.loads(alerts.read_text()).get('alerts'))
++    def test_operator_config_report_does_not_expose_credentials(self):
++        import io
++        output=io.StringIO();ctx=SimpleNamespace(cfg=self.cfg,now=lambda:NOW)
++        with mock.patch.object(rb,'Context',return_value=ctx):
++            result=rb.main(['pitr-config','--json'],stdout=output)
++        self.assertEqual(result,0);report=json.loads(output.getvalue());self.assertTrue(report['ok'])
++        self.assertIn('archive-push',report['facts']['archive_command'])
++        self.assertNotIn('synthetic-secret',output.getvalue())
++
++if __name__=='__main__':unittest.main()

@@ -1,0 +1,15 @@
+2026-11-06T21:32:26.4538326Z test frontend::home::tests::directory_policy_blocks_stale_queue_actions_and_offers_retry_without_blocking_offline ... ok
+2026-11-06T21:32:28.1727986Z test net::directory::tests::boot_uses_signed_concrete_ip_despite_unresolvable_label ... ok
+2026-11-06T21:32:28.1768129Z test net::directory::tests::expired_worker_authority_keeps_pending_handoff_without_transport ... ok
+2026-11-06T21:32:28.1788199Z test net::directory::tests::maintenance_blocks_new_search_but_preserves_fifo_cancel_and_resume ... ok
+2026-11-06T21:32:28.1808074Z test net::directory::tests::command_dispatch_guard_runs_before_new_search_interception ... ok
+2026-11-06T21:32:28.1813406Z test net::directory::tests::lifecycle_retry_preserves_pending_allocation_until_authority_refreshes ... ok
+2026-11-06T21:32:28.1867313Z test net::directory::tests::pending_or_malformed_authority_never_opens_legacy_transport ... ok
+2026-11-06T21:32:28.1898067Z test net::directory::tests::resume_selects_original_owner_before_new_search_policy_and_normalizes_hint ... ok
+2026-11-06T21:32:28.1918064Z test net::directory::tests::removed_owner_cannot_borrow_another_lobbys_worker_authority ... ok
+2026-11-06T21:32:28.2031968Z test net::directory::tests::returning_party_keeps_original_lobby_through_maintenance_and_weight_changes ... ok
+2026-11-06T21:32:36.9458942Z test ui::theme::tests::the_display_subset_covers_every_zh_hans_dictionary_character ... ok
+2026-11-06T21:32:37.0798466Z test update::tests::signed_directory_requires_update_without_udp_and_keeps_portal_link_rules ... ok
+2026-11-06T21:32:40.4922805Z test result: ok. 1621 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.76s
+2026-11-06T21:32:40.5223339Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-11-06T21:32:43.2573871Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

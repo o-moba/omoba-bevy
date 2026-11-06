@@ -1,0 +1,17 @@
+2026-11-06 22:06:05.768 GMT [830] LOG:  starting PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-06 22:06:05.768 GMT [830] LOG:  listening on Unix socket "/tmp/pitr-runtime/native-missing-socket/.s.PGSQL.6545"
+2026-11-06 22:06:05.773 GMT [836] LOG:  database system was interrupted; last known up at 2026-11-06 22:05:51 GMT
+2026-11-06 22:06:05.855 GMT [836] LOG:  starting backup recovery with redo LSN 0/1000028, checkpoint LSN 0/1000080, on timeline ID 1
+2026-11-06 22:06:05.890 GMT [836] LOG:  restored log file "000000010000000000000010" from archive
+2026-11-06 22:06:05.892 GMT [836] LOG:  starting point-in-time recovery to "omoba_fixture_earned"
+2026-11-06 22:06:05.893 GMT [836] LOG:  redo starts at 0/1000028
+2026-11-06 22:06:05.929 GMT [836] LOG:  restored log file "000000010000000000000011" from archive
+2026-11-06 22:06:05.965 GMT [836] LOG:  completed backup recovery with redo LSN 0/1000028 and end LSN 0/1000120
+2026-11-06 22:06:05.965 GMT [836] LOG:  consistent recovery state reached at 0/1000120
+2026-11-06 22:06:05.965 GMT [830] LOG:  database system is ready to accept read-only connections
+2026-11-06 22:06:05.997 GMT [836] LOG:  redo done at 0/1100090 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.10 s
+2026-11-06 22:06:05.997 GMT [836] FATAL:  recovery ended before configured recovery target was reached
+2026-11-06 22:06:05.998 GMT [830] LOG:  startup process (PID 836) exited with exit code 1
+2026-11-06 22:06:05.998 GMT [830] LOG:  terminating any other active server processes
+2026-11-06 22:06:05.998 GMT [830] LOG:  shutting down due to startup process failure
+2026-11-06 22:06:05.999 GMT [830] LOG:  database system is shut down

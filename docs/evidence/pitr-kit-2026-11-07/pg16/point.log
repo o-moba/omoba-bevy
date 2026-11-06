@@ -1,0 +1,19 @@
+2026-11-06 22:09:52.755 GMT [544] LOG:  starting PostgreSQL 16.15 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-06 22:09:52.756 GMT [544] LOG:  listening on Unix socket "/tmp/pitr-runtime/native-point-socket/.s.PGSQL.6545"
+2026-11-06 22:09:52.758 GMT [547] LOG:  database system was interrupted; last known up at 2026-11-06 22:09:45 GMT
+2026-11-06 22:09:52.845 GMT [547] LOG:  starting point-in-time recovery to "omoba_fixture_earned"
+2026-11-06 22:09:52.845 GMT [547] LOG:  starting backup recovery with redo LSN 0/D00028, checkpoint LSN 0/D00060, on timeline ID 1
+2026-11-06 22:09:52.879 GMT [547] LOG:  restored log file "00000001000000000000000D" from archive
+2026-11-06 22:09:52.886 GMT [547] LOG:  redo starts at 0/D00028
+2026-11-06 22:09:52.917 GMT [547] LOG:  restored log file "00000001000000000000000E" from archive
+2026-11-06 22:09:52.954 GMT [547] LOG:  restored log file "00000001000000000000000F" from archive
+2026-11-06 22:09:52.960 GMT [547] LOG:  completed backup recovery with redo LSN 0/D00028 and end LSN 0/D00100
+2026-11-06 22:09:52.960 GMT [547] LOG:  consistent recovery state reached at 0/D00100
+2026-11-06 22:09:52.960 GMT [544] LOG:  database system is ready to accept read-only connections
+2026-11-06 22:09:52.995 GMT [547] LOG:  recovery stopping at restore point "omoba_fixture_earned", time 2026-11-06 22:09:49.970454+00
+2026-11-06 22:09:52.995 GMT [547] LOG:  redo done at 0/F00EE0 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.10 s
+2026-11-06 22:09:52.995 GMT [547] LOG:  last completed transaction was at log time 2026-11-06 22:09:49.866555+00
+2026-11-06 22:09:53.027 GMT [547] LOG:  restored log file "00000001000000000000000F" from archive
+2026-11-06 22:09:53.062 GMT [547] LOG:  selected new timeline ID: 2
+2026-11-06 22:09:53.103 GMT [547] LOG:  archive recovery complete
+2026-11-06 22:09:53.104 GMT [545] LOG:  checkpoint starting: end-of-recovery immediate wait
