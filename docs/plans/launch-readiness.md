@@ -1795,6 +1795,7 @@ Area: secrets · **major** · M · ops+code
 
 #### LR-53 — Ranked ladder presentation: tiers, placement, seasons, cross-play data
 Area: rating model · **minor** · L · code+owner
+- **Status:** software acceptance verified; production season rollover/rollout remains separate.
 - **Now:**
   - Schema10 stores distinct seasonal placement/counters and immutable allocation
     identity. K=48 for the first20 games of each season, then32; lifetime/XP/
@@ -1809,7 +1810,8 @@ Area: rating model · **minor** · L · code+owner
     Server-clock availability now drives an explicit disabled interseason Home
     action;193 shared/498 server cases and RU native test-target clippy PASS.
     New Home execution, expired pixels and visible coherent demotion notice
-    remain required; the transient QA capture now waits for the notice itself. Core236d1c13 full7-job/18-stage CI and independent exact
+    now PASS. RU/EN own/friend/visited badges and portal badges are inspected;
+    exact images/source hashes are preserved in the ranked evidence pack. Core236d1c13 full7-job/18-stage CI and independent exact
     all-ten seasonal-game verification PASS; local669 PG and18 public stages PASS.
   - Native signed movement records declared touch/mouse/mixed/unknown controls per participant; no platform/device identifier is collected. Durable checkpoints and a bounded win-rate comparison are implemented (see `docs/ranked-input-statistics.md`).
 - **Requirement:**
@@ -1826,7 +1828,7 @@ Area: rating model · **minor** · L · code+owner
     comparison rather than splitting queues.
 - **Acceptance:**
   - [x] Unit tests cover tier boundaries.
-  - [ ] Badges show in RU and EN.
+  - [x] Badges show in RU and EN (native own/friend/visited plus scoped portal checks; RU852x393 and EN852x393 evidence in `docs/evidence/ranked-2026-11-06`).
   - [x] Closing a season archives and soft-resets in one transaction (local schema10 PG/operator proof; production application remains separate).
   - [x] A win-rate-by-input query exists (bounded completed Ranked sample, four groups, wins and sample counts).
 - **Depends on:** LR-08, LR-47, O-5

@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Complete findings35/39 software acceptance: native interseason Home/personal
+  demotion and RU/EN profile badges are verified; portal RU notices and EN
+  seasonal/privacy/legacy checks PASS. Preserve15 accepted unmodified PNGs and
+  source/SHA256 metadata in docs/evidence/ranked-2026-11-06 for review. Rejected
+  captures remain rejected; hardware, other findings and RU rollout stay open.
+
 - Keep process-rehearsal clients off lobby/future-worker UDP ports, with bounded
   rebinding and no sends before an accepted bind. Diagnose local ports/retries.
   Full CIa877 had22 AddrInUse workers before reaching its party-disconnect test;

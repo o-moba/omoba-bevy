@@ -1036,3 +1036,18 @@ and replacement ten-human/no-bot roster Running. All source ports are outside
 the server ranges. Report:.agent/codex-ranked-readiness/p6-party-port-v1/report.json.
 Guarded build/fixture/rehearsal report:p6-party-port-v1-verify-report.json. Full
 current-source18-stage CI remains required; all68 status counts stay unchanged.
+
+
+### P6 scoped visual acceptance and original findings35/39
+
+Exact c826 RU Home interseason/disabled Ranked with Casual available and personal
+leaver demotion (Silver,-32,zeroXP,saved progress) PASS. Three EN native profile/
+friend/visited states PASS on the same binary. Six earlier valid RU states are
+reused. Portal ccee8fa seven RU notice cases and six EN season/privacy/legacy
+cases PASS; images inspected. Accepted unmodified PNGs plus hashes/source scopes
+are now in docs/evidence/ranked-2026-11-06 instead of only ignored worktree files.
+First v5 post-unlock black frame remains rejected; system reported unlocked and
+awake, so its renderer failure is not attributed to the owner. v6/v7 succeed.
+EN driver path typo was corrected before its actual three-state run. No rebuild
+or OS preference change was used. Findings35/39 now done;59 done,6 partial,2 open,
+1 mostly refuted. Other P5/P6 and full release/P7/P8/P9 gates remain required.

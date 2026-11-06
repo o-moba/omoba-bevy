@@ -159,3 +159,12 @@ full-CI party setup failure was a loopback client taking a future worker UDP
 port; the socket regression and exact92.27s party-disconnect replay now PASS.
 Full current-source public verification and remaining visual/release gates
 remain required.
+
+
+P6 software acceptance verified2026-11-06: exact c826 expired Home/demotion and
+EN own/friend/visited badge pixels PASS, with earlier scoped RU evidence reused.
+Portal ccee8fa RU notices and EN seasons/privacy/legacy checks PASS. All15 accepted
+images and source/hash identities are preserved in
+[the evidence pack](../evidence/ranked-2026-11-06/README.md). Findings35/39 are
+complete; other P5/P6, full latest-source release gates, multi-host/ops/hardware
+and actual RU rollout are not implied complete.
