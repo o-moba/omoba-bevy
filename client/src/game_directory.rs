@@ -11,6 +11,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod cache_lock;
+use cache_lock::CacheLock;
+
 #[derive(Clone)]
 pub struct PublicPin {
     pub key_id: String,
@@ -185,7 +188,7 @@ impl DirectoryCache {
     pub fn new(path: PathBuf, trust: DirectoryTrust) -> Self {
         Self { path, trust }
     }
-    fn lock(&self) -> Result<File, DirectoryError> {
+    fn lock(&self) -> Result<CacheLock, DirectoryError> {
         let parent = self
             .path
             .parent()
@@ -214,11 +217,10 @@ impl DirectoryCache {
         {
             return Err(DirectoryError::CacheInvalid);
         }
-        file.try_lock().map_err(|e| match e {
+        CacheLock::acquire(file).map_err(|e| match e {
             std::fs::TryLockError::WouldBlock => DirectoryError::CacheBusy,
             _ => DirectoryError::CacheIo,
-        })?;
-        Ok(file)
+        })
     }
     fn read_locked(&self) -> Result<Option<VerifiedDirectory>, DirectoryError> {
         let metadata = match fs::symlink_metadata(&self.path) {

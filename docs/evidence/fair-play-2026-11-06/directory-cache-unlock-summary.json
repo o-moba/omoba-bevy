@@ -1,0 +1,158 @@
+{
+  "status": "targeted_component_pass_full_client_suite_pending",
+  "reason": "CI42233107055 dev-client test expired_cache_survives_restart_as_a_rollback_and_equivocation_fence failed with CacheBusy; parallel fork can retain a flock open-file description after parent close",
+  "fix": "private CacheLock guard explicitly unlocks before closing; stable lock inode and nonblocking contention behavior preserved",
+  "regression": "child retains duplicate via stdin until parent has checked contention while held and reacquisition after drop; exact production guard module compiled through a std-only test wrapper",
+  "positive_trials": [
+    {
+      "run": 1,
+      "exit": 0
+    },
+    {
+      "run": 2,
+      "exit": 0
+    },
+    {
+      "run": 3,
+      "exit": 0
+    },
+    {
+      "run": 4,
+      "exit": 0
+    },
+    {
+      "run": 5,
+      "exit": 0
+    },
+    {
+      "run": 6,
+      "exit": 0
+    },
+    {
+      "run": 7,
+      "exit": 0
+    },
+    {
+      "run": 8,
+      "exit": 0
+    },
+    {
+      "run": 9,
+      "exit": 0
+    },
+    {
+      "run": 10,
+      "exit": 0
+    },
+    {
+      "run": 11,
+      "exit": 0
+    },
+    {
+      "run": 12,
+      "exit": 0
+    },
+    {
+      "run": 13,
+      "exit": 0
+    },
+    {
+      "run": 14,
+      "exit": 0
+    },
+    {
+      "run": 15,
+      "exit": 0
+    },
+    {
+      "run": 16,
+      "exit": 0
+    },
+    {
+      "run": 17,
+      "exit": 0
+    },
+    {
+      "run": 18,
+      "exit": 0
+    },
+    {
+      "run": 19,
+      "exit": 0
+    },
+    {
+      "run": 20,
+      "exit": 0
+    },
+    {
+      "run": 21,
+      "exit": 0
+    },
+    {
+      "run": 22,
+      "exit": 0
+    },
+    {
+      "run": 23,
+      "exit": 0
+    },
+    {
+      "run": 24,
+      "exit": 0
+    },
+    {
+      "run": 25,
+      "exit": 0
+    },
+    {
+      "run": 26,
+      "exit": 0
+    },
+    {
+      "run": 27,
+      "exit": 0
+    },
+    {
+      "run": 28,
+      "exit": 0
+    },
+    {
+      "run": 29,
+      "exit": 0
+    },
+    {
+      "run": 30,
+      "exit": 0
+    }
+  ],
+  "negative_control": {
+    "change": "remove explicit unlock, preserving old close-only lifecycle",
+    "exit": 101,
+    "stdout": "\nrunning 1 test\ntest cache_lock::tests::inherited_descriptor_does_not_keep_a_released_cache_busy ... FAILED\n\nfailures:\n\nfailures:\n    cache_lock::tests::inherited_descriptor_does_not_keep_a_released_cache_busy\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s\n\n",
+    "stderr": "\nthread 'cache_lock::tests::inherited_descriptor_does_not_keep_a_released_cache_busy' (14797891) panicked at .agent/codex-ranked-readiness/cache-lock-close-only.rs:96:9:\nchild retained a released lock\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n"
+  },
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "source_sha256": {
+    "client/src/game_directory.rs": "06f70ef6fb07bd8239863d83a71570b3d2861a84237f9bbfc5154bb8f49c0bd9",
+    "client/src/game_directory/cache_lock.rs": "6fb688b0ba1d4485d862978227ebf67897e8e3490e470da6561620dc7777d710"
+  },
+  "strict_ru_clippy": {
+    "source_parent": "e2ac9146cc69180b490dd7352a16e519fa208f27",
+    "working_diff_sha256": "59a4fdf2bd3dcd782dbb890c6a4db6845559d0075e5b501b60cca3f7c9094540",
+    "untracked": [
+      "client/src/game_directory/cache_lock.rs"
+    ],
+    "market": "ru",
+    "steps": [
+      {
+        "name": "clippy",
+        "exit": 0,
+        "seconds": 90.3,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/d1-cache-unlock-clippy-v1-clippy.log"
+      }
+    ],
+    "minimum_root_gib": 27.142532348632812
+  },
+  "limits": "local macOS test; complete client directory suite running separately; actual Linux branch CI remains required"
+}

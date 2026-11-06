@@ -1646,3 +1646,21 @@ Currentbf359465 CI42233107055: format/core, gameplay harness, Android, Python an
 bot jobs PASS; dev-client job127943697882 FAILED1589 passed/1 failed/1 ignored
 with `CacheBusy` in expired-cache restart regression. PostgreSQL public journeys
 are still running. Investigate the lock lifecycle; do not report this as full green.
+
+
+### D1 CI repair — inherited cache-lock descriptors
+
+The bf359465 dev-client failure is a real lock-lifecycle race. Unix locks belong
+to the open-file description: a concurrent fork can retain it after the parent
+closes its descriptor, until the child execs/exits. Explicitly unlock in a small
+private RAII guard before closing. The stable lock inode, fail-closed cache,
+nonblocking contention and cross-process exclusion remain intact.
+
+A bounded actual subprocess retains a duplicate descriptor and proves both
+contention while owned and successful reacquisition after parent release. The
+exact production guard module compiled through a std-only wrapper passes30/30;
+the close-only negative control fails with `child retained a released lock`.
+Strict RU client/test-target clippy PASS90.30s. Full integrated directory tests
+are still compiling; Linux/full branch CI is required. Preserve [the scoped
+regression proof](../evidence/fair-play-2026-11-06/directory-cache-unlock-summary.json).
+No test is weakened/retried to mask a failure, and no CI workflow is changed.
