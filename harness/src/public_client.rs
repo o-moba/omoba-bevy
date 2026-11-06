@@ -290,6 +290,35 @@ impl PublicSession {
         if self.path.is_none() || epoch != self.epoch {
             return None;
         }
+        if view.storage_enabled && view.auth_nonce.is_none() {
+            if self.auth.is_some()
+                && matches!(
+                    view.error.as_deref(),
+                    Some(
+                        "Sign in before using your profile."
+                            | "Account authorization could not be refreshed. Reconnect when the account service is available."
+                    )
+                )
+            {
+                // Match the native client's explicit authority-loss recovery.
+                // A new path also resets signed-command replay scope safely.
+                self.reset_transport(self.lobby);
+                self.status.error = view.error_code.or(view.error);
+                return None;
+            }
+            if self.auth.is_none()
+                && view.error.as_deref()
+                    == Some("Authentication failed. Request a fresh challenge.")
+            {
+                // Do not sign the rejected nonce forever under a congested
+                // first login. Ignore its retained view until Challenge replies.
+                if self.challenge.take().is_some() {
+                    self.next_auth = Instant::now();
+                }
+                self.status.error = view.error_code.or(view.error);
+                return None;
+            }
+        }
         if self.auth.is_none()
             && let Some(challenge) = view.challenge
             && self.valid_challenge(&challenge)
@@ -704,6 +733,88 @@ mod tests {
         let mut bytes = [0; 16_384];
         let len = peer.recv(&mut bytes).unwrap();
         serde_json::from_slice(&bytes[..len]).unwrap()
+    }
+
+    #[test]
+    fn rejected_challenge_requests_a_fresh_nonce_without_weakening_authorization() {
+        let (socket, peer) = sockets();
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Mage, "Fill".into());
+        session.epoch = 19;
+        session.path = Some("b".repeat(64));
+        session.next_probe = Instant::now() + Duration::from_secs(60);
+        let old = AuthChallenge {
+            public_key: session.public_key.clone(),
+            nonce: "a".repeat(64),
+            server_epoch: 19,
+            session_id: session.session_id.clone(),
+            nickname: session.nickname.clone(),
+        };
+        session.challenge = Some(old.clone());
+        let rejected = CareerView {
+            storage_enabled: true,
+            challenge: Some(old),
+            error: Some("Authentication failed. Request a fresh challenge.".into()),
+            ..Default::default()
+        };
+        session.career(18, rejected.clone());
+        assert!(
+            session.challenge.is_some(),
+            "foreign epoch cannot reset authentication"
+        );
+        session.career(19, rejected.clone());
+        assert!(session.challenge.is_none());
+        session.tick(&socket);
+        let PublicClientDatagram::TransportBootstrap { payload, .. } = receive(&peer) else {
+            panic!("missing fresh challenge request")
+        };
+        assert!(matches!(
+            serde_json::from_str::<ClientPacket>(&payload).unwrap(),
+            ClientPacket::Career {
+                request: CareerRequest::Challenge { .. }
+            }
+        ));
+        let retry = session.next_auth;
+        session.career(19, rejected);
+        assert_eq!(
+            session.next_auth, retry,
+            "periodic stale views cannot flood retries"
+        );
+        assert!(session.auth.is_none());
+    }
+
+    #[test]
+    fn explicit_authority_loss_reprobes_but_empty_views_do_not_restart() {
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Mage, "Fill".into());
+        session.epoch = 19;
+        session.path = Some("b".repeat(64));
+        session.auth = Some("a".repeat(64));
+        session.account_sequence = 7;
+        session.sequence = 8;
+        session.career(
+            19,
+            CareerView {
+                storage_enabled: true,
+                ..Default::default()
+            },
+        );
+        assert!(session.auth.is_some(), "empty bootstrap is not revocation");
+        let key = session.public_key.clone();
+        let nonce = session.client_nonce.clone();
+        session.career(
+            19,
+            CareerView {
+                storage_enabled: true,
+                error: Some("Sign in before using your profile.".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(session.public_key, key);
+        assert_ne!(session.client_nonce, nonce);
+        assert!(session.auth.is_none() && session.path.is_none());
+        assert_eq!((session.account_sequence, session.sequence), (0, 0));
+        assert_eq!(session.status.phase, "probing");
     }
 
     #[test]

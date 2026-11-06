@@ -5,6 +5,24 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Recover the public rehearsal client after a rejected challenge or explicit
+  loss of account authority; request a fresh challenge/path with the same key,
+  preserve retry pacing and reject foreign epochs. Recognize the server's
+  alternate revoked-device wording in native scoped recovery. Server signature,
+  expiry and refusal enforcement stays intact.191 shared,14 matching,30 harness
+  and5 capacity-tool checks plus strict affected-crate clippy pass; native test
+  targets typecheck. Repeated1000-player acceptance and full CI remain required.
+
+- Verify protocol16 full Ranked base victory with exact all-ten awards/history
+  and zeroAFK/disconnection (469460ms gameplay). The60s1000-playing trial lowers
+  measured p95 wire traffic to42014B/player/s but received snapshots remain9.54Hz;
+  a repeat exposes stale synthetic-client auth recovery and fails acceptance.
+  Temporary owned test DB connections are restored to100; both failures remain
+  recorded. Recovery/performance/committed CI and RU verification remain open.
+- Start shared approved season/input primitives: tier boundaries,20 placements,
+  90-day duration, integer reset rounding toward1000 and mixed-control tracking.
+  191 shared tests pass; persistence, rollover and UI are not implemented yet.
+
 - Add owner-approved lossless world-snapshot compression under protocol16. Keep
   the1200-byte UDP budget, exact JSON bytes, plain control packets and snapshot
   cadence; bound decompression to65507 bytes and reject incomplete/trailing/

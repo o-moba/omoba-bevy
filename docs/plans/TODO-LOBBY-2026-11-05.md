@@ -886,3 +886,43 @@ a72dd61c9a1f635bb60da7092d3cb330,426600ms gameplay, exact all-ten Elo/XP/
 profile/history and zeroAFK/disconnection; real tenth/noVK gate and early-crash
 recovery PASS. This closes the saved maintenance/test-driver full-CI checkpoint;
 new protocol16 compression still needs its own full CI.
+
+
+Protocol16 frozen ebf3a1fa actual standard-map Ranked victory PASS: result
+3efdf9f470acaf248c024bc243185a98,497.09s including setup/469460ms gameplay.
+Independent all-ten exact Elo/XP/profile/history and zeroAFK/disconnection PASS.
+Synthetic prior qualification receipts disclosed; real gameplay unchanged.
+
+Post-compression1000-playing v1: live acceptance PASS (100 arenas,1000 unique
+connected native AI peers, zero server bots,60s all-playing); p95 wire42014B/s,
+median received complete snapshots9.54Hz. This is below cadence acceptance and
+not a controlled A/B versus the shorter prior run. First wrapper missed the
+normal wait for asynchronous PostgreSQL connection closure; all processes
+exited, zero DB clients verified and temporary200 restored100. Failure retained.
+Repeat v2 correctly waits/restores100 but gameplay acceptance FAIL:707 actors
+retain rejected auth challenges,165 retain lost account authority, only~12
+arenas start. No repeated-load/overall acceptance claim. Correct the synthetic
+client's fresh-challenge/explicit-authority-loss recovery, audit the native
+client's existing scoped recovery/25s timeout, then repeat. Production signature/
+challenge TTL/ban policy remains unchanged.
+
+P6 approved-rule primitives: six tier boundaries,20 seasonal placements,90-day
+duration, bounded integer half-distance reset toward1000, and monotonic declared
+touch/mouse/mixed/unknown evidence.191 shared tests PASS after registering the
+new tolerant types in the enforced unknown-value policy. Persistence, season
+rollover/archive/badges, input recording/query and native/portal display remain
+open. Helpers are uncommitted WIP while the repeat-load recovery is corrected.
+
+
+P7 repeat-load recovery correction: synthetic public client now requests a
+fresh challenge after rejection instead of re-signing the expired nonce. An
+explicit loss of account authority starts a new transport replay scope with
+the same key; empty views/foreign epochs cannot trigger it, repeated old views
+cannot flood retries. Native already implements scoped authority-loss recovery
+and bounded25s attempts; add its missing alias for the server's QueueAccess
+revocation wording. No server TTL/signature/refusal relaxation.191 shared,14
+matching,30 harness and5 capacity-policy tests, strict affected-crate all-target
+clippy and current native test-target checking PASS. New actual1000-playing
+repeat/full CI remains required. Load provenance now includes public-client
+source/transport hashes and dirty-path disclosure. P6 primitives are preserved
+in local e459dab8 with the integration plan; persistence/UI remain open.

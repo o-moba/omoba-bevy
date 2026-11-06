@@ -628,3 +628,18 @@ complete. Full current Ranked, playing-load and compression CI remain pending.
 artifact13466364097 SHA256c67161d2f13da078d98def557d205b16f5761a929f8c4cbaaba034368752c9bf.
 Ranked a72dd61c9a1f635bb60da7092d3cb330,426600ms, exact all-ten awards/history
 and zeroAFK/disconnection; tenth/noVK and early-crash proofs PASS.
+
+
+Frozen ebf3a1fa protocol16 full Ranked PASS:3efdf9f470acaf248c024bc243185a98,
+497.09s setup-inclusive/469460ms gameplay, all-ten exact awards/history and
+zeroAFK/disconnection independently verified.1000-playing60s v1 live acceptance
+PASS (p95 wire42014B/s, median received9.54Hz) but normal wrapper cleanup wait
+raced connection closure; owned fixture restored100 after idle verification.
+Repeat v2 restores100 normally but FAILS load: native actors retain expired
+challenges/lost authority. Both failures retained, no overall scale acceptance.
+
+Correction now passes30 harness tests (fresh nonce, epoch protection, paced
+retry and authority reset),191 shared/14 matching and5 capacity-tool tests,
+affected strict clippy; native test targets typecheck the alternate revocation
+wording. Actual repeat/full CI remain pending. P6 pure rules preserved in local
+e459dab8; seasons/archive/input persistence and UI remain open.

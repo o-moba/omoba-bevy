@@ -254,6 +254,7 @@ impl CareerIdentity {
                 "Sign in before using your profile." // i18n-allow
                     | "Account authorization could not be refreshed. Reconnect when the account service is available." // i18n-allow
                     | "This device was revoked. Authorize this device again from your account." // i18n-allow
+                    | "This device has been revoked." // i18n-allow
                     | shared::moderation::ACCOUNT_BANNED_TEXT
             )
         ) {
@@ -1115,6 +1116,7 @@ mod tests {
             "Sign in before using your profile.",
             "Account authorization could not be refreshed. Reconnect when the account service is available.",
             "This device was revoked. Authorize this device again from your account.",
+            "This device has been revoked.",
             shared::moderation::ACCOUNT_BANNED_TEXT,
         ] {
             let mut identity = identity();

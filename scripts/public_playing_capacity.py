@@ -205,10 +205,15 @@ def main(argv=None):
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=source_root,
                               capture_output=True, text=True, check=True, timeout=5)
     report["source_parent"] = revision.stdout.strip()
+    changes = subprocess.run(["git", "status", "--porcelain", "--untracked-files=normal"],
+                             cwd=source_root, capture_output=True, text=True,
+                             check=True, timeout=5)
+    report["source_dirty_paths"] = [line[3:] for line in changes.stdout.splitlines()]
     report["source_sha256"] = {
         name: hashlib.sha256((source_root / name).read_bytes()).hexdigest()
         for name in ("scripts/public_playing_capacity.py", "scripts/public_bots_rehearsal.py",
-                     "harness/src/bin/bots.rs", "harness/src/bot.rs", "Cargo.lock", "shared/src/protocol.rs")}
+                     "harness/src/bin/bots.rs", "harness/src/bot.rs", "harness/src/public_client.rs",
+                     "Cargo.lock", "shared/src/lib.rs", "shared/src/transport.rs", "shared/src/protocol.rs")}
     children, writers, readers, shards, latest = [], [], [], [], {}
     def register(child):
         children.append(child)
