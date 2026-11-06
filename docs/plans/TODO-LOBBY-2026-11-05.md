@@ -119,7 +119,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 | 62 | minor | ux | Russian empty-history copy claims bot matches are not recorded, but vs Bots is | `/Users/wotori/git/ekza/_workspace/worktrees/mm-web/src/lib/i18n.ts:6` | ru: «Сохранённых матчей пока нет. Офлайн-тренировка не записывается в карьеру; матчи на сервере появятся здесь после завершения.» | done — empty-history copy |
 | 63 | minor | ux | Production RU client shows a developer message when the server does not answer | `client/i18n/ru/net.json:4` | S: replace with a player-facing line ('Сервер не отвечает. Проверьте интернет; повторяем попытку…') and keep the technical line only when the build has the developer server picker. | done (client agent) — player-facing connection line |
 | 64 | minor | ux | Lobby failure codes without Russian text are shown raw with a misleading instruction | `client/i18n/ru/queue.json:14` | Add queue.failed.{queue_full, already_queued, allocation_cancelled_or_expired, profile_has_another_session, capacity_busy, worker_spawn_failed} to ru/en/zh-Hans with accurate wording (retrying vs. needs action), and extend the `status_text_follows_the_language` test to assert every server code constant has a key. | done (client agent) — every lobby code has ru/en/zh text + test |
-| 65 | minor | ux | Hero is picked twice: HeroSelect before Searching, then again in Draft | `client/src/frontend/home.rs:1318` | For public-lobby queues skip HeroSelect: build the JoinPrematch from the profile card's `main_class`/current avatar (ProfileCard already on Home, home.rs:1131-1184) and go straight to Searching; keep HeroSelect for Offline practice. | partial — public Home and party launch skip the first picker; Home action regression passes. Home/party functional regressions and baseline full client gate pass; native Home0/10 pixels PASS; complete Home/party-to-single-Draft visual flow remains pending. |
+| 65 | minor | ux | Hero is picked twice: HeroSelect before Searching, then again in Draft | `client/src/frontend/home.rs:1318` | For public-lobby queues skip HeroSelect: build the JoinPrematch from the profile card's `main_class`/current avatar (ProfileCard already on Home, home.rs:1131-1184) and go straight to Searching; keep HeroSelect for Offline practice. | done — real RU native Home→Searching→15s unanimous ready→one Draft verified for solo and two-client party through actual loopback lobby/worker/PostgreSQL; ten human seats, party kept on one side. Functional/source regressions pass; full branch release gates and separately recorded layout defects remain open. |
 | 66 | minor | ux | Worker dies during handoff/draft: player sees only 'Нет связи · Переподключение…' for up to 3 minutes | `client/src/net/session.rs:850` | While `flow.allocation.is_some()` and the match has not started, keep polling the lobby view in parallel (FindMatch with the same request_id is already idempotent) and, on `Failed{allocation_cancelled_or_expired}` or a terminal slot, run LeaveMatch + show 'Сервер матча недоступен. Ищем матч снова…' and re-queue automatically; or shorten the prematch reconnect window to ~20 s. | done (client agent) — 20 s pre-start window, then re-queue |
 | 67 | minor | ux | Party command errors are only logged on the server; the player sees nothing | `server/src/party.rs:584` | Add `#[serde(default)] error: Option<String>` (stable code) to PartyView, set it for the issuing viewer on the immediate reply, and add `party.error.<code>` strings in ru/en/zh (e.g. 'Игрок уже не в сети', 'Группа заполнена', 'Приглашение истекло'); render it under the online list for ~5 s. | done — PartyView.error codes localized |
 | 68 | minor | ux | Mate in a match shows 'Отошёл' on the public lobby instead of 'В матче' | `server/src/party.rs:652` | In send_party_views on a lobby, build `in_match` from the match service: profiles with a live allocation (lobby.assignments) mapped to member profile_ids; keep `away` for members with no presence and no allocation. | done — in_match from the lobby allocations |
@@ -1664,3 +1664,37 @@ Strict RU client/test-target clippy PASS90.30s. Full integrated directory tests
 are still compiling; Linux/full branch CI is required. Preserve [the scoped
 regression proof](../evidence/fair-play-2026-11-06/directory-cache-unlock-summary.json).
 No test is weakened/retried to mask a failure, and no CI workflow is changed.
+
+
+### P5 native public journeys — row65 functional acceptance
+
+Real RU852×393 native client, owned loopback lobby/worker and PostgreSQL55582:
+solo Home→Searching→15s Ready→one Draft with9 authenticated AI-controlled human
+seats. Two additional native instances formed a party through real invite/accept,
+returned Home, and the leader launched the group. Both went directly to Searching,
+confirmed separately and entered one Draft each with8 AI-controlled human peers.
+All10 actually joined the same worker; both native profiles are on the same side.
+No synthetic party/match-service views, database friend seed, rank maturity fixture
+or account binding was used. No HeroSelect was observed on either route; the
+existing Home/party functional regressions cover the direct transition. Row65 is
+done in software. Ledger:60 done (including3 minimum),6 partial,1 open,1 mostly
+refuted. Current full CI and P5/P6/release gates remain independently required.
+
+Preserve exact PNGs, scoped transition/allocation evidence and matching UI-source/
+binary hashes in [the native public UI pack](../evidence/native-public-ui-2026-11-06/summary.json).
+These are actual admission/flow checks, not a new completed-match/settlement,
+physical-phone, performance, WAN or RU-host certification. Nativeworker snapshots
+use the internal practice mode; the authoritative allocation is public `quick`
+with10 signed human seats. The solo frame is captured during join; party draft
+frames wait for all10 actual worker joins.
+
+New defects discovered on supported long nicknames remain explicitly OPEN:
+- **UI-1:** mobile Home identity nickname wraps and pushes rating outside its chip.
+  Reproduce with authenticated `QA-Party-leader#7964`; fix bounded name/rating layout
+  and verify the same native state. Existing row39 minimum/short-name evidence does
+  not excuse this overflow.
+- **UI-2:** five-player mobile Draft nameplates clip the beginning of nicknames
+  and crowd labels. Fit/truncate names within each slot and inspect a full team.
+  AI avatar assets are not loaded in these frames; investigate actual source before
+  claiming team-stage visual completeness.
+Functional row65 acceptance does not promote these images to full layout acceptance.

@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify real native public Home→search→15s ready-check→single Draft for solo
+  and a two-client party created by actual UI invitation. All10 human seats join
+  one worker, and the party stays on one team. Row65 functional acceptance and
+  exact evidence are preserved; two newly observed long-nickname layout defects
+  stay open, along with full CI and RU/physical release gates.
+
 - Explicitly release the signed-directory cache OS lock before closing its file.
   A parallel fork can otherwise retain the shared lock and cause false CacheBusy
   on the next read. Real inherited-descriptor regression passes30 repetitions;
