@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Independently verify repeated1000-client gameplay on frozen78070b27:100 arenas,
+  ten signed native AI peers each, zero server bots and60s all-playing PASS.
+  Current hashes, manifests, unique identities, snapshots and cleanup verified;
+  temporary owned test PG restored100. Received wire p95=39347B/player/s;
+  complete snapshots median8.64Hz. Latency/cadence, sustained WAN and RU host
+  acceptance remain open; this is a bounded local proof.
+
 - Retain declared touch/mouse/mixed/unknown controls in immutable match receipts,
   preserving checkpoint evidence across recovery and settlement retry. Native
   signed movement reports selected controls; the queue stays shared. Add a

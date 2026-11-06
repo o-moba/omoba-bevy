@@ -683,3 +683,22 @@ The disposable actor now re-probes a silent held-Home path after25s, retaining
 its key and never counting stale authority as fresh. Local unit proof PASS;
 actual repeated1000-playing acceptance remains required. No server authority,
 expiry, qualification or gameplay policy was relaxed.
+
+
+P7 fresh source78070b27 repeated1000-playing v6 PASS: all1000 ordinary sign-ins
+fresh/error-free at99.61s, stable5s Search release104.63s, all1000 Running146.16s;
+60s uninterrupted all-playing soak,100 ten-human Casual arenas, zero server bots.
+Independent source/binary/100 manifest hashes, exact1000 unique identities,
+100 endpoints, current snapshots/error counters and owned process-group cleanup
+recheck PASS. Owned test PG restored200->100, actual zero clients verified.
+Total206.91s. Downlink received wire p50=34553,p95=39347,p99=43574B/player/s;
+complete snapshot median8.642Hz,p05=8.090Hz. Server3.356 average cores/1546.125MiB
+peak (101 processes); generator2.460 cores/574.266MiB (100),59.61s resource window,
+DB excluded. M4Pro local native AI controllers, not physical humans or RU/WAN/
+cgroup evidence. Fresh server/actor builds and six affected-crate strict clippy
+PASS. Silent held-Home recovery resolves the observed v5 dead-path benchmark
+failure; all failures retained. No new qualification receipts or gameplay override.
+Received cadence/latency SLA, sustained load, real uplink and RU capacity remain
+open; do not infer production1000-player acceptance from this bounded proof.
+P6 input persistence/query is implemented; seasons/archive/badges and their
+native/portal presentation remain the next product integration work.
