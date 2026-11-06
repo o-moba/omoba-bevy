@@ -932,3 +932,44 @@ demotion capture is fully black while Quartz confirms the session is locked;
 it is retained as failed evidence and does not satisfy the visual gate. Reuse
 this binary for the next capture rather than rebuilding it. No release or
 production action has occurred; overall68-finding counts are unchanged.
+
+
+### P6 checkpoint — connected profiles follow the new season
+
+The existing bounded access query now reads the canonical own-profile snapshot
+in the same database statement as key status/sanctions/cooldown. Only an active
+own key receives it. Periodic signed-session refresh and fresh QueueAccess
+adopt a strictly newer season before Find is dispatched. No extra query, poller,
+role grant, schema change or dependency is introduced. This removes the stale
+pre-reset rating/placement/badge cache for already connected players.
+
+Own-profile action and settlement replies also refuse an older season or another
+identity. Same-season background reads cannot overwrite a newer settled rating.
+The lifetime completed-public counter is monotonic too: a slow pre-qualification
+reply cannot relock Ranked after the tenth game. Nonce correlation, revocation,
+bounded pacing and fail-closed authorization remain covered. This is not an automatic season close or production reset.
+
+Local verification on isolated PostgreSQL55582:all63 store/matching cases PASS
+(including real close/access snapshot equality and missing-key/profile reads);
+all497 server unit cases PASS, four DB-specific cases ignored by that default
+invocation. The affected concurrent PostgreSQL access case is separately run
+and PASS. Strict store/server all-target clippy and formatting PASS. Report:
+.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p6-season-refresh-v1-verify-report.json and p6-season-refresh-v2-verify-report.json
+(final monotonic public-counter guard). Source hashes are recorded in
+p6-season-refresh-tested-sources.json. A new full current-source CI/public run remains required.
+
+Registry repair df0547fa passes the new CI42184537405 Python tooling job. Local
+complete tooling also PASS:658 cases/9 skips, iOS62 and Android7. The first local
+full attempt failed because loopback went through the configured proxy and the
+asset test found the unrelated dirty sibling handoff. The unchanged rerun uses
+NO_PROXY and the already established isolated OMOBA_UI_HANDOFF; it passes. Raw
+v2 failures and v3 results are retained, not relabelled.
+
+Demotion v4 actual RU852x393 pixels prove personal defeat despite the winning
+team,1478(-32),zero XP and saved progress. The transient demotion toast is absent
+from that image:the40-frame QA wait outlasted its lifetime at low frame rate.
+Do not accept this as notification proof or extend production toast lifetime.
+Next native capture must wait for the expected visible settled toast, then shoot.
+Inspection: native-ranked-ui-inspection-v2.json in the task directory. Earlier
+black v3 and incoherent fixtures remain rejected. Overall68-finding counts are
+unchanged; expiry display, remaining visuals, P7/P8/P9 and RU rollout remain open.

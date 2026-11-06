@@ -71,6 +71,15 @@ async fn season_close_archives_badges_resets_once_and_preserves_lifetime() {
                 old.completed_public_matches
             )
         );
+        // The bounded game-access query sees the complete post-reset snapshot
+        // (including the retained badge) without a second profile query.
+        let access = f
+            .store
+            .access(&format!("{:064x}", n as u64 + 1), &old.profile_id)
+            .await
+            .unwrap();
+        assert!(access.key_active);
+        assert_eq!(access.profile.as_ref(), Some(&after));
         let progress = after.ranked.as_ref().unwrap();
         assert_eq!(
             (

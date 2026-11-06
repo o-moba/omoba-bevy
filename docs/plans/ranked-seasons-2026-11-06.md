@@ -1,7 +1,9 @@
 # Ranked seasons and input statistics
 
 Status: in progress. Owner O-5/O-18 decisions accepted 2026-11-06. The season
-storage/close engine is implemented locally; API/presentation, current full journeys/CI and deployment review remain required.
+storage/close engine, API and presentation are implemented. Schema10 core full
+journeys and native test execution pass; expiry display, remaining native visual
+evidence, current-source CI and deployment review remain required.
 Production rollover/reset is a separately authorized action.
 
 ## Rules
@@ -126,3 +128,15 @@ CJK/asset and formatting checks PASS.
 Still required: coherent demotion pixels and final current native CI;
 expiry/cache refresh UX; reviewed deployment/drain/rollback integration.
 Follow the full lobby TODO for all other findings and release gates.
+
+
+Connected-session rollover cache repair: the existing bounded access read now
+returns the canonical own profile atomically with active-key status. Periodic
+refresh and pre-Find authorization adopt a strictly newer season without
+reconnect. Older action/settlement replies cannot undo it; same-season periodic
+reads cannot undo a newer award. No additional SQL query or timer was added.
+All63 store/matching and497 server unit cases, the affected actual PostgreSQL
+concurrent-access case and strict store/server all-target clippy PASS. Operator
+drain and profile refresh/restart checks remain release prerequisites; this is
+not permission to run a production close/reset. Expiry display and final
+transient-notice pixels remain open.

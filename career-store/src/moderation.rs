@@ -76,6 +76,8 @@ pub struct Applied {
 /// What the game's access refresh reads in one query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Access {
+    /// Same database snapshot as access; available only for an active own key.
+    pub profile: Option<ProfileSummary>,
     pub completed_public_matches: u32,
     /// The key is this profile's and not revoked.
     pub key_active: bool,
@@ -219,17 +221,24 @@ impl CareerStore {
             check_id(profile_id)?;
             let row = sqlx::query(&format!(
                 "SELECT EXISTS(SELECT 1 FROM career_keys WHERE public_key=$2 AND profile_id=$1 AND revoked_at IS NULL) AS key_active, \
-                 (SELECT nickname FROM career_profiles WHERE profile_id=$1) AS nickname, (SELECT completed_public_matches FROM career_profiles WHERE profile_id=$1) AS completed_public_matches, {ACTIVE_JSON} AS sanctions, (SELECT jsonb_build_object('until',ceil(extract(epoch FROM cooldown_until))::bigint,'strikes',strikes) FROM career_play_penalties WHERE profile_id=$1 AND cooldown_until>clock_timestamp()) AS play_cooldown"
+                 p.*, {ACTIVE_JSON} AS sanctions, (SELECT jsonb_build_object('until',ceil(extract(epoch FROM cooldown_until))::bigint,'strikes',strikes) FROM career_play_penalties WHERE profile_id=$1 AND cooldown_until>clock_timestamp()) AS play_cooldown FROM (SELECT $1::text AS id) wanted LEFT JOIN career_profiles p ON p.profile_id=wanted.id"
             ))
             .bind(profile_id)
             .bind(public_key)
             .fetch_one(&self.pool)
             .await?;
             let Json(sanctions): Json<Vec<Sanction>> = row.try_get("sanctions")?;
+            let key_active: bool = row.try_get("key_active")?;
+            let profile = if key_active {
+                Some(super::profile_row(&row)?)
+            } else {
+                None
+            };
             Ok(Access {
+                profile,
                 completed_public_matches: u32::try_from(row.try_get::<Option<i64>, _>("completed_public_matches")?.unwrap_or(0))
                     .map_err(|_| "Invalid stored public match counter.")?,
-                key_active: row.try_get("key_active")?,
+                key_active,
                 nickname: row.try_get("nickname")?,
                 sanctions,
                 play_cooldown: row.try_get::<Option<Json<shared::career::PlayCooldown>>, _>("play_cooldown")?.map(|v| v.0),

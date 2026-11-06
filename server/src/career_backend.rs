@@ -160,6 +160,7 @@ pub(crate) enum Reply {
     RecoveryChecked,
     Flushed(u64, bool),
     RefreshAccess {
+        profile: Option<ProfileSummary>,
         completed_public_matches: Option<u32>,
         addr: SocketAddr,
         nonce: String,
@@ -340,6 +341,7 @@ impl MemoryLink {
             }
             Job::RefreshAccess { addr, nonce, .. } => {
                 self.replies.push_back(Reply::RefreshAccess {
+                    profile: None,
                     completed_public_matches: None,
                     addr,
                     nonce,
@@ -1157,11 +1159,15 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                                     continue;
                                 }
                                 c.key_checked = Some(Instant::now());
+                                if let Some(profile) = access.profile {
+                                    accept_profile_snapshot(&mut c.view.profile, profile, true);
+                                }
                                 c.view.sanctions = access.sanctions;
                                 c.view.play_cooldown = access.play_cooldown;
                                 if let Some(profile) = c.view.profile.as_mut() {
-                                    profile.completed_public_matches =
-                                        access.completed_public_matches;
+                                    profile.completed_public_matches = profile
+                                        .completed_public_matches
+                                        .max(access.completed_public_matches);
                                 }
                                 if let (Some(nickname), Some(profile)) =
                                     (access.nickname, c.view.profile.as_mut())
@@ -1194,6 +1200,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 }
                 Reply::ChatSwitch(enabled) => self.chat_switch = Some(enabled),
                 Reply::RefreshAccess {
+                    profile,
                     completed_public_matches,
                     addr,
                     nonce,
@@ -1210,10 +1217,16 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                         continue;
                     }
                     c.access_refresh_sent = None;
+                    if key_active == Some(true)
+                        && let Some(profile) = profile
+                    {
+                        accept_profile_snapshot(&mut c.view.profile, profile, true);
+                    }
                     if let (Some(count), Some(profile)) =
                         (completed_public_matches, c.view.profile.as_mut())
                     {
-                        profile.completed_public_matches = count;
+                        profile.completed_public_matches =
+                            profile.completed_public_matches.max(count);
                     }
                     if let Some(cooldown) = play_cooldown {
                         c.view.play_cooldown = cooldown;
@@ -1318,8 +1331,8 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                                 c.view.supporter = Some(supporter);
                                 c.supporter_checked = Some(Instant::now());
                             }
-                            if view.profile.is_some() {
-                                c.view.profile = view.profile;
+                            if let Some(profile) = view.profile {
+                                accept_profile_snapshot(&mut c.view.profile, profile, false);
                                 c.profile_ready = true;
                                 c.view.loading = false;
                             }
@@ -1391,7 +1404,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             if let Some(fresh) =
                                 profiles.iter().find(|p| p.profile_id == current.profile_id)
                             {
-                                c.view.profile = Some(fresh.clone());
+                                accept_profile_snapshot(&mut c.view.profile, fresh.clone(), false);
                                 c.profile_ready = true;
                                 c.view.last_result = Some(result.clone());
                                 c.view.error = None;
@@ -1872,9 +1885,10 @@ async fn answer_access_read(store: CareerStore, job: Job) -> Reply {
             } else {
                 None
             };
-            let (nickname, sanctions, play_cooldown, completed_public_matches) = access
+            let (profile, nickname, sanctions, play_cooldown, completed_public_matches) = access
                 .map(|a| {
                     (
+                        a.profile,
                         a.nickname,
                         Some(a.sanctions),
                         Some(a.play_cooldown),
@@ -1883,6 +1897,7 @@ async fn answer_access_read(store: CareerStore, job: Job) -> Reply {
                 })
                 .unwrap_or_default();
             Reply::RefreshAccess {
+                profile,
                 completed_public_matches,
                 addr,
                 nonce,
@@ -2029,17 +2044,20 @@ fn worker(
                     }
                     _ => None,
                 };
-                let (nickname, sanctions, play_cooldown, completed_public_matches) = access
-                    .map(|a| {
-                        (
-                            a.nickname,
-                            Some(a.sanctions),
-                            Some(a.play_cooldown),
-                            Some(a.completed_public_matches),
-                        )
-                    })
-                    .unwrap_or_default();
+                let (profile, nickname, sanctions, play_cooldown, completed_public_matches) =
+                    access
+                        .map(|a| {
+                            (
+                                a.profile,
+                                a.nickname,
+                                Some(a.sanctions),
+                                Some(a.play_cooldown),
+                                Some(a.completed_public_matches),
+                            )
+                        })
+                        .unwrap_or_default();
                 let _ = replies.try_send(Reply::RefreshAccess {
+                    profile,
                     completed_public_matches,
                     addr,
                     nonce,
@@ -2258,6 +2276,28 @@ fn worker(
     }
 }
 
+/// Periodic reads adopt a reset, not an older award from the same season.
+/// Every own-profile reply also refuses a cross-season downgrade: concurrent
+/// access reads may overtake a pre-reset action/settlement reply.
+fn accept_profile_snapshot(
+    current: &mut Option<ProfileSummary>,
+    fresh: ProfileSummary,
+    only_newer_season: bool,
+) {
+    if let Some(old) = current.as_ref() {
+        let season = |p: &ProfileSummary| p.ranked.as_ref().map_or(0, |s| s.season_id);
+        if fresh.profile_id != old.profile_id
+            || season(&fresh) < season(old)
+            || (only_newer_season && season(&fresh) == season(old))
+        {
+            return;
+        }
+    } else if only_newer_season {
+        return;
+    }
+    *current = Some(fresh);
+}
+
 #[cfg(test)]
 mod tests {
     use ed25519_dalek::{Signer, SigningKey};
@@ -2295,6 +2335,7 @@ mod tests {
         let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
         let until = unix_seconds() + 300;
         let fresh = || omoba_career_store::career_store::moderation::Access {
+            profile: None,
             completed_public_matches: 10,
             key_active: true,
             nickname: None,
@@ -2536,6 +2577,7 @@ mod tests {
             until: Some(unix_seconds() + 600),
         };
         let refresh = |sanctions: Vec<Sanction>, nickname: Option<&str>| Reply::RefreshAccess {
+            profile: None,
             completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
@@ -2570,6 +2612,7 @@ mod tests {
         backend.link.replies.push_back(refresh(vec![mute], None));
         backend.poll();
         backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
             completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
@@ -2705,6 +2748,7 @@ mod tests {
         // The next refresh reports the grant gone: the aura goes with it.
         let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
         backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
             completed_public_matches: None,
             addr,
             nonce,
@@ -2728,6 +2772,7 @@ mod tests {
             "session",
         );
         backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
             completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
@@ -2757,6 +2802,7 @@ mod tests {
         let expired = Instant::now() - COSMETIC_CACHE_TTL;
         backend.clients.get_mut(&addr).unwrap().key_checked = Some(expired);
         backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
             completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),

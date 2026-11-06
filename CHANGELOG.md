@@ -5,6 +5,18 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Refresh already connected players' profile/rating/placements/badge after an
+  operator season rollover through the existing bounded access read. Read the
+  snapshot atomically with key status, adopt only a newer season, and reject
+  older own-profile action/settlement replies. Preserve same-season settled
+  awards, monotonic public eligibility, session correlation and revocation. All63 real-PostgreSQL store cases,
+  497 server unit cases, the affected concurrent PostgreSQL access case and
+  strict store/server all-target clippy PASS; full current-source CI is pending.
+- Screen-registry repair passes CI Python tooling. Local complete tooling passes
+  658 cases (9 skips), iOS62 and Android7 with isolated handoff/loopback settings.
+  Demotion pixels prove personal defeat/-32/zeroXP, but the transient notice
+  still needs a state-gated capture; the missing notice is not counted as PASS.
+
 - Register the shared seasonal QA fixture in the frontend/career screen map,
   preserving source-coverage validation. Current native CI passes all1578 client
   tests (one ignored), Android and strict checks; the Python registry repair is

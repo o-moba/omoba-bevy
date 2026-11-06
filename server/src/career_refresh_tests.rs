@@ -252,13 +252,13 @@ fn postgres_access_read_batches_preserve_identity_errors_and_revocation() {
                     assert_eq!(sequence,request.request_id+1);
                     assert!(seen.insert(request.request_id));
                     match request.request_id {
-                        0=>{let access=access.unwrap().unwrap();assert!(access.key_active);assert_eq!(access.completed_public_matches,0);},
+                        0=>{let access=access.unwrap().unwrap();assert!(access.key_active);assert_eq!(access.completed_public_matches,0);assert_eq!(access.profile,Some(profile.clone()));},
                         1=>assert!(access.is_err()),
-                        2=>assert!(!access.unwrap().unwrap().key_active),
+                        2=>{let access=access.unwrap().unwrap();assert!(!access.key_active);assert!(access.profile.is_none());},
                         _=>panic!("unexpected identity"),
                     }
                 }
-                Reply::RefreshAccess {nonce,key_active,..}=>{assert_eq!(nonce,"refresh");assert_eq!(key_active,Some(true));},
+                Reply::RefreshAccess {nonce,key_active,profile:fresh,..}=>{assert_eq!(nonce,"refresh");assert_eq!(key_active,Some(true));assert_eq!(fresh,Some(profile.clone()));},
                 _=>panic!("unexpected reply"),
             }
         }
@@ -269,4 +269,156 @@ fn postgres_access_read_batches_preserve_identity_errors_and_revocation() {
         assert!(matches!(&replies[0],Reply::QueueAccess {access:Ok(Some(access)),..} if !access.key_active));
         pool.close().await;
     });
+}
+
+#[test]
+fn season_reset_refreshes_a_signed_session_without_reconnect_and_fences_late_replies() {
+    let addr = SocketAddr::from(([127, 0, 0, 1], 30401));
+    let mut backend = MemoryCareer::test_backend(9);
+    let mut old = ProfileSummary::new("a".repeat(64), "Returning".into());
+    old.rating = 2300;
+    old.rated_matches = 40;
+    old.matches_played = 55;
+    old.completed_public_matches = 10;
+    old.progression_xp = 12000;
+    old.ranked = Some(shared::ranked::SeasonProfile {
+        season_id: 1,
+        started_at_ms: 1000,
+        ends_at_ms: 1000 + shared::ranked::SEASON_DURATION_MS,
+        rated_matches: 40,
+        wins: 20,
+        losses: 20,
+        completed_matches: 40,
+        latest_badge: None,
+    });
+    let mut reset = old.clone();
+    reset.rating = 1650;
+    let season = reset.ranked.as_mut().unwrap();
+    season.season_id = 2;
+    season.started_at_ms = season.ends_at_ms;
+    season.ends_at_ms += shared::ranked::SEASON_DURATION_MS;
+    season.rated_matches = 0;
+    season.wins = 0;
+    season.losses = 0;
+    season.completed_matches = 0;
+    season.latest_badge = Some(shared::ranked::SeasonBadge {
+        season_id: 1,
+        ended_at_ms: season.started_at_ms,
+        rating: 2300,
+        rated_matches: 40,
+        tier: Some(shared::ranked::Tier::Platinum),
+    });
+    backend.test_authenticated(addr, old.clone(), "same-session");
+    let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
+    let refresh = |profile: ProfileSummary, nonce: String, active| Reply::RefreshAccess {
+        completed_public_matches: Some(profile.completed_public_matches),
+        profile: Some(profile),
+        addr,
+        nonce,
+        key_active: Some(active),
+        supporter: None,
+        nickname: None,
+        sanctions: Some(Vec::new()),
+        play_cooldown: Some(None),
+    };
+    // An unrelated identity or a response from the previous sign-in cannot reset us.
+    let mut foreign = reset.clone();
+    foreign.profile_id = "b".repeat(64);
+    for reply in [
+        refresh(foreign, nonce.clone(), true),
+        refresh(reset.clone(), "old-login".into(), true),
+    ] {
+        backend.link.replies.push_back(reply);
+        backend.poll();
+        assert_eq!(backend.profile(addr), Some(old.clone()));
+    }
+    backend
+        .link
+        .replies
+        .push_back(refresh(reset.clone(), nonce.clone(), true));
+    backend.poll();
+    assert_eq!(backend.profile(addr), Some(reset.clone()));
+    assert_eq!(
+        backend.authenticated_session(addr).as_deref(),
+        Some("same-session")
+    );
+    assert!(reset.ranked_unlocked());
+    // A slow pre-reset read, own-profile action and settlement must not undo the reset.
+    let mut stale_public = old.clone();
+    stale_public.completed_public_matches = 9;
+    backend
+        .link
+        .replies
+        .push_back(refresh(stale_public, nonce.clone(), true));
+    backend.link.replies.push_back(Reply::Action {
+        addr,
+        nonce: nonce.clone(),
+        request_id: Some(7),
+        result: Ok(shared::career::CareerView {
+            profile: Some(old.clone()),
+            ..Default::default()
+        }),
+    });
+    let receipt = serde_json::from_value(serde_json::json!({
+        "result_id": "old-award", "server_epoch": 9, "match_id": 1,
+        "started_at_ms": 1, "ended_at_ms": 2, "duration_ms": 1,
+        "map_profile": "verdant_default", "ruleset": "public-ranked-v1",
+        "outcome": "completed", "winner": "green", "rated": true,
+        "participants": [], "ranked_season_id": 1
+    }))
+    .unwrap();
+    backend.link.replies.push_back(Reply::Settled {
+        result: receipt,
+        profiles: vec![old],
+    });
+    backend.poll();
+    assert_eq!(backend.profile(addr), Some(reset.clone()));
+    // A same-season in-flight access read cannot replace a newer settled award.
+    backend
+        .clients
+        .get_mut(&addr)
+        .unwrap()
+        .view
+        .profile
+        .as_mut()
+        .unwrap()
+        .rating = 1670;
+    backend
+        .link
+        .replies
+        .push_back(refresh(reset.clone(), nonce.clone(), true));
+    backend.poll();
+    assert_eq!(backend.profile(addr).unwrap().rating, 1670);
+    // Queue authorization refreshes the season before dispatching Find too.
+    let mut third = reset.clone();
+    third.ranked.as_mut().unwrap().season_id = 3;
+    third.rating = 1325;
+    let request = crate::career_port::MatchRequest {
+        addr,
+        request_id: 8,
+        preference: shared::match_service::MatchPreference::Ranked,
+        also_casual: false,
+    };
+    backend.clients.get_mut(&addr).unwrap().queue_sequence = Some(8);
+    backend.link.replies.push_back(Reply::QueueAccess {
+        request,
+        nonce: nonce.clone(),
+        sequence: 8,
+        access: Ok(Some(omoba_career_store::career_store::moderation::Access {
+            profile: Some(third.clone()),
+            completed_public_matches: 10,
+            key_active: true,
+            nickname: None,
+            sanctions: Vec::new(),
+            play_cooldown: None,
+        })),
+    });
+    backend.poll();
+    assert_eq!(backend.take_match_requests(), [request]);
+    assert_eq!(backend.profile(addr), Some(third.clone()));
+    // Revocation still ends the session and cannot install the supplied snapshot.
+    backend.link.replies.push_back(refresh(reset, nonce, false));
+    backend.poll();
+    assert!(backend.authenticated_session(addr).is_none());
+    assert_eq!(backend.view(addr).profile, Some(third));
 }

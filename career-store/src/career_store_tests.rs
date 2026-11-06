@@ -1752,6 +1752,11 @@ async fn career_store_sanctions_apply_expire_lift_and_audit() {
     };
     let clean = f.store.access(&key, &a.profile_id).await.unwrap();
     assert!(clean.key_active && clean.sanctions.is_empty());
+    assert_eq!(clean.profile.as_ref(), Some(&a));
+    let absent = f.store.access(&key, &"f".repeat(64)).await.unwrap();
+    assert!(!absent.key_active && absent.profile.is_none());
+    assert_eq!(absent.completed_public_matches, 0);
+
     assert_eq!(clean.nickname.as_deref(), Some(a.nickname.as_str()));
 
     // Applied: visible to the game at once, with its end.
