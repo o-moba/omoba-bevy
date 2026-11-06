@@ -133,7 +133,9 @@ pub(in crate::net) fn sync_connection_status_ui(
         return;
     };
     // Written every frame, so a language change shows at once.
-    let status = if let Some(verdict) = client_session.compatibility_verdict() {
+    let status = if let Some(notice) = client_session.directory_notice {
+        notice.message()
+    } else if let Some(verdict) = client_session.compatibility_verdict() {
         verdict.message()
     } else if let Some(reason) = client_session.join_error {
         data::join_rejection(reason).to_owned()
@@ -147,7 +149,8 @@ pub(in crate::net) fn sync_connection_status_ui(
     }
 
     if let Ok((mut visibility, mut node)) = retry.single_mut() {
-        let can_retry = client_session.state == ClientConnectionState::Disconnected
+        let can_retry = link_status(&client_session).can_retry()
+            || client_session.state == ClientConnectionState::Disconnected
             || client_session.join_error.is_some()
             || client_session.join_exhausted;
         *visibility = if can_retry {
@@ -192,6 +195,7 @@ impl CompatibilityVerdict {
 /// developer lines (server address, `GAME_SERVER_ADDR`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinkStatus {
+    Directory(super::directory::DirectoryNotice),
     /// The server refused the join (after a reconnect, or a protocol mismatch).
     Rejected(shared::protocol::JoinRejection),
     Compatibility(CompatibilityVerdict),
@@ -219,7 +223,12 @@ impl LinkStatus {
     pub(crate) fn can_retry(self) -> bool {
         matches!(
             self,
-            LinkStatus::Compatibility(_)
+            LinkStatus::Directory(
+                super::directory::DirectoryNotice::Unavailable
+                    | super::directory::DirectoryNotice::Maintenance
+                    | super::directory::DirectoryNotice::Full
+                    | super::directory::DirectoryNotice::Incompatible
+            ) | LinkStatus::Compatibility(_)
                 | LinkStatus::Rejected(_)
                 | LinkStatus::Unconfirmed
                 | LinkStatus::Disconnected
@@ -229,6 +238,7 @@ impl LinkStatus {
     /// The line a screen prints for it (`None` = nothing to say).
     pub(crate) fn detail(self) -> Option<String> {
         match self {
+            LinkStatus::Directory(notice) => Some(notice.message()),
             LinkStatus::Compatibility(verdict) => Some(verdict.message()),
             LinkStatus::Rejected(reason) => Some(data::join_rejection(reason).to_owned()),
             LinkStatus::Unconfirmed => Some(tr("net.status.join_unconfirmed").to_owned()),
@@ -247,6 +257,9 @@ impl LinkStatus {
 
 /// Where the session stands, first match wins (`loading-shell.md`).
 pub(crate) fn link_status(session: &ClientSession) -> LinkStatus {
+    if let Some(notice) = session.directory_notice {
+        return LinkStatus::Directory(notice);
+    }
     if let Some(verdict) = session.compatibility_verdict() {
         return LinkStatus::Compatibility(verdict);
     }

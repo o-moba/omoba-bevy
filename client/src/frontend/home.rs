@@ -50,6 +50,7 @@ enum HomeAction {
     /// elsewhere.
     Play,
     Resume,
+    Retry,
     Ranked,
     BotPractice,
     OfflinePractice,
@@ -391,6 +392,7 @@ struct HomeSignature {
     losses: u32,
     connection: ClientConnectionState,
     compatibility_issue: Option<shared::compatibility::CompatibilityIssue>,
+    directory_notice: Option<crate::net::directory::DirectoryNotice>,
     card: ProfileCard,
     last_result: Option<String>,
     public_matchmaking: bool,
@@ -453,6 +455,7 @@ fn signature(
         losses: profile.map_or(0, |profile| profile.losses),
         connection: session.state(),
         compatibility_issue: session.compatibility_issue,
+        directory_notice: session.directory_notice,
         card: card.clone(),
         public_matchmaking: career.view.match_service.is_some(),
         last_result: career
@@ -499,6 +502,9 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
     use crate::net::CompatibilityVerdict;
+    if let Some(notice) = session.directory_notice {
+        return (notice.short_message(), theme::GOLD);
+    }
     match session.compatibility_verdict() {
         Some(CompatibilityVerdict::Unverified) => {
             return (
@@ -764,7 +770,7 @@ fn spawn_home(
                 &thumbnails,
                 if phone
                     && (party_line.invite.is_some() || update_banner.is_some() || protect_banner
-                        || required.is_some() || session.compatibility_issue.is_some())
+                        || required.is_some() || session.compatibility_issue.is_some() || session.directory_notice.is_some())
                 {
                     None
                 } else {
@@ -919,6 +925,7 @@ fn spawn_home(
                 if !can_resume
                     && !download
                     && (required.is_some()
+                        || session.directory_notice.is_some()
                         || !matches!(session.state(), ClientConnectionState::Connected))
                 {
                     column.commands().entity(play).insert(Pressable {
@@ -929,7 +936,7 @@ fn spawn_home(
                 if !phone {
                     if let Some((latest, link)) = &required {
                         spawn_update_required(column, latest.as_deref(), *link, false, unit);
-                    } else if session.compatibility_issue.is_some() {
+                    } else if session.compatibility_issue.is_some() || session.directory_notice.is_some() {
                         spawn_compatibility_detail(column, &session, false, unit);
                     }
                 }
@@ -1009,7 +1016,7 @@ fn spawn_home(
                                     id.into(),
                                     (),
                                 );
-                                if !session.is_connected() || required.is_some() || session.compatibility_issue.is_some()
+                                if !session.is_connected() || required.is_some() || session.compatibility_issue.is_some() || session.directory_notice.is_some()
                                     || (action == HomeAction::Ranked && (career.view.ranked_season_open == Some(false) || career.view.profile.as_ref().is_none_or(|p| !p.ranked_unlocked())))
                                 {
                                     row.commands().entity(button).insert(Pressable {
@@ -1115,7 +1122,7 @@ fn spawn_home(
                 }
             });
 
-            if phone && (required.is_some() || session.compatibility_issue.is_some()) {
+            if phone && (required.is_some() || session.compatibility_issue.is_some() || session.directory_notice.is_some()) {
                 // Long admission/update copy has its own left-hand slot. It
                 // cannot displace Offline practice onto the bottom navigation.
                 root.spawn((
@@ -1448,6 +1455,7 @@ fn home_actions(
             action,
             HomeAction::Play | HomeAction::Ranked | HomeAction::BotPractice
         ) && (session.compatibility_issue.is_some()
+            || session.directory_notice.is_some()
             || update
                 .as_ref()
                 .and_then(|u| u.offer(&session))
@@ -1475,6 +1483,9 @@ fn home_actions(
             continue;
         }
         match action {
+            HomeAction::Retry => {
+                session_ui.write(crate::net::SessionUiCommand::Retry);
+            }
             HomeAction::Resume => {
                 session_ui.write(crate::net::SessionUiCommand::ResumeMatch);
                 next.set(AppScreen::Searching);
@@ -1730,6 +1741,25 @@ fn spawn_compatibility_detail(
         BackgroundColor(theme::PANEL),
         Name::new("HomeCompatibilityDetail"),
     ));
+    if session.directory_notice.is_some() && crate::net::link_status(session).can_retry() {
+        kit::spawn_button(
+            parent,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(if phone { 44.0 * unit } else { 36.0 }),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            tr("net.retry"),
+            TextStyle::new(TextRole::Button),
+            ButtonKind::Secondary,
+            None,
+            HomeAction::Retry,
+            "HomeDirectoryRetry".into(),
+            (),
+        );
+    }
 }
 
 /// "Update required" under the update button: what happened and, when there
@@ -2576,6 +2606,59 @@ mod tests {
             *app.world().resource::<NextState<AppScreen>>(),
             NextState::Pending(AppScreen::HeroSelect)
         ));
+    }
+
+    #[test]
+    fn directory_policy_blocks_stale_queue_actions_and_offers_retry_without_blocking_offline() {
+        use crate::net::directory::DirectoryNotice;
+        use crate::ui::test_id::harness;
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        session.directory_notice = Some(DirectoryNotice::Maintenance);
+        let mut app = update_home(
+            crate::update::ClientUpdate::for_test(None, || Ok(vec![])),
+            session,
+        );
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .match_service = Some(shared::match_service::MatchServiceView::Idle);
+        app.update();
+        app.update();
+        assert!(harness::find(app.world_mut(), "HomeDirectoryRetry").is_some());
+        for (id, action) in [
+            ("HomePlay", HomeAction::Play),
+            ("HomeRanked", HomeAction::Ranked),
+            ("HomeBotPractice", HomeAction::BotPractice),
+        ] {
+            let source = harness::find(app.world_mut(), id).unwrap();
+            assert!(app.world().get::<Pressable>(source).unwrap().disabled);
+            app.world_mut().write_message(Activated { action, source });
+        }
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        harness::press(app.world_mut(), "HomeDirectoryRetry");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::net::SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, crate::net::SessionUiCommand::Retry))
+        );
+        harness::press(app.world_mut(), "HomeOfflinePractice");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::net::SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, crate::net::SessionUiCommand::StartOffline))
+        );
     }
 
     /// LR-18 acceptance: a fresh install is asked to protect its progress

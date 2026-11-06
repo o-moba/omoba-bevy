@@ -2092,3 +2092,37 @@ resource draft is not a release candidate. Original68 ledger remains62 done,
 5 partial,1 open; C2/C3/C4, UI-2/UI-3, capacity/RU/physical requirements remain.
 Root free space is now about7GiB, so no heavy local build is started under the
 20GiB rule. No production service, key, deployment or CI configuration changed.
+
+
+### Native directory runtime connected — candidate, verification pending
+
+Implement the configured directory path in NetworkingPlugin/session lifecycle,
+recovery persistence, outbound command dispatch, update selection and Home/loading
+UI. Start/fetch only after legal/region acceptance, dial concrete trusted IPs,
+prefer the saved original owner before new selection, retain ownership for party
+returns and reconnect, and wait on current authority without losing allocations.
+Retry no longer drops an allocated seat while a worker handoff is deferred.
+Guard new admission before search interception while preserving an active FIFO
+request/cancel and existing worker recovery. Offline boot/return stays usable;
+invalid configured trust does not become legacy. [Runtime details and exact test
+scope](game-directory.md#native-runtime-integration-candidate--2026-11-07).
+
+Nine networking plus two Home/update cases are added, not yet accepted as run.
+Initial library check PASS; all-target clippy first found a private test import,
+then two test initializer-style issues and an invalid status/weight fixture,
+all corrected. Final-source all-target strict client clippy and no-default-
+features strict library clippy PASS. The11 test bodies compile; execution and
+current full CI still need proof. Formatting/diff and all29
+DevContour packaging checks PASS locally; changed EN/RU/ZH dictionaries have
+matching key sets. Local root briefly21GiB then19.5GiB: stop further heavy local
+builds under the20GiB rule. No new dependency or CI/deployment/key change.
+
+Corrected108d147d CI42289126392 is live: dev-client, Android, Python, bot and
+headless and core jobs pass; actual PostgreSQL/public journeys still run
+at this checkpoint. Its formatter passes, so the previous formatting failure is
+corrected, but the full run is not yet accepted. The runtime candidate is later
+source and needs a fresh gate of its own. Original ledger remains62 done,
+5 partial,1 open; C2/C3/C4, UI-2/UI-3, physical, scaling and RU release requirements
+remain. No release/deployment readiness is claimed from this candidate.
+
+[Exact source fingerprint and validation scope](../evidence/directory-runtime-2026-11-07/summary.json).

@@ -123,6 +123,10 @@ impl MatchServiceClient {
         self.last_request = None;
     }
 
+    pub(crate) fn queue_request_is_active(&self, request_id: u64) -> bool {
+        self.active && self.request_id == request_id
+    }
+
     pub fn intercept_join(
         &mut self,
         view: &CareerView,

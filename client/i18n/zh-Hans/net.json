@@ -21,5 +21,13 @@
   "net.compatibility.verified": "匹配 · 游戏 {client} / 服务器 {server}",
   "net.compatibility.failed": "不匹配 · 游戏 {client} / 服务器 {server}",
   "net.compatibility.pending": "尚未验证版本匹配",
-  "net.compatibility.unverified_short": "未验证"
+  "net.compatibility.unverified_short": "未验证",
+  "net.directory.fetching": "正在检查服务器…",
+  "net.directory.unavailable": "服务器暂不可用，请稍后重试。",
+  "net.directory.maintenance": "服务器正在维护。",
+  "net.directory.full": "服务器已满，请稍后重试。",
+  "net.directory.incompatible": "暂无兼容的服务器，请稍后重试。",
+  "net.directory.unavailable_short": "暂不可用",
+  "net.directory.maintenance_short": "维护中",
+  "net.directory.full_short": "已满"
 }

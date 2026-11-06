@@ -5,6 +5,17 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Bind configured native directory routing to the legal/region startup gate,
+  background refresh and exact-IP UDP. Preserve original lobby/worker ownership
+  across Resume, returns, reconnects and temporary authority failures; bound saved
+  hint reads and defer worker joins until authority is current. Apply maintenance,
+  full, update and compatibility policy before new queue interception, preserving
+  existing FIFO/cancel/recovery. Add localized Home/loading notices and Retry;
+  offline practice remains available. Nine networking and two UI/update cases
+  added; both strict client clippy variants, formatting and packaging PASS.
+  Test execution/current full CI are pending. Public trust remains
+  unprovisioned; no deployed routing or RU readiness is claimed.
+
 - Verify a7116c00 dev-client CI:1610 PASS,0 FAIL,1 ignored, including all5
   compiled-trust and4 current-authority Resume regressions; both strict clippy
   variants, Android, Python, bot and headless jobs PASS. The general gate fails

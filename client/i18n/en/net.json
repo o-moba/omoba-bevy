@@ -21,5 +21,13 @@
   "net.compatibility.verified": "Compatible · Game {client} / Server {server}",
   "net.compatibility.failed": "Incompatible · Game {client} / Server {server}",
   "net.compatibility.pending": "Compatibility not verified",
-  "net.compatibility.unverified_short": "Unverified"
+  "net.compatibility.unverified_short": "Unverified",
+  "net.directory.fetching": "Checking server availability…",
+  "net.directory.unavailable": "Servers are unavailable. Try again shortly.",
+  "net.directory.maintenance": "Servers are undergoing maintenance.",
+  "net.directory.full": "Servers are full. Try again shortly.",
+  "net.directory.incompatible": "No compatible server is available yet.",
+  "net.directory.unavailable_short": "Unavailable",
+  "net.directory.maintenance_short": "Maintenance",
+  "net.directory.full_short": "Full"
 }

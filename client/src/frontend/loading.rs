@@ -521,6 +521,10 @@ fn shell_status(
         stage: None,
     };
     let mut status = match link {
+        LinkStatus::Directory(crate::net::directory::DirectoryNotice::Fetching) => {
+            waiting(link.detail())
+        }
+        LinkStatus::Directory(_) => return failure(link.detail().unwrap_or_default()),
         LinkStatus::Compatibility(_)
         | LinkStatus::Rejected(_)
         | LinkStatus::Unconfirmed

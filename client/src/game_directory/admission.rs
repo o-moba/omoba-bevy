@@ -291,6 +291,29 @@ impl Admission {
             origin,
         })
     }
+    /// Return to the retained lobby without applying new-search selection.
+    /// Current signed ownership (or the explicit fallback) remains mandatory.
+    pub fn owner_at(&self, now_ms: u64, hint: &str) -> Decision {
+        let authority = match self.authority_at(now_ms) {
+            Ok(authority) => authority,
+            Err(AuthorityUnavailable::Pending) => return Decision::Pending,
+            Err(AuthorityUnavailable::Unavailable) => return Decision::Unavailable,
+        };
+        for lobby in &authority.directory.lobbies {
+            if let Some(endpoint) = lobby_endpoint(lobby, hint) {
+                return Decision::Route(Route {
+                    region: authority.directory.region,
+                    contour: authority.directory.contour.clone(),
+                    lobby_id: lobby.id.clone(),
+                    display: lobby.display_endpoint(),
+                    endpoint,
+                    sequence: authority.sequence,
+                    origin: authority.origin,
+                });
+            }
+        }
+        Decision::Unavailable
+    }
     /// Revalidate an untrusted saved hint against current authenticated ownership,
     /// independently of new-admission policy/weights/contracts. Never select a
     /// different lobby, resolve saved DNS, or use expired directory authority.
@@ -302,15 +325,7 @@ impl Admission {
         };
         for lobby in &authority.directory.lobbies {
             let endpoints = lobby.network_endpoints();
-            let mut owner = if let Ok(endpoint) = lobby_hint.parse::<SocketAddr>() {
-                let endpoint = canonical_socket(endpoint);
-                if !endpoints.contains(&endpoint) {
-                    continue;
-                }
-                endpoint
-            } else if lobby_hint.to_ascii_lowercase() == lobby.display_endpoint() {
-                endpoints[0]
-            } else {
+            let Some(mut owner) = lobby_endpoint(lobby, lobby_hint) else {
                 continue;
             };
             let worker = if let Ok(endpoint) = worker_hint.parse::<SocketAddr>() {
@@ -412,6 +427,16 @@ impl Admission {
                 })
             }
         }
+    }
+}
+
+fn lobby_endpoint(lobby: &Lobby, hint: &str) -> Option<SocketAddr> {
+    let endpoints = lobby.network_endpoints();
+    if let Ok(endpoint) = hint.parse::<SocketAddr>() {
+        let endpoint = canonical_socket(endpoint);
+        endpoints.contains(&endpoint).then_some(endpoint)
+    } else {
+        (hint.to_ascii_lowercase() == lobby.display_endpoint()).then(|| endpoints[0])
     }
 }
 

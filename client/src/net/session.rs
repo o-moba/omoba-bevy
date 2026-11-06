@@ -196,6 +196,8 @@ pub struct ClientSession {
     /// The server's update notice from the same report (LR-14).
     pub(crate) server_update: Option<shared::compatibility::UpdateNotice>,
     pub(crate) compatibility_issue: Option<shared::compatibility::CompatibilityIssue>,
+    pub(crate) directory_notice: Option<super::directory::DirectoryNotice>,
+    pub(crate) directory_update_url: Option<String>,
     pub(in crate::net) join_exhausted: bool,
     pub(in crate::net) snapshot_order: SnapshotOrder,
     pub(in crate::net) career_server_epoch: u64,
@@ -228,6 +230,8 @@ impl Default for ClientSession {
             server_contract: None,
             server_update: None,
             compatibility_issue: None,
+            directory_notice: None,
+            directory_update_url: None,
             join_exhausted: false,
             snapshot_order: SnapshotOrder::default(),
             career_server_epoch: 0,
@@ -597,6 +601,9 @@ impl ClientSession {
 pub(in crate::net) fn start_networking(
     mut commands: Commands,
     mut client_session: ResMut<ClientSession>,
+    mut directory: Option<ResMut<super::directory::DirectoryRouting>>,
+    identity: Option<Res<ClientSessionId>>,
+    mut resume: Option<ResMut<super::recovery::ResumeMatchState>>,
 ) {
     // A desktop `GAME_SERVER_ADDR`, else the connection profile's lobby.
     let preferred_addr = crate::session_config::startup_server_addr();
@@ -606,11 +613,38 @@ pub(in crate::net) fn start_networking(
             "Ignoring invalid GAME_SERVER_ADDR value {preferred_addr:?}; falling back to {server_addr}"
         );
     }
+    // Only a valid explicit operator route bypasses compiled public routing.
+    // Invalid overrides never turn a configured build back into legacy mode.
+    let operator = crate::connection_profile::desktop_override("GAME_SERVER_ADDR")
+        .and_then(|addr| crate::persistence::validate_game_server_addr(&addr));
     if std::env::var("OMOBA_OFFLINE_PRACTICE").is_ok_and(|v| v == "1") {
+        if let Some(directory) = directory.as_mut() {
+            // Activate the future return guard without initializing or fetching
+            // anything while practice is offline.
+            directory.active = directory.configured() && operator.is_none();
+        }
         client_session.offline_return_addr = Some(server_addr);
         client_session.ephemeral_endpoint = true;
         spawn_network_transport(&mut commands, &mut client_session, offline::ADDRESS.into());
     } else {
+        // An explicit, validated desktop operator override retains its existing
+        // contour/region restrictions. Public routing never reads a runtime URL
+        // or falls back to the legacy address after malformed build trust.
+        if let Some(directory) = directory.as_mut()
+            && directory.configured()
+        {
+            if operator.is_none() {
+                directory.begin(
+                    &mut client_session,
+                    identity.as_ref().map_or("", |id| &id.0),
+                    false,
+                );
+                return;
+            }
+            if let (Some(resume), Some(identity)) = (resume.as_mut(), identity.as_ref()) {
+                super::recovery::load_legacy_resume(resume, &identity.0, &server_addr);
+            }
+        }
         spawn_network_transport(&mut commands, &mut client_session, server_addr);
     }
 }
@@ -895,6 +929,7 @@ pub(in crate::net) fn update_session_lifecycle(
     mut match_service: Option<ResMut<crate::match_service::MatchServiceClient>>,
     mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     session_id: Option<Res<ClientSessionId>>,
+    mut directory: Option<ResMut<super::directory::DirectoryRouting>>,
 ) {
     let TeardownQueries {
         remote_query,
@@ -920,6 +955,9 @@ pub(in crate::net) fn update_session_lifecycle(
                 }
                 if let Some(channels) = channels.as_ref() {
                     let _ = channels.outgoing.try_send(ClientPacket::Leave);
+                }
+                if let Some(directory) = directory.as_mut() {
+                    directory.cancel_handoff();
                 }
                 client_session.offline_return_addr =
                     Some(client_session.server_addr_display.clone());
@@ -955,9 +993,33 @@ pub(in crate::net) fn update_session_lifecycle(
                 retried_this_frame = true;
             }
             SessionUiCommand::ConnectAllocated(raw) => {
-                let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
-                    continue;
+                let address = if let Some(directory) = directory.as_mut().filter(|d| d.active) {
+                    let Some(address) = directory.worker(raw) else {
+                        // Retain the allocated seat/hint while authority is
+                        // unavailable. Never dial a saved hostname or guess a
+                        // different host to get around this check.
+                        directory.defer_worker(raw);
+                        client_session.directory_notice =
+                            Some(super::directory::DirectoryNotice::Unavailable);
+                        continue;
+                    };
+                    if let Some(allocation) = match_service
+                        .as_mut()
+                        .and_then(|service| service.allocation.as_mut())
+                        && directory.worker(&allocation.endpoint).as_ref() == Some(&address)
+                    {
+                        allocation.endpoint.clone_from(&address);
+                    }
+                    address
+                } else {
+                    let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
+                        continue;
+                    };
+                    address
                 };
+                if let Some(directory) = directory.as_mut() {
+                    directory.complete_handoff();
+                }
                 client_session.abandon_join();
                 despawn_tracked_net_entities(
                     &mut commands,
@@ -1029,13 +1091,49 @@ pub(in crate::net) fn update_session_lifecycle(
                     client_session.outbox.push(SessionEvent::ServerScopeReset);
                     client_session.ephemeral_endpoint = false;
                     commands.remove_resource::<NetworkChannels>();
-                    spawn_network_transport(&mut commands, &mut client_session, address);
+                    if let Some(directory) = directory.as_mut().filter(|d| d.active) {
+                        directory.begin(
+                            &mut client_session,
+                            session_id.as_ref().map_or("", |id| &id.0),
+                            true,
+                        );
+                    } else {
+                        spawn_network_transport(&mut commands, &mut client_session, address);
+                    }
                     incoming_dead.0 = false;
                     retried_this_frame = true;
                 }
             }
             SessionUiCommand::ResumeMatch => {}
             SessionUiCommand::Retry => {
+                if let Some(directory) = directory.as_mut().filter(|d| d.active)
+                    && !client_session.is_offline()
+                {
+                    if directory.pending_handoff() {
+                        directory.refresh(true);
+                    } else if client_session.ephemeral_endpoint
+                        || client_session.has_committed_join()
+                    {
+                        if let Some(address) = directory.reconnect_endpoint(&client_session) {
+                            commands.remove_resource::<NetworkChannels>();
+                            spawn_network_transport(&mut commands, &mut client_session, address);
+                            incoming_dead.0 = false;
+                            retried_this_frame = true;
+                        } else {
+                            directory.refresh(true);
+                        }
+                    } else {
+                        commands.remove_resource::<NetworkChannels>();
+                        directory.begin(
+                            &mut client_session,
+                            session_id.as_ref().map_or("", |id| &id.0),
+                            true,
+                        );
+                        incoming_dead.0 = false;
+                        retried_this_frame = true;
+                    }
+                    continue;
+                }
                 if client_session.state == ClientConnectionState::Disconnected
                     || client_session.join_error.is_some()
                     || client_session.join_exhausted
@@ -1063,8 +1161,19 @@ pub(in crate::net) fn update_session_lifecycle(
         client_session.reconnect.active,
         client_session.reconnect.last_attempt.map(|at| at.elapsed()),
     ) {
+        let retry_addr = if let Some(directory) = directory.as_mut().filter(|d| d.active)
+            && !client_session.is_offline()
+        {
+            let Some(address) = directory.reconnect_endpoint(&client_session) else {
+                directory.refresh(true);
+                client_session.reconnect.last_attempt = Some(Instant::now());
+                return;
+            };
+            address
+        } else {
+            validated_server_addr_or_default(&client_session.server_addr_display)
+        };
         commands.remove_resource::<NetworkChannels>();
-        let retry_addr = validated_server_addr_or_default(&client_session.server_addr_display);
         spawn_network_transport(&mut commands, &mut client_session, retry_addr);
         incoming_dead.0 = false;
         client_session.reconnect.attempts = client_session.reconnect.attempts.saturating_add(1);

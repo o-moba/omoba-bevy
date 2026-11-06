@@ -363,17 +363,15 @@ reviewed profile before that region can use this path. Rotations retain the
 previous verifier while cached/owned admissions still need it. Five new cases
 cover scope/fallback/cache paths, malformed/partial bounds/weak pins, actual
 compiled input, and a real subprocess with malicious runtime environment. They
-are written but not executed yet; formatting/source review pass, while the root
-disk guard prevents a heavy local build. Current CI atf144 and admission8c9
-results do not verify this later candidate.
+actually execute in sourcea7116c00 dev-client job128126563753: all5 PASS,
+with1610 total PASS,0 FAIL,1 ignored; both strict dev clippy variants pass. Its
+separate overall gate fails formatting and is corrected by108d147d, whose fresh
+complete gate remains pending. Earlierf144/8c9 do not verify these later cases.
 
-Actual routing is not activated by this configuration parser/audit. Next integration
-must preserve the original owning lobby on cold Resume before selecting any new
-lobby, bind legal/region startup to the asynchronous resolver and exact-IP UDP,
-apply policy to new queue input/UI, and keep party/worker scope through refresh.
-Existing resume hints currently require the one static startup address, so that
-boundary must be updated before enabling D1. No live key is generated/baked,
-directory published, configuration installed, workflow changed or service moved.
+The parser/audit alone does not activate routing. The native integration below
+is now implemented as a candidate, with verification still pending. No live key
+is generated/baked, directory published, configuration installed, workflow changed
+or service moved.
 
 
 Before binding the session, `Admission::resume_at` now resolves a saved hint
@@ -389,8 +387,57 @@ mandatory. A retained address value alone never authorizes a fresh reconnect.
 
 Four additional cases cover these owner boundaries, including current removal,
 expired secondary/explicit fallback, mixed worker hosts and multi-IP legacy hints.
-They are not executed yet. Main session/Resume persistence and policy UI still
-need to consume this method before D1 activation. Operators must retain a live
+All4 execute and PASS in sourcea7116c00 dev-client CI alongside the5 config
+cases. Native runtime consumers are implemented below but need their own gate. Operators must retain a live
 owner in the signed list while its workers need recovery, even when new admission
 is closed. A baked fallback IP remains a static trust target for supported client
 artifacts and must remain under operator control for that lifetime.
+
+
+### Native runtime integration candidate — 2026-11-07
+
+`net::directory::DirectoryRouting` is initialized without HTTP/cache I/O. Both
+startup and refresh are behind the existing bound-region/legal-acceptance gate.
+Configured malformed/missing-region trust stays unavailable, rather than falling
+back to legacy. The existing explicitly validated desktop operator override is
+preserved; an invalid override cannot disable the compiled directory guard.
+Unconfigured artifacts keep the existing regional static route. Offline boot
+starts no resolver; its later online return goes through the configured guard.
+
+The resolver performs at most one anonymous fixed-regional HTTPS fetch at once;
+automatic refresh is30s, explicit retry at least5s apart. Only signed/pinned
+concrete IPs reach UDP, with normal server preflight still mandatory. Cold Resume
+loads a bounded16KiB credential-free hint without deleting it for disagreement
+with the static default, then validates/normalizes its original lobby and worker
+against current authority before exposing Resume or opening transport. Party/
+return and reconnect keep the retained owner. Removed/expired worker authority
+holds the pending allocation; Retry retains it until authority is repaired.
+Committed seat/epoch/backend authentication rules remain in force.
+
+New Join, service search and party launch pass a shared dispatch guard before
+new-search interception. Current FIFO request IDs, cancellation, profile/history
+and recovery remain usable. A deferred worker Join cannot leave on the old lobby
+transport, including the frame in which a refresh permits handoff. Existing worker
+transports and offline practice are not gated by new-search policy. Home/loading
+show localized policy detail, short header copy and Retry; required update uses
+the existing build-portal/store link restrictions. Actual new pixels remain
+unverified under the disk/build limitation.
+
+Nine new networking cases cover pending/invalid authority, real loopback UDP by
+signed IP despite an unresolvable label, original-owner Resume and normalized
+hints, expiry/removal, FIFO/cancel/new launch, dispatch before interception,
+allocated-seat Retry after authority repair, and party return through maintenance/
+weight changes. Two further cases cover Home stale actions/offline/Retry and
+required-update link selection without UDP. They are added but not yet accepted
+as executed. An intermediate local library check passed; all-target clippy found
+a test-only private import, two initializer-style errors and an incorrect test
+status/weight fixture, corrected before this checkpoint. Final-source all-target strict client clippy and no-default-
+features strict library clippy now PASS, together with formatting/diff checks and
+all29 DevContour packaging checks. The11 new test bodies compile, but execution
+and full branch CI remain required. Root space briefly recovered to21GiB, then
+fell below20GiB; no new heavy local linked build is started below the guard. Public-key provisioning/package input, actual
+configured binary audit, signed endpoint publication, alternate-host runtime and
+cross-host discipline/party discovery, real host/WAN/load and RU deployment still
+remain. #12/P7 and the overall release checklist stay incomplete.
+
+[Exact source fingerprint and validation scope](../evidence/directory-runtime-2026-11-07/summary.json).

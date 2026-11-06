@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "date": "2026-11-07",
+  "scope": "Native directory runtime integration candidate; no deployment or physical UI acceptance",
+  "parent_commit": "108d147d33b6da81dd8dda653f6ccb7f7dfffccc",
+  "client_source_sha256": "188c09675835d6351f4f37a99f32cb61b55b7b907b4f2e5e2bcb4e7d60732910",
+  "client_files_sha256": {
+    "client/i18n/en/net.json": "fc8f7dd189d585ab93396f12cadc0f4ef5ba6ff55911967c32587edb0045cac4",
+    "client/i18n/ru/net.json": "10585187fb94e17eb0e724779a4f96776c46b2535d8e3fc43a0f85fc8b31939f",
+    "client/i18n/zh-Hans/net.json": "f2bb26e73c0d118c2effa002d4a549488c8602b7ec9ac782f19c805a409ee291",
+    "client/src/frontend/home.rs": "ecddaa925df39e6f114460027827652802a240a7c96b34821f41d722190be814",
+    "client/src/frontend/loading.rs": "7ffc82c112b336d964a35a3367cc399d70eacdd5119c3207f593b31300e996f7",
+    "client/src/frontend/postmatch.rs": "eee677506970e1ab04e1a36e32896a31f155104f338cb06c9cec759b3b3756ae",
+    "client/src/game_directory/admission.rs": "8e311e12435872cd76ed1c2459d34568112cddba5a9591438e092d14b4a4e1e6",
+    "client/src/match_service.rs": "e1270f5cb5900788a62dab3850e033268980d90e6375b409e5e3c8e0b705c41f",
+    "client/src/net/commands.rs": "82cfa7ecf59b6127c5f6eb0b0af9bf3bddeb08428bd9c0148b8cafb681af87cf",
+    "client/src/net/directory.rs": "d5fff0fc5b09c8a82f79fa33211c33d673c306f83cb873ae83c78418c59879ee",
+    "client/src/net/directory/tests.rs": "b35c778e835d3cf5dc4eeb3a7e4a9fd812f1994ae7b53dff6a08fe160b844329",
+    "client/src/net/mod.rs": "2c68d0e6469a6df244306aa95f2ba4b557542568e9db047bd98228ebbfa08956",
+    "client/src/net/recovery.rs": "37d64ce7ffa278c77c0678a0c2eb0422815d4db5cec2d9246c7675ade52acbb7",
+    "client/src/net/session.rs": "cb974750f46bbabfe3b580f7f55726db1b7a6a16cfd9f706a1b8652c70960fa5",
+    "client/src/net/status_ui.rs": "85ae26f2cd83b246789aba2370a918bc83456de3bb6789818e81bdc8ed123620",
+    "client/src/net/transport.rs": "6d6a36944d88168a3fc433e5e511f6d1d13f8aa999dde8319ac98b74019eb6c2",
+    "client/src/update.rs": "6e06fec265b70c844c75bd4582a6fec90055e2ce661305c3be23052e6dcb7711"
+  },
+  "checks": [
+    {
+      "command": "cargo fmt --all -- --check",
+      "status": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "status": "PASS"
+    },
+    {
+      "command": "cargo clippy -p client --all-targets --no-deps --locked -- -D warnings",
+      "status": "PASS"
+    },
+    {
+      "command": "cargo clippy -p client --lib --no-deps --no-default-features --locked -- -D warnings",
+      "status": "PASS"
+    },
+    {
+      "command": "PYTHONPATH=scripts python3.13 -m unittest test_release.DevContour",
+      "status": "PASS",
+      "passed": 29
+    },
+    {
+      "command": "JSON parse, matching net dictionary key sets and policy placeholders for en/ru/zh-Hans",
+      "status": "PASS"
+    }
+  ],
+  "new_cases": {
+    "status": "ADDED_AND_COMPILE; EXECUTION_PENDING_CI",
+    "count": 11,
+    "names": [
+      "pending_or_malformed_authority_never_opens_legacy_transport",
+      "boot_uses_signed_concrete_ip_despite_unresolvable_label",
+      "resume_selects_original_owner_before_new_search_policy_and_normalizes_hint",
+      "expired_worker_authority_keeps_pending_handoff_without_transport",
+      "maintenance_blocks_new_search_but_preserves_fifo_cancel_and_resume",
+      "removed_owner_cannot_borrow_another_lobbys_worker_authority",
+      "command_dispatch_guard_runs_before_new_search_interception",
+      "lifecycle_retry_preserves_pending_allocation_until_authority_refreshes",
+      "returning_party_keeps_original_lobby_through_maintenance_and_weight_changes",
+      "frontend::home::tests::directory_policy_blocks_stale_queue_actions_and_offers_retry_without_blocking_offline",
+      "update::tests::signed_directory_requires_update_without_udp_and_keeps_portal_link_rules"
+    ]
+  },
+  "full_ci": {
+    "status": "REQUIRED_ON_CANDIDATE",
+    "parent_run": 42289126392,
+    "parent_status": "six jobs PASS; postgres public journeys still in progress at checkpoint; not inherited"
+  },
+  "limitations": [
+    "No live public trust provisioned or package option applied",
+    "No configured released binary or published live directory",
+    "No actual alternate-host/WAN/RU capacity or cross-host discipline proof",
+    "No current native pixels or physical device acceptance",
+    "Local linked test/game build not performed below disk guard; cached targeted lint checks only",
+    "Initial private-import, initializer, status/weight test-fixture errors corrected before final checks"
+  ]
+}

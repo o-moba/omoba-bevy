@@ -499,7 +499,8 @@ fn status_spec(
                 ink: color::STATE_WARNING,
                 timer: None,
             },
-            LinkStatus::Compatibility(_)
+            LinkStatus::Directory(_)
+            | LinkStatus::Compatibility(_)
             | LinkStatus::Disconnected
             | LinkStatus::Rejected(_)
             | LinkStatus::Unconfirmed => StatusSpec {

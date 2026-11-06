@@ -213,6 +213,7 @@ pub(in crate::net) fn send_network_commands(
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
     mut social_client: Option<ResMut<crate::social::SocialClient>>,
     mut match_service: Option<ResMut<crate::match_service::MatchServiceClient>>,
+    directory: Option<Res<super::directory::DirectoryRouting>>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -231,6 +232,11 @@ pub(in crate::net) fn send_network_commands(
         });
     }
     for command in command_events.read() {
+        if directory.as_ref().is_some_and(|directory| {
+            directory.rejects(command, &client_session, match_service.as_deref())
+        }) {
+            continue;
+        }
         if client_session.is_offline()
             && matches!(
                 command,

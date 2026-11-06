@@ -210,14 +210,18 @@ impl ClientUpdate {
                 self.newest
                     .as_ref()
                     .and_then(|release| release.update_url.as_deref()),
-                session
-                    .server_update
-                    .as_ref()
-                    .and_then(|notice| notice.url.as_deref()),
+                session.directory_update_url.as_deref().or_else(|| {
+                    session
+                        .server_update
+                        .as_ref()
+                        .and_then(|notice| notice.url.as_deref())
+                }),
                 newer.map(|release| release.url.as_str()),
             )
         };
         if below_minimum
+            || session.directory_notice
+                == Some(crate::net::directory::DirectoryNotice::UpdateRequired)
             || session.compatibility_verdict() == Some(CompatibilityVerdict::UpdateRequired)
         {
             return Some(UpdateOffer::Required {
@@ -434,6 +438,25 @@ mod tests {
             url: url.map(str::to_owned),
         });
         session
+    }
+
+    #[test]
+    fn signed_directory_requires_update_without_udp_and_keeps_portal_link_rules() {
+        let update = ClientUpdate::for_test(Some("https://portal.example"), || Ok(vec![]));
+        let mut session = ClientSession::default();
+        session.directory_notice = Some(crate::net::directory::DirectoryNotice::UpdateRequired);
+        session.directory_update_url = Some("https://evil.example/download".into());
+        let Some(UpdateOffer::Required {
+            link: Some(link), ..
+        }) = update.offer(&session)
+        else {
+            panic!("directory must require update before UDP");
+        };
+        assert!(link.starts_with("https://portal.example/download"));
+        assert!(session.compatibility_issue.is_none());
+        session.directory_notice = Some(crate::net::directory::DirectoryNotice::Maintenance);
+        session.directory_update_url = None;
+        assert_eq!(update.offer(&session), None);
     }
 
     #[test]

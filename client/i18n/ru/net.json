@@ -21,5 +21,13 @@
   "net.compatibility.verified": "Совместимо · Игра {client} / Сервер {server}",
   "net.compatibility.failed": "Несовместимо · Игра {client} / Сервер {server}",
   "net.compatibility.pending": "Совместимость не проверена",
-  "net.compatibility.unverified_short": "Не проверено"
+  "net.compatibility.unverified_short": "Не проверено",
+  "net.directory.fetching": "Проверяем доступность серверов…",
+  "net.directory.unavailable": "Серверы недоступны. Попробуйте чуть позже.",
+  "net.directory.maintenance": "На серверах идут технические работы.",
+  "net.directory.full": "Серверы заполнены. Попробуйте чуть позже.",
+  "net.directory.incompatible": "Подходящий сервер пока недоступен.",
+  "net.directory.unavailable_short": "Недоступен",
+  "net.directory.maintenance_short": "Техработы",
+  "net.directory.full_short": "Нет мест"
 }
