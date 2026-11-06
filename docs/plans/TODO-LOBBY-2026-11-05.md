@@ -2067,3 +2067,28 @@ reviewed public bundle explicitly, while release packaging deliberately clears
 ambient values. A separately prepared/reviewed explicit package option is still
 required before D1 can ship configured. No release/workflow file, live key or
 service is changed. The full57a gate remains failed until corrected source passes.
+
+
+### Compiled trust and owning-worker regressions executed; formatter correction
+
+Sourcea7116c00 CI42285913875 dev-client job128126563753 completes SUCCESS:
+1610 PASS,0 FAIL,1 ignored. Logs explicitly execute all5 config and4 new Resume
+cases, including subprocess runtime-environment isolation, exact owner/worker
+validation, removal/expiry/cache failure, and DNS-free multihomed canonicalization.
+Both strict dev-client clippy variants, Android compilation, Python packaging,
+bot and headless jobs PASS. PostgreSQL/public journeys are still running at this
+checkpoint. [Current run](https://github.com/o-moba/omoba-bevy/actions/runs/42285913875).
+
+The overall gate is not accepted: job128126563519 fails its formatter before
+core clippy/tests because the renamed environment-setting test now exceeds the
+formatter's line width. The preceding local-formatting claim did not establish
+that the final renamed line was formatted. Apply the exact rustfmt layout and
+rerun the whole formatter/diff checks: PASS locally, without any compilation.
+Fresh corrected-source CI remains required; no change to workflows or guards.
+
+Directory startup/refresh transport binding is being implemented locally; it is
+not yet connected or claimed to compile. In particular, the new networking
+resource draft is not a release candidate. Original68 ledger remains62 done,
+5 partial,1 open; C2/C3/C4, UI-2/UI-3, capacity/RU/physical requirements remain.
+Root free space is now about7GiB, so no heavy local build is started under the
+20GiB rule. No production service, key, deployment or CI configuration changed.

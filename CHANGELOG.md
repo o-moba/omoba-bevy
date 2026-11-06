@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify a7116c00 dev-client CI:1610 PASS,0 FAIL,1 ignored, including all5
+  compiled-trust and4 current-authority Resume regressions; both strict clippy
+  variants, Android, Python, bot and headless jobs PASS. The general gate fails
+  rustfmt on the renamed environment-setting test; apply the exact formatter
+  correction. A fresh complete corrected-source gate is required. Directory
+  startup/runtime integration remains work in progress, not release acceptance.
+
 - Align the compiled directory trust setting with the existing scrubbed
   OMOBA_DEFAULT_ namespace. Preserve the release guard: ambient public trust
   cannot leak into a package, and packaging needs an explicit reviewed input.
