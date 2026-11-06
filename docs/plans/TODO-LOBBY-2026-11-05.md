@@ -1562,3 +1562,16 @@ C5 completion. [Failure/source summary](../evidence/fair-play-2026-11-06/rejecte
 The earlier full e85875ba CI is now all7 jobs green; latest directory/runtime
 work still needs its own full current-source CI. All remaining requirements
 retain their original scope.
+
+
+### Current native CI correction — directory protocol literals
+
+1ab44e5a CI42224273521/dev-client job127913696738 failed the key-shaped-literal
+source scan: DNS fixture strings beginning with the shipped `lobby` namespace
+were mistaken for translation keys. The other1587 executed client cases pass,
+with1 existing ignored case. The routing fixtures now use raw literals, the
+scanner's documented non-key convention (`i18n/tests.rs`, Span::Skipped). Wire
+host values are unchanged and the scanner/translation tables are untouched.
+The exact unchanged compiled source-scan test passes against current sources
+(.agent/codex-ranked-readiness/p7-directory-i18n-source-v1.log); full corrected
+branch CI is still required. No failed job is reported as a green full gate.

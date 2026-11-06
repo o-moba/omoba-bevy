@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Classify native directory DNS fixtures as raw protocol literals under the
+  existing localization-scanner convention. Fixes the1ab44e5a CI key-shaped
+  literal failure without changing host values, translations or the guard.
+  The unchanged compiled source-scan test now passes against current files.
+
 - Correct the remake presentation fixture to avoid supplying a contradictory
   Victory snapshot with a winner-less Remade receipt. Keep production outcome
   fencing intact; extend its conflict test to Remade. All18 post-match cases and

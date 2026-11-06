@@ -1,3 +1,5 @@
+// Routing fixture hosts use raw literals: the i18n scanner documents these
+// as protocol data, never translation keys. Wire values stay unchanged.
 use super::*;
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{Value, json};
@@ -111,12 +113,12 @@ fn scope_time_and_known_foreign_labels_and_ips_are_checked_independently() {
     }
     let contract = shared::compatibility::ReleaseContract::current();
     for (host, ip) in [
-        ("lobby.omoba.io", "212.113.117.105"),
-        ("lobby.omoba.ru", "77.246.105.57"),
-        ("lobby.omoba.ru", "::ffff:77.246.105.57"),
-        ("lobby.dev.omoba.ru", "212.113.117.105"),
-        ("lobby.omoba.ru", "146.103.102.18"),
-        ("lobby.omoba.ru", "::ffff:146.103.102.18"),
+        (r"lobby.omoba.io", "212.113.117.105"),
+        (r"lobby.omoba.ru", "77.246.105.57"),
+        (r"lobby.omoba.ru", "::ffff:77.246.105.57"),
+        (r"lobby.dev.omoba.ru", "212.113.117.105"),
+        (r"lobby.omoba.ru", "146.103.102.18"),
+        (r"lobby.omoba.ru", "::ffff:146.103.102.18"),
     ] {
         let mut doc = document(1);
         doc["lobbies"] = json!([{"id":"ru-one","location":"moscow","host":host,"addresses":[ip],"port":4000,"contract":contract,"status":"open","weight":1}]);
@@ -129,7 +131,7 @@ fn scope_time_and_known_foreign_labels_and_ips_are_checked_independently() {
     }
     let mut doc = document(1);
     doc["contour"] = json!("dev");
-    doc["lobbies"] = json!([{"id":"ru-one","location":"moscow","host":"lobby.dev.omoba.ru","addresses":["212.113.117.105"],"port":4100,"contract":contract,"status":"open","weight":1}]);
+    doc["lobbies"] = json!([{"id":"ru-one","location":"moscow","host":r"lobby.dev.omoba.ru","addresses":["212.113.117.105"],"port":4100,"contract":contract,"status":"open","weight":1}]);
     assert!(
         super::tests::trust(RegionId::Ru, "dev")
             .verify_at(&signed(&doc, 7, "fixture"), NOW, 0)
@@ -319,7 +321,7 @@ fn independent_instances_cannot_update_a_locked_or_newer_cache() {
 fn open_directory_exposes_only_the_verified_signed_concrete_destinations() {
     let mut doc = document(2);
     doc["policy"]["maintenance"] = json!(false);
-    doc["lobbies"] = json!([{"id":"ru-one","location":"moscow","host":"lobby.omoba.ru","addresses":["212.113.117.105"],"port":4000,"contract":shared::compatibility::ReleaseContract::current(),"status":"open","weight":1}]);
+    doc["lobbies"] = json!([{"id":"ru-one","location":"moscow","host":r"lobby.omoba.ru","addresses":["212.113.117.105"],"port":4000,"contract":shared::compatibility::ReleaseContract::current(),"status":"open","weight":1}]);
     let verified = trust(RegionId::Ru, "production")
         .verify_at(&signed(&doc, 7, "fixture"), NOW, 1)
         .unwrap();
