@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 // Version 13 adds unanimous 15-second ready checks and signed answers.
 // Version 14 distinguishes movement input from reflected poses for AFK reclaim.
 // Version 15 adds team votes and the strict Remade result variant.
-pub const PROTOCOL_VERSION: u16 = 15;
+pub const PROTOCOL_VERSION: u16 = 16;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

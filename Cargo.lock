@@ -5698,6 +5698,7 @@ name = "shared"
 version = "0.45.0"
 dependencies = [
  "bevy",
+ "flate2",
  "serde",
  "serde_json",
 ]

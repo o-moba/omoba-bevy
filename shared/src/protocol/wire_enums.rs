@@ -27,8 +27,9 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-// Protocol 15 adds authenticated MatchVote and the distinct Remade receipt.
-const POLICY_PROTOCOL_VERSION: u16 = 15;
+// Protocol16 changes only snapshot transport: bounded lossless world envelopes.
+// Reviewed all strict/tolerant variant lists; no JSON enum variant changes.
+const POLICY_PROTOCOL_VERSION: u16 = 16;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;

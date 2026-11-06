@@ -5,6 +5,27 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add owner-approved lossless world-snapshot compression under protocol16. Keep
+  the1200-byte UDP budget, exact JSON bytes, plain control packets and snapshot
+  cadence; bound decompression to65507 bytes and reject incomplete/trailing/
+  corrupted streams. Update native/harness shared codec and Python/Node observers.
+  No package identities added or removed.187 shared,654 isolated Python tooling,
+  exact40-frame cross-language corpus and malformed-stream checks PASS; actual
+  gameplay/load and committed full CI remain pending.656 real PG/API/server,
+  28 harness unit and5 actual UDP checks and strict affected-crate clippy also
+  PASS; signed15s ready/requeue lifecycle passes on protocol16.
+- Fix the locked Ranked caption overflowing the half-width phone button found
+  in current native RU852×393 capture; use shorter progress text and compact
+  two-line queue labels. Both corrected current native RU852×393 Home captures PASS (0/10 disabled,
+  10/10 enabled/rating); C6 software acceptance is complete.
+
+- Record owner-approved product rules:20 Ranked placement games, six rating
+  tiers,90-day seasons with archived results/badges and a half-distance reset
+  toward1000; one Ranked queue for touch/mouse with participant input statistics.
+  Implementation remains pending; no live ratings or season state changed.
+  Also approve the pinned lossless snapshot compression dependency; production
+  transport and actual-game/load verification follow as a separate checkpoint.
+
 - Add runtime maintenance drain with bounded operator-marker polling, exact
   operation acknowledgement and localized search refusal. Pause all ready
   checks without dodge penalties, preserve party/FIFO, keep live workers and
@@ -17,7 +38,9 @@ All notable changes are recorded here. The canonical version is
   Retain result diagnostics before verification and explicitly reject AFK/
   abandonment/disconnection in the ordinary victory proof. Make the Unicode
   account-search fixture unique across repeated/load tests.9 oracle tests and
-  current656 PG/API/server checks PASS; full victory/CI repeat pending.
+  current656 PG/API/server checks PASS. Fresh standard-map Ranked victory
+  verifies all ten exact awards/history with zero AFK/disconnection in435.92s
+  including setup; committed full CI remains pending.
 
 - Add guarded native playing-load measurement with exact UDP counters, separate
   generator/server resources and captured worker receipts. Actual1000 signed

@@ -594,3 +594,37 @@ short Unicode rename/lowercase prefix fixes test isolation without deleting
 data or changing the API; fresh full656-test repeat PASS. Current actual
 standard-map ten-client Ranked victory is running; new committed full CI remains
 required. All proof specs/raw failures/results remain in task artifacts.
+
+P9 corrected current standard-map Ranked victory PASS in435.92s including
+setup: result70227325cf99969e84347c8d4e7d3c97. All ten exact Elo/XP/profile/
+history and participation rows independently rechecked; zero AFK/disconnection
+or abandon, no map/rule/time change. Qualification uses the existing disclosed
+loopback synthetic prior Casual receipts; actual match uses ten signed human
+seats. Full committed CI remains pending on5aa462a2.
+
+
+Owner O-5/O-18 and compression decisions2026-11-06 recorded in canonical
+launch-readiness/TODO. Tier/season/input statistics are approved but not delivered
+yet. Compression production integration is protocol16 with no new package
+identities; bounded shared/Python/Node checks pass, actual current gameplay/load
+and full CI remain required. Current native5aa Home10 pixels pass rating/
+placement/footer checks; Home0 exposes clipped locked text, now corrected and
+building for repeat capture. No physical-mobile or RU rollout claim.
+
+TLS5da85959 full7-job/18-stage CI42126718754 independently rechecked PASS;
+artifact13462799158 hash526d44735eb79bb3e5a66d455cd1d5e55b1851e1c4e182bce8c964b07dc446c0.
+Actual Ranked a4c2b83b9034cc894ac3ca1bf454fbec (426382ms), exact all-ten
+awards/history and zeroAFK/disconnection; real tenth-game/noVK acceptance PASS.
+Current5aa and compression CI are separate checkpoints.
+
+
+Compression local187 shared/656 real PG/API/server/28 harness unit/5 actual UDP
+checks and strict affected-crate all-target clippy PASS. Signed Node15s ready
+lifecycle v2 passes protocol16; first command omitted its qualification helper
+and correctly failed Ranked eligibility (retained failure). Current native
+Home0/10 captures visually PASS with corrected compact labels; C6 software now
+complete. Full current Ranked, playing-load and compression CI remain pending.
+5aa462a2 CI42132894282 independently rechecked all7 jobs/18 stages PASS,
+artifact13466364097 SHA256c67161d2f13da078d98def557d205b16f5761a929f8c4cbaaba034368752c9bf.
+Ranked a72dd61c9a1f635bb60da7092d3cb330,426600ms, exact all-ten awards/history
+and zeroAFK/disconnection; tenth/noVK and early-crash proofs PASS.

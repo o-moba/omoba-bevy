@@ -32,6 +32,37 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
 import {performance} from 'node:perf_hooks';
+import {inflateSync, deflateSync} from 'node:zlib';
+
+// Complete framed payload only. Bound output before allocation and require one
+// exact zlib stream, preserving JSON integers and floats as original bytes.
+function decodeSnapshotPayload(bytes) {
+ if(!bytes.length||bytes.length>65507)throw new Error('snapshot payload size');
+ if(bytes.subarray(0,4).toString()!=='OMZ1')return bytes;
+ if(bytes.length<=8)throw new Error('compressed snapshot header');
+ const expected=bytes.readUInt32LE(4);
+ if(!expected||expected>65507)throw new Error('decompressed snapshot size');
+ const encoded=bytes.subarray(8),decoded=inflateSync(encoded,{maxOutputLength:expected+1,info:true});
+ if(decoded.buffer.length!==expected||decoded.engine.bytesWritten!==encoded.length)
+  throw new Error('incomplete, oversized or trailing compressed snapshot');
+ return decoded.buffer;
+}
+if(process.argv.includes('--self-test-transport')) {
+ const envelope=raw=>{const header=Buffer.alloc(8);header.write('OMZ1');header.writeUInt32LE(raw.length,4);return Buffer.concat([header,deflateSync(raw,{level:1})]);};
+ const exact=Buffer.from('{"id":18446744073709551615,"x":1.0000000000000002}');
+ for(const raw of [exact,Buffer.alloc(65507,120),crypto.randomBytes(3000)]) {
+  assert.deepEqual(decodeSnapshotPayload(raw),raw);assert.deepEqual(decodeSnapshotPayload(envelope(raw)),raw);
+ }
+ const good=envelope(Buffer.alloc(65507,120));let refused=0;
+ const reject=raw=>{assert.throws(()=>decodeSnapshotPayload(raw));refused++;};
+ for(let n=4;n<good.length;n++)reject(good.subarray(0,n));
+ for(const n of [0,1,65506,65508,0xffffffff]){const bad=Buffer.from(good);bad.writeUInt32LE(n,4);reject(bad);}
+ reject(Buffer.concat([good,Buffer.from([0])]));reject(Buffer.concat([good,good.subarray(8)]));
+ reject(Buffer.alloc(0));reject(Buffer.alloc(65508));
+ const corrupt=Buffer.from(good);corrupt[corrupt.length-1]^=1;reject(corrupt);
+ const bomb=envelope(Buffer.alloc(1000000,120));bomb.writeUInt32LE(4,4);reject(bomb);
+ console.log(`snapshot_payload: PASS (exact roundtrips; ${refused} malformed/bounded refusals)`);process.exit(0);
+}
 
 // Match consent must belong to the current search. A retained ready view may
 // still carry the previous request ID while a reconnect starts the next one.
@@ -258,7 +289,7 @@ class Client {
    if(this.frames.size>8)this.frames.delete(this.frames.keys().next().value);
    if(f.received<count)return;this.frames.delete(id);bytes=Buffer.concat(f.parts);
   }
-  let packet;try{packet=parse(bytes)}catch(e){this.errors.push('decode:'+e.message);return;}
+  let packet;try{packet=parse(decodeSnapshotPayload(bytes))}catch(e){this.errors.push('decode:'+e.message);return;}
   if(packet.type==='server_full') {if(packet.client_nonce===this.nonce)this.serverFull=(this.serverFull||0)+1;return;}
   if(packet.type==='transport_challenge') {if(packet.client_nonce!==this.nonce)return;this.path=packet.path_nonce;this.epoch=packet.server_epoch;this.send({type:'transport_proof',server_epoch:this.epoch,path_nonce:this.path});if(!this.auth)this.stage='authenticating';return;}
   if(packet.type==='party') {this.party=packet.party;return;}

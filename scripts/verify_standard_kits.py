@@ -14,6 +14,7 @@ from collections import deque
 import copy
 import hashlib
 import json
+from snapshot_payload import decode_snapshot_payload
 import os
 from pathlib import Path
 import select
@@ -95,7 +96,7 @@ class Peer:
             data = b''.join(assembly[2])
             del self.fragments[key]
         require(len(data) <= MAX_SNAPSHOT, 'Oversized snapshot')
-        packet = json.loads(data)
+        packet = json.loads(decode_snapshot_payload(data))
         self.transcript.write(json.dumps({'peer': self.name, 'direction': 'receive',
                                          'packet': packet}) + '\n')
         if packet.get('type') != 'snapshot':

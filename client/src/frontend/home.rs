@@ -999,7 +999,14 @@ fn spawn_home(
                                     row,
                                     secondary((row_width - gap) / 2.0),
                                     label,
-                                    TextStyle::new(TextRole::Button),
+                                    if phone {
+                                        // Two lines must fit the compact half-row,
+                                        // including the locked Ranked progress.
+                                        TextStyle::new(TextRole::Button)
+                                            .sized(Metric::new(14.0, 14.0))
+                                    } else {
+                                        TextStyle::new(TextRole::Button)
+                                    },
                                     ButtonKind::Secondary,
                                     None,
                                     action,

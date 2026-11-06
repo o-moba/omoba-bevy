@@ -1792,7 +1792,7 @@ Area: secrets · **major** · M · ops+code
 #### LR-53 — Ranked ladder presentation: tiers, placement, seasons, cross-play data
 Area: rating model · **minor** · L · code+owner
 - **Now:**
-  - Rating is a bare i32 with K=32 and no tiers or placement (`shared/src/career.rs:9-10,153-182`; `docs/match-progression.md:143-146`).
+  - Rating uses K=48 for the first20 rated games, then K=32; Home shows placement progress. Tier/season implementation remains pending.
   - There is one lifetime rating and no seasons (`001_career.sql:5`).
   - Matches record no input type or platform (`server/src/match_service.rs:15-25`).
 - **Requirement:**
@@ -1801,6 +1801,12 @@ Area: rating model · **minor** · L · code+owner
   - Tier badges on every profile surface, plus a promotion/demotion banner.
   - A seasons table and a close-season command (soft reset plus archive).
   - The input type stored per participant, and a cross-play policy (O-18).
+  - Owner decisions2026-11-06:20 placement games; Bronze0–999, Silver1000–1499,
+    Gold1500–1999, Platinum2000–2499, Diamond2500–2999, Master3000+.
+    Seasons last90 days; archive results and award a seasonal badge; soft reset
+    `1000 + (old_rating - 1000) / 2`. Applying a production reset requires a
+    separate owner action. Touch/mouse share one queue; retain input type for
+    comparison rather than splitting queues.
 - **Acceptance:**
   - [ ] Unit tests cover tier boundaries.
   - [ ] Badges show in RU and EN.
@@ -2073,7 +2079,7 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 | O-2 | Should bots fill Casual PvP, and after how long (30 s today)? Should Casual merge cohorts or wait longer while other humans are online? | LR-08, LR-36 |
 | O-3 | Ranked entry gate: what career level or match count, and must the player link VK ID in RU? | LR-37 |
 | O-4 | Ranked parties: solo/duo only, or full premade against premade? | LR-55 |
-| O-5 | Seasons: when, how long, soft-reset formula, rewards? Tier thresholds and placement count? | LR-53 |
+| O-5 | Decided2026-11-06:20 placements; Bronze<1000/Silver<1500/Gold<2000/Platinum<2500/Diamond<3000/Master3000+;90-day seasons, half-distance reset toward1000, archived results and seasonal badge. Production reset is separate. Implementation pending. | LR-53 |
 | O-6 | Online bot difficulty: keep Elite for all, or easier for newcomers' first matches? Should Server bot match offer a level picker? | LR-43 |
 | O-7 | Launch hero roster: which of the 17 classes are allowed in public and ranked play? | LR-45, LR-58 |
 | O-8 | Match length target, max duration, the minute from which surrender is allowed, map tier preset for casual and bot play | LR-11, LR-34 |
@@ -2086,7 +2092,7 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 | O-15 | Account deletion: self-service at launch, or a manual e-mail procedure first? Does the target store require in-app deletion? | LR-42, LR-04 |
 | O-16 | Hosting: one VPS vs separate web and game IPs, provider with UDP anti-DDoS, host city, budget for more capacity | LR-01, LR-09, LR-51 |
 | O-17 | Are custom/private matches in the first public release? | LR-56 |
-| O-18 | Ranked cross-play between touch and mouse players | LR-53 |
+| O-18 | Decided2026-11-06: one Ranked queue for touch and mouse; retain participant input type for statistics. Implementation pending. | LR-53 |
 | O-19 | Consent model for attaching logs and crash data to feedback and crash reports | LR-20, LR-29 |
 | O-20 | When does the global market launch? This decides when the directory and global hostname work (D0/D1) is needed | LR-57 |
 | O-21 | Production app identity for the one app per platform. Default: a new id (for example `io.omoba.game`) chosen before the first public listing, before any IAP product is created and before the first public RU APK. Changing it later means a new app, lost reviews and new product ids. Android: own key uploaded to Play App Signing. | LR-68, LR-69, LR-24, LR-50 |

@@ -14,6 +14,7 @@ from qa_account_fixture import prepare_capture_account
 import argparse
 import hashlib
 import json
+from snapshot_payload import decode_snapshot_payload
 import catalog
 import math
 import os
@@ -210,7 +211,7 @@ class ScenarioPeer:
                 del self.pending[key]
                 if len(data) != total:
                     raise RuntimeError("incomplete native frame reconstruction")
-            snapshot = json.loads(data)
+            snapshot = json.loads(decode_snapshot_payload(data))
             tick = snapshot.get("snapshot_tick", 0)
             if tick <= self.snapshot_tick:
                 continue
@@ -274,7 +275,7 @@ class SnapshotObserver:
                 del self.pending[key]
                 if len(data) != total:
                     raise RuntimeError("incomplete observer snapshot reconstruction")
-            packet = json.loads(data)
+            packet = json.loads(decode_snapshot_payload(data))
             if packet.get("type") != "snapshot":
                 continue
             self.joined = any(player["id"] == packet.get("your_id") for player in packet.get("players", []))

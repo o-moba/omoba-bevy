@@ -46,5 +46,5 @@
   "home.button.leaderboard": "Таблица игроков",
   "home.leaderboard.error": "Не удалось открыть таблицу игроков. Повторите попытку.",
   "home.recovery.afk": "Вы были неактивны: героем управляет ИИ. Двигайтесь или примените умение, чтобы вернуть управление. Отметка AFK сохранится до конца матча.",
-  "home.ranked.locked": "Ranked закрыт\nПубличные: {played}/{total}"
+  "home.ranked.locked": "Ranked закрыт\nМатчи {played}/{total}"
 }

@@ -10,7 +10,7 @@ Snapshot: game dev 6d34f98, portal dev 604bc34, 2026-10-24. See [README](README.
 | --- | --- | --- | --- | --- | --- |
 | Compatibility preflight | client, operator CLI → any server role | JSON over UDP, ≤ 2 KiB | `HANDSHAKE_VERSION` + `ReleaseContract` | [`shared/src/compatibility.rs`](../../shared/src/compatibility.rs) | [release-compatibility.md](../release-compatibility.md) |
 | Gameplay packets | client, offline sim, harness ↔ server | JSON over UDP, internally tagged | `PROTOCOL_VERSION` | [`shared/src/protocol.rs`](../../shared/src/protocol.rs), [`shared/src/protocol/wire.rs`](../../shared/src/protocol/wire.rs) | [ARCHITECTURE.md § Protocol rules](../ARCHITECTURE.md#protocol-rules) |
-| Snapshot framing | server → client | 30-byte binary header + JSON chunk | `OMB1` magic + protocol in every fragment | [`shared/src/transport.rs`](../../shared/src/transport.rs) | this page |
+| Snapshot framing | server → client | 30-byte binary header + JSON or bounded lossless world envelope | `OMB1` magic + protocol in every fragment | [`shared/src/transport.rs`](../../shared/src/transport.rs) | this page |
 | Public admission and signed commands | client ↔ lobby/worker | JSON over UDP, ≤ 12 KiB, Ed25519 | `omoba.gameplay.command.v1`, carried by `PROTOCOL_VERSION` | [`shared/src/public_transport.rs`](../../shared/src/public_transport.rs), [`server/src/public_transport.rs`](../../server/src/public_transport.rs), [`client/src/net/public_transport.rs`](../../client/src/net/public_transport.rs) | [public-mvp.md](../public-mvp.md) |
 | Career/account requests | client ↔ server, inside `ClientPacket::Career` | JSON, Ed25519 | `omoba.career.auth.v1`, `omoba.career.request.v1` | [`shared/src/career.rs`](../../shared/src/career.rs), [`server/src/career_backend.rs`](../../server/src/career_backend.rs) | [match-progression.md](../match-progression.md), [player-handles.md](../player-handles.md) |
 | Worker allocation | lobby ↔ worker process (same host, files) | JSON files | manifest `version: 1` | [`server/src/match_allocation.rs`](../../server/src/match_allocation.rs), [`server/src/match_pool.rs`](../../server/src/match_pool.rs) | [public-mvp.md](../public-mvp.md) |
@@ -127,6 +127,18 @@ Receive order per datagram (`runtime/dispatch.rs`, `receive_packets`):
 `shared/src/transport.rs`:
 
 - `encode_snapshot` splits one JSON payload (≤ `MAX_SNAPSHOT_BYTES` = 65 507) into datagrams of ≤ 1200 bytes. Header layout, little-endian: `"OMB1"`(4) · protocol u16 · server_epoch u64 · tick u64 · index u16 · count u16 · total u32, 30 bytes in all.
+- Protocol16 adds selective world compression through `encode_world_snapshot`.
+  World JSON of at least1024 bytes uses level1 zlib only when the complete
+  envelope saves at least10% and64 bytes. The envelope is `"OMZ1"`(4) · original
+  length u32 little-endian · one zlib stream. `OMB1.total` describes this envelope,
+  not the uncompressed JSON. Career/social/party/control keep their plain encoder.
+  Both encoded and decoded payloads are capped at65507 bytes. Reassemble first,
+  then require a complete stream, exact original length and no trailing bytes;
+  invalid streams publish nothing and do not enter the completed-key cache.
+  Compression preserves the exact personalized/fog-filtered JSON bytes and
+  snapshot ordering. Protocol15 peers fail the existing compatibility check;
+  clients and server must update together. Python QA observers and the standalone
+  Node public probe decode the same bounded envelope before parsing JSON.
 - `SnapshotAssembler` keeps at most 4 pending assemblies and drops them after 2 s. It also remembers the last 16 completed `(epoch, tick)` keys to drop duplicates, rejects conflicting fragments, and never emits a partial payload. A datagram without the magic is passed through whole as legacy JSON.
 - A fragment with another protocol number fails with `TransportError::Version` before any allocation. The client turns that into `NetThreadSignal::ProtocolMismatch`.
 - Framing is per recipient: the server frames for any endpoint that sent `Hello` (`player.framed_snapshots`, `handlers/session.rs`), and the client always sends `Hello` first. Joining a standard (modular-kit) class without framing is refused as `ProtocolMismatch` (`handlers/join.rs`). Career, social and party views are always framed, each in its own tick namespace (table above), so their assemblies never collide with world snapshots.

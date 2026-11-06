@@ -313,7 +313,7 @@ fn send_snapshot(
         serialize_snapshot_datagram(packet)
             .map_err(|error| error.to_string())
             .and_then(|payload| {
-                shared::transport::encode_snapshot(&payload, server_epoch, snapshot_tick)
+                shared::transport::encode_world_snapshot(&payload, server_epoch, snapshot_tick)
                     .map_err(|error| error.to_string())
             })
     } else {
