@@ -1,8 +1,12 @@
 # Game directory and server routing
 
-Status: **concept / TODO**, recorded 2026-10-13 from the owner. Nothing here is
-implemented or scheduled. It keeps the idea, the current constraints and a phased
-path in one place.
+Status: **P7 in progress** (2026-11-06). D1's bounded contract, routing policy
+and offline signer/verifier are implemented and locally verified. No directory
+is published or used by the running client yet. Fetch/cache/fallback, trusted
+key provisioning, operator publication, cross-host penalties/party/Resume
+behavior and actual second-host/capacity proof remain required. D0/D1 are now
+scheduled in P7 before multi-host launch acceptance; they are not deferred away
+from the owner's complete-finding scope.
 
 ## Idea
 
@@ -15,10 +19,10 @@ client.
 
 | Area | Today | Why it matters |
 | --- | --- | --- |
-| Client default | `DEFAULT_GAME_SERVER_ADDR` is a baked **IP and port** (`77.246.105.57:4000`), overridable at build time ([session_config.rs](../../client/src/session_config.rs)) | Moving the server means a new client release |
+| Client default | Account-region startup uses RU `lobby.omoba.ru:4000`; Global still uses `77.246.105.57:4000` ([region.rs](../../shared/src/region.rs), [session_config.rs](../../client/src/session_config.rs)) | Global D0/DNS provisioning remains open; signed routing must preserve account-region isolation |
 | Lobby | One coordinator, one region; it redirects to match workers on `OMOBA_MATCH_PUBLIC_HOST` and ports from `OMOBA_MATCH_FIRST_PORT` with `OMOBA_MATCH_CAPACITY` ([match_pool.rs](../../server/src/match_pool.rs), [public MVP](../public-mvp.md)) | The lobby already hands out match servers, but only on its own host |
 | Compatibility | Every transport runs a JSON preflight: handshake, release, protocol, catalog, geometry ([release compatibility](../release-compatibility.md), [compatibility.rs](../../shared/src/compatibility.rs)) | Routing can pick a lobby whose contract matches the client instead of failing after connect |
-| Web backend | app.omoba.io is a Vercel (Next.js) app: HTTPS only, serverless | It can serve a directory document and an HTTP matchmaking API; UDP game traffic must still go straight to game hosts |
+| Web layer | Next/HTTPS front and regional Account API | It can serve the signed document; UDP still goes directly to game hosts, not through the web front |
 | Contours | Dev builds bake the dev lobby and registry; prod builds will hide the server picker (connection profiles work) | A directory URL per contour can replace hard-coded addresses in both |
 
 ## Phases
@@ -36,7 +40,7 @@ Clients fetch one HTTPS document at startup:
 
 The document carries:
 - a schema version, an issue time and an expiry;
-- a list of lobbies: `id`, `region`, `host`, `port`, the compatibility contract
+- a list of lobbies: `id`, locality, `host`, signed concrete IP `addresses`, `port`, the compatibility contract
   (protocol, catalog, geometry), `status` (open, maintenance, full) and a `weight`;
 - a client policy: minimum release, update URL and a message of the day.
 
@@ -48,7 +52,11 @@ The client:
 3. never mixes contours: a prod client only accepts the prod directory.
 
 Sign the document with an ed25519 key whose public half is baked into the client,
-so a hosting or DNS compromise cannot redirect players. Operators publish it with
+so a hosting compromise cannot replace its routing policy. Clients must use the
+signed concrete IP targets, not a fresh DNS answer for the label; baked fallback
+also needs pinned addresses to meet the DNS-compromise requirement. These client
+and fallback rules are still pending. The current unauthenticated UDP preflight
+is not server identity proof. Operators publish the reviewed signed artifact with
 a CLI from a reviewed file. Production builds then hard-code only the directory URL
 and the fallback name.
 
@@ -98,3 +106,79 @@ queue times, fill rate, match start latency.
 - [ ] **D3** — matchmaker service and tickets, worker ticket check, party and
       reconnect, migration away from the direct lobby queue.
 - [ ] **D4** — multi-host health, capacity, autoscaling, metrics.
+
+
+## Implemented D1 contract/operator checkpoint
+
+Sources: [contract/policy](../../shared/src/game_directory.rs),
+[contract tests](../../shared/src/game_directory_tests.rs),
+[offline operator](../../server/examples/game-directory.rs),
+[process/interoperability proof](../../scripts/test_game_directory.mjs).
+No new dependency, live key, DNS record, workflow or production service is added.
+
+The signed envelope carries `key_id`, exact UTF-8 JSON `payload` and a lowercase
+hex Ed25519 signature. Signing bytes are
+`b"omoba.game-directory.v1\0" || u8(key_id_bytes.len) || key_id_bytes || payload_bytes`.
+The pinned public key must come from the client/operator trust configuration,
+never from the document. Envelope/payload limits are64/48KiB, at most32 lobbies
+and8 concrete addresses per lobby. Version1 is separate from UDP protocol16.
+
+Payload fields: `version`, `region` (`ru`/`global`), exact `contour` (`production`
+or the build contour), positive `sequence`, `issued_at_ms`, `expires_at_ms`,
+`policy` and `lobbies`. TTL is at most7 days; future issue skew is at most30s.
+Reject expired/wrong-scope/older-sequence documents, malformed or duplicate
+lobby IDs/targets, invalid destinations and incompatible contracts. A client
+cache must additionally refuse different payloads reusing the same sequence.
+Every publication/expiry/status change must advance the sequence.
+
+Policy has a semantic `min_release`, `maintenance`, optional HTTPS `update_url`
+and bounded plain `message`. Lobby fields are `id`, `location`, `host`, `addresses`,
+`port`, `contract`, `status` (`open`/`full`/`maintenance`) and weight1..10000.
+`host` is a display/contour label; `network_endpoints()` returns the exact signed
+IP destinations. Selection uses compatible open entries and caller entropy;
+valid maintenance/update/full outcomes must not silently bypass policy through
+fallback. Existing live-worker Resume must retain its owning lobby/worker and
+must not go through new-admission selection.
+
+Build and prove locally from the game checkout with shared cacheA:
+
+```sh
+export CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../target"
+cargo build --locked -p server --example game-directory
+node scripts/test_game_directory.mjs "$CARGO_TARGET_DIR/debug/examples/game-directory"
+```
+
+The offline command interface (UTC values are Unix milliseconds):
+
+```text
+game-directory sign INPUT_JSON KEY_FILE KEY_ID REGION CONTOUR NOW_MS
+game-directory verify SIGNED_JSON PINNED_PUBLIC_KEY_HEX KEY_ID REGION CONTOUR NOW_MS MIN_SEQUENCE
+```
+
+`sign` accepts a separate regular file containing the32-byte hexadecimal seed,
+with no group/other permissions on Unix. It validates input, signs and verifies
+its own output before printing the public envelope. `verify` prints only an
+authenticated, currently valid typed document; failure has no usable stdout.
+No networking, migration, key generation or automatic publication occurs.
+Live key creation/rotation/baking and publication require the owner's separate
+production approval; the publicly known fixture key must never be provisioned.
+
+Verification:all197 shared cases and2 operator cases PASS; strict shared/example
+clippy PASS. Nine actual-process/independent Node Ed25519 checks PASS, including
+exact Unicode payload, wrong key/region, expiry, rollback, tamper, key alias and
+unsafe key permissions. Synthetic private fixture removed. Reports:
+`.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p7-directory-v3-*`.
+Initial v1 shared gate correctly required classifying the new `LobbyStatus` as
+non-UDP; classification was added without a gameplay protocol bump, and final
+v3 passes. This checkpoint does not prove runtime routing or multi-host capacity.
+
+Remaining D1 integration gates:
+
+- Client anonymous bounded HTTPS read, signature verification and scoped durable
+  last-good cache; equal-sequence immutability and rollback fencing.
+- Pinned fallback destinations and region/contour checks on both labels and IPs;
+  worker handoff and saved Resume must retain the authorized destination scope.
+- Maintenance/update/capacity UI, compatible alternate/fallback tests, key rotation
+  and a reviewed publication kit; preserve party grouping when routing changes.
+- Cross-host ready/dodge discipline and real two-lobby/worker process proof, then
+  measured RU/WAN operation. No item is closed by these primitives alone.

@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add the bounded version1 signed game-directory contract, exact IP targets,
+  scope/expiry/sequence and compatible weighted admission policy, plus an
+  offline Ed25519 signer/verifier.197 shared/2 operator and9 independent
+  Node/process checks PASS; strict checks PASS. No new dependency or runtime
+  activation. Client/cache/fallback/publication and multi-host proof remain open.
+
 - Complete findings35/39 software acceptance: native interseason Home/personal
   demotion and RU/EN profile badges are verified; portal RU notices and EN
   seasonal/privacy/legacy checks PASS. Preserve15 accepted unmodified PNGs and

@@ -1051,3 +1051,19 @@ awake, so its renderer failure is not attributed to the owner. v6/v7 succeed.
 EN driver path typo was corrected before its actual three-state run. No rebuild
 or OS preference change was used. Findings35/39 now done;59 done,6 partial,2 open,
 1 mostly refuted. Other P5/P6 and full release/P7/P8/P9 gates remain required.
+
+
+### P7 signed directory contract and offline operator
+
+D1 now has bounded schema/envelope, exact domain+key-ID+UTF8 signing bytes,
+region/contour/time/sequence checks, unique concrete IP targets and compatible
+weighted selection with explicit maintenance/update/full results. Offline
+signer/verifier validates a private seed file without printing it; production
+keys/publication are not created. All197 shared/2 operator cases and strict
+checks PASS;9 real command/independent Node signature cases PASS. No runtime
+client/router, deployment, dependency or protocol activation occurs yet.
+The first shared run caught its new enum missing the explicit non-UDP registry;
+that classification was added and final v3 passes. Synthetic private fixtures
+were removed. Logs/report:p7-directory-v3-* in the task directory. Exact pending
+client/cache/fallback/Resume/party/multi-host gates remain in game-directory.md.
+Finding12 partial; original list now59 done,7 partial,1 open,1 mostly refuted.

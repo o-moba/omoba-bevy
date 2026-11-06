@@ -16,6 +16,7 @@ pub mod compatibility;
 pub mod debug;
 pub mod device_account;
 pub mod forest_pickups;
+pub mod game_directory;
 pub mod handheld;
 pub mod hero_balance;
 pub mod jungle;

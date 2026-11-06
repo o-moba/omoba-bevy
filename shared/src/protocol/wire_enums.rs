@@ -138,6 +138,10 @@ wire_enums! {
 /// They are versioned by their own contract (HTTP API, data file).
 const NOT_UDP_WIRE: &[(&str, &str)] = &[
     (
+        "LobbyStatus",
+        "Version1 signed HTTPS directory only; never part of a UDP gameplay datagram",
+    ),
+    (
         "CompatibilityIssue",
         "local client diagnosis and operator JSON, not a UDP field",
     ),
