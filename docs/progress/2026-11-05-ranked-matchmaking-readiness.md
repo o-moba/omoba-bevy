@@ -1221,3 +1221,27 @@ fixed pixels still require a new native build. A separate no-window Bevy render
 probe produced a readable852x393 frame, so opt-in offscreen integration can
 remove the repeated desktop-unlock dependency. That prototype is not game UI
 acceptance and C5 remains partial.
+
+
+## 2026-11-07 — Pinned admission coordinator and local PITR proof
+
+Game source8c9f9351 adds the real single-worker admission coordinator over existing
+anonymous transport/signature/cache APIs. Nine new cases and full dev-client
+1601/0/1 actually PASS in CI42277199327, including denied-write memory fencing,
+party-address retention and preserved Resume. Strict dev client clippy and
+Android compilation PASS. Startup/queue/UI integration, live trust provisioning,
+full current gate and actual multi-host/RU proof remain outstanding.
+[Exact D1 proof](../evidence/directory-admission-2026-11-07/summary.json).
+
+An isolated native PG18.3 rehearsal migrates real career10/portal11, verifies a
+physical base and replays archived post-base WAL to exactly1024/history1 or latest
+1048/history2 from baseline1000/history0. Missing required WAL terminates target
+recovery. Five checks PASS; temporary processes/data cleaned. These are disclosed
+direct-SQL fixtures, not games or production/off-host/RPO proof. C4 remains open
+until actual encrypted off-host tooling and approved installation/drill pass.
+[Runnable PITR proof](../evidence/pitr-2026-11-07/summary.json).
+
+Current original68 ledger is62 done,5 partial,1 open after actual portal finding28
+adjudication. Separate critic/physical/UI and P7–P9 release gates remain. No RU
+migration, key provision, service configuration or deployment occurred. Root disk
+remains below20GiB; caches already use Orico and a resource question is pending.

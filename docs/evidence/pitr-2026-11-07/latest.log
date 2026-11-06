@@ -1,0 +1,27 @@
+2026-11-06 19:18:09.007 GMT [56027] LOG:  starting PostgreSQL 18.3 (Postgres.app) on aarch64-apple-darwin23.6.0, compiled by Apple clang version 15.0.0 (clang-1500.3.9.4), 64-bit
+2026-11-06 19:18:09.008 GMT [56027] LOG:  listening on IPv4 address "127.0.0.1", port 58460
+2026-11-06 19:18:09.029 GMT [56033] LOG:  database system was interrupted; last known up at 2026-11-06 19:18:04 GMT
+2026-11-06 19:18:09.170 GMT [56033] LOG:  starting backup recovery with redo LSN 0/F00028, checkpoint LSN 0/F00080, on timeline ID 1
+2026-11-06 19:18:09.287 GMT [56033] LOG:  restored log file "00000001000000000000000F" from archive
+2026-11-06 19:18:09.288 GMT [56033] LOG:  starting archive recovery
+2026-11-06 19:18:09.290 GMT [56033] LOG:  redo starts at 0/F00028
+2026-11-06 19:18:09.360 GMT [56033] LOG:  restored log file "000000010000000000000010" from archive
+2026-11-06 19:18:09.441 GMT [56033] LOG:  restored log file "000000010000000000000011" from archive
+2026-11-06 19:18:09.442 GMT [56033] LOG:  completed backup recovery with redo LSN 0/F00028 and end LSN 0/F00120
+2026-11-06 19:18:09.442 GMT [56033] LOG:  consistent recovery state reached at 0/F00120
+2026-11-06 19:18:09.443 GMT [56027] LOG:  database system is ready to accept read-only connections
+2026-11-06 19:18:09.580 GMT [56033] LOG:  redo done at 0/11255A0 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.29 s
+2026-11-06 19:18:09.580 GMT [56033] LOG:  last completed transaction was at log time 2026-11-06 19:18:05.447035+00
+2026-11-06 19:18:09.637 GMT [56033] LOG:  restored log file "000000010000000000000011" from archive
+2026-11-06 19:18:09.687 GMT [56033] LOG:  selected new timeline ID: 2
+2026-11-06 19:18:09.747 GMT [56033] LOG:  archive recovery complete
+2026-11-06 19:18:09.747 GMT [56031] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-11-06 19:18:09.758 GMT [56031] LOG:  checkpoint complete: wrote 44 buffers (2.1%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 3 recycled; write=0.002 s, sync=0.007 s, total=0.012 s; sync files=24, longest=0.002 s, average=0.001 s; distance=3072 kB, estimate=3072 kB; lsn=0/1200028, redo lsn=0/1200028
+2026-11-06 19:18:09.759 GMT [56027] LOG:  database system is ready to accept connections
+2026-11-06 19:18:10.972 GMT [56027] LOG:  received fast shutdown request
+2026-11-06 19:18:10.973 GMT [56027] LOG:  aborting any active transactions
+2026-11-06 19:18:10.974 GMT [56027] LOG:  background worker "logical replication launcher" (PID 56072) exited with exit code 1
+2026-11-06 19:18:10.974 GMT [56031] LOG:  shutting down
+2026-11-06 19:18:10.975 GMT [56031] LOG:  checkpoint starting: shutdown immediate
+2026-11-06 19:18:10.978 GMT [56031] LOG:  checkpoint complete: wrote 12 buffers (0.6%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.004 s; sync files=7, longest=0.001 s, average=0.001 s; distance=73 kB, estimate=2772 kB; lsn=0/1212748, redo lsn=0/1212748
+2026-11-06 19:18:10.988 GMT [56027] LOG:  database system is shut down

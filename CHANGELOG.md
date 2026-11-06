@@ -5,12 +5,19 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Prove physical-base/WAL point-in-time and latest-archive recovery on isolated
+  PostgreSQL18 with actual career10/portal11 tables: post-base rating/history
+  fixtures recover exactly, missing WAL refuses target recovery. Five checks
+  PASS; all owned clusters/data cleaned. Preserve runnable exact proof and logs.
+  Encrypted off-host PITR tooling/installation remains open; no RU change.
+
 - Prepare the native D1 admission coordinator: bounded background anonymous fetch,
   exact signed IP routing, durable cache/history, pinned fallback, maintenance/
   update/full/compatibility decisions, party affinity and retained Resume address.
   An observed newer policy fences older cache after a failed write in the running
-  process. Nine new targeted cases added; formatting/source review PASS, execution
-  pending CI while root disk is below20GiB. No live trust/routing activation.
+  process. Nine new targeted cases actually PASS in full dev-client CI1601/0/1,
+  with strict clippy/Android compilation PASS. Startup/queue/UI binding and live
+  trust/routing activation remain required; complete current gate is pending.
 
 - Verify the Home required-catalog guard in the full dev-client CI:1592 cases
   PASS,0 FAIL,1 ignored, including stale primary/Ranked/vs-Bots activations while

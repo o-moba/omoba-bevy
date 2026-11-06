@@ -312,12 +312,14 @@ call the correct path; these value APIs are not server admission tickets.
 
 Nine new cases cover cache/fallback/expiry, closed policies, compatible alternate,
 party/IP retention, original Resume address, tamper/replay/equivocation, corruption/
-clock, actual Unix denied-write recovery and a single asynchronous worker. They
-have not executed yet: root disk is below the20GiB build threshold. Formatting
-and source review pass. Existing full CI atf144c8f7 proves the *previous* source
-only, and must not be cited as verification of this new coordinator.
+clock, actual Unix denied-write recovery and a single asynchronous worker. All9
+actually execute and PASS in source8c9f9351's dev-client CI42277199327,
+job128096469173; complete client1601 PASS/0 FAIL/1 ignored. Both strict dev client
+clippy variants and Android compilation also pass. Preserve [exact source/job proof](../evidence/directory-admission-2026-11-07/summary.json).
+Complete core/PostgreSQL gates remain pending at this observation. No local heavy
+build was launched below20GiB and no native startup/UI proof is claimed.
 
-Remaining: execute the new cases/strict checks; add reviewed compiled public trust
+Remaining: complete the current full gate; add reviewed compiled public trust
 and fallback configuration; bind the asynchronous resolver to legal/region startup,
 new queue entry, policy UI, retry and exact-address transport; preserve actual
 party/worker/Resume ownership across refresh; prove two lobbies/shared discipline.

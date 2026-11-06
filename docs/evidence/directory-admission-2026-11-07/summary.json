@@ -1,0 +1,37 @@
+{
+  "status": "TARGETED_CI_PASS_FULL_GATE_PENDING",
+  "source_commit": "8c9f9351857c63a8cf121dd7d90ae9a3d1bae247",
+  "ci_run": 42277199327,
+  "client_job": 128096469173,
+  "job_url": "https://github.com/o-moba/omoba-bevy/actions/runs/42277199327/job/128096469173",
+  "platform": "Linux dev-contour client",
+  "full_client_result": {
+    "passed": 1601,
+    "failed": 0,
+    "ignored": 1
+  },
+  "new_cases": {
+    "startup_cache_expiry_and_outage_use_only_valid_policy_or_pinned_addresses": "PASS (actual decoded job log)",
+    "authenticated_closed_policies_do_not_escape_through_fallback_but_resume_is_retained": "PASS (actual decoded job log)",
+    "party_affinity_never_switches_to_a_different_lobby_or_new_ip": "PASS (actual decoded job log)",
+    "tamper_and_replay_keep_current_durable_policy_while_equivocation_is_refused": "PASS (actual decoded job log)",
+    "corruption_and_backwards_clock_never_turn_into_an_open_fallback": "PASS (actual decoded job log)",
+    "failed_new_maintenance_publication_fences_old_cache_until_durable_repair": "PASS (actual decoded job log)",
+    "fallback_scope_and_concrete_destinations_are_validated_without_dns": "PASS (actual decoded job log)",
+    "async_refresh_has_one_worker_and_never_blocks_main_polling": "PASS (actual decoded job log)",
+    "compatible_alternate_is_selected_and_missing_fallback_stays_unavailable": "PASS (actual decoded job log)"
+  },
+  "strict_checks": "Both dev client clippy variants and Android compilation PASS in this run; complete core/PG gate remains pending.",
+  "source_sha256": {
+    "client/src/game_directory.rs": "9883de2e7395847dcdddbd5bd0396889dc1723a24a933e037802c3413ced7695",
+    "client/src/game_directory/admission.rs": "1bb30c1c48dd9e5d0a3dc512361c5065a704921e0e05d3216ffbf44adb8947ef",
+    "client/src/game_directory/admission/tests.rs": "b8d402187ff85418f77d3f204ee107fa946da9a62b978fc5e607e8fb31065bee",
+    "passport/src/game_directory.rs": "2036463875329c5a30d25fe6a650d14107504e2a7cc110bc6ce05d33ce821bc1"
+  },
+  "scope": [
+    "Actual signature/cache/filesystem/state decisions, real single worker with injected byte fetch; no live HTTP call by this new async test.",
+    "Existing anonymous HTTP transport is composed by production Resolver::new; prior independent HTTP4-case evidence remains separate.",
+    "Denied-write case actually executed on Unix; the observed newer in-memory floor prevents using older open cache after a failed durable write in this process.",
+    "No live trust provisioning, startup/queue/network/policy-UI binding, worker authentication, cross-host party/Resume/penalty or RU/WAN acceptance is implied."
+  ]
+}
