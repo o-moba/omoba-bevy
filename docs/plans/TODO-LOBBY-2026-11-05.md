@@ -1882,3 +1882,31 @@ the newly connected path, not only the standalone new scenario. Ranked maturity
 uses the disclosed existing synthetic fixture; no synthetic history is claimed
 as played. Source1310e564 is pushed; fresh CI42267312369 is running. Code is
 saved separately as84894318 (server handoff) and1310e564 (Home glyph fitting).
+
+
+### Fresh CI failure and peer-source correction — 2026-11-07
+
+Run42268366799 at84fa2344 passes6 of7 jobs (full native client, Android,
+core/clippy, gameplay, Python and bots), but PostgreSQL public `party-leave`
+times out before the planned departure: only9 of10 seats reached Draft. All506
+server Rust cases passed; this does not override the failed public scenario.
+The artifact SHA is verified against GitHub. Client6's new worker endpoint59898
+reused client7's former lobby endpoint; its final snapshot is still Lobby despite
+140 signed Join attempts. The probe ignored packet source and could apply late
+lobby epoch/auth to its new socket. Controlled source replay confirms the fault;
+the native client already connects its UDP socket to its selected peer.
+
+Filter the loopback probe's current peer before any decoding, retain retired-
+socket fencing, and inject old lobby views into both the retired callback and
+the *new* worker socket on each flagged handoff.3 real-socket cases PASS; removing
+the source filter makes the new regression fail.5 existing policy wrappers PASS.
+Actual ten-player `party-draft` with stale handoff exercises PASS: five-stack kept,
+nine survivors retain FIFO/party/career, only the voluntary leaver receives one
+strike, and the fresh10-human roster enters Running.20 callback and20 old-source
+replays execute. Ranked maturity prerequisites are disclosed synthetic receipts.
+[Exact compact proof](../evidence/probe-peer-fence-2026-11-07/summary.json).
+
+Fresh complete CI after this fix is still required. UI-2/UI-3 follow-up remains
+unverified WIP: no heavy client test/build launched while root disk is below
+20GiB. No additional original finding is closed by this harness repair, and no
+production deployment or physical/RU/scale acceptance is implied.

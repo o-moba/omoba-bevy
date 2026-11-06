@@ -12,7 +12,8 @@ class PublicQueuePolicyTests(unittest.TestCase):
         result = subprocess.run(["node", "--test", str(script)],
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("pass 2", result.stdout)
+        self.assertRegex(result.stdout, r"pass [1-9][0-9]*")
+        self.assertIn("fail 0", result.stdout)
 
     @unittest.skipUnless(shutil.which("node"), "public protocol probe requires Node")
     def test_ready_consent_is_correlated_and_cannot_starve_search_refresh(self):

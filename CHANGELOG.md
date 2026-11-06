@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fence live public-probe UDP traffic by the current peer address/port before
+  decoding. An OS-reused endpoint could receive old lobby views and corrupt the
+  new worker context. Real3-socket regression, failing negative control,5 policy
+  tests and full ten-player party departure/replacement process PASS, including
+  20 forced old-lobby replays. Fresh full CI remains required.
+
 - Confirm the existing Ranked unique-draft CI entrypoint also passes its new
   Casual handoff continuation in the same real local lobby/DB: all7 assertions
   PASS. Disclosed Ranked prerequisites remain synthetic; fresh full CI pending.

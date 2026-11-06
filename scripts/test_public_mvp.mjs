@@ -27,7 +27,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import dgram from 'node:dgram';
-import {bindLoopbackPeer} from './public_probe_socket.mjs';
+import {bindLoopbackPeer,listenForLoopbackPeer} from './public_probe_socket.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -278,7 +278,7 @@ class Client {
    isReserved:port=>port===lobbyPort||(port>=workerPort&&port<workerPort+capacity),
    active:()=>this.active&&!stopping,
    onSocket:socket=>{this.socket=socket;
-    socket.on('message',b=>{if(this.active&&this.socket===socket)this.receive(b);});
+    listenForLoopbackPeer(socket,()=>this.port,b=>{if(this.active&&this.socket===socket)this.receive(b);},()=>{this.foreignDatagrams=(this.foreignDatagrams||0)+1;});
     socket.on('error',e=>{if(this.active&&this.socket===socket)this.errors.push(e.message);});
    },
    onReady:socket=>{this.localPort=socket.address().port;this.socketReady=true;},
@@ -320,7 +320,12 @@ class Client {
      // Deliver a real old lobby view after the worker context exists. This
      // models a queued callback, independently of kernel/runner timing.
      const scope={socket:this.socket,epoch:this.epoch,auth:this.auth};
-     oldSocket.emit('message',Buffer.from(bytes));
+     oldSocket.emit('message',Buffer.from(bytes),{address:'127.0.0.1',port:lobbyPort});
+     // The OS can also deliver old lobby datagrams to a reused *new* socket.
+     const foreignBefore=this.foreignDatagrams||0;
+     this.socket.emit('message',Buffer.from(bytes),{address:'127.0.0.1',port:lobbyPort});
+     this.staleEndpointChecks=(this.staleEndpointChecks||0)+1;
+     assert.equal(this.foreignDatagrams,foreignBefore+1,'old lobby packet entered worker context');
      this.staleHandoffChecks=(this.staleHandoffChecks||0)+1;
      this.staleHandoffFailure=this.socket!==scope.socket||this.epoch!==scope.epoch||this.auth!==scope.auth;
     }
@@ -398,7 +403,7 @@ class Client {
  }
  join(){this.joinAttempts++;this.gameplay({type:'join',prematch:true,team:'green',character:'ipfs',hero_class:['warrior','mage','ranger','cleric','warden'][this.index%5],avatar:null,sprite_character:null,session_id:this.session,passport_ticket:null});}
  close(){this.active=false;try{this.socket.close()}catch{}}
- diagnostic(){return{index:this.index,queue_request_id:this.queueId,match_service_request_id:this.career?.match_service_request_id,stale_ready_checks:this.staleReadyChecks||0,stale_ready_refreshes:this.staleReadyRefreshes||0,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,local_port:this.localPort,port_rebinds:this.portRebinds||0,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
+ diagnostic(){return{index:this.index,queue_request_id:this.queueId,match_service_request_id:this.career?.match_service_request_id,stale_ready_checks:this.staleReadyChecks||0,stale_ready_refreshes:this.staleReadyRefreshes||0,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,local_port:this.localPort,port_rebinds:this.portRebinds||0,foreign_datagrams:this.foreignDatagrams||0,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
 }
 // Keep every owned client alive while awaiting an observable protocol condition.
 async function pumpUntil(label, predicate, timeout=20000, onTick=()=>{}) {
@@ -1338,6 +1343,8 @@ try {
   const handed=all.filter(c=>c.allocation);
   assert(handed.length>0&&handed.every(c=>c.staleHandoffChecks>0&&!c.staleHandoffFailure),'stale handoff fixture did not execute for every handed client');
   report.stale_handoff_checks=handed.reduce((n,c)=>n+c.staleHandoffChecks,0);
+  assert(handed.every(c=>c.staleEndpointChecks>0),'stale endpoint fixture did not execute for every handed client');
+  report.stale_endpoint_checks=handed.reduce((n,c)=>n+c.staleEndpointChecks,0);
  }
  report.resources=resources;
  report.status='PASS';

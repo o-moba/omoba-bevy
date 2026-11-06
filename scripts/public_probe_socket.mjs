@@ -32,3 +32,12 @@ export function bindLoopbackPeer({isReserved,onSocket,onReady,onFailure,onReject
  };
  attempt();
 }
+
+// A newly bound peer may reuse another client's former lobby endpoint. Late
+// lobby traffic must never replace the new worker's epoch or authentication.
+export function listenForLoopbackPeer(socket, peerPort, onMessage, onForeign=()=>{}) {
+ socket.on('message',(bytes,remote)=>{
+  if(remote?.address==='127.0.0.1'&&remote.port===peerPort())onMessage(bytes);
+  else onForeign();
+ });
+}
