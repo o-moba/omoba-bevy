@@ -1,0 +1,49 @@
+{
+  "status": "PASS_STORE_FOUNDATION_RUNTIME_INTEGRATION_OPEN",
+  "source_parent": "1f39528a6c5c57e9b7bc16341c954b2743b41849",
+  "career_schema": 11,
+  "portal_schema": 11,
+  "postgres": "18.6",
+  "new_cases": {
+    "passed": 6,
+    "failed": 0,
+    "ignored": 0
+  },
+  "all_store_tests": {
+    "passed": 69,
+    "failed": 0,
+    "ignored": 0
+  },
+  "checks": {
+    "current_shared_and_store_source_compiled": "PASS",
+    "strict_test_target_clippy_with_workspace_policy": "PASS",
+    "cargo_fmt_all_check": "PASS",
+    "git_diff_check": "PASS",
+    "owned_schema_cleanup": "PASS"
+  },
+  "test_process_id": 92393,
+  "owned_schemas_remaining": 0,
+  "fixture_public_career_schema": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "fixture_note": "The full store suite includes existing supporter tests that open/migrate the task-owned public fixture. It is now career11/portal11. The final run observed11 before and after; per-process temporary schemas were removed. No production database was touched.",
+  "cache_policy": "No Cargo/Bevy build or cache writes. Current shared/store source compiled with coherent cached third-party libraries read-only; 34MiB owned test artifacts retained in .agent/codex-ranked-readiness/queue-discipline for next integration checks.",
+  "pending": [
+    "Runtime-role grants, access reads, shared ready ownership/deadline fencing and final start admission guard",
+    "Stable event production and typed durable off-tick delivery/replay/flush acknowledgements",
+    "Safe reconciliation of existing local penalty floors without pardons or duplicate strikes",
+    "Actual two-lobby signed flow, database failure/restart, FIFO/party/Resume and15s ready scenarios",
+    "Fresh standard Cargo/full7-job CI, including PG16, and actual independent-storage/RU recovery on schema11"
+  ],
+  "scope": "Real PostgreSQL store API tests; synthetic profiles/events. No active cross-host gameplay protection, RU deployment, provider storage, physical UI, current multi-host load or production acceptance."
+}

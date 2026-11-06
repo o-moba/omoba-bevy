@@ -1324,3 +1324,24 @@ This is a prerequisite for safe explicit packaging, not completion of #12/D1.
 No release.py/workflow/mobile packaging edits, public key provisioning, published
 directory or service changes. Both C4/C2 review patches remain unapplied pending
 owner answers. Original68 ledger62/5/1 and RU/physical/capacity gates unchanged.
+
+
+## 2026-11-07: shared dodge storage verified; cross-host wiring remains open
+
+Career schema11 adds separate shared queue-dodge receipts/penalties. Six new
+actual PG18.6 scenarios and all69 store tests pass with no ignored cases. Strict
+test-target clippy and formatting pass. Duplicate/concurrent/conflicting events,
+clock drift, old delivery,24h quiet reset and schema upgrade are verified; career/
+history and played-match penalties are preserved. [Exact proof](../evidence/queue-discipline-store-2026-11-07/README.md).
+
+Runtime event/outbox/access/start wiring, shared ready ownership/deadlines, legacy
+floor reconciliation and actual signed two-lobby fault proof remain required.
+The current lobby still uses local dodge storage: do not mark D1/#12 complete.
+The task's public test fixture is now career11/portal11 (supporter suite migrates
+it); final verification sees11 before/after and zero owned scratch schemas.
+Repeat C4 real recovery on11; older schema10 proofs are historical. Standard full
+current CI/PG16 and every RU/physical/capacity requirement stay open.
+
+The prior1f39528a input-audit dev-client CI128196318370 executes all4 new cases:
+PASS,1625 total pass,0 failures,1 ignored; its full7-job run is still pending at
+this checkpoint and cannot certify this later schema/API change.

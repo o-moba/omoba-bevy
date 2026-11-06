@@ -476,3 +476,33 @@ gate are pending CI. [Exact source and scope](../evidence/directory-input-audit-
 No release script, workflow or mobile packaging is changed. The explicit reviewed
 public bundle option across all platforms, live keys/publication, actual
 configured artifacts and real multi-host/RU acceptance remain open.
+
+
+## Shared queue discipline foundation — 2026-11-07
+
+The store now supplies schema11 record_queue_dodge / queue_dodge_cooldown with a
+stable event ID, profile row locking, idempotent/conflict-safe receipts, separate
+queue state and observation-anchored cooldowns. Six new actual PG18.6 cases and
+all69 store tests pass, strict test-target clippy/formatting pass. This is stored
+application code, not a closed cross-host bypass: the lobby remains local.
+[Exact source and proof](../evidence/queue-discipline-store-2026-11-07/README.md).
+
+Complete next, without weakening the existing15s/FIFO/party/Resume behavior:
+
+- Produce stable events and deliver them off-tick through a separate typed durable
+  journal with bounded retries and flush/commit acknowledgements. Do not encode
+  them as MatchResult records that restart recovery may turn into Interrupted.
+- Add reviewed runtime grants, fresh access reads and final durable-start checks.
+  Profile row locks must serialize the penalty with actual match admission.
+- Fence shared ready ownership/deadlines before cross-host re-search, including
+  the interval before an old host's event reaches SQL. A late asynchronous write
+  alone does not prove that rapid host switching cannot bypass a penalty.
+- Reconcile existing local penalty floors without pardoning active penalties or
+  fabricating duplicate event/strike history from aggregated local counters.
+- Prove two actual lobbies with signed decline/15s timeout, accepted-player FIFO
+  and party retention, database outage/restart/replay, owner recovery and Resume.
+
+The owned test fixture is now career11/portal11. Older C4/schema10 proofs are
+historical; repeat actual recovery with schema11 before acceptance. The C2/C4
+review patches remain unchanged/unapplied pending owner answers. No production
+secret, service, key or host configuration is changed here.

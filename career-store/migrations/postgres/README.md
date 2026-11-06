@@ -207,3 +207,26 @@ opens a new window atomically; retry returns its original receipt. See the
 requires schema10; old workers must drain before migration, and an old schema9
 binary is not a compatible rollback afterward. No production change is implied
 by the local test fixtures.
+
+
+## Queue discipline foundation (schema11)
+
+011_queue_discipline.sql adds immutable-by-API event receipts and separate
+per-profile queue penalties. They do not alter played-match abandon penalties,
+rating, XP, public counts, season state or history. The trusted server API records
+a stable32-hex event/profile/original observation exactly once under the same
+profile-row locks used by match admission. Duplicate deliveries cannot increment
+or extend a penalty; conflicting identities/times fail. Preserve60/300/900/3600s
+escalation and reset after24h without a new dodge. Old deliveries do not restart
+expired cooldowns; small future clock drift is bounded/clamped to database time.
+
+New runtime source requires schema11. Existing schema10 binaries are not a
+compatible rollback after that migration. Apply only through the separately
+approved operator rollout after the complete feature is integrated. The local
+proof runs actual source and69 store tests on the task-owned PG18.6 fixture.
+
+Runtime role grants and lobby access/event/outbox/start wiring are not added in
+this foundation. The cross-host loophole therefore remains open. Shared ready
+ownership/deadline fences, legacy local-floor reconciliation, signed two-lobby
+fault scenarios, standard full CI/PG16 and schema11 backup/recovery remain
+release requirements. [Proof and limits](../../../docs/evidence/queue-discipline-store-2026-11-07/README.md).

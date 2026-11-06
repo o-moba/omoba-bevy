@@ -1,5 +1,5 @@
 {
-  "status": "IMPLEMENTED_EXECUTION_PENDING_CI",
+  "status": "PASS_DEV_CLIENT_EXECUTION_FULL_GATE_PENDING",
   "parent_commit": "850b908d1d2a45e0140a6559ff9137846dad3b87",
   "scope": "Canonical desktop operator input validation for future explicit packaging; not a configured/released binary or live directory activation",
   "source_sha256": {
@@ -13,7 +13,7 @@
   },
   "new_tests": {
     "count": 4,
-    "status": "NOT_EXECUTED_PENDING_CI",
+    "status": "PASS_EXECUTED_IN_CI",
     "names": [
       "input_audit_uses_the_real_trust_parser_without_certifying_the_binary",
       "input_audit_bounds_stream_reads_and_never_echoes_private_or_io_details",
@@ -26,5 +26,14 @@
     "No release.py, CI workflow or mobile packaging changes",
     "No live key provisioned, build bundle selected or RU/production service changed",
     "Input audit explicitly does not certify compiled binary trust; actual artifact audit still required"
-  ]
+  ],
+  "validated_source_commit": "1f39528a6c5c57e9b7bc16341c954b2743b41849",
+  "dev_client_ci": {
+    "run_id": 42306289098,
+    "job_id": 128196318370,
+    "passed": 1625,
+    "failed": 0,
+    "ignored": 1,
+    "four_new_cases": "PASS"
+  }
 }

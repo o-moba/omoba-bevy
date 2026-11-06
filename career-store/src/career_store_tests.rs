@@ -129,10 +129,12 @@ impl Fixture {
         self.admin.close().await;
     }
 }
-// Remove every schema10 object before explicitly simulating a pre-season
+// Remove every schema10/11 object before explicitly simulating a pre-season
 // schema. Leaving future tables while deleting version rows is not an upgrade
 // fixture. This runs only in the test's own disposable schema.
 async fn remove_season_schema_for_upgrade(f: &Fixture) {
+    sqlx::raw_sql("DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
+        .execute(&f.store.pool).await.unwrap();
     sqlx::raw_sql("DROP TRIGGER career_ranked_registration ON career_profiles; DROP FUNCTION career_stamp_ranked_profile(); ALTER TABLE career_profiles DROP COLUMN ranked_season_id,DROP COLUMN ranked_started_at_ms,DROP COLUMN ranked_ends_at_ms,DROP COLUMN season_rated_matches,DROP COLUMN season_wins,DROP COLUMN season_losses,DROP COLUMN season_completed_matches,DROP COLUMN latest_ranked_badge; DROP TABLE career_ranked_closures,career_ranked_archives,career_ranked_allocations,career_ranked_seasons; DROP FUNCTION career_guard_ranked_archive(),career_guard_ranked_season(),career_require_open_ranked_season(); DELETE FROM career_schema_version WHERE version=10;")
         .execute(&f.store.pool).await.unwrap();
 }
@@ -2754,3 +2756,287 @@ async fn declared_input_statistics_are_bounded_and_settlement_retry_is_exact() {
 
 #[path = "career_store/seasons_tests.rs"]
 mod seasons;
+
+async fn queue_discipline_now(f: &Fixture) -> u64 {
+    u64::try_from(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint",
+        )
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_receipt_is_shared_exactly_once_and_preserves_career() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let event = format!("{:032x}", 1);
+    let first = f
+        .store
+        .record_queue_dodge(&event, &profile.profile_id, at)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.strikes, 1);
+    assert!(first.until >= i64::try_from(at / 1000).unwrap() + 60);
+    assert_eq!(
+        other
+            .queue_dodge_cooldown(&profile.profile_id)
+            .await
+            .unwrap(),
+        Some(first)
+    );
+    assert_eq!(
+        other
+            .record_queue_dodge(&event, &profile.profile_id, at)
+            .await
+            .unwrap(),
+        Some(first)
+    );
+    assert_eq!(f.store.profile(&profile.profile_id).await.unwrap(), profile);
+    assert_eq!(
+        f.store
+            .history(&profile.profile_id, None)
+            .await
+            .unwrap()
+            .0
+            .len(),
+        0
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &profile.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none(),
+        "queue discipline must not create a played-match abandon"
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_concurrent_owners_do_not_lose_or_double_strikes() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let first = format!("{:032x}", 1);
+    let second = format!("{:032x}", 2);
+    let (a, b) = tokio::join!(
+        f.store.record_queue_dodge(&first, &profile.profile_id, at),
+        other.record_queue_dodge(&second, &profile.profile_id, at)
+    );
+    let mut strikes = vec![a.unwrap().unwrap().strikes, b.unwrap().unwrap().strikes];
+    strikes.sort_unstable();
+    assert_eq!(strikes, [1, 2]);
+    let second = other
+        .queue_dodge_cooldown(&profile.profile_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.strikes, 2);
+    assert!(second.until >= i64::try_from(at / 1000).unwrap() + 300);
+    for (n, seconds) in [(3, 900), (4, 3600)] {
+        let value = f
+            .store
+            .record_queue_dodge(&format!("{n:032x}"), &profile.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.strikes, n);
+        assert!(value.until >= i64::try_from(at / 1000).unwrap() + seconds);
+    }
+    let event = format!("{:032x}", 5);
+    let (a, b) = tokio::join!(
+        f.store.record_queue_dodge(&event, &profile.profile_id, at),
+        other.record_queue_dodge(&event, &profile.profile_id, at)
+    );
+    assert_eq!(a.unwrap().unwrap().strikes, 5);
+    assert_eq!(b.unwrap().unwrap().strikes, 5);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_conflicting_receipt_and_invalid_clock_fail_without_side_effects() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let at = queue_discipline_now(&f).await;
+    let event = format!("{:032x}", 1);
+    f.store
+        .record_queue_dodge(&event, &a.profile_id, at)
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &b.profile_id, at)
+            .await
+            .is_err()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &a.profile_id, at - 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&format!("{:032x}", 2), &a.profile_id, at + 60_000)
+            .await
+            .is_err()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&format!("{:032x}", 3), &a.profile_id, u64::MAX)
+            .await
+            .is_err()
+    );
+    for event in ["", "../bad", &"a".repeat(33), &"A".repeat(32)] {
+        assert!(
+            f.store
+                .record_queue_dodge(event, &a.profile_id, at)
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        f.store
+            .queue_dodge_cooldown(&b.profile_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_old_delivery_does_not_restart_a_penalty_and_quiet_day_resets() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let stale = at - 86_401_000;
+    let event = format!("{:032x}", 1);
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &profile.profile_id, stale)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &profile.profile_id, stale)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let first = f
+        .store
+        .record_queue_dodge(&format!("{:032x}", 2), &profile.profile_id, at - 30_000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        first.until < i64::try_from(at / 1000).unwrap() + 32,
+        "delivery delay cannot restart the full minute"
+    );
+    sqlx::query("UPDATE career_queue_penalties SET last_observed_ms=$2,cooldown_until=clock_timestamp()-interval '1 day',strikes=9 WHERE profile_id=$1")
+        .bind(&profile.profile_id).bind(i64::try_from(stale).unwrap()).execute(&f.store.pool).await.unwrap();
+    let reset = f
+        .store
+        .record_queue_dodge(&format!("{:032x}", 3), &profile.profile_id, at)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reset.strikes, 1);
+    assert!(reset.until <= i64::try_from(at / 1000).unwrap() + 61);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_out_of_order_events_preserve_latest_time_and_schema_upgrade() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    // An actual schema10 fixture has none of the new objects or version row.
+    sqlx::raw_sql("DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
+        .execute(&f.store.pool).await.unwrap();
+    assert!(
+        f.store
+            .queue_dodge_cooldown(&profile.profile_id)
+            .await
+            .is_err(),
+        "missing schema is not a no-ban success"
+    );
+    let other = f.another_owner().await;
+    assert_eq!(other.profile(&profile.profile_id).await.unwrap(), profile);
+    let at = queue_discipline_now(&f).await;
+    other
+        .record_queue_dodge(&format!("{:032x}", 1), &profile.profile_id, at)
+        .await
+        .unwrap();
+    let later = f
+        .store
+        .record_queue_dodge(&format!("{:032x}", 2), &profile.profile_id, at - 1000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(later.strikes, 2);
+    assert!(later.until >= i64::try_from(at / 1000).unwrap() + 300);
+    let last: i64 = sqlx::query_scalar(
+        "SELECT last_observed_ms FROM career_queue_penalties WHERE profile_id=$1",
+    )
+    .bind(&profile.profile_id)
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    assert_eq!(last, i64::try_from(at).unwrap());
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_small_host_clock_skew_cannot_extend_the_cooldown() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let event = format!("{:032x}", 1);
+    let first = f
+        .store
+        .record_queue_dodge(&event, &profile.profile_id, at + 2_000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        first.until <= i64::try_from(at / 1000).unwrap() + 61,
+        "tolerated future observation must clamp to the authoritative database clock"
+    );
+    assert_eq!(
+        f.store
+            .record_queue_dodge(&event, &profile.profile_id, at + 2_000)
+            .await
+            .unwrap(),
+        Some(first)
+    );
+    f.close().await;
+}

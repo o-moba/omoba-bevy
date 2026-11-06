@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add schema11 shared queue-dodge storage with idempotent receipts, profile
+  locking and observation-anchored existing cooldown escalation. Six new real
+  PG18.6 cases/all69 store tests, strict test-target clippy and formatting PASS.
+  Runtime delivery/access/ready/start integration and two-host proof remain open;
+  local lobbies are not yet protected by this new store. Owned fixture is now11;
+  schema11 real recovery and standard full CI remain required before release.
+
+- Verify1f39528a native public-input audit in dev-client CI: all4 new cases PASS,
+  total1625 pass,0 failures,1 ignored. Full run remains separate/pending.
+
 - Add a desktop operator public-directory input audit using the exact native
   trust parser before account/network/UI initialization. Bound stdin to16KiB,
   require explicit contour, sanitize errors and distinguish input validity from

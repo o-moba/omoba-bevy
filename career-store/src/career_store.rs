@@ -22,11 +22,12 @@ use std::{
 
 mod fair_play;
 mod input_stats;
+mod queue_discipline;
 mod seasons;
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+pub const SCHEMA_VERSIONS: [i32; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -326,6 +327,13 @@ impl CareerStore {
         if !versions.contains(&10) {
             sqlx::raw_sql(include_str!(
                 "../migrations/postgres/010_ranked_seasons.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if !versions.contains(&11) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/011_queue_discipline.sql"
             ))
             .execute(&mut *tx)
             .await?;

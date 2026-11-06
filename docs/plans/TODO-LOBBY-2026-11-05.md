@@ -2,7 +2,7 @@
 
 Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sessions. Source of truth for the plan: [ranked-launch-readiness-2026-11-05.md](ranked-launch-readiness-2026-11-05.md); decisions: ADR-027 in [../architecture/decisions.md](../architecture/decisions.md); progress: [../progress/2026-11-05-ranked-matchmaking-readiness.md](../progress/2026-11-05-ranked-matchmaking-readiness.md). Raw reviewer output (JSON, local only): `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/raw/review-findings.json`.
 
-Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career10, portal11). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
+Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career11, portal11; schema11 foundation tests upgraded the owned fixture). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
 
 ## Method
 
@@ -2233,3 +2233,24 @@ This is a prerequisite for safe explicit packaging, not completion of #12/D1.
 No release.py/workflow/mobile packaging edits, public key provisioning, published
 directory or service changes. Both C4/C2 review patches remain unapplied pending
 owner answers. Original68 ledger62/5/1 and RU/physical/capacity gates unchanged.
+
+
+### Shared dodge storage verified; cross-host wiring remains open
+
+Career schema11 adds separate shared queue-dodge receipts/penalties. Six new
+actual PG18.6 scenarios and all69 store tests pass with no ignored cases. Strict
+test-target clippy and formatting pass. Duplicate/concurrent/conflicting events,
+clock drift, old delivery,24h quiet reset and schema upgrade are verified; career/
+history and played-match penalties are preserved. [Exact proof](../evidence/queue-discipline-store-2026-11-07/README.md).
+
+Runtime event/outbox/access/start wiring, shared ready ownership/deadlines, legacy
+floor reconciliation and actual signed two-lobby fault proof remain required.
+The current lobby still uses local dodge storage: do not mark D1/#12 complete.
+The task's public test fixture is now career11/portal11 (supporter suite migrates
+it); final verification sees11 before/after and zero owned scratch schemas.
+Repeat C4 real recovery on11; older schema10 proofs are historical. Standard full
+current CI/PG16 and every RU/physical/capacity requirement stay open.
+
+The prior1f39528a input-audit dev-client CI128196318370 executes all4 new cases:
+PASS,1625 total pass,0 failures,1 ignored; its full7-job run is still pending at
+this checkpoint and cannot certify this later schema/API change.
