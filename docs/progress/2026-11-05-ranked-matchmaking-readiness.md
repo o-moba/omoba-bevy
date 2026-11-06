@@ -1288,3 +1288,23 @@ under the user-provided AGENTS. No host installation, secrets, archive settings,
 service restart, workflow or RU deployment occurred. Actual independent-storage/
 RU recovery, C2/C3, UI-2/UI-3, scaling and final release acceptance remain. The
 original68 ledger remains62 done,5 partial,1 open; no remaining requirement waived.
+
+
+## 2026-11-07: C2 complete host-drain review and combined C4 proof
+
+The [C2 host patch](../plans/reviews/C2-DRAIN-2026-11-07.md) composes on the exact unapplied
+C4 candidate:28 new cases PASS;184 combined tests (183 pass,1 expected optional
+E2E skip). Real host methods use temporary files and simulated OS commands, not
+actual RU services. [Exact source hashes and logs](../evidence/drain-host-2026-11-07/README.md).
+
+Fix two discovered draft defects: equal-timestamp old reports cannot acknowledge
+a restarted lobby; cancellation failures record the operation and observed marker
+state. Post-removal sync failure returns resume unconfirmed/nonzero rather than
+falsely claiming drain held. Ship/server rollback support bounded --drain; failed
+backup/migration/start/health/timeout keep admission paused. Dry run/preflight are
+read-only; unexpected restarted workers hold admission.
+
+C2 stays PARTIAL: owner approval under the supplied AGENTS is required for host
+deployment-tool changes. The pending C4 question does not authorize C2 or real
+RU operations. Tracked integration/full CI and actual service acceptance remain.
+Original68 ledger62/5/1 and other physical/capacity/RU gates are unchanged.

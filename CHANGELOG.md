@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Preserve the C2 host-drain/update/rollback review patch, composed on unapplied
+  C4.28 new fault/CLI cases PASS;184 combined tests,1 expected skip. Correct stale
+  restart acknowledgement and operation history; report late marker-removal
+  uncertainty with nonzero exit. Backup/migration/start/health/timeout failures
+  keep admission paused. Integration approval and actual RU acceptance remain.
+
 - Verify corrected715a8117 full CI: all7 jobs and18 public-journey stages PASS;
   dev-client1621/0/1, including all11 directory cases and full CJK coverage.
   Inspect exact artifact checksum, unanimous15s ready/FIFO and all10 AI-played
