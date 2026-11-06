@@ -27,6 +27,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import dgram from 'node:dgram';
+import {bindLoopbackPeer} from './public_probe_socket.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -270,11 +271,22 @@ class Client {
   this.bind();
  }
  bind() {
-  const socket=dgram.createSocket('udp4');this.socket=socket;
-  socket.on('message',b=>{if(this.active&&this.socket===socket)this.receive(b);});
-  socket.on('error',e=>{if(this.active&&this.socket===socket)this.errors.push(e.message);});
-  socket.bind(0,'127.0.0.1');this.nonce=crypto.randomBytes(16).toString('hex');this.epoch=0n;this.match=0;this.path=null;this.auth=null;this.authChallenge=null;this.lastProbe=0;this.accountSequence=0;this.sequence=0;this.prematchSequence=0;this.lastSend=0;this.lastQueue=0;this.next=0;}
- send(value) {if(!stopping){const bytes=Buffer.from(wire(value));this.sentPackets++;this.sentBytes+=bytes.length;this.socket.send(bytes,this.port,'127.0.0.1');}}
+  this.socketReady=false;this.bindError=null;
+  this.nonce=crypto.randomBytes(16).toString('hex');this.epoch=0n;this.match=0;this.path=null;this.auth=null;this.authChallenge=null;this.lastProbe=0;this.accountSequence=0;this.sequence=0;this.prematchSequence=0;this.lastSend=0;this.lastQueue=0;this.next=0;
+  bindLoopbackPeer({
+   isReserved:port=>port===lobbyPort||(port>=workerPort&&port<workerPort+capacity),
+   active:()=>this.active&&!stopping,
+   onSocket:socket=>{this.socket=socket;
+    socket.on('message',b=>{if(this.active&&this.socket===socket)this.receive(b);});
+    socket.on('error',e=>{if(this.active&&this.socket===socket)this.errors.push(e.message);});
+   },
+   onReady:socket=>{this.localPort=socket.address().port;this.socketReady=true;},
+   onRejected:()=>{this.portRebinds=(this.portRebinds||0)+1;},
+   onFailure:error=>{this.bindError=error;},
+  });
+ }
+ send(value) {if(!stopping&&this.active&&this.socketReady){const bytes=Buffer.from(wire(value));this.sentPackets++;this.sentBytes+=bytes.length;this.socket.send(bytes,this.port,'127.0.0.1');}}
+
  bootstrap(payload) {this.send({type:'transport_bootstrap',path_nonce:this.path,payload:wire(payload)});}
  account(action) {if(!this.auth)return;const sequence=++this.accountSequence;this.bootstrap({type:'career',request:{action:'authorized',session_nonce:this.auth,sequence,request:action,signature:sign(this.key,['omoba.career.request.v1',this.epoch,this.auth,sequence,action])}});}
  gameplay(payload) {if(!this.auth)return;const command={server_epoch:this.epoch,match_id:this.match,session_id:this.session,session_nonce:this.auth,path_nonce:this.path,sequence:++this.sequence,payload:wire(payload),signature:''};command.signature=sign(this.key,['omoba.gameplay.command.v1',command.server_epoch,command.match_id,command.session_id,command.session_nonce,command.path_nonce,command.sequence,command.payload]);this.send({type:'signed_command',command});}
@@ -324,6 +336,7 @@ class Client {
   }
  }
  tick(now) {
+  if(this.active&&this.bindError)throw this.bindError;
   if(this.staleHandoffFailure)throw new Error('old lobby callback mutated worker authentication');
   if(!this.active)return;
   if(this.qualificationError)throw this.qualificationError;
@@ -384,7 +397,7 @@ class Client {
  }
  join(){this.joinAttempts++;this.gameplay({type:'join',prematch:true,team:'green',character:'ipfs',hero_class:['warrior','mage','ranger','cleric','warden'][this.index%5],avatar:null,sprite_character:null,session_id:this.session,passport_ticket:null});}
  close(){this.active=false;try{this.socket.close()}catch{}}
- diagnostic(){return{index:this.index,queue_request_id:this.queueId,match_service_request_id:this.career?.match_service_request_id,stale_ready_checks:this.staleReadyChecks||0,stale_ready_refreshes:this.staleReadyRefreshes||0,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
+ diagnostic(){return{index:this.index,queue_request_id:this.queueId,match_service_request_id:this.career?.match_service_request_id,stale_ready_checks:this.staleReadyChecks||0,stale_ready_refreshes:this.staleReadyRefreshes||0,preference:this.preference,stage:this.stage,running_after_secs:this.firstRunning?(this.firstRunning-this.createdAt)/1000:null,server_full_replies:this.serverFull||0,active:this.active,port:this.port,local_port:this.localPort,port_rebinds:this.portRebinds||0,world_snapshots:this.worldSnapshots,bootstrap_snapshots:this.bootstrapSnapshots,join_attempts:this.joinAttempts,profile:this.profile?.profile_id,allocation:this.allocation,join_error:this.lastJoinError,career_error:this.career?.error,match_service:this.career?.match_service,party:this.party,game_state:this.snapshot?.game_state,prematch:this.snapshot?.prematch,packets:this.packets,bytes:this.bytes,sent_packets:this.sentPackets,sent_bytes:this.sentBytes,transforms_sent:this.transforms,input_hz_observed:this.transforms>1?(this.transforms-1)*1000/(this.lastTransform-this.firstTransform):0,snapshots:this.snapshots,errors:this.errors.slice(-5)};}
 }
 // Keep every owned client alive while awaiting an observable protocol condition.
 async function pumpUntil(label, predicate, timeout=20000, onTick=()=>{}) {

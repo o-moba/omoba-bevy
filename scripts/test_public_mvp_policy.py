@@ -6,6 +6,14 @@ import unittest
 
 
 class PublicQueuePolicyTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "public probe socket regression requires Node")
+    def test_loopback_clients_leave_future_worker_ports_free(self):
+        script = Path(__file__).with_name("test_public_probe_socket.mjs")
+        result = subprocess.run(["node", "--test", str(script)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("pass 2", result.stdout)
+
     @unittest.skipUnless(shutil.which("node"), "public protocol probe requires Node")
     def test_ready_consent_is_correlated_and_cannot_starve_search_refresh(self):
         script = Path(__file__).with_name("test_public_mvp.mjs")

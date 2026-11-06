@@ -998,3 +998,41 @@ source was corrected to source and v2/v3 PASS. Reports in the task/codex dirs:
 p6-season-hint-v1-verify-report.json and p6-native-season-hint-ru-clippy-v3-report.json.
 New Home interaction test execution and actual expired/notification pixels await
 the committed CI/native build. Overall68-finding counts stay unchanged.
+
+
+### P6 current native gate and full-CI port-collision repair
+
+Native c8260b31 CI42187649841 executes all1578 client tests PASS (one ignored),
+including phone Home expiry/reopen/legacy hints, stale activation refusal and
+Casual availability. RU build-v3 PASS:493.09s,minimum root36.35GiB,binary SHA256
+366d088f72db1455fcab8d6a3071784f3be582d7ae8c4eb36f7ec966394a7d01.
+The Mac is currently locked (Quartz verified); expired Home and visible demotion
+are not captured or accepted. The ready binary is retained; no rebuild is needed.
+Portal ccee8fa adds own-account calibration/promotion/demotion banners:250 tests,
+3 expected skips,typecheck/build and seven RU852x393 Chrome/Next checks PASS;
+two actual images inspected. Loopback API fixtures are not settlement/hardware
+proof. Account/season changes, late/replayed counts and dishonest completions
+cannot invent a celebration.
+
+Earlier a877c1ce full CI42186198928 failed before its party-disconnect injection:
+22 workers all failed AddrInUse on127.0.0.1:45600, which a live test client had
+bound as its ephemeral source port. No client joined a worker; the party recovery
+assertions were never reached. Artifact13488342913 verified SHA256
+bd590225467ee9c9941e015b29cd925178c4a323ba6c325ea884542cbe2b6e00; bounded
+path/duplicate/symlink/size checks passed. Original FAIL and compact diagnosis
+ci-a877-party-port-diagnosis.json are retained in the task directory.
+
+Every loopback probe bind now excludes the lobby and the entire future worker
+range, waits for an accepted bind before sending, and has bounded resampling.
+Diagnostics include local source port/rebind count. Two actual UDP regressions
+prove rejection/release/data delivery and exhaustion without leaked sockets;
+five Python-invoked policy/socket cases PASS. No production queue/worker policy,
+consent deadline, workflow or server-port configuration is changed.
+
+Fresh actual signed ten-seat party-disconnect rehearsal on c826 server + current
+probe PASS in92.27s:one held Ranked Draft, nine survivors requeued with retained
+age, unchanged profiles/empty histories, return codes, stale consent correlation
+and replacement ten-human/no-bot roster Running. All source ports are outside
+the server ranges. Report:.agent/codex-ranked-readiness/p6-party-port-v1/report.json.
+Guarded build/fixture/rehearsal report:p6-party-port-v1-verify-report.json. Full
+current-source18-stage CI remains required; all68 status counts stay unchanged.

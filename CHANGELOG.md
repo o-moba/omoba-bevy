@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Keep process-rehearsal clients off lobby/future-worker UDP ports, with bounded
+  rebinding and no sends before an accepted bind. Diagnose local ports/retries.
+  Full CIa877 had22 AddrInUse workers before reaching its party-disconnect test;
+  preserve that failed artifact. Two real UDP regressions and the exact signed
+  party-disconnect rehearsal PASS; full18-stage CI remains required.
+- Current c826 native CI executes all1578 client tests PASS, including the new
+  interseason Home guards. RU build is ready; two native pixels still await an
+  unlocked Mac. Portal ccee8fa rank-change banners pass250 tests plus focused
+  browser/build/type checks. Release and hardware gates remain open.
+
 - Show a localized interseason Ranked state on Home from optional server-clock
   availability, disable Ranked and refuse stale activations while leaving Casual
   available. Hint-only changes refresh the screen; legacy omission is supported.

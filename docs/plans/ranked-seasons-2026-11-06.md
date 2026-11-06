@@ -149,3 +149,13 @@ follows existing behavior; authoritative allocation validation is unchanged.
 Committed execution of the extended Home interaction case and actual expired/
 demotion pixels remain pending; the Result QA now captures the visible settled
 notice, and missing notices fail instead of yielding a misleading screenshot.
+
+
+Current c826 native CI executes all1578 cases, including the extended Home
+interseason interaction. RU build is ready; expired Home/demotion screenshots
+are still blocked by the locked Mac. Portal ccee8fa adds scoped rank-change
+banners with250 tests and seven inspected-scope browser checks. The unrelated
+full-CI party setup failure was a loopback client taking a future worker UDP
+port; the socket regression and exact92.27s party-disconnect replay now PASS.
+Full current-source public verification and remaining visual/release gates
+remain required.
