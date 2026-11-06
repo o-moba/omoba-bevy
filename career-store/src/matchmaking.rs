@@ -19,7 +19,7 @@ pub const MAX_RATING_SPREAD: i32 = 300;
 /// The widest rating spread a Ranked roster may ever have (LR-35): the base
 /// spread grows while players wait, never past this.
 pub const MAX_WIDENED_SPREAD: i32 = 600;
-pub const MAX_RATING: i32 = 5000;
+pub use shared::ranked::MAX_RATING;
 pub const ELO_K: i32 = 32;
 pub const NEWCOMER_ELO_K: i32 = 48;
 

@@ -34,6 +34,7 @@ pub mod prematch;
 pub mod progression;
 pub mod protocol;
 pub mod public_transport;
+pub mod ranked;
 pub mod region;
 pub mod sandbox;
 pub mod shop;
