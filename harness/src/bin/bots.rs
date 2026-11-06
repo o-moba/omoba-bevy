@@ -269,6 +269,7 @@ fn main() {
 
     let mut last_telemetry = Instant::now() - Duration::from_secs(1);
     let mut last_phase = String::new();
+    let mut last_auth_telemetry = Instant::now() - Duration::from_secs(1);
     let mut search_gate_open = args.search_gate.is_none();
     loop {
         if !search_gate_open
@@ -571,6 +572,31 @@ fn main() {
                     })
                 );
             }
+        }
+        if args.telemetry
+            && args.public
+            && !search_gate_open
+            && last_auth_telemetry.elapsed() >= Duration::from_secs(1)
+        {
+            last_auth_telemetry = Instant::now();
+            let peers: Vec<_> = runners
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "public": r.bot.public_status().map(|s| serde_json::json!({
+                            "phase": s.phase, "profile_id": s.profile_id,
+                            "auth_age_ms": s.auth_age_ms, "error": s.error,
+                            "allocation": s.allocation,
+                        }))
+                    })
+                })
+                .collect();
+            println!(
+                "BOT_AUTH {}",
+                serde_json::json!({
+                    "elapsed_secs": started.elapsed().as_secs_f64(), "peers": peers,
+                })
+            );
         }
         if args.exit_after_result {
             let statuses: Vec<_> = runners

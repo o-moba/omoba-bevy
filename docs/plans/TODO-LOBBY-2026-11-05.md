@@ -946,3 +946,17 @@ unit cases,3 CLI refusals in1 process test,6 Python policy cases, fresh binaries
 and strict harness clippy PASS. Ten-client actual pilot PASS: all authenticated
 9.14s, Search released14.17s, all Running28.00s,15s soak; p95 wire58056B/s,
 complete received median17.69Hz.1000 repeat and full current CI remain required.
+
+
+P7 warmup v4 FAIL retained; no Search released and owned test PG restored100.
+The old world-dependent BOT_SAMPLE stopped updating for several unjoined lobby
+shards; independent later PUBLIC_BOT messages show authenticated peers. Stale
+samples cannot establish a permanent authentication failure. Authentication
+telemetry now emits independently of world snapshots, with current matching-nonce
+acknowledgement age; admission to the benchmark requires every acknowledgement
+<3s old continuously for5s. Foreign nonce/epoch cannot refresh evidence.
+32 harness unit/1 CLI process/16 Python telemetry-policy cases and strict harness
+clippy PASS. Actual ten-client pilot PASS: all authenticated4.85s, Search9.86s,
+all Running23.46s,15s soak, p95 wire58166B/player/s and median complete snapshots
+17.77Hz. No qualification receipts or gameplay policy override. Fresh1000-client
+repeat remains required; season/input persistence and UI remain open.

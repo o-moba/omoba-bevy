@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Correct playing-capacity warmup telemetry: report authentication independently
+  of world snapshots and require fresh matching-nonce acknowledgements. Preserve
+  the v4 timeout caused by stale world-dependent observations.32 harness unit,
+  1 CLI process,16 Python cases and strict harness clippy PASS; actual ten-client
+  pilot passes15s all-playing. Fresh1000-client repeat remains pending.
+
 - Start playing-capacity measurement after every ordinary sign-in is fresh,
   error-free and stable for5s; release queue intent through a loopback-only
   actor marker. Record login/release/play timings separately. This prevents

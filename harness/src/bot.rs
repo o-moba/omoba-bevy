@@ -120,7 +120,7 @@ impl Bot {
     pub fn public_status(&self) -> Option<crate::PublicBotStatus> {
         self.public
             .as_ref()
-            .map(|session| session.borrow().status.clone())
+            .map(|session| session.borrow().status_view())
     }
 
     /// Owned loopback load fixtures may finish sign-in before pressing Search.

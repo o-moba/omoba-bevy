@@ -119,7 +119,7 @@ def read_events(stream):
         if not line.endswith("\n"):
             stream.seek(offset)
             return
-        for kind in ("BOT_SAMPLE", "BOT_RESULT"):
+        for kind in ("BOT_SAMPLE", "BOT_AUTH", "BOT_RESULT"):
             prefix = kind + " "
             if line.startswith(prefix):
                 yield kind, json.loads(line[len(prefix):])

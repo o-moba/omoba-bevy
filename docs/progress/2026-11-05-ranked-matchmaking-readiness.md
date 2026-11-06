@@ -643,3 +643,17 @@ retry and authority reset),191 shared/14 matching and5 capacity-tool tests,
 affected strict clippy; native test targets typecheck the alternate revocation
 wording. Actual repeat/full CI remain pending. P6 pure rules preserved in local
 e459dab8; seasons/archive/input persistence and UI remain open.
+
+
+P7 warmup v4 FAIL retained; no Search released and owned test PG restored100.
+The old world-dependent BOT_SAMPLE stopped updating for several unjoined lobby
+shards; independent later PUBLIC_BOT messages show authenticated peers. Stale
+samples cannot establish a permanent authentication failure. Authentication
+telemetry now emits independently of world snapshots, with current matching-nonce
+acknowledgement age; admission to the benchmark requires every acknowledgement
+<3s old continuously for5s. Foreign nonce/epoch cannot refresh evidence.
+32 harness unit/1 CLI process/16 Python telemetry-policy cases and strict harness
+clippy PASS. Actual ten-client pilot PASS: all authenticated4.85s, Search9.86s,
+all Running23.46s,15s soak, p95 wire58166B/player/s and median complete snapshots
+17.77Hz. No qualification receipts or gameplay policy override. Fresh1000-client
+repeat remains required; season/input persistence and UI remain open.

@@ -72,6 +72,8 @@ def authenticated_population(samples, count):
             profile = status.get("profile_id")
             if (status.get("phase") != "authenticated" or status.get("error") is not None
                     or status.get("allocation") is not None or not isinstance(profile, str)
+                    or type(status.get("auth_age_ms")) is not int
+                    or not 0 <= status["auth_age_ms"] < 3000
                     or len(profile) != 64 or any(c not in "0123456789abcdef" for c in profile)):
                 return False
             profiles.append(profile)
@@ -233,6 +235,7 @@ def main(argv=None):
                      "harness/src/bin/bots.rs", "harness/src/bot.rs", "harness/src/public_client.rs",
                      "Cargo.lock", "shared/src/lib.rs", "shared/src/transport.rs", "shared/src/protocol.rs")}
     children, writers, readers, shards, latest = [], [], [], [], {}
+    auth_latest = {}
     def register(child):
         children.append(child)
         (root / "owned-processes.json").write_text(json.dumps([
@@ -266,10 +269,14 @@ def main(argv=None):
                 for kind, sample in read_events(reader):
                     if kind == "BOT_SAMPLE":
                         latest[index] = (now, sample)
+                    elif kind == "BOT_AUTH":
+                        auth_latest[index] = (now, sample)
             current = [latest[i][1] for i in range(rooms) if i in latest]
             fresh = len(latest) == rooms and all(now - at < 3 for at, _ in latest.values())
             if not search_gate.exists():
-                if fresh and authenticated_population(current, args.clients):
+                current_auth = [auth_latest[i][1] for i in range(rooms) if i in auth_latest]
+                auth_fresh = len(auth_latest) == rooms and all(now - at < 3 for at, _ in auth_latest.values())
+                if auth_fresh and authenticated_population(current_auth, args.clients):
                     if authenticated_since is None:
                         authenticated_since = now
                         report["all_authenticated_after_seconds"] = now - started
@@ -301,6 +308,7 @@ def main(argv=None):
     finally:
         report["elapsed_seconds"] = time.monotonic() - started
         report["latest_shards"] = {str(i): sample for i, (_, sample) in latest.items()}
+        report["latest_auth_shards"] = {str(i): sample for i, (_, sample) in auth_latest.items()}
         (root / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         stop_owned(children)
         for file in readers + writers:

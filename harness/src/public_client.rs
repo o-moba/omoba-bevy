@@ -30,6 +30,7 @@ const SEARCH_ID: u64 = 1;
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct PublicBotStatus {
     pub phase: &'static str,
+    pub auth_age_ms: Option<u64>,
     pub profile_id: Option<String>,
     pub initial_profile: Option<ProfileSummary>,
     pub profile: Option<ProfileSummary>,
@@ -51,6 +52,7 @@ pub(crate) struct PublicSession {
     match_id: u64,
     path: Option<String>,
     auth: Option<String>,
+    auth_confirmed_at: Option<Instant>,
     challenge: Option<AuthChallenge>,
     account_sequence: u64,
     sequence: u64,
@@ -119,6 +121,7 @@ impl PublicSession {
             match_id: 0,
             path: None,
             auth: None,
+            auth_confirmed_at: None,
             challenge: None,
             account_sequence: 0,
             sequence: 0,
@@ -140,6 +143,7 @@ impl PublicSession {
             match_vote: None,
             status: PublicBotStatus {
                 phase: "probing",
+                auth_age_ms: None,
                 profile_id: None,
                 initial_profile: None,
                 profile: None,
@@ -173,6 +177,15 @@ impl PublicSession {
         self.next_action = Instant::now();
     }
 
+    pub fn status_view(&self) -> PublicBotStatus {
+        let mut status = self.status.clone();
+        status.auth_age_ms = self
+            .auth_confirmed_at
+            .filter(|_| self.auth.is_some())
+            .map(|at| u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX));
+        status
+    }
+
     fn reset_transport(&mut self, lobby: bool) {
         self.status.phase = "probing";
         self.client_nonce = random_hex();
@@ -180,6 +193,7 @@ impl PublicSession {
         self.match_id = 0;
         self.path = None;
         self.auth = None;
+        self.auth_confirmed_at = None;
         self.challenge = None;
         self.account_sequence = 0;
         self.sequence = 0;
@@ -265,6 +279,7 @@ impl PublicSession {
                 // session on repeats, but never carry it across a server restart.
                 if self.epoch != server_epoch {
                     self.auth = None;
+                    self.auth_confirmed_at = None;
                     self.challenge = None;
                     self.sequence = 0;
                     self.account_sequence = 0;
@@ -341,8 +356,12 @@ impl PublicSession {
             self.challenge = Some(challenge);
             self.next_auth = Instant::now();
         }
-        if let (Some(nonce), Some(profile)) = (view.auth_nonce, view.profile) {
+        if let (Some(nonce), Some(profile)) = (view.auth_nonce, view.profile)
+            && (self.auth.as_ref() == Some(&nonce)
+                || self.challenge.as_ref().is_some_and(|c| c.nonce == nonce))
+        {
             self.auth = Some(nonce);
+            self.auth_confirmed_at = Some(Instant::now());
             self.status.profile_id = Some(profile.profile_id.clone());
             if self.lobby && self.status.allocation.is_none() {
                 self.status.initial_profile = Some(profile.clone());
@@ -879,6 +898,38 @@ mod tests {
             }
         ));
         assert_eq!(session.status.phase, "searching");
+    }
+
+    #[test]
+    fn auth_freshness_requires_the_current_nonce_and_is_cleared_on_reprobe() {
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Mage, "Fill".into());
+        session.epoch = 19;
+        session.path = Some("b".repeat(64));
+        let challenge = AuthChallenge {
+            public_key: session.public_key.clone(),
+            nonce: "a".repeat(64),
+            server_epoch: 19,
+            session_id: session.session_id.clone(),
+            nickname: session.nickname.clone(),
+        };
+        session.challenge = Some(challenge.clone());
+        let view = |nonce| CareerView {
+            storage_enabled: true,
+            auth_nonce: Some(nonce),
+            profile: Some(ProfileSummary::new("f".repeat(64), "Fill".into())),
+            ..Default::default()
+        };
+        session.career(19, view("c".repeat(64)));
+        assert!(session.auth.is_none() && session.status_view().auth_age_ms.is_none());
+        session.career(18, view(challenge.nonce.clone()));
+        assert!(session.auth.is_none());
+        session.career(19, view(challenge.nonce));
+        assert!(session.auth.is_some() && session.status_view().auth_age_ms.is_some());
+        session.auth_confirmed_at = Some(Instant::now() - Duration::from_secs(10));
+        assert!(session.status_view().auth_age_ms.unwrap() >= 10_000);
+        session.reset_transport(true);
+        assert!(session.status_view().auth_age_ms.is_none());
     }
 
     #[test]

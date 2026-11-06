@@ -31,12 +31,14 @@ class PopulationEvidenceTests(unittest.TestCase):
     def test_search_release_requires_every_distinct_authenticated_unallocated_profile(self):
         samples = [sample(0), sample(1)]
         for index, peer in enumerate(p for s in samples for p in s["peers"]):
-            peer["public"].update(phase="authenticated", profile_id=f"{index:064x}", allocation=None)
+            peer["public"].update(phase="authenticated", profile_id=f"{index:064x}", allocation=None,
+                                  auth_age_ms=200)
         self.assertTrue(probe.authenticated_population(samples, 20))
         self.assertFalse(probe.authenticated_population(samples[:1], 20))
         self.assertFalse(probe.authenticated_population(samples + samples, 40))
         for key, value in [("phase", "authenticating"), ("error", "Busy"),
-                           ("profile_id", None), ("allocation", {"allocation_id": "unexpected"})]:
+                           ("profile_id", None), ("allocation", {"allocation_id": "unexpected"}),
+                           ("auth_age_ms", None), ("auth_age_ms", True), ("auth_age_ms", 3000)]:
             bad = copy.deepcopy(samples)
             bad[0]["peers"][0]["public"][key] = value
             self.assertFalse(probe.authenticated_population(bad, 20))

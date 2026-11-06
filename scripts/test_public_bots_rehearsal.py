@@ -6,6 +6,16 @@ import public_bots_rehearsal as rehearsal
 
 
 class PublicBotsRehearsalTests(unittest.TestCase):
+    def test_auth_progress_is_independent_of_world_frames_and_partial_lines_are_retained(self):
+        stream = io.StringIO('BOT_AUTH {"peers":[')
+        self.assertEqual(list(rehearsal.read_events(stream)), [])
+        offset = stream.tell()
+        stream.seek(0, 2)
+        stream.write(']}\n')
+        stream.seek(offset)
+        self.assertEqual(list(rehearsal.read_events(stream)), [("BOT_AUTH", {"peers": []})])
+        self.assertEqual(list(rehearsal.read_events(stream)), [])
+
     def test_only_disposable_loopback_database_without_options_is_allowed(self):
         for host in ("127.0.0.1", "localhost", "[::1]"):
             self.assertTrue(rehearsal.isolated_database(f"postgres://tester:pass@{host}:5432/omoba_test"))
