@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Close finding28 after focused actual RU portal rendering: interrupted Ranked
+  without an award stays neutral with a dash, detail retains singular Ranked tag,
+  and personal rating is never invented. Three browser checks and257 portal units
+  PASS; inspected exact images/source/build identifiers preserved. Original68
+  ledger now62 done,5 partial,1 open; RU/physical/current full gates remain.
+
 - Prepare shared actual-glyph fitting for Home/Lobby/Draft labels and a separate
   phone Home admission/update notice slot so Offline practice stays above the
   navigation. Guard every new Home queue action against a required catalog update,
