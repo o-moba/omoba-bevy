@@ -12,6 +12,7 @@ use std::{
 };
 
 pub mod admission;
+pub mod config;
 
 mod cache_lock;
 use cache_lock::CacheLock;
@@ -81,6 +82,9 @@ impl DirectoryTrust {
             }
             let key = VerifyingKey::from_bytes(&pin.public_key)
                 .map_err(|_| DirectoryError::Invalid("invalid directory public key"))?;
+            if key.is_weak() {
+                return Err(DirectoryError::Invalid("weak directory public key"));
+            }
             verified.push((pin.key_id, key));
         }
         Ok(Self {

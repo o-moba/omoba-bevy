@@ -318,3 +318,118 @@ fn compatible_alternate_is_selected_and_missing_fallback_stays_unavailable() {
     assert!(no_fallback.refresh_at(Err("offline"), NOW).is_err());
     assert_eq!(decision(&no_fallback, NOW), Decision::Unavailable);
 }
+
+#[test]
+fn resume_revalidates_original_owner_without_new_admission_policy_or_selection() {
+    let f = Fixture::new();
+    let mut a = f.admission();
+    assert_eq!(
+        a.resume_at(NOW, "212.113.117.105:4000", "212.113.117.105:45600"),
+        ResumeDecision::Pending
+    );
+    let mut doc = document(1);
+    doc.policy.maintenance = true;
+    doc.policy.min_release = "999.0.0".into();
+    doc.lobbies[0].status = LobbyStatus::Maintenance;
+    doc.lobbies[0].contract.protocol += 1;
+    a.refresh_at(Ok(&signed(&doc)), NOW).unwrap();
+    assert!(matches!(decision(&a, NOW), Decision::UpdateRequired { .. }));
+    let ResumeDecision::Ready(resume) =
+        a.resume_at(NOW, "212.113.117.105:4000", "212.113.117.105:45600")
+    else {
+        panic!("existing seat owner must not use new-admission selection")
+    };
+    assert_eq!(
+        resume.lobby().endpoint().to_string(),
+        "212.113.117.105:4000"
+    );
+    assert_eq!(resume.worker().to_string(), "212.113.117.105:45600");
+    assert_eq!(resume.lobby().lobby_id(), "one");
+}
+#[test]
+fn saved_resume_never_authorizes_foreign_hosts_ports_or_another_lobbys_worker() {
+    let f = Fixture::new();
+    let mut a = f.admission();
+    a.refresh_at(Ok(&signed(&document(1))), NOW).unwrap();
+    for (lobby, worker) in [
+        ("212.113.117.105:4000", "212.113.117.106:45600"),
+        ("212.113.117.105:4000", "77.246.105.57:45600"),
+        ("212.113.117.105:4000", "127.0.0.1:45600"),
+        ("212.113.117.105:4000", r"foreign.omoba.ru:45600"),
+        ("212.113.117.105:4000", "212.113.117.105:0"),
+        ("212.113.117.105:4001", "212.113.117.105:45600"),
+        (r"foreign.omoba.ru:4000", "212.113.117.105:45600"),
+    ] {
+        assert_eq!(
+            a.resume_at(NOW, lobby, worker),
+            ResumeDecision::Unavailable,
+            "{lobby}/{worker}"
+        );
+    }
+    let ResumeDecision::Ready(route) = a.resume_at(
+        NOW,
+        "[::ffff:212.113.117.105]:4000",
+        "[::ffff:212.113.117.105]:45600",
+    ) else {
+        panic!("canonical mapped addresses")
+    };
+    assert_eq!(route.worker().to_string(), "212.113.117.105:45600");
+}
+#[test]
+fn resume_removal_expiry_and_corrupt_cache_cannot_reuse_old_directory_authority() {
+    let f = Fixture::new();
+    let mut a = f.admission();
+    let mut doc = document(1);
+    a.refresh_at(Ok(&signed(&doc)), NOW).unwrap();
+    assert!(matches!(
+        a.resume_at(NOW, "212.113.117.105:4000", "212.113.117.105:45600"),
+        ResumeDecision::Ready(_)
+    ));
+    doc.sequence = 2;
+    doc.lobbies.remove(0);
+    a.refresh_at(Ok(&signed(&doc)), NOW).unwrap();
+    assert_eq!(
+        a.resume_at(NOW, "212.113.117.105:4000", "212.113.117.105:45600"),
+        ResumeDecision::Unavailable,
+        "current removal cannot be bypassed through baked fallback"
+    );
+    assert_eq!(
+        a.resume_at(NOW + 60000, "212.113.117.106:4000", "212.113.117.106:45600"),
+        ResumeDecision::Unavailable,
+        "expired secondary owner is not the separately pinned fallback"
+    );
+    let ResumeDecision::Ready(fallback) =
+        a.resume_at(NOW + 60000, "212.113.117.105:4000", "212.113.117.105:45600")
+    else {
+        panic!("separately pinned original fallback remains authorized")
+    };
+    assert_eq!(fallback.lobby().origin(), Origin::PinnedFallback);
+    fs::write(&a.cache.path, b"corrupt").unwrap();
+    assert!(a.refresh_at(Err("offline"), NOW + 60000).is_err());
+    assert_eq!(
+        a.resume_at(NOW + 60000, "212.113.117.105:4000", "212.113.117.105:45600"),
+        ResumeDecision::Unavailable
+    );
+}
+#[test]
+fn legacy_and_multihomed_resume_hints_become_exact_authorized_ips_without_dns() {
+    let f = Fixture::new();
+    let mut a = f.admission();
+    let mut doc = document(1);
+    doc.lobbies[0]
+        .addresses
+        .push(std::net::Ipv4Addr::new(212, 113, 117, 108).into());
+    a.refresh_at(Ok(&signed(&doc)), NOW).unwrap();
+    let ResumeDecision::Ready(route) =
+        a.resume_at(NOW, r"one.omoba.ru:4000", "212.113.117.108:45600")
+    else {
+        panic!("legacy owner label must retain actual authorized worker IP")
+    };
+    assert_eq!(route.lobby().endpoint().to_string(), "212.113.117.108:4000");
+    let ResumeDecision::Ready(route) =
+        a.resume_at(NOW, "212.113.117.108:4000", r"one.omoba.ru:45600")
+    else {
+        panic!("known label maps only to the original pinned owner")
+    };
+    assert_eq!(route.worker().to_string(), "212.113.117.108:45600");
+}

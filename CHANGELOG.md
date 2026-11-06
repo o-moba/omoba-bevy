@@ -5,6 +5,20 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Prepare build-scoped public directory trust/fallback configuration and an
+  operator-only compiled-binary audit. Refuse malformed/missing-region input,
+  weak public keys and runtime environment replacement; keep scoped cache paths.
+  Add current-authority lookup for saved Resume: exact owning lobby/worker IPs,
+  no new selection/DNS or use of expired secondary authority. Nine new regressions
+  added; formatting/source review PASS, execution pending CI. Actual startup/
+  queue/Resume wiring and live keys remain required.
+
+- Accept sourcef144c8f7 full7-job/18-stage CI42273662478 after independently
+  checking the complete artifact/hash, ready15s, repaired party departure,
+  Casual handoff continuation and all10 natural Ranked profile awards. Default
+  map,466.798s played, ±24 Elo, actual XP/public/season credit; synthetic eligibility
+  prerequisites disclosed. Later directory candidates need their current gates.
+
 - Prove physical-base/WAL point-in-time and latest-archive recovery on isolated
   PostgreSQL18 with actual career10/portal11 tables: post-base rating/history
   fixtures recover exactly, missing WAL refuses target recovery. Five checks

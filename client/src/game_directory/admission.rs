@@ -53,8 +53,9 @@ impl Route {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OwnedLobby(Route);
 impl OwnedLobby {
-    /// An existing seat keeps its exact concrete address even while new
-    /// admission is under maintenance, full, expired, or incompatible.
+    /// Retain the exact address through policy changes. Before opening a fresh
+    /// transport, resume_at must revalidate current ownership; this value alone
+    /// is not permission to reconnect to an expired or removed destination.
     pub fn resume_route(&self) -> &Route {
         &self.0
     }
@@ -68,6 +69,36 @@ pub enum Decision {
     Full,
     Incompatible,
     Unavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResumeRoute {
+    lobby: Route,
+    worker: SocketAddr,
+}
+impl ResumeRoute {
+    pub fn lobby(&self) -> &Route {
+        &self.lobby
+    }
+    pub fn worker(&self) -> SocketAddr {
+        self.worker
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResumeDecision {
+    Pending,
+    Ready(ResumeRoute),
+    Unavailable,
+}
+#[derive(Clone, Copy)]
+enum AuthorityUnavailable {
+    Pending,
+    Unavailable,
+}
+struct Authority<'a> {
+    directory: &'a Directory,
+    sequence: Option<u64>,
+    origin: Origin,
 }
 
 /// A build/operator-supplied fallback, never a hostname resolved after a failed
@@ -231,15 +262,9 @@ impl Admission {
             Err(error) => Err(error),
         }
     }
-    pub fn decision_at(
-        &self,
-        now_ms: u64,
-        client: &ReleaseContract,
-        entropy: u64,
-        party: Option<&OwnedLobby>,
-    ) -> Decision {
+    fn authority_at(&self, now_ms: u64) -> Result<Authority<'_>, AuthorityUnavailable> {
         if !self.attempted {
-            return Decision::Pending;
+            return Err(AuthorityUnavailable::Pending);
         }
         if self.error.is_some()
             || self
@@ -247,7 +272,7 @@ impl Admission {
                 .as_ref()
                 .is_some_and(|f| f.directory.issued_at_ms > now_ms.saturating_add(30_000))
         {
-            return Decision::Unavailable;
+            return Err(AuthorityUnavailable::Unavailable);
         }
         let (directory, sequence, origin) = match &self.current {
             Some(current) if current.directory.expires_at_ms > now_ms => (
@@ -257,9 +282,94 @@ impl Admission {
             ),
             _ => match &self.fallback {
                 Some(fallback) => (&fallback.directory, None, Origin::PinnedFallback),
-                None => return Decision::Unavailable,
+                None => return Err(AuthorityUnavailable::Unavailable),
             },
         };
+        Ok(Authority {
+            directory,
+            sequence,
+            origin,
+        })
+    }
+    /// Revalidate an untrusted saved hint against current authenticated ownership,
+    /// independently of new-admission policy/weights/contracts. Never select a
+    /// different lobby, resolve saved DNS, or use expired directory authority.
+    pub fn resume_at(&self, now_ms: u64, lobby_hint: &str, worker_hint: &str) -> ResumeDecision {
+        let authority = match self.authority_at(now_ms) {
+            Ok(authority) => authority,
+            Err(AuthorityUnavailable::Pending) => return ResumeDecision::Pending,
+            Err(_) => return ResumeDecision::Unavailable,
+        };
+        for lobby in &authority.directory.lobbies {
+            let endpoints = lobby.network_endpoints();
+            let mut owner = if let Ok(endpoint) = lobby_hint.parse::<SocketAddr>() {
+                let endpoint = canonical_socket(endpoint);
+                if !endpoints.contains(&endpoint) {
+                    continue;
+                }
+                endpoint
+            } else if lobby_hint.to_ascii_lowercase() == lobby.display_endpoint() {
+                endpoints[0]
+            } else {
+                continue;
+            };
+            let worker = if let Ok(endpoint) = worker_hint.parse::<SocketAddr>() {
+                let endpoint = canonical_socket(endpoint);
+                if endpoint.port() == 0
+                    || !endpoints.iter().any(|known| known.ip() == endpoint.ip())
+                {
+                    return ResumeDecision::Unavailable;
+                }
+                // A legacy hint saved a DNS label, not the selected IP. Preserve
+                // its already concrete worker IP when that IP is authorized.
+                if lobby_hint.parse::<SocketAddr>().is_err() {
+                    owner = SocketAddr::new(endpoint.ip(), lobby.port);
+                }
+                endpoint
+            } else {
+                let Some((host, port)) = worker_hint.rsplit_once(':') else {
+                    return ResumeDecision::Unavailable;
+                };
+                let Ok(port) = port.parse::<u16>() else {
+                    return ResumeDecision::Unavailable;
+                };
+                if port == 0 || host.contains(':') || host.to_ascii_lowercase() != lobby.host {
+                    return ResumeDecision::Unavailable;
+                }
+                SocketAddr::new(owner.ip(), port)
+            };
+            return ResumeDecision::Ready(ResumeRoute {
+                lobby: Route {
+                    region: authority.directory.region,
+                    contour: authority.directory.contour.clone(),
+                    lobby_id: lobby.id.clone(),
+                    display: lobby.display_endpoint(),
+                    endpoint: owner,
+                    sequence: authority.sequence,
+                    origin: authority.origin,
+                },
+                worker,
+            });
+        }
+        ResumeDecision::Unavailable
+    }
+    pub fn decision_at(
+        &self,
+        now_ms: u64,
+        client: &ReleaseContract,
+        entropy: u64,
+        party: Option<&OwnedLobby>,
+    ) -> Decision {
+        let authority = match self.authority_at(now_ms) {
+            Ok(authority) => authority,
+            Err(AuthorityUnavailable::Pending) => return Decision::Pending,
+            Err(AuthorityUnavailable::Unavailable) => return Decision::Unavailable,
+        };
+        let Authority {
+            directory,
+            sequence,
+            origin,
+        } = authority;
         match directory.select(client, entropy) {
             Selection::UpdateRequired => Decision::UpdateRequired {
                 url: directory.policy.update_url.clone(),
@@ -303,6 +413,16 @@ impl Admission {
             }
         }
     }
+}
+
+fn canonical_socket(endpoint: SocketAddr) -> SocketAddr {
+    let ip = match endpoint.ip() {
+        std::net::IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .map_or(std::net::IpAddr::V6(ip), std::net::IpAddr::V4),
+        ip => ip,
+    };
+    SocketAddr::new(ip, endpoint.port())
 }
 
 /// One bounded anonymous fetch in flight. Polling never blocks the render

@@ -2008,3 +2008,43 @@ backup/WAL code/configuration is unchanged: encrypted signed off-host base/WAL
 sets, archive/check/restore integration, retention/alerts, actual off-host drills
 and approved installation remain required. C4 stays open; C2 host-controller
 integration and all P7–P9 requirements stay in scope. Original ledger62/5/1.
+
+
+### Corrected full current pre-directory gate; build-trust candidate
+
+Sourcef144c8f7 CI42273662478 completed SUCCESS across all7 jobs and18 actual
+PostgreSQL/public stages. Verified498521-byte artifact against GitHub SHA256,
+checked all report states and all10 profile awards independently: natural default-
+map Ranked victory466.798s, ±24 rating, expected XP, completed-public and seasonal
+credits. Readiness15s/late acceptance, party departure/replacement, crash, remake,
+surrender and the new Casual handoff continuation all pass. [Exact compact proof](../evidence/full-ci-2026-11-07-f144/summary.json).
+This closes the previously fresh-f144 gate;84fa remains recorded failed. Later
+8c9/b4/configuration code does not inherit this result automatically.
+
+Prepare bounded compile-only public trust profiles and required concrete fallback
+config, plus desktop `--check-directory-trust` audit before all game/account
+initialization. Runtime environment cannot substitute pins; configured missing
+regions and malformed data fail instead of becoming legacy. Cache scopes include
+region/contour; weak Ed25519 points are rejected. New5 cases include an actual
+subprocess runtime-override attempt; they remain unexecuted at this checkpoint.
+Formatting/source review pass; root disk remains below20GiB and heavy local
+compilation is not launched. No public key/configuration is actually provisioned.
+
+[Configuration format and remaining binding](game-directory.md#build-trust-configuration-candidate--2026-11-07).
+The parser/audit alone does not activate D1. Actual legal/startup/queue/policy UI,
+exact-IP transport, stored owning-lobby Resume, party scope and shared cross-host
+discipline still need end-to-end integration/proof. Existing saved Resume's static
+startup-address check must be preserved/replaced with authenticated ownership
+before any new lobby selection. #12/P7 remain partial; original ledger62/5/1,
+C2/C3/C4 and all RU/physical/capacity/final release requirements stay in scope.
+
+
+The same candidate adds current-authority saved-owner lookup before session
+binding: keep the original lobby port and worker IP under that owner's current
+signed/pinned destinations, canonicalize mapped addresses/known legacy labels
+without DNS, reject foreign/removed/expired-secondary/cache-failed authority.
+New-search policy/weights do not select a different lobby for Resume; actual
+worker compatibility and saved allocation/epoch checks remain mandatory. Four
+additional regressions (9 total in this candidate) await execution. Retained
+address values alone are explicitly not authorization for a fresh transport.
+The running network/Resume/policy UI is still not wired to this candidate.

@@ -325,3 +325,70 @@ new queue entry, policy UI, retry and exact-address transport; preserve actual
 party/worker/Resume ownership across refresh; prove two lobbies/shared discipline.
 No live pin, signing secret, public directory, service, workflow or deployment is
 changed. D1/#12/P7 remain incomplete until these end-to-end gates pass.
+
+
+## Build trust configuration candidate — 2026-11-07
+
+`client/src/game_directory/config.rs` parses the public JSON value baked by
+`option_env!("OMOBA_GAME_DIRECTORY_TRUST")`. The running process does not read
+that environment variable for trust. Version1 is bounded to16KiB and at most
+two unique regional profiles; each profile has1..4 independent public pins and
+a required concrete fallback. Region/contour, public key encoding/curve strength,
+duplicate IDs, address bounds and known foreign/dev destinations are validated.
+Unknown fields (including a signing seed or alternate HTTP URL) are refused.
+Absent configuration is distinguishable from malformed/partial configuration;
+requesting a missing configured account region returns an error, not legacy.
+Cache paths explicitly include both the contour and account region.
+
+The desktop executable adds `--check-directory-trust`. It audits the *compiled*
+public pins/fallback destinations without starting account/GUI/service/cache
+initialization. Disabled/invalid builds exit2 rather than being certified as
+configured. The JSON report says `configured:true`; it is a configuration audit,
+not evidence of live routing or release readiness. Public key bytes are included
+so the operator can compare the actual binary's pins with the approved public
+keys. No signing key belongs in this configuration or binary.
+
+A deliberately invalid template, to fill only with separately reviewed public
+values before building:
+
+```json
+{"version":1,"contour":"production","regions":[{"region":"ru","pins":[{"key_id":"reviewed-key-id","public_key":"REVIEWED_64_LOWERCASE_HEX_PUBLIC_KEY"}],"fallback":{"id":"reviewed-ru-lobby","location":"moscow","host":"lobby.omoba.ru","addresses":["REVIEWED_PUBLIC_IP"],"port":4000}}]}
+```
+
+Building with a public bundle can use the existing build environment; no workflow
+or release-script edit is made here. Every offered account region must have its
+reviewed profile before that region can use this path. Rotations retain the
+previous verifier while cached/owned admissions still need it. Five new cases
+cover scope/fallback/cache paths, malformed/partial bounds/weak pins, actual
+compiled input, and a real subprocess with malicious runtime environment. They
+are written but not executed yet; formatting/source review pass, while the root
+disk guard prevents a heavy local build. Current CI atf144 and admission8c9
+results do not verify this later candidate.
+
+Actual routing is not activated by this configuration parser/audit. Next integration
+must preserve the original owning lobby on cold Resume before selecting any new
+lobby, bind legal/region startup to the asynchronous resolver and exact-IP UDP,
+apply policy to new queue input/UI, and keep party/worker scope through refresh.
+Existing resume hints currently require the one static startup address, so that
+boundary must be updated before enabling D1. No live key is generated/baked,
+directory published, configuration installed, workflow changed or service moved.
+
+
+Before binding the session, `Admission::resume_at` now resolves a saved hint
+against the current authenticated owner list (or separately pinned fallback when
+no valid current directory exists). It checks the exact original lobby port and
+keeps its worker within that lobby's signed/pinned IPs. Known legacy labels map
+to those concrete addresses without DNS; IPv4-mapped aliases canonicalize. Current
+removal cannot escape through fallback. Expired secondary authority, foreign IPs/
+labels, zero ports and cache failure refuse a new transport. Existing-seat owner
+lookup bypasses new-search maintenance/full/min-release/weight decisions, then
+the real worker's normal compatibility and allocation/epoch/seat checks remain
+mandatory. A retained address value alone never authorizes a fresh reconnect.
+
+Four additional cases cover these owner boundaries, including current removal,
+expired secondary/explicit fallback, mixed worker hosts and multi-IP legacy hints.
+They are not executed yet. Main session/Resume persistence and policy UI still
+need to consume this method before D1 activation. Operators must retain a live
+owner in the signed list while its workers need recovery, even when new admission
+is closed. A baked fallback IP remains a static trust target for supported client
+artifacts and must remain under operator control for that lifetime.
