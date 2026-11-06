@@ -142,5 +142,50 @@
     "Initial local regression was corrected to use a valid Casual roster (the first BotPractice fixture incorrectly split its two humans across teams); old failure is retained in ignored logs.",
     "Full current branch CI remains required.",
     "Terminal receipt racing with cached Forming takes the existing terminal path: exclude the canceller and requeue only survivors. Existing terminal-receipt regression now covers both Ranked and Casual."
-  ]
+  ],
+  "combined_existing_ci_entrypoint": {
+    "status": "PASS",
+    "scenario": "unique-draft",
+    "source_commit": "1310e564204adf6de50f18106a91c46dc3ecb097",
+    "capacity": 2,
+    "existing_ranked_unique_checks": [
+      {
+        "name": "select_and_lock_reject_same_team_but_allow_opposing_mirror",
+        "status": "PASS"
+      },
+      {
+        "name": "unlock_releases_class_and_a_later_lock_reserves_it",
+        "status": "PASS"
+      },
+      {
+        "name": "five_distinct_classes_per_team_and_valid_locks_preserved",
+        "status": "PASS"
+      }
+    ],
+    "casual_release_checks": [
+      {
+        "name": "unjoined_cancel_is_worker_acknowledged_and_only_its_seat_is_bot_filled",
+        "status": "PASS",
+        "surviving_humans": 9,
+        "bots": 1,
+        "manifest_humans": 10
+      },
+      {
+        "name": "nine_original_humans_reach_running_without_new_search_or_worker",
+        "status": "PASS"
+      },
+      {
+        "name": "unjoined_canceller_receives_no_match_xp_or_rating",
+        "status": "PASS"
+      },
+      {
+        "name": "start_wins_late_cancel_keeps_admission_and_resume_without_aborting_other_players",
+        "status": "PASS"
+      }
+    ],
+    "ranked_allocation_id": "e726b6443708915ae995f4fdd8b6bb91",
+    "casual_allocation_id": "04711f90a1b861f358365aa6aae8d18f",
+    "disclosed_ranked_maturity_fixture_profiles": 10,
+    "scope": "existing Ranked unique-draft proof followed by new Casual release proof in the same owned lobby/DB; synthetic completed-public fixtures are Ranked prerequisites, not real previous games; no complete-game settlement/host/physical claim"
+  }
 }

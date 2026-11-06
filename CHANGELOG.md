@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Confirm the existing Ranked unique-draft CI entrypoint also passes its new
+  Casual handoff continuation in the same real local lobby/DB: all7 assertions
+  PASS. Disclosed Ranked prerequisites remain synthetic; fresh full CI pending.
+
 - Fit Home nicknames using actual production glyph/ink bounds while preserving
   the readable font and full profile value. Maximum-width W case now fits197px
   inside210px with intact ellipsis; ordinary name remains unchanged. Preserve

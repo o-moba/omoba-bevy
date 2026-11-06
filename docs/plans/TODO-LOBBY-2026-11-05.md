@@ -1873,3 +1873,12 @@ pack; these new closed-loopback identity fixtures do not prove account/server
 admission or physical phones. UI-2 widest-name acceptance and UI-3 compatibility
 failure-state hint/navigation overlap remain explicitly open/partial above; no
 full Home/full-device certification is claimed.
+
+
+Combined CI-entrypoint follow-up: actual `--scenario=unique-draft`, capacity2,
+owned PostgreSQL55582 passes its3 existing Ranked unique-pick assertions followed
+by all4 new Casual handoff-release assertions in the same lobby. This verifies
+the newly connected path, not only the standalone new scenario. Ranked maturity
+uses the disclosed existing synthetic fixture; no synthetic history is claimed
+as played. Source1310e564 is pushed; fresh CI42267312369 is running. Code is
+saved separately as84894318 (server handoff) and1310e564 (Home glyph fitting).
