@@ -84,6 +84,7 @@ def main():
     parser.add_argument("--width", type=int, default=852)
     parser.add_argument("--height", type=int, default=393)
     parser.add_argument("--guide", action="store_true", help="capture and dismiss the real first-match guide before a vote prompt")
+    parser.add_argument("--nickname", help="synthetic Home nickname for bounded-name checks; no real account change")
     parser.add_argument("--build-report", type=Path, help="optional verified build JSON with binary_sha256")
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args()
@@ -97,6 +98,13 @@ def main():
         parser.error("use a fresh .agent/ subdirectory, viewport200..3840 and timeout30..240")
     if args.guide and args.scene not in ("remake-prompt", "surrender-prompt"):
         parser.error("--guide applies to one vote-prompt scene")
+    if args.nickname is not None:
+        name, separator, tag = args.nickname.partition("#")
+        if (args.scene != "party-restart" or not 1 <= len(name) <= 20
+                or name != name.strip() or len(name.encode("utf-8")) > 80
+                or not all(c.isalnum() or c in " _-." for c in name)
+                or (separator and (len(tag) != 4 or not tag.isascii() or not tag.isdigit()))):
+            parser.error("--nickname requires party-restart and a valid1..20-character name with optional #1234 tag")
     assets = root / "client/assets"
     if not (assets / "avatars/manifest.json").is_file():
         parser.error("this checkout needs its normal client assets; the helper downloads nothing")
@@ -112,6 +120,8 @@ def main():
     (state / "account_region.json").write_text(json.dumps({"schema": 1, "selected": "ru", "pending": None, "account": None}))
     (state / "legal_acceptance.json").write_text(json.dumps({"region": "ru", "doc_version": args.legal_version, "accepted_at": int(time.time())}))
     (state / "client_preferences.json").write_text(json.dumps({"schema_version": 8, "audio": {"muted": True}, "beginner_tips": {"enabled": args.guide}}))
+    if args.nickname is not None:
+        (state / "career_nickname.json").write_text(json.dumps(args.nickname))
     env = {k: v for k, v in os.environ.items() if not k.startswith(
         ("OMOBA_", "EKZA_", "SOLANA_", "YOOKASSA_", "APPLE_", "VERCEL_"))
         and k not in ("SERVER_ADDR", "GAME_SERVER_ADDR")}
@@ -129,6 +139,7 @@ def main():
         env["OMOBA_CREATOR_LOOP_QA"] = str(loop)
     git = lambda *command: subprocess.check_output(["git", *command], cwd=root)
     report = {"status": "running", "scene": args.scene, "language": args.language,
+              "nickname_fixture": args.nickname,
               "region": "ru", "viewport": [args.width, args.height],
               "binary_sha256": identity, "head_at_capture": git("rev-parse", "HEAD").decode().strip(),
               "tracked_diff_sha256": hashlib.sha256(git("diff", "HEAD")).hexdigest(),

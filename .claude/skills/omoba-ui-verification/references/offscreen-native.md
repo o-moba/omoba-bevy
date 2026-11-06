@@ -120,6 +120,27 @@ their presence alone did not prove a ready-check panel was visible. For public
 AI peers, the existing loopback-only `bots --search-gate FILE` opens search only
 for a **regular empty file**; a nonempty file deliberately keeps it closed.
 
+Creator Loop's `label_geometry` reports actual shaped size, last glyph bounds,
+font size, node bounds and inherited clip for its selected labels. Use these
+with the original PNG to distinguish overflow from a mistaken visual reading;
+the normal `QA-Party-leade…` already contained its ellipsis, whereas20 wide W
+characters exposed a genuine258px layout inside a210px node. The Home fitter
+now uses shaped glyph bounds without reducing the readable font size. Other
+surfaces need their own targeted acceptance.
+
+To repeat one long-name Home fixture using the bundled helper:
+
+```sh
+python3 .claude/skills/omoba-ui-verification/scripts/capture_offscreen.py \
+  --binary "$CARGO_TARGET_DIR/debug/client" --scene party-restart \
+  --nickname 'WWWWWWWWWWWWWWWWWWWW#1234' --language ru \
+  --legal-version 0-draft --output .agent/ui-proof/home-wide-unique
+```
+
+This only writes the owned synthetic nickname preference. It does not rename
+an account or prove a public-server journey. Inspect the complete nickname/
+ellipsis and contained rating; a nonblack frame alone is insufficient.
+
 Verified2026-11-06: real RU852×393 `remade-result` with the new application
 renderer, readable Remake/no ordinary rewards/zero XP result; Mac reported
 locked at launch. The bundled helper also produced inspected surrender-result,

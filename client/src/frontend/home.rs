@@ -40,6 +40,13 @@ impl Plugin for HomeScreenPlugin {
                     .after(UiSet::Dispatch)
                     .before(crate::net::ClientNetPipeline::SendCommands)
                     .run_if(in_state(AppScreen::Home)),
+            )
+            .add_systems(
+                PostUpdate,
+                fit_home_nickname
+                    .after(crate::i18n::I18nSystems::Font)
+                    .before(bevy::ui::UiSystems::Layout)
+                    .run_if(in_state(AppScreen::Home)),
             );
     }
 }
@@ -72,6 +79,38 @@ enum HomeAction {
     Protect,
     /// "Not now" on the protect-progress card.
     DeclineProtect,
+}
+
+#[derive(Component)]
+struct FittedHomeNickname;
+
+/// The initial glyph budget is only an estimate: W and other wide letters
+/// can exceed it. Use the production shaper's previous layout to elide before
+/// this frame's layout, retaining the readable font size and real profile name.
+fn fit_home_nickname(
+    mut names: Query<
+        (&mut Text, &bevy::text::TextLayoutInfo, &ComputedNode),
+        With<FittedHomeNickname>,
+    >,
+) {
+    for (mut text, layout, node) in &mut names {
+        if node.size().x <= 2.0 || layout.glyphs.is_empty() {
+            continue;
+        }
+        let ink_right = layout
+            .glyphs
+            .iter()
+            .map(|g| g.position.x + g.atlas_info.rect.width() * 0.5)
+            .fold(0.0_f32, f32::max);
+        if layout.size.x.max(ink_right) <= node.size().x - 2.0 {
+            continue;
+        }
+        let mut prefix = text.0.strip_suffix('…').unwrap_or(&text.0).to_owned();
+        if prefix.pop().is_some() {
+            prefix.push('…');
+            text.0 = prefix;
+        }
+    }
 }
 
 #[derive(Component)]
@@ -1308,14 +1347,17 @@ fn spawn_home_identity(
         if let Some(image) = portrait {
             avatar.insert(ImageNode::new(image));
         }
-        chip.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            min_width: Val::Px(0.0),
-            flex_grow: 1.0,
-            overflow: Overflow::clip(),
-            ..default()
-        })
+        chip.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                min_width: Val::Px(0.0),
+                flex_grow: 1.0,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            Name::new("HomeIdentityText"),
+        ))
         .with_children(|text| {
             text.spawn((
                 widgets::heading(
@@ -1328,6 +1370,7 @@ fn spawn_home_identity(
                     ..default()
                 },
                 Name::new("HomeNickname"),
+                FittedHomeNickname,
             ));
             text.spawn(widgets::label(
                 &format!(

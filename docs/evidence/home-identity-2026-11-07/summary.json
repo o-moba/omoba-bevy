@@ -1,0 +1,571 @@
+{
+  "status": "UI-1_identity_accepted_other_Home_states_not_certified",
+  "scope": "one RU852x393 native offscreen Home with isolated public nickname preferences and closed loopback endpoints; only identity fitting; no real account/gameplay/phone/WAN/RU host or performance evidence",
+  "original_false_negative": "QA-Party-leade… in the prior frame already had all three ellipsis dots. Exact source pixels and shaped glyph rectangle confirm it; the previous claim that this name end was clipped was a visual-review mistake. The supported all-W nickname is the actual counterexample and fix basis.",
+  "cases": [
+    {
+      "file": "wide-before.png",
+      "sha256": "3d86f2e82824113317ab5bd712a61821ab3730cffc5b19fbce1d52a9bdb27923",
+      "bytes": 613745,
+      "identity_accepted": false,
+      "displayed_nickname": "WWWWWWWWWWWW…",
+      "actual_glyph_layout": {
+        "center": [
+          227.484619140625,
+          27.70768928527832
+        ],
+        "clip": [
+          [
+            122.484619140625,
+            15.823074340820312
+          ],
+          [
+            332.484619140625,
+            69.82307434082031
+          ]
+        ],
+        "font_size": "Px(20.0)",
+        "glyph_count": 13,
+        "last_glyphs": [
+          {
+            "center": [
+              248.431640625,
+              18.0
+            ],
+            "line": 0,
+            "size": [
+              15.0,
+              4.0
+            ]
+          },
+          {
+            "center": [
+              232.1484375,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              211.953125,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              191.7578125,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              171.5625,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              151.3671875,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              131.171875,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              110.9765625,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          258.0,
+          24.0
+        ],
+        "node_size": [
+          210.0,
+          24.0
+        ]
+      },
+      "binary": {
+        "sha256": "64801f4d4aa5ca0f79d765582dcce023e40bf7054009e2823ce09826504043c7",
+        "scope": "isolated offline Home presentation only, no server/account/phone/gameplay proof"
+      },
+      "manual_inspection": "wide name and ellipsis exceed210px and are clipped; rejected"
+    },
+    {
+      "file": "wide-after.png",
+      "sha256": "f5a31c487e4d01b4986492508ebf4d2034c62510a3645caac75a3cf1534983e8",
+      "bytes": 613137,
+      "identity_accepted": true,
+      "displayed_nickname": "WWWWWWWWW…",
+      "actual_glyph_layout": {
+        "center": [
+          227.484619140625,
+          27.70768928527832
+        ],
+        "clip": [
+          [
+            122.484619140625,
+            15.823074340820312
+          ],
+          [
+            332.484619140625,
+            69.82307434082031
+          ]
+        ],
+        "font_size": "Px(20.0)",
+        "glyph_count": 10,
+        "last_glyphs": [
+          {
+            "center": [
+              187.845703125,
+              18.0
+            ],
+            "line": 0,
+            "size": [
+              15.0,
+              4.0
+            ]
+          },
+          {
+            "center": [
+              171.5625,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              151.3671875,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              131.171875,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              110.9765625,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              90.78125,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              70.5859375,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              50.390625,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              20.0,
+              15.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          197.0,
+          24.0
+        ],
+        "node_size": [
+          210.0,
+          24.0
+        ]
+      },
+      "binary": {
+        "sha256": "e70b665733124f5658c9745fcb734d3755b2fb553cfef1c1fb8f8b9df67e38fc",
+        "scope": "isolated offline Home presentation only, no server/account/phone/gameplay proof"
+      },
+      "manual_inspection": "one readable line, intact ellipsis and contained rating"
+    },
+    {
+      "file": "normal-after.png",
+      "sha256": "76bdce08422a017ca9d2b653596605f5a18136a40ddd0a10cc4d4ccd410008d4",
+      "bytes": 610646,
+      "identity_accepted": true,
+      "displayed_nickname": "QA-Party-leade…",
+      "actual_glyph_layout": {
+        "center": [
+          227.484619140625,
+          27.70768928527832
+        ],
+        "clip": [
+          [
+            122.484619140625,
+            15.823074340820312
+          ],
+          [
+            332.484619140625,
+            69.82307434082031
+          ]
+        ],
+        "font_size": "Px(20.0)",
+        "glyph_count": 15,
+        "last_glyphs": [
+          {
+            "center": [
+              155.697265625,
+              18.0
+            ],
+            "line": 0,
+            "size": [
+              15.0,
+              4.0
+            ]
+          },
+          {
+            "center": [
+              141.537109375,
+              13.5
+            ],
+            "line": 0,
+            "size": [
+              10.0,
+              13.0
+            ]
+          },
+          {
+            "center": [
+              129.291015625,
+              12.0
+            ],
+            "line": 0,
+            "size": [
+              10.0,
+              16.0
+            ]
+          },
+          {
+            "center": [
+              117.060546875,
+              13.5
+            ],
+            "line": 0,
+            "size": [
+              10.0,
+              13.0
+            ]
+          },
+          {
+            "center": [
+              106.205078125,
+              13.5
+            ],
+            "line": 0,
+            "size": [
+              10.0,
+              13.0
+            ]
+          },
+          {
+            "center": [
+              97.861328125,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              3.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              90.662109375,
+              12.5
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              3.0
+            ]
+          },
+          {
+            "center": [
+              81.212890625,
+              16.0
+            ],
+            "line": 0,
+            "size": [
+              11.0,
+              16.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          165.0,
+          24.0
+        ],
+        "node_size": [
+          210.0,
+          24.0
+        ]
+      },
+      "binary": {
+        "sha256": "e70b665733124f5658c9745fcb734d3755b2fb553cfef1c1fb8f8b9df67e38fc",
+        "scope": "isolated offline Home presentation only, no server/account/phone/gameplay proof"
+      },
+      "manual_inspection": "one readable line, intact ellipsis and contained rating"
+    }
+  ],
+  "build": {
+    "source_parent": "6a61a7acf8419be3669b81e1df0bfc8894212ac8",
+    "working_diff_sha256": "92b8cd52cff10d0125db0dd798fa42548f1ee43d4ec07efcaa2a48647580a24f",
+    "untracked": [
+      "server/src/match_allocation/releases.rs"
+    ],
+    "market": "ru",
+    "steps": [
+      {
+        "name": "clippy",
+        "exit": 0,
+        "seconds": 48.09,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-home-glyph-fit-v1-clippy.log"
+      },
+      {
+        "name": "build",
+        "exit": 0,
+        "seconds": 547.43,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-home-glyph-fit-v1-build.log"
+      }
+    ],
+    "minimum_root_gib": 31.85211181640625,
+    "binary": "/Users/wotori/git/ekza/omoba-bevy/target-b/debug/client",
+    "binary_sha256": "e70b665733124f5658c9745fcb734d3755b2fb553cfef1c1fb8f8b9df67e38fc",
+    "binary_bytes": 226279416
+  },
+  "source_hashes": {
+    "client/src/frontend/home.rs": "f5fed2927ea10209b511a8a0b3ea60ffc30be1751c6ae2f86dd0f40e9b9af03b",
+    "client/src/qa/creator_loop_qa.rs": "73c7536b040abcfce32963c3daa979f4ec16ff51005288208c1ae71d07e38703"
+  },
+  "known_other_defects": [
+    {
+      "id": "UI-3",
+      "status": "open",
+      "description": "With compatibility unavailable, long error text pushes the offline-practice progress hint into the bottom navigation. This is outside identity fitting; preserve it for the next targeted Home check."
+    }
+  ],
+  "original_frame_pixel_check": {
+    "file": "../native-public-ui-2026-11-06/names-home-rating-contained.png",
+    "sha256": "00e0d9aa7319c6de9f0a54b3fde3e3305e44bc6505d96e9793b73a6d7606d4d9",
+    "roi": [
+      270,
+      31,
+      289,
+      36
+    ],
+    "threshold": "each RGB channel >140",
+    "ellipsis_components": [
+      {
+        "min": [
+          272,
+          32
+        ],
+        "max": [
+          273,
+          34
+        ],
+        "bright_pixels": 6
+      },
+      {
+        "min": [
+          277,
+          32
+        ],
+        "max": [
+          279,
+          34
+        ],
+        "bright_pixels": 7
+      },
+      {
+        "min": [
+          283,
+          32
+        ],
+        "max": [
+          285,
+          34
+        ],
+        "bright_pixels": 7
+      }
+    ],
+    "analysis_only": "original PNG was read, never cropped/edited or rewritten"
+  },
+  "bundled_skill_reproduction": {
+    "status": "accepted_after_manual_identity_inspection",
+    "capture": {
+      "status": "captured_pending_visual_inspection",
+      "scene": "party-restart",
+      "language": "ru",
+      "nickname_fixture": "WWWWWWWWWWWWWWWWWWWW#1234",
+      "region": "ru",
+      "viewport": [
+        852,
+        393
+      ],
+      "binary_sha256": "e70b665733124f5658c9745fcb734d3755b2fb553cfef1c1fb8f8b9df67e38fc",
+      "head_at_capture": "848943188f6ac50bba06082253296033900b7ddb",
+      "tracked_diff_sha256": "c283ac1def8c5453e9484e34c3380d5b197b1668f6bea583f489e20d25038b23",
+      "source_hashes": {
+        "client/src/lib.rs": "24d7ec59fe68ee1153cbf44630bf0cb886f822b7354ecd9e32d48b819f6b1a5f",
+        "client/src/qa/mod.rs": "c630fd60edd77f2ba97cdadc90f0c81657b38c1681a114b261291effd0e5ebf2",
+        "client/src/qa/offscreen.rs": "a3d2067f99c5e7136816626bfee872a6ae86f90783c08896d7b02af267197504",
+        "client/src/qa/fair_play_qa.rs": "80a5cc379ce424d3a9f8194a0adcc169b103784c67676283f2404a0d991c8f70",
+        "client/src/qa/result_qa.rs": "1ab50f42695ded4c3015ac118dab9b150ce97b5c290d4e97d4a168d4d0f5366e",
+        "client/src/qa/creator_loop_qa.rs": "73c7536b040abcfce32963c3daa979f4ec16ff51005288208c1ae71d07e38703",
+        "client/src/net/session.rs": "a3937e7fa17dec8b9f2385499a3c1db7a767685ab5e95bc80c226dee2d90685d",
+        "client/src/pause_menu/match_votes.rs": "104a12aeccd5b481872b2aaa489d8911b26f2c58899411b07e5e2608712cc13e",
+        "client/src/world.rs": "24613bd3c250fef5d67d4aa8971bf59f9289a74815a3579594227c98dabf4bcb",
+        "client/src/platform.rs": "2934dd6113615624ffe8a3259a643998d471e3e5625b94a0cc687ab36a4fdd37",
+        "client/src/frontend/mod.rs": "1cef58effd974fe2bf068d1b4eb681cc063e020172e42918a98cebcec157f239",
+        "client/src/frontend/home.rs": "f5fed2927ea10209b511a8a0b3ea60ffc30be1751c6ae2f86dd0f40e9b9af03b",
+        "client/src/frontend/lobby.rs": "3040343c3bc51380c7349fae5a65a97859d20e664a4cd879ddf15004dca56e1e",
+        "client/src/frontend/draft.rs": "f754cf1ed17b18b35fdf6b91fac3f2af5463187c12e653fb34924df37bfa26c8",
+        "client/src/frontend/draft/stage.rs": "8b9ea930bbdfa701ba1c6a1f1aefa867092e94ce89716989fc3f36219a3dffb1",
+        "client/src/party.rs": "76e10c44c5c72827b0bd2bdc7b8cc27b7d86024d7159a962794732832b444696",
+        "client/src/ui/widgets/surfaces.rs": "7c800f9dc551adac8d2831fef22e20545e982bad6508f7af7e10999412c9cd2c"
+      },
+      "runner_sha256": "33817de4c3ea338e7a62a3db4e5da7db261bd267d301a1cc01435ae227327c88",
+      "screen_locked_at_launch": false,
+      "scope": "production offscreen renderer and real UI-kit actions; synthetic RU session/views/settings; no live match/account, desktop/window, physical phone or keep-awake/haptic proof",
+      "build_source_parent": "6a61a7acf8419be3669b81e1df0bfc8894212ac8",
+      "source_binary_link": "caller-provided build; paths alone do not prove matching sources",
+      "summary": {
+        "color_pixels": true,
+        "controls": [],
+        "expected_visible_text": "Соединение с лобби восстановлено, группа распущена.",
+        "locale": "ru",
+        "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+        "physical_device": false,
+        "real_admission_or_gameplay": false,
+        "render_surface": "offscreen image with virtual window metrics",
+        "scene": "PartyRestart",
+        "screen": "Home",
+        "status": "passed",
+        "synthetic_state": true,
+        "viewport": [
+          852,
+          393
+        ]
+      },
+      "screenshot": {
+        "file": "fair-play.png",
+        "sha256": "ccbe3bd0220b32390f8b68d154172f389158eb2dd60897a6e3e87b66f032a08e",
+        "bytes": 594760
+      },
+      "seconds": 6.74,
+      "guide_actions_submitted": false
+    },
+    "png": {
+      "file": "wide-bundled-helper.png",
+      "sha256": "ccbe3bd0220b32390f8b68d154172f389158eb2dd60897a6e3e87b66f032a08e",
+      "bytes": 594760
+    },
+    "native_summary": {
+      "color_pixels": true,
+      "controls": [],
+      "expected_visible_text": "Соединение с лобби восстановлено, группа распущена.",
+      "locale": "ru",
+      "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+      "physical_device": false,
+      "real_admission_or_gameplay": false,
+      "render_surface": "offscreen image with virtual window metrics",
+      "scene": "PartyRestart",
+      "screen": "Home",
+      "status": "passed",
+      "synthetic_state": true,
+      "viewport": [
+        852,
+        393
+      ]
+    },
+    "scope": "isolated synthetic Home/party-restart; true renderer, nickname preset and visible intact ellipsis; no account rename or live journey"
+  },
+  "remaining_width_acceptance": "Draft/Lobby still use an estimated initial glyph budget and do not yet share Home actual-width fitter; their widest-name cases require targeted acceptance."
+}

@@ -162,6 +162,19 @@ RU deployment and capacity measurement remain pending owner authorization.
 No open/deferred feature is marked done merely because its supporting
 prerequisites passed.
 
+
+## Additional native UI follow-ups
+
+These are additional to the original68-row ledger. Their scope is retained
+separately rather than silently treating the inspected frames as complete UI QA.
+
+| ID | Status | Acceptance / remaining work |
+|---|---|---|
+| UI-1 | done | Home nickname stays one readable line with intact ellipsis at actual glyph width; rating is contained. Ordinary and maximum-width20-W names inspected at RU852×393. |
+| UI-2 | partial | Ordinary Draft names/class/roles no longer overlap in the inspected team. Draft/Lobby still need actual-width fitting or verified widest-name bounds; the initial character estimate undercounts W. |
+| UI-3 | open | Compatibility-unavailable error pushes offline-practice progress hint into bottom navigation at RU852×393. Fix this failure-state layout and repeat only this Home state. |
+
+
 ## Product completion — owner instruction 2026-11-05
 
 The owner requires closing the complete 68-finding list and nine critic items,
@@ -1829,3 +1842,34 @@ done in software; its server/controller/process and actual native pixel evidence
 retain their original scopes. The separate Release workflow was cancelled; it
 is not a deployment. All new subsequent source changes need their fresh full
 release gate and do not inherit this result automatically.
+
+
+### UI-1 accepted with production glyph bounds; corrected visual diagnosis
+
+The previously suspected `QA-Party-leade…` truncation was a false negative: the
+original committed image contains all three ellipsis dots. Exact unchanged
+source-pixel connected components and shaped layout confirm it. Do not retain
+that mistaken interpretation as a product bug. A genuine supported counterexample
+is20 W characters plus tag: initial heuristic emits12 W+ellipsis, but the actual
+Inter20px layout is258px inside a210px node. Its ellipsis is clipped.
+
+Keep the readable font and original profile value. A Home-only marker consults
+production `TextLayoutInfo`/glyph ink bounds and node width before each new UI
+layout, shortening just the displayed prefix until it fits with an ellipsis.
+Actual final wide layout197px/210px,20px font; normal name165px/210px unchanged.
+New recorder geometry reports bounded selected-label metrics/last8 glyphs and
+inherited clip. No new dependency, account data mutation or OS setting change.
+
+RU strict client/test-target clippy PASS48.09s, native build PASS547.43s, binary
+e70b6657… , minimum root31.85GiB. Both native Home identity frames are inspected.
+The repository skill gains an optional validated synthetic `--nickname` for its
+Home fixture; its actual bundled helper reproduces the wide name with intact
+ellipsis and passes existing native/offscreen gates. Skill validation and Python
+syntax PASS. Preserve original failure, actual bounds, unchanged-original-pixel
+check and fixed exact PNGs in [the identity pack](../evidence/home-identity-2026-11-07/summary.json).
+
+UI-1 is done. Existing numeric-rating proof remains in the real public-party
+pack; these new closed-loopback identity fixtures do not prove account/server
+admission or physical phones. UI-2 widest-name acceptance and UI-3 compatibility
+failure-state hint/navigation overlap remain explicitly open/partial above; no
+full Home/full-device certification is claimed.

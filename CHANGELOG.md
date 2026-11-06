@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fit Home nicknames using actual production glyph/ink bounds while preserving
+  the readable font and full profile value. Maximum-width W case now fits197px
+  inside210px with intact ellipsis; ordinary name remains unchanged. Preserve
+  exact native evidence and correct an earlier false-negative ellipsis reading.
+  Save glyph diagnostics and optional synthetic nickname in the repository skill;
+  widest Draft/Lobby names and compatibility-failure hint layout remain pending.
+
 - Preserve a Casual/vs-Bots arena when one player cancels during lobby handoff:
   durable exact-seat release intent, owning-worker ACK, bot replacement and
   admission fencing through start/freeze races. Keep immutable manifests and

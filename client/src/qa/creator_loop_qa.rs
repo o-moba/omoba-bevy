@@ -900,7 +900,15 @@ fn observe(
         Option<&crate::combat::CombatStats>,
     )>,
     cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::MainCamera>>,
-    labels: Query<(super::QaName, &Text)>,
+    labels: Query<(
+        super::QaName,
+        &Text,
+        Option<&ComputedNode>,
+        Option<&UiGlobalTransform>,
+        Option<&bevy::ui::CalculatedClip>,
+        Option<&TextFont>,
+        Option<&bevy::text::TextLayoutInfo>,
+    )>,
     pressables: Query<
         (
             &crate::ui::TestId,
@@ -1102,7 +1110,15 @@ fn return_state(
         Has<Player>,
         Option<&crate::combat::CombatStats>,
     )>,
-    labels: &Query<(super::QaName, &Text)>,
+    labels: &Query<(
+        super::QaName,
+        &Text,
+        Option<&ComputedNode>,
+        Option<&UiGlobalTransform>,
+        Option<&bevy::ui::CalculatedClip>,
+        Option<&TextFont>,
+        Option<&bevy::text::TextLayoutInfo>,
+    )>,
     pressables: &Query<
         (
             &crate::ui::TestId,
@@ -1130,9 +1146,23 @@ fn return_state(
         _ => None,
     };
     let mut texts = serde_json::Map::new();
-    for (key, text) in labels.iter() {
+    let mut label_geometry = serde_json::Map::new();
+    for (key, text, node, transform, clip, font, layout) in labels.iter() {
         if LABELS.contains(&key.as_str()) {
             texts.insert(key.as_str().to_owned(), text.0.clone().into());
+            label_geometry.insert(key.as_str().to_owned(), serde_json::json!({
+                "node_size": node.map(|n| n.size().to_array()),
+                "center": transform.map(|t| t.translation.to_array()),
+                "clip": clip.map(|c| [c.clip.min.to_array(), c.clip.max.to_array()]),
+                "font_size": font.map(|f| format!("{:?}", f.font_size)),
+                "layout_size": layout.map(|l| l.size.to_array()),
+                "layout_scale": layout.map(|l| l.scale_factor),
+                "glyph_count": layout.map(|l| l.glyphs.len()),
+                "last_glyphs": layout.map(|l| l.glyphs.iter().rev().take(8).map(|g| serde_json::json!({
+                    "center": g.position.to_array(), "size": g.atlas_info.rect.size().to_array(),
+                    "line": g.line_index,
+                })).collect::<Vec<_>>()),
+            }));
         }
     }
     let mut buttons: Vec<&str> = pressables
@@ -1181,8 +1211,9 @@ fn return_state(
         "selection": {"handheld": serde_json::to_value(&selection.handheld).unwrap_or_default(),
             "class": selection.hero_class.id(), "item": selected},
         "labels": texts,
-        "active_toasts": labels.iter().filter(|(name, _)| name.as_str() == "UiToastText")
-            .map(|(_, text)| text.0.clone()).collect::<Vec<_>>(),
+        "label_geometry": label_geometry,
+        "active_toasts": labels.iter().filter(|(name, ..)| name.as_str() == "UiToastText")
+            .map(|(_, text, ..)| text.0.clone()).collect::<Vec<_>>(),
         "party": party.map(|p| &p.view),
         "party_notice": party.and_then(|p| p.notice(Instant::now())).map(|notice| format!("{notice:?}")),
         "career_profile": career.and_then(|c| c.view.profile.as_ref()),
