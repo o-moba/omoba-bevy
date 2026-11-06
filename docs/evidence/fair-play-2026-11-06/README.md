@@ -24,3 +24,9 @@ text/geometry check. Those images are not accepted. A new render-before-paint
 regression/fix and stricter modal/root capture gates are being verified. A
 missing synthetic local player blocked the first result attempt; corrected
 result presentation is still pending. See the current TODO/CHANGELOG.
+
+The [directory-foundation CI summary](ci-2a-summary.json) records all7 jobs/18
+stages on2a45600c/run42201671041. Its downloaded artifact matched the GitHub digest;
+all-ten rating/XP/history/lifetime/season updates for the546050ms standard-map
+Ranked match were independently recalculated. This predates the new modal fix.
+Debug viewport captures here are not performance benchmarks.

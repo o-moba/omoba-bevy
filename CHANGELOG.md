@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Native e85875ba RU build and strict client/test-target clippy PASS; fixed-state
+  pixel acceptance and the real decorator regression are still pending. Preserve
+  the independently checked directory2a45600c full7-job/18-stage CI summary:
+ 546050ms Ranked with exact all-ten settlement,15s consent and recovery gates.
+
 - Flush vote/menu replacement after current pause navigation and before UI-kit
   decoration, so opening a modal cannot leave queued decoration targeting removed
   vote buttons. Add a real decorator/modal-cycle regression with same-frame skins

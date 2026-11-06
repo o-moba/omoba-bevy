@@ -1153,3 +1153,26 @@ Focused QA additionally requires an actual visible named root and appropriate
 modal/help state; initial states are re-entered, and result scenarios create the
 same synthetic local Player that the existing Result QA uses. No new dependency,
 protocol, workflow or production action. All remaining gates retain their scope.
+
+
+### Current native build and independently checked directory CI
+
+e85875ba source hashes match all6 bound client/QA/regression files. Native RU
+v4 build PASS in612.1s,minimum root35.08GiB,binary SHA256
+`a54fdaa13b27540825ea342d2a04ced0b039d4870a3763168b047dcae9519d61`.
+Fresh capture v4 stopped before launching a client because the current Quartz
+session reports locked. The prior unlock did work and produced the5 committed
+accepted images. No rebuild is needed for the remaining fixed-state captures.
+The filtered actual decorator/modal regression is still compiling on cacheA;
+CI42211135390 for the fix is active. C5/#45/result acceptance is still pending.
+
+Directory2a45600c/run42201671041 independently rechecked:all7 jobs/18 stages PASS,
+2699.35s. Artifact13497606620 matches SHA256
+`4d5b0973b4e1a7b3a67b659a0ef818898f6538b5c6f84be4c352de1518a104e3`;
+139 bounded/unique/path-safe/non-symlink entries and CRC pass. Real standard-map
+Rankede2de026ae59553a668818e861b2dbe8f lasts546050ms with zeroAFK/disconnection;
+all-ten Elo/XP/history/lifetime/season increments were recalculated.15s unanimity,
+FIFO/party recovery, actual10th completion/noVK, crash, unique picks, remake and
+surrender proofs pass. Sanitized summary:../evidence/fair-play-2026-11-06/ci-2a-summary.json.
+This predates the new modal fix and is not WAN/RU-host/hardware/provider evidence.
+All remaining original/critic/operations/release requirements retain full scope.
