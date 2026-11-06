@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Show a localized interseason Ranked state on Home from optional server-clock
+  availability, disable Ranked and refuse stale activations while leaving Casual
+  available. Hint-only changes refresh the screen; legacy omission is supported.
+  193 shared/498 server cases and strict RU native test-target clippy PASS;
+  new Home execution and actual pixels remain pending committed verification.
+- Capture seasonal result notices only while the expected text is visible and
+  the toast has settled. Missing notices fail rather than passing a40-frame wait
+  that can outlive the notification on a slow GPU. No toast duration change.
+
 - Refresh already connected players' profile/rating/placements/badge after an
   operator season rollover through the existing bounded access read. Read the
   snapshot atomically with key status, adopt only a newer season, and reject

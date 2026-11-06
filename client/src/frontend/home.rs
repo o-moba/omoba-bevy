@@ -385,6 +385,7 @@ struct HomeSignature {
     rating: i32,
     rated_matches: u32,
     completed_public_matches: u32,
+    ranked_season_open: Option<bool>,
     matches: u32,
     wins: u32,
     losses: u32,
@@ -446,6 +447,7 @@ fn signature(
         rating: profile.map_or(0, |profile| profile.rating),
         rated_matches: profile.map_or(0, |profile| profile.placement_matches()),
         completed_public_matches: profile.map_or(0, |profile| profile.completed_public_matches),
+        ranked_season_open: career.view.ranked_season_open,
         matches: profile.map_or(0, |profile| profile.matches_played),
         wins: profile.map_or(0, |profile| profile.wins),
         losses: profile.map_or(0, |profile| profile.losses),
@@ -987,7 +989,9 @@ fn spawn_home(
                                 ("queue.ranked", HomeAction::Ranked, "HomeRanked"),
                                 ("queue.bots", HomeAction::BotPractice, "HomeBotPractice"),
                             ] {
-                                let label = if action == HomeAction::Ranked {
+                                let label = if action == HomeAction::Ranked && career.view.ranked_season_open == Some(false) {
+                                    tr("home.ranked.between_seasons").to_owned()
+                                } else if action == HomeAction::Ranked {
                                     career.view.profile.as_ref().map_or_else(
                                         || tr(label).to_owned(),
                                         |p| if p.ranked_unlocked() {
@@ -1018,7 +1022,7 @@ fn spawn_home(
                                     (),
                                 );
                                 if !session.is_connected()
-                                    || (action == HomeAction::Ranked && career.view.profile.as_ref().is_none_or(|p| !p.ranked_unlocked()))
+                                    || (action == HomeAction::Ranked && (career.view.ranked_season_open == Some(false) || career.view.profile.as_ref().is_none_or(|p| !p.ranked_unlocked())))
                                 {
                                     row.commands().entity(button).insert(Pressable {
                                         disabled: true,
@@ -1417,6 +1421,11 @@ fn home_actions(
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
     for Activated { action, .. } in activated.read() {
+        if *action == HomeAction::Ranked && career.view.ranked_season_open == Some(false) {
+            career.view.error = Some(shared::career::error_code::RANKED_SEASON_ENDED.into());
+            career.view.error_code = Some(shared::career::error_code::RANKED_SEASON_ENDED.into());
+            continue;
+        }
         if *action == HomeAction::Ranked
             && career.view.match_service.is_some()
             && career
@@ -2692,6 +2701,72 @@ mod tests {
         assert_eq!(
             named_text(&mut app, "HomeRating").as_deref(),
             Some("Рейтинг 1500 · Золото")
+        );
+        // Only the authoritative hint changes; neither local time nor the
+        // seasonal/lifetime counters decide whether the server window is open.
+        for open in [Some(false), Some(true), None] {
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .view
+                .ranked_season_open = open;
+            app.update();
+            app.update();
+            let button = harness::find(app.world_mut(), "HomeRanked").unwrap();
+            let disabled = app
+                .world()
+                .get::<Pressable>(button)
+                .is_some_and(|p| p.disabled);
+            assert_eq!(disabled, open == Some(false));
+            let label = app
+                .world()
+                .get::<Children>(button)
+                .unwrap()
+                .iter()
+                .filter_map(|e| app.world().get::<Text>(e))
+                .map(|t| t.0.as_str())
+                .collect::<String>();
+            assert!(label.contains(if open == Some(false) {
+                "Межсезонье"
+            } else {
+                "1500"
+            }));
+        }
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .ranked_season_open = Some(false);
+        app.update();
+        app.update();
+        let target = harness::find(app.world_mut(), "HomeRanked").unwrap();
+        // A stale activation from before a rebuild must be refused as well.
+        app.world_mut().write_message(Activated {
+            action: HomeAction::Ranked,
+            source: target,
+        });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<CareerClient>()
+                .view
+                .error_code
+                .as_deref(),
+            Some(shared::career::error_code::RANKED_SEASON_ENDED)
+        );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        harness::press(app.world_mut(), "HomePlay");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .any(|m| matches!(m, NetworkCommand::JoinPrematch { .. })),
+            "Casual remains available"
         );
     }
 

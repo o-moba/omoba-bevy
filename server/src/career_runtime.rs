@@ -1474,6 +1474,7 @@ impl ServerRuntime {
             self.career.backend.profile(addr),
             self.career.backend.authenticated_session(addr),
         ) {
+            view.ranked_season_open = profile.ranked.as_ref().map(|s| s.active_at(utc_ms()));
             view.match_service = self.match_service.view(&profile.profile_id, &session, now);
             view.match_service_request_id =
                 self.match_service.request_id(&profile.profile_id, &session);

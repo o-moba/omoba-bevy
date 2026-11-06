@@ -1805,8 +1805,11 @@ Area: rating model · **minor** · L · code+owner
     type/build and focused RU browser fixtures. Native Home/profile/friend badges
     and scoped calibration/promotion/demotion notices are implemented. Four new
     helper/system tests execute in CI; one stale Home expectation is repaired.
-    Six RU native pixel checks pass; coherent penalty demotion/final native CI
-    remain required. Core236d1c13 full7-job/18-stage CI and independent exact
+    Six RU native pixel checks pass; native e8 executes all1578 client cases.
+    Server-clock availability now drives an explicit disabled interseason Home
+    action;193 shared/498 server cases and RU native test-target clippy PASS.
+    New Home execution, expired pixels and visible coherent demotion notice
+    remain required; the transient QA capture now waits for the notice itself. Core236d1c13 full7-job/18-stage CI and independent exact
     all-ten seasonal-game verification PASS; local669 PG and18 public stages PASS.
   - Native signed movement records declared touch/mouse/mixed/unknown controls per participant; no platform/device identifier is collected. Durable checkpoints and a bounded win-rate comparison are implemented (see `docs/ranked-input-statistics.md`).
 - **Requirement:**

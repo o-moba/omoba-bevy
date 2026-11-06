@@ -375,6 +375,11 @@ fn shoot(
     mut qa: ResMut<ResultQa>,
     screen: Res<State<AppScreen>>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    texts: Query<(&Text, &ComputedNode, &InheritedVisibility)>,
+    toasts: Query<
+        (&Node, &ComputedNode, &Visibility),
+        With<crate::ui::widgets::surfaces::ToastAge>,
+    >,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(&(file, fixture)) = STAGES.get(qa.stage) else {
@@ -421,7 +426,20 @@ fn shoot(
         return;
     }
     qa.settled += 1;
-    if qa.settled < SETTLE_FRAMES {
+    let expected = (fixture == Fixture::Saved)
+        .then(super::ranked_fixture::expected_notice)
+        .flatten();
+    if let Some(text) = expected {
+        let visible = texts.iter().any(|(label, node, visibility)| {
+            label.0 == text && node.size().x > 0.0 && visibility.get()
+        });
+        let settled = toasts.iter().any(|(node, computed, visibility)| {
+            node.top == Val::Px(0.0) && computed.size().x > 0.0 && *visibility != Visibility::Hidden
+        });
+        if qa.settled < 2 || !visible || !settled {
+            return;
+        }
+    } else if qa.settled < SETTLE_FRAMES {
         return;
     }
     if std::fs::create_dir_all(&qa.directory).is_err() {

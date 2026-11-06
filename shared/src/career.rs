@@ -567,6 +567,11 @@ impl CareerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CareerView {
+    /// Signed-in profile's season window evaluated by the server's UTC clock.
+    /// Advisory UI hint; allocation/store validation remains authoritative.
+    /// Missing for legacy peers, guests or unrefreshed authorization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranked_season_open: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub match_vote: Option<crate::match_vote::View>,
     #[serde(skip_serializing_if = "is_false")]
@@ -848,6 +853,13 @@ mod tests {
         );
         let view: CareerView = serde_json::from_str("{}").unwrap();
         assert_eq!(view.response_id, None);
+        assert_eq!(view.ranked_season_open, None);
+        let hint: CareerView = serde_json::from_str(r#"{"ranked_season_open":false}"#).unwrap();
+        assert_eq!(hint.ranked_season_open, Some(false));
+        assert_eq!(
+            serde_json::to_value(hint).unwrap()["ranked_season_open"],
+            false
+        );
         let view = CareerView {
             response_id: Some(42),
             ..CareerView::default()

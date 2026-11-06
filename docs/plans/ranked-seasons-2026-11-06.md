@@ -140,3 +140,12 @@ concurrent-access case and strict store/server all-target clippy PASS. Operator
 drain and profile refresh/restart checks remain release prerequisites; this is
 not permission to run a production close/reset. Expiry display and final
 transient-notice pixels remain open.
+
+
+Server-clock availability is implemented as additive optional CareerView metadata
+and a localized disabled interseason Ranked action on Home. Legacy omission
+follows existing behavior; authoritative allocation validation is unchanged.
+193 shared/498 server cases and strict RU client test-target clippy PASS.
+Committed execution of the extended Home interaction case and actual expired/
+demotion pixels remain pending; the Result QA now captures the visible settled
+notice, and missing notices fail instead of yielding a misleading screenshot.

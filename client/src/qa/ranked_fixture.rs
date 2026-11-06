@@ -9,6 +9,7 @@ use shared::{
 enum Scene {
     Placement,
     Calibrated,
+    Expired,
     Promoted,
     Demoted,
 }
@@ -16,6 +17,7 @@ fn scene() -> Option<Scene> {
     match std::env::var("OMOBA_RANKED_SEASON_QA").ok()?.as_str() {
         "placement" => Some(Scene::Placement),
         "calibrated" => Some(Scene::Calibrated),
+        "expired" => Some(Scene::Expired),
         "promoted" => Some(Scene::Promoted),
         "demoted" => Some(Scene::Demoted),
         _ => None,
@@ -33,6 +35,22 @@ impl Scene {
 pub(super) fn enabled() -> bool {
     scene().is_some()
 }
+pub(super) fn season_open_hint() -> Option<bool> {
+    scene().map(|s| !matches!(s, Scene::Expired))
+}
+/// Capture the transient notice itself, rather than assuming forty frames fit
+/// inside its lifetime on a slow GPU. Missing notices must time out, not pass.
+pub(super) fn expected_notice() -> Option<String> {
+    let (key, tier) = match scene()? {
+        Scene::Promoted => ("ranked.promoted", Tier::Gold),
+        Scene::Demoted => ("ranked.demoted", Tier::Silver),
+        _ => return None,
+    };
+    Some(crate::i18n::trf(
+        key,
+        &[("tier", &crate::career::ranked::tier_name(tier))],
+    ))
+}
 pub(super) fn apply_profile(profile: &mut ProfileSummary) {
     let Some(scene) = scene() else {
         return;
@@ -40,7 +58,11 @@ pub(super) fn apply_profile(profile: &mut ProfileSummary) {
     apply_profile_scene(profile, scene);
 }
 fn apply_profile_scene(profile: &mut ProfileSummary, scene: Scene) {
-    let started = 1793923200000;
+    let started = if matches!(scene, Scene::Expired) {
+        1793923200000 - SEASON_DURATION_MS
+    } else {
+        1793923200000
+    };
     let count = if matches!(scene, Scene::Placement) {
         0
     } else {
@@ -130,7 +152,12 @@ mod tests {
         assert_eq!(badge.rating, 2300);
         assert_eq!(badge.tier, Some(Tier::Platinum));
         assert_eq!(profile.rating, 1650);
-        for scene in [Scene::Calibrated, Scene::Promoted, Scene::Demoted] {
+        for scene in [
+            Scene::Calibrated,
+            Scene::Expired,
+            Scene::Promoted,
+            Scene::Demoted,
+        ] {
             apply_profile_scene(&mut profile, scene);
             let season = profile.ranked.as_ref().unwrap();
             assert_eq!(season.wins + season.losses, season.rated_matches);
@@ -140,6 +167,9 @@ mod tests {
             );
             assert_eq!(profile.abandons, u32::from(matches!(scene, Scene::Demoted)));
             assert!(!profile.newcomer());
+            if matches!(scene, Scene::Expired) {
+                assert!(!season.active_at(1793923200001));
+            }
         }
     }
 }

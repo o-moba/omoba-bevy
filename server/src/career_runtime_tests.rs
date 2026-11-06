@@ -1524,3 +1524,46 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
         "LIVE_TIER_AURA_UDP donation_points=1000 equip=crimson prism_i=refused other_client=crimson expiry=cleared_after_one_refresh"
     );
 }
+
+#[test]
+fn career_season_hint_tracks_the_server_window_without_a_find_request() {
+    use shared::ranked::{SEASON_DURATION_MS, SeasonProfile};
+    let now = Instant::now();
+    let utc = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let mut rt = runtime(MatchConfig::release(1), true);
+    let address = addr(30451);
+    let p = profile(90, 1650, true);
+    rt.career
+        .backend
+        .test_authenticated(address, p.clone(), "window-session");
+    assert_eq!(rt.career_view(address, now).ranked_season_open, None);
+    for (start, open) in [
+        (utc - SEASON_DURATION_MS - 60_000, false),
+        (utc + 60_000, false),
+        (utc - 60_000, true),
+    ] {
+        let mut p = p.clone();
+        p.ranked = Some(SeasonProfile {
+            season_id: 2,
+            started_at_ms: start,
+            ends_at_ms: start + SEASON_DURATION_MS,
+            rated_matches: 0,
+            wins: 0,
+            losses: 0,
+            completed_matches: 0,
+            latest_badge: None,
+        });
+        rt.career
+            .backend
+            .test_authenticated(address, p, "window-session");
+        let view = rt.career_view(address, now);
+        assert_eq!(view.ranked_season_open, Some(open));
+        assert_eq!(view.profile.unwrap().rating, 1650);
+        assert!(rt.career.backend.take_match_requests().is_empty());
+    }
+    rt.career.backend.forget(address);
+    assert_eq!(rt.career_view(address, now).ranked_season_open, None);
+}

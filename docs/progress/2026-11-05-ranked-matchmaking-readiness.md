@@ -973,3 +973,28 @@ Next native capture must wait for the expected visible settled toast, then shoot
 Inspection: native-ranked-ui-inspection-v2.json in the task directory. Earlier
 black v3 and incoherent fixtures remain rejected. Overall68-finding counts are
 unchanged; expiry display, remaining visuals, P7/P8/P9 and RU rollout remain open.
+
+
+### P6 checkpoint — server-clock season availability and transient capture
+
+CareerView now carries optional ranked_season_open, evaluated for the signed-in
+profile by the server UTC clock. Missing stays backward-compatible for older
+peers/guests. Home renders a localized two-line interseason state, disables
+Ranked and refuses an activation retained across a rebuild; Casual remains
+available. Changes to this hint alone rebuild Home. Allocation/store checks
+remain the final authority; device wall time never decides admission.
+
+The seasonal Result QA now waits for the expected localized notice to be visible
+and its toast at rest, rather than waiting40 frames past a short notification
+at low FPS. Missing notices time out. Production toast lifetime is unchanged.
+An explicit expired Home fixture keeps an expired90-day window and returning
+player's earned badge; no real account, season close or production state changes.
+
+Verification:193 shared and498 server cases PASS (four DB-specific cases remain
+ignored by the default server unit invocation). Strict shared/server all-target
+clippy and final RU native test-target clippy PASS; screen-map5 cases and JSON/
+format checks PASS. Native clippy v1 found a test-only Activated field typo;
+source was corrected to source and v2/v3 PASS. Reports in the task/codex dirs:
+p6-season-hint-v1-verify-report.json and p6-native-season-hint-ru-clippy-v3-report.json.
+New Home interaction test execution and actual expired/notification pixels await
+the committed CI/native build. Overall68-finding counts stay unchanged.

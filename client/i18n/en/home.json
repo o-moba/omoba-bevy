@@ -46,5 +46,6 @@
   "home.button.leaderboard": "Leaderboard",
   "home.leaderboard.error": "Could not open the leaderboard. Try again.",
   "home.recovery.afk": "You were inactive: AI controls your hero. Move or use a skill to take control again. The AFK mark remains for this match.",
-  "home.ranked.locked": "Ranked locked\nGames {played}/{total}"
+  "home.ranked.locked": "Ranked locked\nGames {played}/{total}",
+  "home.ranked.between_seasons": "Ranked\nBetween seasons"
 }
