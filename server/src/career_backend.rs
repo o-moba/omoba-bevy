@@ -2820,6 +2820,7 @@ mod tests {
     }
     fn outbox_result(id: &str, outcome: MatchOutcome) -> MatchResult {
         MatchResult {
+            ranked_season_id: None,
             gameplay_started: true,
             end_reason: None,
             result_id: id.into(),
@@ -3121,6 +3122,7 @@ mod tests {
                 .unwrap()
                 .as_millis() as u64;
             let mut result = MatchResult {
+                ranked_season_id: None,
                 gameplay_started: true,
                 end_reason: None,
                 result_id: random_id::<16>(),

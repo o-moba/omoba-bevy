@@ -108,6 +108,22 @@ pub struct SeasonBadge {
     pub tier: Option<Tier>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeasonWindow {
+    pub season_id: u64,
+    pub started_at_ms: u64,
+    pub ends_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeasonClosure {
+    pub season_id: u64,
+    pub next_season_id: u64,
+    pub closed_at_ms: u64,
+    pub archived_profiles: u64,
+    pub awarded_badges: u64,
+}
+
 /// Counts, rather than rounded percentages, keep small/unknown samples visible.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputStatistics {

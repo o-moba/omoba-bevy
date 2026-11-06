@@ -659,6 +659,7 @@ mod tests {
     use crate::match_allocation::AllocatedHuman;
     fn manifest(id: char) -> Manifest {
         Manifest {
+            ranked_season_id: None,
             version: 1,
             allocation_id: id.to_string().repeat(32),
             endpoint: String::new(),

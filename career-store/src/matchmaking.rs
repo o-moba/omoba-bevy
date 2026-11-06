@@ -464,7 +464,7 @@ pub fn rating_changes(
                 p.waiting.player_id,
                 p.team,
                 p.waiting.profile.rating,
-                p.waiting.profile.rated_matches,
+                p.waiting.profile.placement_matches(),
             )
         })
         .collect();

@@ -276,6 +276,34 @@ impl Lobby {
         cohort: Option<CohortAllowance>,
         now: Instant,
     ) {
+        let ranked_season_id = if queue.rated() {
+            let season = selected
+                .first()
+                .and_then(|w| w.profile.ranked.as_ref())
+                .map(|s| s.season_id);
+            if selected.iter().any(|w| {
+                w.profile.ranked.as_ref().map(|s| s.season_id) != season
+                    || w.profile
+                        .ranked
+                        .as_ref()
+                        .is_some_and(|s| !s.active_at(unix_ms()))
+            }) {
+                let ids: HashSet<_> = selected
+                    .iter()
+                    .map(|w| w.profile.profile_id.clone())
+                    .collect();
+                self.waiting
+                    .retain(|w| !ids.contains(&w.profile.profile_id));
+                for id in ids {
+                    self.errors
+                        .insert(id, shared::career::error_code::RANKED_SEASON_ENDED.into());
+                }
+                return;
+            }
+            season
+        } else {
+            None
+        };
         let teams = split_teams(&selected, now);
         let humans = selected
             .iter()
@@ -287,6 +315,7 @@ impl Lobby {
             })
             .collect();
         let manifest = Manifest {
+            ranked_season_id,
             version: 1,
             allocation_id: id,
             endpoint: String::new(),
@@ -368,6 +397,43 @@ impl Lobby {
         }
     }
     /// A decline returns everybody else; a timeout returns only accepted humans.
+    fn expire_ranked_season(&mut self, now_ms: u64) {
+        let expired = |w: &Waiting| {
+            w.profile
+                .ranked
+                .as_ref()
+                .is_some_and(|s| !s.active_at(now_ms))
+        };
+        let checks: Vec<_> = self
+            .ready
+            .iter()
+            .filter(|(_, r)| r.queue.rated() && r.entries.iter().any(expired))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in checks {
+            if let Some(check) = self.ready.remove(&id) {
+                for entry in check.entries {
+                    self.ready_profiles.remove(&entry.profile.profile_id);
+                    self.errors.insert(
+                        entry.profile.profile_id,
+                        shared::career::error_code::RANKED_SEASON_ENDED.into(),
+                    );
+                }
+            }
+        }
+        self.waiting.retain(|w| {
+            if w.preference.rated() && expired(w) {
+                self.errors.insert(
+                    w.profile.profile_id.clone(),
+                    shared::career::error_code::RANKED_SEASON_ENDED.into(),
+                );
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     fn cancel_ready(&mut self, id: &str, declined: Option<&str>, now: Instant) {
         let Some(check) = self.ready.remove(id) else {
             return;
@@ -867,6 +933,21 @@ impl MatchService {
         if lobby.assignments.contains_key(&profile.profile_id) {
             return;
         }
+        if preference.rated()
+            && profile
+                .ranked
+                .as_ref()
+                .is_some_and(|s| !s.active_at(unix_ms()))
+        {
+            lobby
+                .waiting
+                .retain(|w| w.profile.profile_id != profile.profile_id);
+            lobby.errors.insert(
+                profile.profile_id,
+                shared::career::error_code::RANKED_SEASON_ENDED.into(),
+            );
+            return;
+        }
         if let Some(existing) = lobby
             .waiting
             .iter_mut()
@@ -874,6 +955,7 @@ impl MatchService {
         {
             if existing.session == session && existing.preference == preference {
                 existing.touched = now;
+                existing.profile = profile;
                 existing.party = party;
                 existing.also_casual(search.also_casual, now);
             } else {
@@ -1336,6 +1418,7 @@ impl MatchService {
         if lobby.drain.active() {
             lobby.pause_ready_for_drain(now);
         } else {
+            lobby.expire_ranked_season(unix_ms());
             lobby.tick_ready(now);
         }
         expire_waiting(&mut lobby.waiting, now);
@@ -2442,6 +2525,7 @@ mod tests {
     fn manifest_for(chosen: &[Waiting], queue: MatchPreference) -> Manifest {
         let teams = split_teams(chosen, Instant::now() + PARTY_GATHER_WINDOW);
         Manifest {
+            ranked_season_id: None,
             version: 1,
             allocation_id: "a".repeat(32),
             endpoint: "127.0.0.1:41000".into(),
@@ -4348,6 +4432,114 @@ mod tests {
             .filter_map(|w| w.party.filter(|(id, _)| *id == 9))
             .collect();
         assert_eq!(present, [(9, 3), (9, 3), (9, 3)]);
+        drop(service);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    fn season_profile(id: u64) -> shared::ranked::SeasonProfile {
+        let started_at_ms = unix_ms().saturating_sub(1000);
+        shared::ranked::SeasonProfile {
+            season_id: id,
+            started_at_ms,
+            ends_at_ms: started_at_ms + shared::ranked::SEASON_DURATION_MS,
+            rated_matches: 0,
+            wins: 0,
+            losses: 0,
+            completed_matches: 0,
+            latest_badge: None,
+        }
+    }
+
+    #[test]
+    fn season_expiry_clears_ready_consent_without_penalties_or_losing_casual_waiters() {
+        let now = Instant::now();
+        let (mut service, entries, directory, check_id) = ready_fixture(now);
+        for entry in &entries[..3] {
+            service.respond_ready(
+                &entry.profile.profile_id,
+                &entry.session,
+                7,
+                &check_id,
+                true,
+                now,
+            );
+        }
+        let season = season_profile(1);
+        let MatchService::Lobby(lobby) = &mut service else {
+            panic!()
+        };
+        for entry in &mut lobby.ready.get_mut(&check_id).unwrap().entries {
+            entry.profile.ranked = Some(season.clone());
+        }
+        let casual = w(11, MatchPreference::Casual, now);
+        lobby.waiting.push(casual.clone());
+        lobby.expire_ranked_season(season.ends_at_ms);
+        assert!(
+            lobby.ready.is_empty() && lobby.ready_profiles.is_empty() && lobby.penalties.is_empty()
+        );
+        assert_eq!(lobby.waiting.len(), 1);
+        assert_eq!(
+            lobby.waiting[0].profile.profile_id,
+            casual.profile.profile_id
+        );
+        assert_eq!(lobby.pool.occupied(), 0);
+        for entry in &entries {
+            assert!(
+                matches!(service.view(&entry.profile.profile_id,&entry.session,now),Some(MatchServiceView::Failed {code}) if code==shared::career::error_code::RANKED_SEASON_ENDED)
+            );
+            service.respond_ready(
+                &entry.profile.profile_id,
+                &entry.session,
+                7,
+                &check_id,
+                true,
+                now,
+            );
+        }
+        let MatchService::Lobby(lobby) = &service else {
+            panic!()
+        };
+        assert!(lobby.penalties.is_empty() && lobby.pool.occupied() == 0);
+        drop(service);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn mixed_season_roster_is_refused_before_any_worker_allocation() {
+        let now = Instant::now();
+        let pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_path_buf();
+        let mut service = lobby_with(pool, &[]);
+        let entries: Vec<_> = (1..=10)
+            .map(|i| {
+                let mut entry = w(i, MatchPreference::Ranked, now);
+                entry.profile.ranked = Some(season_profile(if i == 10 { 2 } else { 1 }));
+                entry
+            })
+            .collect();
+        let MatchService::Lobby(lobby) = &mut service else {
+            panic!()
+        };
+        lobby.waiting = entries.clone();
+        lobby.allocate_ready(
+            "f".repeat(32),
+            entries.clone(),
+            MatchPreference::Ranked,
+            None,
+            now,
+        );
+        assert!(
+            lobby.waiting.is_empty() && lobby.penalties.is_empty() && lobby.pool.occupied() == 0
+        );
+        for entry in &entries {
+            assert_eq!(
+                lobby
+                    .errors
+                    .get(&entry.profile.profile_id)
+                    .map(String::as_str),
+                Some(shared::career::error_code::RANKED_SEASON_ENDED)
+            );
+        }
         drop(service);
         let _ = std::fs::remove_dir_all(directory);
     }

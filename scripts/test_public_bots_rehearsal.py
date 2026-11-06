@@ -75,6 +75,42 @@ class PublicBotsRehearsalTests(unittest.TestCase):
                              "wins": int(i < 5), "losses": rated_matches + int(i >= 5)},
                  "history": [{"result_id": "result", "rating": participants[i]["rating"]}]} for i in range(10)]
 
+    def seasonal_ranked(self):
+        statuses = self.completed_ranked(19)
+        for i, status in enumerate(statuses):
+            status["initial_profile"].update(rated_matches=100, matches_played=100)
+            status["profile"].update(rated_matches=101, matches_played=101)
+            season = {"season_id": 2, "started_at_ms": 1000, "ends_at_ms": 7776001000,
+                      "rated_matches": 19, "wins": 0, "losses": 19, "completed_matches": 19}
+            status["initial_profile"]["ranked"] = season
+            status["profile"]["ranked"] = dict(season, rated_matches=20, completed_matches=20,
+                                              wins=int(i < 5), losses=19 + int(i >= 5))
+            status["result"]["ranked_season_id"] = 2
+        return statuses
+
+    def test_new_season_placements_use_current_count_and_preserve_lifetime(self):
+        self.assertEqual(rehearsal.verify_results(self.seasonal_ranked(), 10, True), "result")
+
+    def test_season_proof_rejects_wrong_identity_counters_or_lifetime_k(self):
+        for mutation in ("identity", "missing_frozen", "counter", "lifetime_k"):
+            with self.subTest(mutation=mutation):
+                statuses = self.seasonal_ranked()
+                if mutation == "identity":
+                    statuses[0]["profile"]["ranked"]["season_id"] = 3
+                elif mutation == "missing_frozen":
+                    statuses[0]["result"].pop("ranked_season_id")
+                elif mutation == "counter":
+                    statuses[0]["profile"]["ranked"]["rated_matches"] += 1
+                else:
+                    for i, status in enumerate(statuses):
+                        delta = 16 if i < 5 else -16
+                        status["profile"]["rating"] = 1000 + delta
+                        for result in statuses:
+                            result["result"]["participants"][i]["rating"].update(after=1000 + delta, delta=delta)
+                        status["history"][0]["rating"].update(after=1000 + delta, delta=delta)
+                with self.assertRaises(AssertionError):
+                    rehearsal.verify_results(statuses, 10, True)
+
     def test_a_complete_rated_result_checks_every_profile_and_history(self):
         self.assertEqual(rehearsal.verify_results(self.completed_ranked(), 10, True), "result")
 

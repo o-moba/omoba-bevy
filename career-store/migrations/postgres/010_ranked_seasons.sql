@@ -1,7 +1,7 @@
 -- First season starts without resetting ratings, lifetime totals or eligibility.
 -- Production rollout must drain old workers before switching schema/runtime.
 CREATE TABLE career_ranked_seasons (
-    season_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    season_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY CHECK (season_id > 0),
     started_at_ms BIGINT NOT NULL CHECK (started_at_ms >= 0),
     ends_at_ms BIGINT NOT NULL,
     closed_at_ms BIGINT,
@@ -42,12 +42,14 @@ CREATE INDEX career_profiles_season_ladder
     WHERE season_rated_matches>=20;
 
 -- All registration routes, including portal SQL, coordinate with rollover.
--- This invoker trigger obtains a fresh season after waiting for an operator.
-CREATE FUNCTION career_stamp_ranked_profile() RETURNS trigger LANGUAGE plpgsql AS $$
+-- The narrow owner trigger locks metadata without granting runtime UPDATE.
+-- Pin the trusted schema before pg_temp; caller-created temp tables cannot
+-- replace the authoritative window during registration.
+CREATE FUNCTION career_stamp_ranked_profile() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE current_season career_ranked_seasons%ROWTYPE;
 BEGIN
     PERFORM pg_advisory_xact_lock_shared(721946010);
-    SELECT * INTO STRICT current_season FROM career_ranked_seasons WHERE closed_at_ms IS NULL;
+    SELECT * INTO STRICT current_season FROM career_ranked_seasons WHERE closed_at_ms IS NULL FOR SHARE;
     NEW.ranked_season_id := current_season.season_id;
     NEW.ranked_started_at_ms := current_season.started_at_ms;
     NEW.ranked_ends_at_ms := current_season.ends_at_ms;
@@ -58,6 +60,11 @@ BEGIN
     NEW.latest_ranked_badge := NULL;
     RETURN NEW;
 END $$;
+DO $$
+BEGIN
+    EXECUTE format('ALTER FUNCTION %I.career_stamp_ranked_profile() SET search_path TO %I, pg_temp',current_schema(),current_schema());
+END $$;
+REVOKE ALL ON FUNCTION career_stamp_ranked_profile() FROM PUBLIC;
 CREATE TRIGGER career_ranked_registration BEFORE INSERT ON career_profiles
     FOR EACH ROW EXECUTE FUNCTION career_stamp_ranked_profile();
 

@@ -142,6 +142,9 @@ fn is_true(value: &bool) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MatchResult {
+    /// Frozen Ranked allocation season; omitted by pre-season receipts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranked_season_id: Option<u64>,
     /// Durable allocation is not proof that gameplay began. Aborted drafts
     /// settle for recovery/auditing without entering player career totals.
     #[serde(default = "legacy_gameplay_started", skip_serializing_if = "is_true")]
@@ -617,6 +620,7 @@ pub struct PlayCooldown {
 pub mod error_code {
     pub const PLAY_COOLDOWN: &str = "play_cooldown";
     pub const RANKED_LOCKED: &str = "ranked_locked";
+    pub const RANKED_SEASON_ENDED: &str = "ranked_season_ended";
     /// A new device key from a network that created today's share of new
     /// profiles (LR-16).
     pub const NEW_PROFILE_LIMIT: &str = "new_profile_limit";

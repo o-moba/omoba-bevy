@@ -55,6 +55,7 @@ fn main() -> Result<(), String> {
                     disconnected: false, participation: None, rating: None, progression_xp_gained: 0,
                 }).collect();
                 let terminal = MatchResult {
+                    ranked_season_id: None,
                     result_id: format!("synthetic-public-{stamp}-{id}-{n}"),
                     server_epoch: 1, match_id: n + 1, started_at_ms: 1000,
                     ended_at_ms: 2000, duration_ms: 1000, gameplay_started: true,

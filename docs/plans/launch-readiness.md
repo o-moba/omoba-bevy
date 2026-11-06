@@ -1814,7 +1814,7 @@ Area: rating model · **minor** · L · code+owner
 - **Acceptance:**
   - [x] Unit tests cover tier boundaries.
   - [ ] Badges show in RU and EN.
-  - [ ] Closing a season archives and soft-resets in one transaction.
+  - [x] Closing a season archives and soft-resets in one transaction (local schema10 PG/operator proof; production application remains separate).
   - [x] A win-rate-by-input query exists (bounded completed Ranked sample, four groups, wins and sample counts).
 - **Depends on:** LR-08, LR-47, O-5
 
@@ -2083,7 +2083,7 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 | O-2 | Should bots fill Casual PvP, and after how long (30 s today)? Should Casual merge cohorts or wait longer while other humans are online? | LR-08, LR-36 |
 | O-3 | Ranked entry gate: what career level or match count, and must the player link VK ID in RU? | LR-37 |
 | O-4 | Ranked parties: solo/duo only, or full premade against premade? | LR-55 |
-| O-5 | Decided2026-11-06:20 placements; Bronze<1000/Silver<1500/Gold<2000/Platinum<2500/Diamond<3000/Master3000+;90-day seasons, half-distance reset toward1000, archived results and seasonal badge. Production reset is separate. Implementation pending. | LR-53 |
+| O-5 | Decided2026-11-06:20 placements; Bronze<1000/Silver<1500/Gold<2000/Platinum<2500/Diamond<3000/Master3000+;90-day seasons, half-distance reset toward1000, archived results and seasonal badge. Production reset is separate. Local schema10 storage/atomic close/operator tests pass; role approval, API/native/portal presentation and full current gates remain pending. | LR-53 |
 | O-6 | Online bot difficulty: keep Elite for all, or easier for newcomers' first matches? Should Server bot match offer a level picker? | LR-43 |
 | O-7 | Launch hero roster: which of the 17 classes are allowed in public and ranked play? | LR-45, LR-58 |
 | O-8 | Match length target, max duration, the minute from which surrender is allowed, map tier preset for casual and bot play | LR-11, LR-34 |

@@ -35,6 +35,7 @@ impl Game {
             })
             .collect();
         let manifest = Manifest {
+            ranked_season_id: None,
             version: 1,
             allocation_id: "d".repeat(32),
             endpoint: "127.0.0.1:41000".into(),

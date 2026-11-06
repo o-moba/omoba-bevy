@@ -640,6 +640,23 @@ impl ServerRuntime {
         {
             return false;
         }
+        if let Some(worker) = self.match_service.worker()
+            && worker.manifest.preference.rated()
+            && self
+                .world
+                .players
+                .values()
+                .filter(|p| p.joined && !p.hero.identity.is_bot)
+                .filter_map(|p| p.career_profile.as_ref())
+                .any(|p| {
+                    p.ranked.as_ref().map_or(1, |s| s.season_id)
+                        != worker.manifest.ranked_season_id.unwrap_or(1)
+                })
+        {
+            // An old reserved/drafting worker cannot enter a newly reset season.
+            // Its ordinary pre-start timeout returns players to a fresh search.
+            return false;
+        }
         if !self.allocated_humans_ready() {
             return false;
         }
@@ -674,6 +691,23 @@ impl ServerRuntime {
             } // Pure simulation fixtures.
             let eligibility = self.rating_eligibility(&roster);
             let result = MatchResult {
+                ranked_season_id: if let Some(worker) = self.match_service.worker() {
+                    worker
+                        .manifest
+                        .preference
+                        .rated()
+                        .then_some(worker.manifest.ranked_season_id)
+                        .flatten()
+                } else if eligibility.is_ok() {
+                    self.career
+                        .queue
+                        .selection()
+                        .and_then(|selection| selection.participants.first())
+                        .and_then(|p| p.waiting.profile.ranked.as_ref())
+                        .map(|season| season.season_id)
+                } else {
+                    None
+                },
                 gameplay_started: false,
                 end_reason: None,
                 result_id: self.career.backend.new_result_id(),

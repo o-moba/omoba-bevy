@@ -22,10 +22,11 @@ use std::{
 
 mod fair_play;
 mod input_stats;
+mod seasons;
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+pub const SCHEMA_VERSIONS: [i32; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -316,6 +317,13 @@ impl CareerStore {
             .execute(&mut *tx)
             .await?;
         }
+        if !versions.contains(&10) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/010_ranked_seasons.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
             .fetch_one(&pool)
@@ -535,6 +543,7 @@ impl CareerStore {
     async fn allocation_inner(&self, result: MatchResult, recover: bool) -> StoreResult<()> {
         let result = normalize(result)?;
         let mut tx = self.pool.begin().await?;
+        seasons::lock(&mut tx).await?;
         // Serialize retries even before the allocation row exists.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,721946003))")
             .bind(&result.result_id)
@@ -573,6 +582,7 @@ impl CareerStore {
         sqlx::query("INSERT INTO career_matches(result_id,server_epoch,match_id,owner_id,lease_until,allocation,checkpoint) VALUES($1,$2,$3,$4,clock_timestamp()+interval '90 seconds',$5,$5)")
             .bind(&result.result_id).bind(result.server_epoch.to_string()).bind(result.match_id.to_string())
             .bind(&self.owner).bind(Json(&result)).execute(&mut *tx).await?;
+        seasons::reserve(&mut tx, &result).await?;
         let profiles = append_participants(&mut tx, &result, &[]).await?;
         if !recover {
             // Profile locks serialize admission with settlement on every host.
@@ -675,6 +685,7 @@ impl CareerStore {
     }
     async fn finish_inner(&self, result_id: &str, expired: bool) -> StoreResult<MatchResult> {
         let mut tx = self.pool.begin().await?;
+        seasons::lock(&mut tx).await?;
         let row = locked_match(&mut tx, result_id)
             .await?
             .ok_or("Match allocation not found.")?;
@@ -721,6 +732,7 @@ impl CareerStore {
                 .bind(result_id).bind(Json(&recovered)).execute(&mut *tx).await?;
             recovered
         };
+        let allocated_season = seasons::allocation(&mut tx, result_id).await?;
         let mut profiles = locked_profiles(&mut tx, &result.participants).await?;
         let changes = if result.rated {
             validate_rated(&result)?;
@@ -730,7 +742,12 @@ impl CareerStore {
                 .map(|p| {
                     let profile =
                         &profiles[p.profile_id.as_ref().expect("validated rated identity")];
-                    (p.player_id, p.team, profile.rating, profile.rated_matches)
+                    (
+                        p.player_id,
+                        p.team,
+                        profile.rating,
+                        profile.placement_matches(),
+                    )
                 })
                 .collect();
             crate::matchmaking::rating_changes_for_players(
@@ -862,9 +879,23 @@ impl CareerStore {
                     profile.abandons = total;
                 }
             }
-            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7,completed_public_matches=$8 WHERE profile_id=$1")
+            seasons::advance(
+                profile,
+                participant,
+                allocated_season,
+                result.outcome == MatchOutcome::Completed,
+                result.outcome == MatchOutcome::Completed
+                    && result.winner == Some(participant.team)
+                    && !fair_play::proved_abandon(participant),
+            )?;
+            let season = profile
+                .ranked
+                .as_ref()
+                .ok_or("Season progress is missing.")?;
+            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7,completed_public_matches=$8,season_rated_matches=$9,season_wins=$10,season_losses=$11,season_completed_matches=$12 WHERE profile_id=$1")
                 .bind(id).bind(profile.rating).bind(i64::from(profile.rated_matches)).bind(i64::from(profile.matches_played))
                 .bind(i64::from(profile.wins)).bind(i64::from(profile.losses)).bind(profile.progression_xp as i64).bind(i64::from(profile.completed_public_matches))
+                .bind(i64::from(season.rated_matches)).bind(i64::from(season.wins)).bind(i64::from(season.losses)).bind(i64::from(season.completed_matches))
                 .execute(&mut *tx).await?;
         }
         result.saved = true;
@@ -1234,7 +1265,7 @@ fn profile_row(row: &PgRow) -> StoreResult<ProfileSummary> {
             .map_err(|_| "Invalid stored profile counter.".into())
     };
     Ok(ProfileSummary {
-        ranked: None,
+        ranked: Some(seasons::profile(row)?),
         completed_public_matches: counter("completed_public_matches")?,
         profile_id: row.try_get("profile_id")?,
         nickname: row.try_get("nickname")?,
@@ -1383,7 +1414,10 @@ fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
 }
 
 fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
-    if result.result_id.is_empty()
+    if result
+        .ranked_season_id
+        .is_some_and(|id| id == 0 || id > i64::MAX as u64)
+        || result.result_id.is_empty()
         || result.result_id.len() > 128
         || result.result_id.chars().any(char::is_control)
         || result.server_epoch == 0
@@ -1540,7 +1574,8 @@ fn same_person(a: &ParticipantResult, b: &ParticipantResult) -> bool {
         && a.sprite_character == b.sprite_character
 }
 fn same_allocation(old: &MatchResult, new: &MatchResult, allow_add: bool) -> StoreResult<()> {
-    if old.result_id != new.result_id
+    if old.ranked_season_id != new.ranked_season_id
+        || old.result_id != new.result_id
         || old.server_epoch != new.server_epoch
         || old.match_id != new.match_id
         || old.started_at_ms != new.started_at_ms

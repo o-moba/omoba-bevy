@@ -5,6 +5,18 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Implement local schema10 seasonal progress, durable allocation identity and an
+  explicit atomic/idempotent archive/badge/reset operator. Preserve lifetime/XP/
+  public eligibility, fence old recovery and expired consent, and use seasonal
+  placement K/cohorts. Protected registration coordinates with close without
+  runtime reset privileges.193 shared,63 store/matching,64 lobby,33 harness and
+  12 Python checks PASS; strict affected/native test-target clippy and actual
+  isolated operator CLI proof PASS. Deployment-role approval, API/native/portal
+  presentation and current full public/visual/CI gates remain required.
+- Independently recheck ddc59e1d CI42153618597:all7 jobs/18 stages PASS. Verified
+  artifact13475806511, exact all-ten Ranked awards/history, zeroAFK/disconnection,
+  real tenth-public/noVK and early-crash recovery. This predates schema10.
+
 - Prepare a distinct current-season profile/badge contract and migration010
   draft with immutable season history and registration/rollover coordination.
   193 shared tests, five-crate strict clippy and a rolled-back local PostgreSQL

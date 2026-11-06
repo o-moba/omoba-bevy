@@ -12,6 +12,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::with_initial_season(None).await
+    }
+    async fn with_initial_season(initial_ms: Option<i64>) -> Self {
         let url = std::env::var("OMOBA_TEST_DATABASE_URL")
             .expect("Set an isolated PostgreSQL test database URL");
         let admin = PgPoolOptions::new()
@@ -46,6 +49,43 @@ impl Fixture {
             .connect(&url)
             .await
             .unwrap();
+        if let Some(initial_ms) = initial_ms {
+            // Owned fixture only: apply the real SQL with an explicit initial
+            // timestamp. Production has no clock flag or reset-on-read path.
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::raw_sql("CREATE TABLE career_schema_version(version INTEGER PRIMARY KEY)")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::raw_sql(include_str!("../migrations/postgres/001_career.sql"))
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO career_schema_version VALUES(1)")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            for migration in [
+                include_str!("../migrations/postgres/002_player_handles.sql"),
+                include_str!("../migrations/postgres/003_device_keys.sql"),
+                include_str!("../migrations/postgres/004_admission_limits.sql"),
+                include_str!("../migrations/postgres/005_sanctions.sql"),
+                include_str!("../migrations/postgres/006_rating_ladder.sql"),
+                include_str!("../migrations/postgres/007_fair_play.sql"),
+                include_str!("../migrations/postgres/008_match_votes.sql"),
+                include_str!("../migrations/postgres/009_ranked_eligibility.sql"),
+            ] {
+                sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+            }
+            let migration = include_str!("../migrations/postgres/010_ranked_seasons.sql");
+            let expired = migration.replace(
+                "SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint AS ms",
+                &format!("SELECT {initial_ms}::bigint AS ms"),
+            );
+            assert_ne!(migration, expired);
+            sqlx::raw_sql(&expired).execute(&mut *tx).await.unwrap();
+            tx.commit().await.unwrap();
+        }
         let store = CareerStore::from_pool(pool).await.unwrap();
         Self {
             store,
@@ -89,6 +129,14 @@ impl Fixture {
         self.admin.close().await;
     }
 }
+// Remove every schema10 object before explicitly simulating a pre-season
+// schema. Leaving future tables while deleting version rows is not an upgrade
+// fixture. This runs only in the test's own disposable schema.
+async fn remove_season_schema_for_upgrade(f: &Fixture) {
+    sqlx::raw_sql("DROP TRIGGER career_ranked_registration ON career_profiles; DROP FUNCTION career_stamp_ranked_profile(); ALTER TABLE career_profiles DROP COLUMN ranked_season_id,DROP COLUMN ranked_started_at_ms,DROP COLUMN ranked_ends_at_ms,DROP COLUMN season_rated_matches,DROP COLUMN season_wins,DROP COLUMN season_losses,DROP COLUMN season_completed_matches,DROP COLUMN latest_ranked_badge; DROP TABLE career_ranked_closures,career_ranked_archives,career_ranked_allocations,career_ranked_seasons; DROP FUNCTION career_guard_ranked_archive(),career_guard_ranked_season(),career_require_open_ranked_season(); DELETE FROM career_schema_version WHERE version=10;")
+        .execute(&f.store.pool).await.unwrap();
+}
+
 fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> ParticipantResult {
     ParticipantResult {
         input_kind: Default::default(),
@@ -113,6 +161,7 @@ fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> Particip
 }
 fn result(a: &ProfileSummary, b: &ProfileSummary, n: u64) -> MatchResult {
     MatchResult {
+        ranked_season_id: None,
         gameplay_started: true,
         end_reason: None,
         result_id: format!("fixture-result-{n}"),
@@ -364,7 +413,7 @@ async fn career_store_accepts_the_lobbys_widened_rating_and_experience_window() 
     let f = Fixture::new().await;
     let a = f.profile(1).await;
     let b = f.profile(2).await;
-    sqlx::query("UPDATE career_profiles SET rating=1500,rated_matches=20,matches_played=20 WHERE profile_id=$1")
+    sqlx::query("UPDATE career_profiles SET rating=1500,rated_matches=20,season_rated_matches=20,matches_played=20 WHERE profile_id=$1")
         .bind(&b.profile_id).execute(&f.store.pool).await.unwrap();
     let b = f.store.profile(&b.profile_id).await.unwrap();
     assert!(a.newcomer() && !b.newcomer());
@@ -384,7 +433,7 @@ async fn career_store_allocation_rechecks_current_experience_and_rating_after_re
     let a = f.profile(1).await;
     let b = f.profile(2).await;
     let opponent = f.profile(3).await;
-    sqlx::query("UPDATE career_profiles SET rated_matches=19,matches_played=19,wins=9,losses=10")
+    sqlx::query("UPDATE career_profiles SET rated_matches=19,season_rated_matches=19,matches_played=19,wins=9,losses=10")
         .execute(&f.store.pool)
         .await
         .unwrap();
@@ -434,7 +483,7 @@ async fn career_store_allocation_rechecks_current_experience_and_rating_after_re
     assert_eq!(seats, 0, "failed validation cannot reserve either account");
 
     // A is 650 above current_a: 601 points must fail, exactly 600 must pass.
-    sqlx::query("UPDATE career_profiles SET rated_matches=20,matches_played=20,losses=11,rating=$2 WHERE profile_id=$1")
+    sqlx::query("UPDATE career_profiles SET rated_matches=20,season_rated_matches=20,matches_played=20,losses=11,rating=$2 WHERE profile_id=$1")
         .bind(&b.profile_id).bind(current_a.rating + 49).execute(&f.store.pool).await.unwrap();
     assert_eq!(server_b.start(starting(&stale)).await.unwrap_err(), error);
     sqlx::query("UPDATE career_profiles SET rating=$2 WHERE profile_id=$1")
@@ -577,7 +626,7 @@ async fn placement_k_changes_only_after_the_twentieth_committed_rated_match() {
     let f = Fixture::new().await;
     let a = f.profile(1).await;
     let b = f.profile(2).await;
-    sqlx::query("UPDATE career_profiles SET rated_matches=19,matches_played=19,wins=9,losses=10")
+    sqlx::query("UPDATE career_profiles SET rated_matches=19,season_rated_matches=19,matches_played=19,wins=9,losses=10")
         .execute(&f.store.pool)
         .await
         .unwrap();
@@ -1218,7 +1267,7 @@ async fn career_store_ten_human_casual_pvp_awards_casual_xp_without_rating() {
     for n in 1..=10 {
         profiles.push(f.profile(n).await);
     }
-    sqlx::query("UPDATE career_profiles SET rating=1400,rated_matches=40,matches_played=40,wins=20,losses=20 WHERE profile_id=$1")
+    sqlx::query("UPDATE career_profiles SET rating=1400,rated_matches=40,season_rated_matches=40,matches_played=40,wins=20,losses=20 WHERE profile_id=$1")
         .bind(&profiles[1].profile_id)
         .execute(&f.store.pool)
         .await
@@ -2153,7 +2202,7 @@ async fn fair_play_teammate_reduction_and_invalid_time_cannot_settle() {
     // Both teams mix newcomer K48 and established K32. Apply each coefficient
     // before the leaver override / teammate reduction, using locked profiles.
     sqlx::query(
-        "UPDATE career_profiles SET rated_matches=20,matches_played=20 WHERE profile_id=ANY($1)",
+        "UPDATE career_profiles SET rated_matches=20,season_rated_matches=20,matches_played=20 WHERE profile_id=ANY($1)",
     )
     .bind(vec![b.profile_id.clone(), c.profile_id.clone()])
     .execute(&f.store.pool)
@@ -2240,6 +2289,7 @@ async fn fair_play_schema_upgrade_preserves_saved_profile_and_cooldown_is_cross_
     let f = Fixture::new().await;
     let a = f.profile(1).await;
     let b = f.profile(2).await;
+    remove_season_schema_for_upgrade(&f).await;
     sqlx::raw_sql("UPDATE career_profiles SET rating=1234,rated_matches=25,matches_played=25,wins=15,losses=10,progression_xp=1000; DROP TABLE career_abandon_events,career_play_penalties; ALTER TABLE career_profiles DROP COLUMN abandons, DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version>=7;")
         .execute(&f.store.pool).await.unwrap();
     let upgraded = f.another_owner().await;
@@ -2539,6 +2589,7 @@ async fn ranked_eligibility_excludes_abandon_interruption_remake_and_custom_resu
         );
     }
     // Backfill must apply the same exclusions as live settlement.
+    remove_season_schema_for_upgrade(&f).await;
     sqlx::raw_sql("ALTER TABLE career_profiles DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version=9;")
         .execute(&f.store.pool).await.unwrap();
     let upgraded = f.another_owner().await;
@@ -2583,6 +2634,7 @@ async fn ranked_eligibility_backfill_and_existing_allocation_recovery_preserve_p
     f.store.start(starting(&game)).await.unwrap();
     f.store.settle(game).await.unwrap();
     // Reconstruct a pre-schema9 database from trusted receipts.
+    remove_season_schema_for_upgrade(&f).await;
     sqlx::raw_sql("ALTER TABLE career_profiles DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version=9;")
         .execute(&f.store.pool).await.unwrap();
     let upgraded = f.another_owner().await;
@@ -2694,3 +2746,6 @@ async fn declared_input_statistics_are_bounded_and_settlement_retry_is_exact() {
     assert!(f.store.input_statistics(10_001).await.is_err());
     f.close().await;
 }
+
+#[path = "career_store/seasons_tests.rs"]
+mod seasons;

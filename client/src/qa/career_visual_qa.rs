@@ -183,6 +183,7 @@ fn fixture() -> CareerView {
         })
         .collect();
     let result = MatchResult {
+        ranked_season_id: None,
         gameplay_started: true,
         end_reason: None,
         result_id: "QA-FIXTURE-NOT-A-SAVED-MATCH".into(),

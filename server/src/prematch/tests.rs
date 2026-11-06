@@ -949,6 +949,7 @@ fn allocated_loading_roster(
         .collect();
     rt.match_service = crate::match_service::MatchService::Worker(Worker {
         manifest: Manifest {
+            ranked_season_id: None,
             version: 1,
             allocation_id: "e".repeat(32),
             endpoint: "127.0.0.1:41000".into(),

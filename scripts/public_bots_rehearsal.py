@@ -97,7 +97,25 @@ def verify_results(statuses, count, ranked, custom_map=False):
                                 for p in result["participants"] if p["team"] != me["team"]]
             expected_score = 1 / (1 + 10 ** ((sum(opposing_ratings) / len(opposing_ratings)
                                             - sum(team_ratings) / len(team_ratings)) / 400))
-            k = 48 if initial["rated_matches"] < 20 else 32
+            season = initial.get("ranked")
+            if season is not None:
+                current = profile.get("ranked")
+                assert isinstance(season, dict) and isinstance(current, dict), "missing season progress"
+                assert type(season.get("season_id")) is int and season["season_id"] > 0
+                assert type(season.get("rated_matches")) is int and season["rated_matches"] >= 0
+                assert current["season_id"] == season["season_id"] == result.get("ranked_season_id"), "wrong frozen season"
+                assert current["started_at_ms"] == season["started_at_ms"]
+                assert current["ends_at_ms"] == season["ends_at_ms"]
+                assert season["ends_at_ms"] - season["started_at_ms"] == 90 * 24 * 60 * 60 * 1000
+                assert current.get("latest_badge") == season.get("latest_badge")
+                assert current["rated_matches"] == season["rated_matches"] + 1, "wrong seasonal game count"
+                assert current["completed_matches"] == season["completed_matches"] + 1
+                assert current["wins"] == season["wins"] + int(won)
+                assert current["losses"] == season["losses"] + int(not won)
+            else:
+                assert profile.get("ranked") is None, "unexpected season boundary in Ranked proof"
+            placements = season["rated_matches"] if season is not None else initial["rated_matches"]
+            k = 48 if placements < 20 else 32
             requested = k * (int(won) - expected_score)
             # Rust f64::round rounds half away from zero, unlike Python round.
             delta = math.floor(abs(requested) + 0.5) * (1 if requested >= 0 else -1)

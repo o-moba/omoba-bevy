@@ -130,7 +130,7 @@ fn rating_line(profile: Option<&shared::career::ProfileSummary>) -> String {
         },
         &[
             ("rating", &profile.rating),
-            ("played", &profile.rated_matches),
+            ("played", &profile.placement_matches()),
             ("total", &shared::career::NEWCOMER_MATCHES),
         ],
     )
@@ -440,7 +440,7 @@ fn signature(
             |profile| profile.nickname.clone(),
         ),
         rating: profile.map_or(0, |profile| profile.rating),
-        rated_matches: profile.map_or(0, |profile| profile.rated_matches),
+        rated_matches: profile.map_or(0, |profile| profile.placement_matches()),
         completed_public_matches: profile.map_or(0, |profile| profile.completed_public_matches),
         matches: profile.map_or(0, |profile| profile.matches_played),
         wins: profile.map_or(0, |profile| profile.wins),
@@ -2650,6 +2650,33 @@ mod tests {
             .collect();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].text, tr("home.leaderboard.error"));
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            let profile = career.view.profile.as_mut().unwrap();
+            profile.rating = 1200;
+            profile.rated_matches = 40;
+            profile.matches_played = 40;
+            let start = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            profile.ranked = Some(shared::ranked::SeasonProfile {
+                season_id: 2,
+                started_at_ms: start,
+                ends_at_ms: start + shared::ranked::SEASON_DURATION_MS,
+                rated_matches: 0,
+                wins: 0,
+                losses: 0,
+                completed_matches: 0,
+                latest_badge: None,
+            });
+        }
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1200 · Новичок 0/20")
+        );
     }
 
     /// LR-14 acceptance: on a mismatch an outdated RU game shows «Требуется

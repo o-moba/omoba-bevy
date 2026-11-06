@@ -719,3 +719,40 @@ activation, allocation/settlement locks/counters, explicit close command, durabl
 season identity through manifests/results/recovery, queue expiry/cached profiles,
 role-grant draft, full PG concurrency/rollback tests and UI remain required.
 No production season or rating reset has been performed.
+
+
+P6 seasonal storage/close engine implemented locally under schema10. Initial
+migration preserves rating/lifetime/XP/public access while starting seasonal
+placements at0. Immutable manifest/result season IDs and allocation mapping fence
+late recovery; shared begin/settle lock precedes match/profile locks. Explicit
+expired expected-ID close uses an exclusive lock and one transaction for archive,
+badges, half-distance reset/new90-day window, with idempotent close receipts and
+original-rated-intent blocking. Current-season K/cohort and Home placement count
+use seasonal games. Expired queue/ready consent stops without dodge penalties.
+
+Registration role proof found an invoker FOR SHARE privilege failure. A narrowly
+scoped owner trigger, trusted-schema/pg_temp search path and revoked PUBLIC
+execution fix it without granting runtime season UPDATE. Repeatable Read, actual
+registration/close contention and caller temp-table shadowing proofs PASS.
+193 shared,63 store/matching (real PG included),64 lobby and33 harness tests PASS;
+strict affected-crate and native test-target clippy PASS. New Home regression is
+typechecked, not yet executed.12 Python verifier cases use seasonal K/counters.
+Actual operator CLI proof in an owned synthetic expired schema PASS: show and
+invalid commands leave data unchanged,2300->1650 once, repeated receipt identical,
+lifetime/XP/public totals preserved; owned schema removed. No real-game claim.
+
+Role deployment patch is prepared/tested, awaiting owner response; actual
+account-api/ops/grants.sql is unchanged. API/ladder/archive read presentation,
+native/portal tiers/badges/promotions, expiry/cache UX, current full public/role
+journeys and visual/CI gates remain open. Production migration requires old-worker
+drain; close requires all-host drain including reservations and cache refresh.
+Schema9 binary rollback after migration10 is unsupported and must be covered by
+P8 deployment review. No production migration/reset/deploy has been performed.
+
+Schema9 ddc59e1d full CI42153618597 independently rechecked all7 jobs/18 stages
+PASS (2540.45s). Artifact13475806511 SHA256
+5c83acdf6fef624de2e782ce9c61d06567b67c73a8363bbfccc14b702ecd8100
+verified before safe extraction. Actual Ranked9cf904dd956939d5332f54fe1f8b2786,
+418283ms gameplay, exact all-ten awards/profile/history and zeroAFK/disconnection;
+real tenth public/noVK and early crash PASS. Private provider fixture removed.
+This evidence precedes and does not cover the local schema10 engine.

@@ -30,6 +30,8 @@ pub(crate) struct AllocatedHuman {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranked_season_id: Option<u64>,
     pub version: u32,
     pub allocation_id: String,
     pub endpoint: String,
@@ -47,7 +49,8 @@ impl Manifest {
     pub fn validate(&self) -> Result<(), String> {
         let ids: HashSet<_> = self.humans.iter().map(|h| &h.profile_id).collect();
         let sessions: HashSet<_> = self.humans.iter().map(|h| &h.session_id).collect();
-        if self.version != 1
+        if self.ranked_season_id.is_some_and(|id| id == 0 || id > i64::MAX as u64 || !self.preference.rated())
+            || self.version != 1
             || self.allocation_id.len() != 32
             || !self.allocation_id.bytes().all(|b| b.is_ascii_hexdigit())
             || self.humans.is_empty()
@@ -259,6 +262,7 @@ mod tests {
     use shared::map::Team;
     fn fixture() -> Manifest {
         Manifest {
+            ranked_season_id: None,
             version: 1,
             allocation_id: "a".repeat(32),
             endpoint: "127.0.0.1:41000".into(),
@@ -353,6 +357,7 @@ pub(crate) mod runtime_tests {
             .test_authenticated(addr, profile.clone(), "seat-a");
         rt.match_service = crate::match_service::MatchService::Worker(Worker {
             manifest: Manifest {
+                ranked_season_id: None,
                 version: 1,
                 allocation_id: "b".repeat(32),
                 endpoint: "127.0.0.1:41000".into(),
@@ -652,6 +657,7 @@ pub(crate) mod runtime_tests {
                 })
                 .collect();
             let manifest = Manifest {
+                ranked_season_id: None,
                 version: 1,
                 allocation_id: "c".repeat(32),
                 endpoint: "127.0.0.1:41000".into(),

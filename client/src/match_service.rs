@@ -1044,6 +1044,7 @@ mod tests {
             })
             .add_systems(Update, update_match_service);
         let result = MatchResult {
+            ranked_season_id: None,
             gameplay_started: true,
             end_reason: None,
             result_id: "abandoned".into(),
@@ -1892,9 +1893,10 @@ mod tests {
         // language (never the generic "could not start: <code>" line), as do
         // the re-search notice, the prematch reset codes and the unrated
         // reason the career store sends.
-        const LOBBY_CODES: [&str; 14] = [
+        const LOBBY_CODES: [&str; 15] = [
             "ranked_party_cohort",
             "ranked_locked",
+            "ranked_season_ended",
             "arena_limit",
             "practice_cooldown",
             "queue_full",

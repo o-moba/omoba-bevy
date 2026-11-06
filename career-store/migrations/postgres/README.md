@@ -186,3 +186,24 @@ must be reported separately.
 (`rating DESC, rated_matches DESC, profile_id` where `rated_matches >= 20`) that
 the Account API's `GET /v1/leaderboard` reads. No table or grant changes: the
 portal role already has `SELECT` on `career_profiles`.
+
+## Ranked seasons (schema10)
+
+The initial window is90 days, with unchanged rating, lifetime career and public
+eligibility and zero seasonal placements. Profile window snapshots are FK-checked;
+registration is stamped by a narrow owner trigger pinned to its owning schema
+before `pg_temp`, with PUBLIC execution revoked. Runtime roles need metadata
+reads and the game needs INSERT/SELECT on immutable allocation mappings. Only the
+operator can close, archive/reset or consume the season sequence. Apply the
+reviewed schema10 grants together with the paired runtime; the current prepared
+role patch still requires owner approval.
+
+`ranked-season show` is read-only. The explicit close command requires expected
+identity, `--apply`, a separate authorized operator connection, an expired window
+and no unsettled original Ranked intent. Drain all hosts/reservations first and
+refresh lobby caches afterward. The database operation archives/badges/resets and
+opens a new window atomically; retry returns its original receipt. See the
+[season plan](../../../docs/plans/ranked-seasons-2026-11-06.md). Source/runtime
+requires schema10; old workers must drain before migration, and an old schema9
+binary is not a compatible rollback afterward. No production change is implied
+by the local test fixtures.

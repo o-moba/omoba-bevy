@@ -32,6 +32,7 @@
   "queue.ready.decline": "Decline",
   "queue.failed.play_cooldown": "Matchmaking is temporarily unavailable after leaving or going AFK.",
   "queue.play_cooldown.remaining": "Leaving / AFK cooldown: {seconds}s remaining.",
+  "queue.failed.ranked_season_ended": "The Ranked season has ended. Casual games are available; the next season is coming soon.",
   "queue.failed.ranked_locked": "Ranked opens after 10 completed public matches. Play Casual PvP or vs Bots to make progress.",
   "queue.ranked_locked.progress": "Complete {total} public matches to unlock Ranked ({played}/{total}). Remakes, interruptions and your own leaves/AFK do not count.",
   "queue.failed.server_draining": "The server is preparing an update. New matches will resume soon; search retries automatically…"

@@ -247,6 +247,7 @@ fn occupied_lobby(now: Instant) -> (Lobby, std::path::PathBuf, String) {
     let directory = pool.test_directory().to_owned();
     let id = pool
         .allocate(Manifest {
+            ranked_season_id: None,
             version: 1,
             allocation_id: "a".repeat(32),
             endpoint: String::new(),
