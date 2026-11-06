@@ -34,7 +34,11 @@ pub(super) fn configure(app: &mut App) {
         Update,
         (actions, render, render_prompt, update_labels)
             .chain()
-            .after(UiSet::Dispatch),
+            .after(UiSet::Dispatch)
+            .after(super::PauseMenuSet::Visuals)
+            // Flush removed prompt/menu children before the kit queues their
+            // slab decoration. Opening another modal may replace them now.
+            .before(UiSet::Paint),
     );
 }
 pub(super) fn spawn(parent: &mut ChildSpawnerCommands) {

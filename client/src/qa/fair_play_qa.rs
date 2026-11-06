@@ -86,6 +86,16 @@ impl Scene {
     fn restart(self) -> bool {
         matches!(self, Self::PartyRestart | Self::SearchRestart)
     }
+    fn root(self) -> &'static str {
+        match self {
+            Self::Taken => "DraftScreen",
+            Self::PartyRestart => "HomeScreen",
+            Self::SearchRestart => "SearchingScreen",
+            Self::RemakeMenu => "PauseMenuPanel",
+            Self::RemakePrompt | Self::SurrenderPrompt => "MatchVotePrompt",
+            Self::RemadeResult | Self::SurrenderResult => "PostMatchScreen",
+        }
+    }
 }
 
 pub(crate) struct FairPlayQaPlugin;
@@ -288,7 +298,26 @@ fn prepare(
         entry.open = false;
     }
     if !qa.seeded {
+        // Re-enter even an initial Home/InMatch state so its OnEnter view and
+        // result latch run, rather than accepting an empty backdrop.
+        if *screen.get() == qa.scene.screen() {
+            next.set(if qa.scene.screen() == AppScreen::Home {
+                AppScreen::Card
+            } else {
+                AppScreen::Home
+            });
+            return;
+        }
         if matches!(qa.scene, Scene::RemadeResult | Scene::SurrenderResult) {
+            if players.is_empty() {
+                commands.spawn((
+                    crate::player::Player,
+                    crate::team::Team::Green,
+                    crate::net::NetworkAvatar(Some("agnes".into())),
+                    Name::new("FairPlayQaPlayer"),
+                ));
+                return;
+            }
             let Ok(mut team) = players.single_mut() else {
                 return;
             };
@@ -370,6 +399,9 @@ fn capture(
     )>,
     texts: Query<(&Text, &ComputedNode, &InheritedVisibility)>,
     toasts: Query<&Node, With<crate::ui::widgets::surfaces::ToastAge>>,
+    roots: Query<(super::QaName, &ComputedNode, &InheritedVisibility)>,
+    modals: Option<Res<crate::ui::ModalStack>>,
+    help: Res<crate::help_overlay::HelpOverlayVisible>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.finished {
@@ -418,6 +450,15 @@ fn capture(
     if !qa.seeded
         || *screen.get() != qa.scene.screen()
         || qa.frames < if qa.scene.restart() { 8 } else { 12 }
+    {
+        return;
+    }
+    let allowed_modal = (qa.scene == Scene::RemakeMenu).then_some(crate::ui::ModalId::Pause);
+    if help.0
+        || modals.as_ref().and_then(|m| m.top()) != allowed_modal
+        || !roots.iter().any(|(name, node, visible)| {
+            name.as_str() == qa.scene.root() && node.size().min_element() > 0. && visible.get()
+        })
     {
         return;
     }

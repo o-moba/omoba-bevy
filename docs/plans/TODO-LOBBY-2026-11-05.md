@@ -1441,3 +1441,19 @@ remaining P5/P6 and all scale/operations/release requirements stay open.
 Directory2a45600c CI42201671041 has now completed successfully (all7 jobs),
 separate from current f2214c66 CI42206582628 and this newer uncommitted fix.
 No production deployment, dependencies, workflow or owner preferences changed.
+
+
+### Vote replacement regression/fix checkpoint — verification in progress
+
+Production vote rendering now follows current pause navigation and explicitly
+flushes before UiSet::Paint. This removes the overlap with queued slab decoration
+of replaced prompt/menu children. The new actual decorator/modal-cycle regression
+checks immediate skins,20 Help modal open/close cycles, removed entities and a
+subsequent correctly scoped vote request. Strict RU client/lib/test-target clippy
+PASS (64.24s); filtered execution is still compiling on cacheA, native v4 on B.
+No passing execution or repaired native-guide result is claimed yet.
+
+Focused QA additionally requires an actual visible named root and appropriate
+modal/help state; initial states are re-entered, and result scenarios create the
+same synthetic local Player that the existing Result QA uses. No new dependency,
+protocol, workflow or production action. All remaining gates retain their scope.

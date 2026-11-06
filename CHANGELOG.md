@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Flush vote/menu replacement after current pause navigation and before UI-kit
+  decoration, so opening a modal cannot leave queued decoration targeting removed
+  vote buttons. Add a real decorator/modal-cycle regression with same-frame skins
+  and a preserved vote request. Strict RU client/test-target clippy PASS; targeted
+  test execution and native recapture are in progress, not final crash acceptance.
+- Strengthen focused captures with an actual visible screen root and clear modal/
+  help state; re-enter the screen and create the result fixture's local player.
+  This prevents accepting a backdrop/covered menu or waiting for an absent player.
+
 - Verify/preserve native C7 Taken feedback, Search restart notice and returning-
   user remake/surrender menu/prompts; exact PNGs and hashes in the fair-play
   evidence pack. C7 software criterion is complete. Reject the guide-obscured

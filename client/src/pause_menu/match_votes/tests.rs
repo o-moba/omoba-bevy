@@ -53,6 +53,64 @@ fn app() -> App {
         .match_vote = Some(fixture());
     app
 }
+
+#[test]
+fn modal_replacement_removes_vote_controls_before_kit_decoration() {
+    if crate::i18n::testing::isolated(
+        "pause_menu::match_votes::tests::modal_replacement_removes_vote_controls_before_kit_decoration",
+    ) {
+        return;
+    }
+    let mut app = app();
+    app.init_resource::<crate::ui::ModalStack>()
+        .add_systems(Update, crate::ui::widgets::paint_slabs.in_set(UiSet::Paint));
+    // Exercise the real decorator's deferred entity commands, which the
+    // earlier prompt-only tests omitted. Repeated modal opening also changes
+    // the prompt identity while a button's skin is due to update.
+    for _ in 0..20 {
+        app.update();
+        let yes = harness::find(app.world_mut(), "MatchVotePromptYes").unwrap();
+        assert!(
+            app.world()
+                .get::<crate::ui::kit_assets::KitImage>(yes)
+                .is_some(),
+            "a newly shown prompt must receive its skin in the same frame"
+        );
+        app.world_mut().entity_mut(yes).insert(Interaction::Hovered);
+        app.world_mut()
+            .resource_mut::<crate::ui::ModalStack>()
+            .push(crate::ui::ModalId::Help);
+        app.update();
+        assert!(harness::find(app.world_mut(), "MatchVotePromptYes").is_none());
+        assert!(app.world().get_entity(yes).is_err());
+        app.world_mut()
+            .resource_mut::<crate::ui::ModalStack>()
+            .pop(crate::ui::ModalId::Help);
+    }
+    app.update();
+    let yes = harness::find(app.world_mut(), "MatchVotePromptYes").unwrap();
+    harness::press(app.world_mut(), "MatchVotePromptYes");
+    app.update();
+    assert!(
+        app.world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .any(|c| matches!(
+                c,
+                NetworkCommand::MatchVote {
+                    server_epoch: 11,
+                    match_id: 7,
+                    generation: 8,
+                    action: Action::Yes,
+                    ..
+                }
+            ))
+    );
+    assert_eq!(
+        harness::find(app.world_mut(), "MatchVotePromptYes"),
+        Some(yes)
+    );
+}
 #[test]
 fn active_vote_reaches_closed_menu_and_real_press_keeps_original_round_and_generation() {
     if crate::i18n::testing::isolated(
