@@ -30,3 +30,23 @@ stages on2a45600c/run42201671041. Its downloaded artifact matched the GitHub dig
 all-ten rating/XP/history/lifetime/season updates for the546050ms standard-map
 Ranked match were independently recalculated. This predates the new modal fix.
 Debug viewport captures here are not performance benchmarks.
+
+
+Latest v6/v7 attempts remain rejected; [sanitized failure summary](rejected-v6-v7-summary.json).
+The default-window remake prompt had expected text/44px controls but black
+readback while Mac was locked. Background window capture therefore cannot
+replace actual pixels. The result attempt additionally exposed a contradictory
+QA fixture: a Green Victory snapshot plus a winner-less Remade receipt. The
+production latch correctly rejected the conflicting receipt. The fixture now
+keeps Running until its terminal remake receipt; production acceptance rules
+remain intact and the existing victory-conflict test now includes Remade.
+All18 post-match cases and strict client lib/test-target clippy PASS. New game
+pixels require a new build; the earlier ready binary does not contain this QA fix.
+
+A separate no-window Bevy render-to-texture diagnostic produced a readable
+852x393 frame in12.29s; Mac reported locked after capture. It uses the existing
+cacheB renderer without a new dependency/Cargo cache, desktop capture or OS lock/
+preference changes. It only establishes feasibility: application integration and
+actual fair-play/game frames still need verification. Its own source/binary/PNG/
+report are retained under `.agent/codex-ranked-readiness/offscreen-probe-v1*`.
+This diagnostic is not added to the accepted game-image manifest.

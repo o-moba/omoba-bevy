@@ -3029,7 +3029,11 @@ mod tests {
             ..default()
         };
         assert!(latch.accepts_result(&receipt));
-        for outcome in [MatchOutcome::Abandoned, MatchOutcome::Interrupted] {
+        for outcome in [
+            MatchOutcome::Abandoned,
+            MatchOutcome::Interrupted,
+            MatchOutcome::Remade,
+        ] {
             let late = MatchResult {
                 outcome,
                 winner: None,

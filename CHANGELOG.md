@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Correct the remake presentation fixture to avoid supplying a contradictory
+  Victory snapshot with a winner-less Remade receipt. Keep production outcome
+  fencing intact; extend its conflict test to Remade. All18 post-match cases and
+  strict client test-target clippy PASS. Preserve rejected result/black-window
+  attempts; a separate no-window texture-render diagnostic works, but actual
+  game integration/build/pixel acceptance remains pending.
+
 - Add independent native directory signature/authority checks and a durable
   exact-byte cache. Expired history still fences rollback and changed payloads
   reusing a sequence; corrupt state and backwards clocks fail closed. A stable

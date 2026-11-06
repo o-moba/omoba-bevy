@@ -1541,3 +1541,24 @@ or new dependency was introduced. No live key or UDP player route was activated.
 Runtime pin baking/fetch/cache/pinned fallback/selection, maintenance/update UI,
 party/Resume/cross-host discipline, actual multi-host/WAN and all remaining gates
 stay required;#12 remains partial. Full current-source CI is still required.
+
+
+### Fair-play fixture correction and no-window render feasibility
+
+v6 remade result was rejected: it still inherited the saved-win fixture's Green
+Victory while its receipt was Remade/winner-less. Production PostMatch correctly
+kept the scoped victory. The QA fixture now uses Running until the terminal
+remake receipt; existing victory-conflict coverage includes Remade. All18
+post-match cases and strict client lib/test-target clippy PASS. A new native
+build is required before corrected result pixels can be accepted.
+
+v7 locked-window prompt was also rejected (44px geometry/text present but black
+readback). No new accepted game image exists. An independent native no-window
+render-to-texture diagnostic succeeded in12.29s with a visually inspected
+852x393 frame while Mac reported locked after capture. It changes no lock/OS
+preferences, reads no desktop and adds no dependency/cargo cache. Integration
+into actual opt-in QA and game-screen acceptance remains required; this is not
+C5 completion. [Failure/source summary](../evidence/fair-play-2026-11-06/rejected-v6-v7-summary.json).
+The earlier full e85875ba CI is now all7 jobs green; latest directory/runtime
+work still needs its own full current-source CI. All remaining requirements
+retain their original scope.

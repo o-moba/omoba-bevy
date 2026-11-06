@@ -1209,3 +1209,15 @@ immutability, backwards-clock rejection and cross-process atomic cache storage
 are implemented. Four anonymous transport cases also PASS. [Proof](../evidence/fair-play-2026-11-06/directory-native-summary.json).
 These APIs are not wired to live UDP admission yet; pin configuration, lifecycle,
 fallback/policy UI, party/Resume and actual multi-host acceptance remain required.
+
+
+## 2026-11-06 — Rejected UI attempts and remake fixture
+
+A locked-window prompt frame remained black and was rejected. The result
+attempt exposed a separate contradictory QA fixture (Victory plus Remade without
+winner), correctly rejected by production outcome fencing. Corrected the
+fixture;18 actual post-match cases and strict test-target clippy PASS. Actual
+fixed pixels still require a new native build. A separate no-window Bevy render
+probe produced a readable852x393 frame, so opt-in offscreen integration can
+remove the repeated desktop-unlock dependency. That prototype is not game UI
+acceptance and C5 remains partial.

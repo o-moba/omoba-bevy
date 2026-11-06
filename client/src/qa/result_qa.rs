@@ -182,6 +182,10 @@ pub(super) fn fair_play_fixture(
     let result = career.view.last_result.as_mut().expect("saved fixture");
     result.end_reason = Some(if remade { "remake" } else { "surrender" }.into());
     if remade {
+        // A remake arrives as a terminal career receipt without a base victory.
+        // PostMatch deliberately refuses a winner-less receipt after latching
+        // Victory, so the saved-win fixture must not keep that world outcome.
+        game.state = GameState::Running;
         result.outcome = MatchOutcome::Remade;
         result.winner = None;
         result.rated = false;
