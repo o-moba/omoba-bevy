@@ -1273,7 +1273,7 @@ fn spawn_home_identity(
                 left: Val::Px(63.0 * unit),
                 top: Val::Px(10.0 * unit),
                 width: Val::Px(300.0 * unit),
-                height: Val::Px(56.0 * unit),
+                height: Val::Px(64.0 * unit),
                 padding: UiRect::axes(Val::Px(space::S8 * unit), Val::Px(space::S4 * unit)),
                 column_gap: Val::Px(space::S8 * unit),
                 align_items: AlignItems::Center,
@@ -1313,10 +1313,22 @@ fn spawn_home_identity(
             justify_content: JustifyContent::Center,
             min_width: Val::Px(0.0),
             flex_grow: 1.0,
+            overflow: Overflow::clip(),
             ..default()
         })
         .with_children(|text| {
-            text.spawn(widgets::heading(name, 16.0));
+            text.spawn((
+                widgets::heading(
+                    super::lobby::plate_name(name, 212.0 * unit, theme::metric::PHONE_HEADING_MIN),
+                    16.0,
+                ),
+                TextLayout::new(Justify::Left, bevy::text::LineBreak::NoWrap),
+                Node {
+                    max_width: Val::Percent(100.0),
+                    ..default()
+                },
+                Name::new("HomeNickname"),
+            ));
             text.spawn(widgets::label(
                 &format!(
                     "{} · {}",

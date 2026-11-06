@@ -745,7 +745,7 @@ fn spawn_nameplates(
 
 /// Conservative glyph budget keeps the beginning and a visible ellipsis.
 /// Full names remain in the scrolling member list. CJK/wide glyphs use a full em.
-fn plate_name(name: &str, width: f32, size: f32) -> String {
+pub(super) fn plate_name(name: &str, width: f32, size: f32) -> String {
     let weight = |c: char| {
         if c as u32 >= 0x2e80 {
             1.05

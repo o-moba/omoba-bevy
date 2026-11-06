@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Bound mobile Home nicknames to one line and reserve enough identity-chip height
+  for the rating. Fit Draft identity/class/role/status lines to their own slots
+  using the actual readable phone font minimum. RU strict clippy PASS; native
+  long-name image acceptance remains pending, so UI-1/UI-2 stay open.
+
 - Verify real native public Home→search→15s ready-check→single Draft for solo
   and a two-client party created by actual UI invitation. All10 human seats join
   one worker, and the party stays on one team. Row65 functional acceptance and

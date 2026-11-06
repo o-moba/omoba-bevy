@@ -224,8 +224,23 @@ pub(crate) fn spawn_team_stage(
                                         if compact { 9.0 } else { 10.0 },
                                     ),
                                 ] {
+                                    let size: f32 = size;
+                                    // Menu typography raises phone labels to its
+                                    // readable minimum. Budget at that actual
+                                    // size, not the smaller design size, so a
+                                    // centred line never loses its beginning.
+                                    let measured_size = if compact {
+                                        size.max(theme::metric::PHONE_LABEL_MIN)
+                                    } else {
+                                        size
+                                    };
+                                    let fitted = super::super::lobby::plate_name(
+                                        text,
+                                        plate_width,
+                                        measured_size,
+                                    );
                                     plate.spawn((
-                                        widgets::label(text, size, ink),
+                                        widgets::label(fitted, size, ink),
                                         TextLayout::justify(Justify::Center)
                                             .with_linebreak(LineBreak::NoWrap),
                                         Pickable::IGNORE,
