@@ -589,8 +589,15 @@ async function gracefulTermination(original) {
 async function readyCheckLifecycle() {
  const workers = () => fs.readdirSync(path.join(root,'matches'),{withFileTypes:true}).filter(e=>e.isDirectory()&&fs.existsSync(path.join(root,'matches',e.name,'manifest.json'))).length;
  const before=workers();
- const roster=Array.from({length:10},(_,i)=>new Client(5000+i,lobbyPort,null,{preference:'humans_only',autoHandoff:false,autoReady:i!==9}));
+ const preparedAt=performance.now();
+ const roster=Array.from({length:10},(_,i)=>new Client(5000+i,lobbyPort,null,{preference:'humans_only',autoQueue:false,autoHandoff:false,autoReady:i!==9}));
  all.push(...roster); const missing=roster[9];
+ // Isolated fixture writes are setup, not player consent. Do not start the
+ // gameplay deadline while ten serial PostgreSQL qualification jobs are pending.
+ await pumpUntil('ready-check roster qualified before Search',()=>roster.every(c=>c.auth&&(c.profile?.completed_public_matches??0)>=10),90000);
+ assert(roster.every(c=>!['waiting','ready_check','assigned'].includes(c.career?.match_service?.state)),'fixture setup started Search');
+ const qualificationSetupSeconds=(performance.now()-preparedAt)/1000;
+ for(const c of roster)c.autoQueue=true;
  await pumpUntil('nine explicit confirmations',()=>roster.every(c=>c.career?.match_service?.state==='ready_check')&&roster[0].career.match_service.accepted_count===9,20000);
  const check=roster[0].career.match_service.check_id;
  assert(roster.every(c=>c.career.match_service.check_id===check));
@@ -601,14 +608,16 @@ async function readyCheckLifecycle() {
  missing.autoQueue=false;
  missing.account({action:'ready_match',request_id:missing.queueId,check_id:check,accepted:true});
  await pumpFor(500); assert.equal(workers(),before,'late accept revived an expired check');
- const replacement=new Client(5010,lobbyPort,null,{preference:'humans_only',autoHandoff:false});all.push(replacement);
+ const replacement=new Client(5010,lobbyPort,null,{preference:'humans_only',autoQueue:false,autoHandoff:false});all.push(replacement);
+ await pumpUntil('ready-check replacement qualified before Search',()=>replacement.auth&&(replacement.profile?.completed_public_matches??0)>=10,90000);
+ replacement.autoQueue=true;
  const accepted=[...roster.slice(0,9),replacement];
  await pumpUntil('replacement unanimously accepts a new roster',()=>accepted.every(c=>c.career?.match_service?.state==='assigned'),25000);
  const allocation=accepted[0].career.match_service.allocation;
  assert(accepted.every(c=>c.career.match_service.allocation.allocation_id===allocation.allocation_id));
  assert.equal(workers(),before+1,'one unanimous roster must start exactly one worker');
  for(const c of [...roster,replacement]){c.autoQueue=false;c.close();}
- report.ready_check={status:'PASS',window_secs:15,accepted_before_timeout:9,worker_count_before_unanimity:0,fifo_age_preserved:true,late_accept_rejected:true,replacement_allocation:allocation.allocation_id};
+ report.ready_check={status:'PASS',qualification_setup_seconds:qualificationSetupSeconds,fixture_setup_before_search:true,window_secs:15,accepted_before_timeout:9,worker_count_before_unanimity:0,fifo_age_preserved:true,late_accept_rejected:true,replacement_allocation:allocation.allocation_id};
  report.scenarios.push('unanimous_15s_ready_timeout_fifo_replacement');
 }
 async function lifecycle(original) {

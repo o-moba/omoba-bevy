@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Prepare ready-check probe qualification fixtures before issuing Search, including
+  the replacement player. Bound setup separately while preserving the real15s
+  consent window and all no-worker/FIFO/late-accept assertions. Real signed local
+  ready-check scenario and queue policy/boundary checks PASS; full public rerun
+  remains required. This changes test setup only, not production queue deadlines.
+
 - Add native seasonal tier/placement badges on own, visited and friend profiles;
   Home shows the calibrated tier or current-season calibration. Profile windows
   and earned historical badges stay distinct from lifetime totals. Scoped,

@@ -1149,3 +1149,21 @@ its strict15s timeout, nine accepts, no premature worker, FIFO preservation,
 late-accept rejection and replacement allocation PASS. This harness fix is the
 next separate checkpoint. Complete public/core+new-native CI and visual gates
 remain required. Overall68-finding status counts remain unchanged.
+
+
+### P6 verification repair — prepare ready-check fixtures before Search
+
+The local full public v2 failure was before any ready check: serial disposable
+PostgreSQL qualification was counted inside the20s wait for nine accepts. Move
+initial ten-player and replacement preparation behind a bounded90s setup phase,
+verify no initial Search began, then enable Search. The actual game retains its
+15s consent window; no worker before unanimity, nine-accept timeout, preserved
+FIFO age, late-accept refusal and exactly one replacement allocation are unchanged.
+
+Targeted signed local ready scenario PASS:
+.agent/codex-ranked-readiness/p6-ready-setup-v3/report.json.
+Initial qualification setup15.598s; replacement allocation
+c40dd273b659d468ef54bcdcd917569b. JS syntax, queue policy and seven isolated
+queue-only boundary cases PASS. Server/API binaries remain core236d1c13; native
+13abace6 changes are separate and not proved by this wire scenario. Public v2
+remains failed; complete fresh public verification must pass after this repair.
