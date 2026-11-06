@@ -32,6 +32,7 @@ mod help_qa;
 mod map_qa;
 mod navigation_qa;
 mod offline_qa;
+pub(crate) mod offscreen;
 mod ranked_fixture;
 mod record_qa;
 mod result_qa;
@@ -57,6 +58,7 @@ pub(crate) struct QaPlugins;
 impl PluginGroup for QaPlugins {
     fn build(self) -> PluginGroupBuilder {
         let group = PluginGroupBuilder::start::<Self>()
+            .add(offscreen::OffscreenQaPlugin)
             .add(frontend_qa::FrontendQaPlugin)
             .add(visual_qa::VisualQaPlugin)
             .add(social_qa::SocialQaPlugin)

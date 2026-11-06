@@ -1575,3 +1575,29 @@ host values are unchanged and the scanner/translation tables are untouched.
 The exact unchanged compiled source-scan test passes against current sources
 (.agent/codex-ranked-readiness/p7-directory-i18n-source-v1.log); full corrected
 branch CI is still required. No failed job is reported as a green full gate.
+
+
+### Native rendering without an OS window — actual game frames verified
+
+Explicit desktop `OMOBA_QA_OFFSCREEN=1` disables Winit before DefaultPlugins,
+supplies a virtual primary window and redirects the production main camera/UI
+to a screenshot image. Existing avatar/party preview image targets are retained;
+Creator Loop uses the selected virtual dimensions. Normal unflagged launches
+retain their window path. Only the selected fair-play/Creator Loop harness can
+activate it; phones refuse the mode. No OS focus/unlock/power settings changed.
+
+Strict RU client lib/test-target clippy PASS74.24s; native build PASS981.32s,
+binaryd8d0bf61… ; minimum root32.71GiB. Two actual opt-in/camera regressions PASS,
+including late cameras, distinct preserved preview target and DefaultUiCamera.
+All5 map cases/64-screen registry checks PASS. Initialv1/v2 compile negatives
+(RenderTarget equality then fallible SystemState API) were corrected before the
+single successful native build; no failed run is counted as pass.
+
+Fresh real production-rendered RU852×393 fixture frames are inspected: coherent
+Remade/no ordinary reward/zero XP; played surrender result; remake entry and
+surrender availability; both44px vote prompts; actual first-match guide followed
+by a real Creator Loop dismiss and the restored remake prompt, without the old
+entity-despawn panic. These are synthetic presentation proof, not real admission,
+physical phones or performance. Current full corrected branch CI remains required.
+The party-restart/Home attempt still has no underlying Home content and is
+rejected;#45 remains partial. No empty backdrop or false green was accepted.

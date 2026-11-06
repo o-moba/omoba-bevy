@@ -159,26 +159,27 @@ pub fn main() {
         passport::initialize_store();
         passport::poll_account();
     }
-    app.add_plugins(
-        DefaultPlugins
-            .set(AssetPlugin {
-                file_path: asset_root.to_string_lossy().into_owned(),
-                ..default()
-            })
-            .set(platform::window_plugin()),
-    )
-    // The render backend is chosen once, before any plugin builds. After
-    // `DefaultPlugins` so an invalid value's warning reaches the log.
-    .insert_resource(PlayerVisualMode::from_environment())
-    // The language is resolved before any plugin spawns text.
-    .add_plugins(i18n::I18nPlugin::from_environment())
-    .add_plugins((
-        NetPlugins,
-        UiPlugins,
-        GameplayPlugins,
-        DebugPlugins,
-        PresentationPlugins,
-    ));
+    let default_plugins = DefaultPlugins
+        .set(AssetPlugin {
+            file_path: asset_root.to_string_lossy().into_owned(),
+            ..default()
+        })
+        .set(platform::window_plugin());
+    #[cfg(feature = "qa")]
+    let default_plugins = qa::offscreen::configure(&mut app, default_plugins);
+    app.add_plugins(default_plugins)
+        // The render backend is chosen once, before any plugin builds. After
+        // `DefaultPlugins` so an invalid value's warning reaches the log.
+        .insert_resource(PlayerVisualMode::from_environment())
+        // The language is resolved before any plugin spawns text.
+        .add_plugins(i18n::I18nPlugin::from_environment())
+        .add_plugins((
+            NetPlugins,
+            UiPlugins,
+            GameplayPlugins,
+            DebugPlugins,
+            PresentationPlugins,
+        ));
     #[cfg(feature = "qa")]
     app.add_plugins(qa::QaPlugins);
     if let bevy::app::AppExit::Error(code) = app.run() {

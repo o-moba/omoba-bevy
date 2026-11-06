@@ -51,7 +51,7 @@ use std::{
 
 use bevy::{
     prelude::*,
-    render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
+    render::view::screenshot::{ScreenshotCaptured, save_to_disk},
     window::{PrimaryWindow, WindowPosition},
 };
 use serde::Deserialize;
@@ -286,6 +286,7 @@ struct Armed {
 
 #[derive(Resource)]
 struct Loop {
+    shot_target: Option<Handle<Image>>,
     dir: PathBuf,
     started: Instant,
     frame: u64,
@@ -339,7 +340,12 @@ impl Plugin for CreatorLoopQaPlugin {
             return;
         };
         let _ = std::fs::create_dir_all(&dir);
+        let shot_target = app
+            .world()
+            .get_resource::<super::offscreen::Surface>()
+            .map(|surface| surface.image.clone());
         app.insert_resource(Loop {
+            shot_target,
             dir,
             started: Instant::now(),
             frame: 0,
@@ -396,7 +402,9 @@ fn keep_window(
     }
     for mut window in &mut windows {
         window.resolution.set_scale_factor_override(Some(1.0));
-        if window.physical_width() != 1280 || window.physical_height() != 720 {
+        if lp.shot_target.is_none()
+            && (window.physical_width() != 1280 || window.physical_height() != 720)
+        {
             window.resolution.set_physical_resolution(1280, 720);
         }
         if !lp.placed {
@@ -836,7 +844,10 @@ fn spawn_shot(commands: &mut Commands, lp: &Loop, n: usize, file: &str, data: se
     let path = lp.dir.join(file);
     let _ = std::fs::remove_file(&path);
     commands
-        .spawn((Screenshot::primary_window(), LoopShot { n, data }))
+        .spawn((
+            super::offscreen::screenshot(lp.shot_target.as_ref()),
+            LoopShot { n, data },
+        ))
         .observe(save_to_disk(path));
 }
 

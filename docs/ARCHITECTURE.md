@@ -82,6 +82,21 @@ no live server. This is presentation proof, separate from real public gameplay,
 account/consent, keep-awake/haptics or physical-phone acceptance. Select one
 language/viewport and only the changed cases; this does not enable a full matrix.
 
+Desktop fair-play and Creator Loop QA may additionally set
+`OMOBA_QA_OFFSCREEN=1`. Before DefaultPlugins build, it disables Winit/OS-window
+creation; its first QA plugin supplies a virtual primary window at the selected
+`OMOBA_QA_WIDTH`/`OMOBA_QA_HEIGHT` (default852×393, scale1), and a60Hz schedule
+runner. Production main camera/UI render into an image; avatar/party preview
+image targets remain separate. Their existing screenshot commands capture that
+image and retain all text/root/modal/geometry/color-readback gates. Creator Loop
+keeps the selected virtual dimensions instead of imposing its1280×720 desktop
+window. No desktop pixels, focus or OS lock/power settings are read/changed by
+this mode. It needs a supported harness and fails on mobile or an invalid flag;
+a normal run without the flag follows the same DefaultPlugins/window path.
+It is viewport/rendering evidence, not physical-device, OS-window/input,
+keep-awake/haptic or real-match evidence. An opt-in fair-play fixture remains
+synthetic even though it uses production rendering.
+
 QA harnesses live in `client/src/qa/` behind the `qa` cargo feature. It is on
 by default, so `cargo run -p client`, packaging, the mobile builds and the
 capture scripts compile them as before. Each harness is dormant unless its

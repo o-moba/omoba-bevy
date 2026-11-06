@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add explicit desktop QA rendering to an image without an OS window. Retain
+  production main-camera/UI routing and virtual window metrics; preserve preview
+  image targets and existing capture gates. RU strict clippy/build,2 camera/opt-in
+  regressions and5 screen-map checks PASS. Actual locked-Mac RU852×393 remake,
+  surrender, vote and guide-dismiss frames are inspected; failed Home fixture
+  remains rejected. Normal launch and mobile/physical acceptance stay separate.
+
 - Classify native directory DNS fixtures as raw protocol literals under the
   existing localization-scanner convention. Fixes the1ab44e5a CI key-shaped
   literal failure without changing host values, translations or the guard.

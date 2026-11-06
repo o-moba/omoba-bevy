@@ -9,7 +9,7 @@ use crate::{
 use bevy::{
     app::AppExit,
     prelude::*,
-    render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
+    render::view::screenshot::{ScreenshotCaptured, save_to_disk},
     window::PrimaryWindow,
 };
 use shared::{
@@ -114,6 +114,10 @@ impl Plugin for FairPlayQaPlugin {
                 .unwrap_or(default)
                 .clamp(200, 3840)
         };
+        let target = app
+            .world()
+            .get_resource::<super::offscreen::Surface>()
+            .map(|surface| surface.image.clone());
         app.insert_resource(Capture {
             directory: PathBuf::from(output),
             scene,
@@ -130,6 +134,7 @@ impl Plugin for FairPlayQaPlugin {
             color_pixels: false,
             report: serde_json::Value::Null,
             finished: false,
+            target,
         })
         .insert_resource(ScreenDriverPaused(true))
         .insert_resource(bevy::winit::WinitSettings::continuous())
@@ -162,6 +167,7 @@ struct Capture {
     color_pixels: bool,
     report: serde_json::Value,
     finished: bool,
+    target: Option<Handle<Image>>,
 }
 fn watermark(mut commands: Commands) {
     commands.spawn((
@@ -502,13 +508,19 @@ fn capture(
         controls.push(serde_json::json!({"id":wanted,"size":size.to_array(),"min":min.to_array(),"fits":fit,"disabled":disabled}));
     }
     qa.report = serde_json::json!({"scene":format!("{:?}",qa.scene),"screen":format!("{:?}",screen.get()),"viewport":qa.pixels.to_array(),"locale":crate::i18n::active().code(),"expected_visible_text":expected,"controls":controls,"synthetic_state":true,"real_admission_or_gameplay":false,"physical_device":false,"method":"production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures"});
+    qa.report["render_surface"] = if qa.target.is_some() {
+        "offscreen image with virtual window metrics"
+    } else {
+        "OS window"
+    }
+    .into();
     if std::fs::create_dir_all(&qa.directory).is_err() {
         qa.finished = true;
         exit.write(AppExit::error());
         return;
     }
     commands
-        .spawn(Screenshot::primary_window())
+        .spawn(super::offscreen::screenshot(qa.target.as_ref()))
         .observe(save_to_disk(qa.directory.join("fair-play.png")))
         .observe(readback);
     qa.in_flight = true;
