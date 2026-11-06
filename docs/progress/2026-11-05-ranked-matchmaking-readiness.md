@@ -1189,3 +1189,12 @@ before startup; no live signing identity, settings or deployment changed.
 #12 stays partial until native verification/cache/routing and all multi-host
 conditions pass. The e85875ba modal regression now executed successfully in CI
 (1579 client cases PASS,1 ignored); actual fixed native pixels remain pending.
+
+
+## 2026-11-06 — Native anonymous directory transport
+
+Four real loopback HTTP transport cases and strict RU passport all-target clippy
+PASS. Fixed regional portal URL, no ambient account material, bounded streaming,
+redirect/error boundaries and5s total/3s connect deadlines are implemented.
+This returns untrusted bytes only; native pin/cache/routing integration remains
+in progress and no live key/service/player route was activated.

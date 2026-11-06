@@ -1508,3 +1508,18 @@ reply again reports locked, so no new client/image was launched or accepted.
 C5/#45/result pixels remain pending; no rebuild is needed for them. Original
 finding counts stay59 done/7 partial/1 open/1 mostly refuted. No remaining
 P5/P6/P7/P8/P9 gate was waived, and no live deployment was performed.
+
+
+### Native anonymous directory transport — verified, not activated
+
+`passport/src/game_directory.rs` derives its endpoint from the exact account
+region/contour, with no runtime service override, browser/session material or
+cookie jar. Redirect/non-success/non-JSON/interrupted responses are rejected;
+streaming is capped at64KiB with5s total/3s connect deadlines. Four actual local
+TCP/HTTP cases PASS: fixed origins/negative URL inputs, exact Unicode/u64 wire
+and absent account headers, redirects/errors/HTML/truncation, and declared/
+missing/chunked oversize bodies plus the exact64KiB limit. Strict RU passport
+all-target clippy PASS. Reports:p7-directory-transport-v1-* under the task proof
+directory. This fetch returns untrusted bytes; native signature/cache/selection,
+pinned fallback/ownership and full P7 requirements remain mandatory. #12 stays
+partial; no URL, key or player routing was activated.

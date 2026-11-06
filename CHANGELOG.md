@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add native anonymous game-directory transport using the account region's
+  fixed HTTPS portal, no ambient service override/session/cookies, no redirects,
+  bounded JSON response streaming and total/connect deadlines. All4 real local
+  HTTP cases and strict RU passport all-target clippy PASS. Independent native
+  pin/cache/selection integration is still required before player activation.
+
 - Add opt-in anonymous signed-directory HTTP delivery in Account API and the
   regional portal. Verify bounded regular signed files against the configured
   public pin/build scope; forward exact bytes without browser account material,
