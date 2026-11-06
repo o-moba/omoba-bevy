@@ -250,6 +250,7 @@ fn receipt(outcome: MatchOutcome, rated: bool) -> MatchResult {
             participant
         })
         .collect();
+    super::ranked_fixture::apply_result(&mut result);
     result
 }
 
@@ -273,6 +274,9 @@ fn apply_fixture(
         progression_xp: 2450,
         ..ProfileSummary::new("qa-profile".into(), "Guest".into()) // i18n-allow: fixture
     });
+    if let Some(profile) = career.view.profile.as_mut() {
+        super::ranked_fixture::apply_profile(profile);
+    }
     career.public_profile_id = Some("qa-profile".into());
     career.view.last_result = None;
     match fixture {

@@ -290,6 +290,7 @@ fn seed_home_fixture(mut career: ResMut<crate::career::CareerClient>) {
     profile.wins = 10;
     profile.losses = 9;
     profile.progression_xp = 1900;
+    super::ranked_fixture::apply_profile(&mut profile);
     career.view.profile = Some(profile);
     career.view.storage_enabled = true;
     career.view.error = None;

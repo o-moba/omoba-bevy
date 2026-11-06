@@ -5,6 +5,19 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add opt-in seasonal data to the existing native QA paths and restrict seasonal
+  career capture to the three changed profile/friend views. Six RU852x393 native
+  pixel checks PASS: calibrated and reset Home, own/visited/friend badges and
+  promotion. Demotion is being recaptured with a coherent personal-leave penalty.
+  The driver uses no live server for Result QA, as that fixture requires. Repair
+  the stale Home expectation: a calibrated1199 profile shows Silver. Strict RU
+  native test-target clippy PASS; current final native CI remains required.
+- Independently verify schema10 core236d1c13 full CI42168782869:all7 jobs and18
+  public stages PASS. Actual Rankedf7a85df6eadb8fd9c071bf1a6bdbea1f (454307ms),
+  exact all-ten Elo/XP/history/current-season counters and zeroAFK/disconnection.
+  Real tenth-public/noVK and early crash PASS. A fresh local full PostgreSQL run
+  passes669 cases, and current public v3 passes all18 stages after setup repair.
+
 - Prepare ready-check probe qualification fixtures before issuing Search, including
   the replacement player. Bound setup separately while preserving the real15s
   consent window and all no-worker/FIFO/late-accept assertions. Real signed local

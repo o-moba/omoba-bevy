@@ -99,20 +99,30 @@ lifetime fields but uses seasonal calibration/tie-breaks and hides old badges.
 The first fresh full schema10 run stopped on a device-test startup503; unchanged
 focused migration and all8 device cases PASS afterwards. Cause is unconfirmed;
 The repeat local core236d1c13 PostgreSQL run passes all669 tests across18 suites,
-including actual role installation. Public v2 then failed during ready-check
-fixture preparation; a targeted setup-before-Search fix passes unchanged15s
-consent/FIFO/replacement assertions. Complete public journeys still must pass.
+including actual role installation. Public v2 failed during ready-check fixture
+preparation; setup-before-Search repair preserves the strict15s game deadline.
+Current local public v3 passes all18 stages (2346.68s).
 
-Portal fa4dc7f season/tier/badge/archive presentation is implemented:247 tests,
-3 expected skips, typecheck/build and six RU852x393 Chrome/Next fixture scenarios
-PASS. Browser fixture evidence is separate from actual PostgreSQL API proof.
-Native Home/own/visited/friend tiers, seasonal windows/badges and scoped
-calibration/promotion/demotion notices are implemented. Strict native test-target
-clippy compiles the four new helper/system tests and extended RU Home test;
-execution and current native screenshots remain required. Eight added CJK glyphs
-preserve old coverage; asset and formatting checks PASS.
+Core236d1c13 full CI42168782869 independently rechecked PASS:all7 jobs/18 stages,
+verified artifact13481319080 SHA256
+8c0338d3886cfeb2dc1d2ce101845d832aa307e9a8cee477842fcfdec04f657c. Real Ranked
+f7a85df6eadb8fd9c071bf1a6bdbea1f,454307ms, exact all-ten awards/profile/history/
+seasonal counters, zeroAFK/disconnection. Real tenth-public/noVK and early crash
+PASS. This backend source remains unchanged through56b86dec; new native UI has
+its own gate.
 
-Still required: current native test execution and affected RU visual proof;
-expiry/cache refresh UX; complete current public journeys and final CI;
-reviewed deployment/drain/rollback integration.
+Portal fa4dc7f season/tier/badge/archive presentation:247 tests,3 expected skips,
+typecheck/build and six RU852x393 Chrome/Next fixture scenarios PASS. Browser
+fixtures remain separate from actual PostgreSQL API proof.
+Native Home/own/visited/friend badges, windows and scoped calibration/promotion/
+demotion notices are implemented. The four new helper/system cases execute in
+CI56b86dec; its one remaining client failure is a stale Home test expectation,
+repaired to Silver here. Strict native and RU test-target clippy PASS.
+Six actual RU852x393 native pixels are inspected PASS. Coherent personal-penalty
+demotion is being recaptured; invalid fixture attempts are retained. Optional QA
+paths use synthetic data and do not prove real account/legal/hardware behavior.
+CJK/asset and formatting checks PASS.
+
+Still required: coherent demotion pixels and final current native CI;
+expiry/cache refresh UX; reviewed deployment/drain/rollback integration.
 Follow the full lobby TODO for all other findings and release gates.

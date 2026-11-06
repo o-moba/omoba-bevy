@@ -31,6 +31,7 @@ mod help_qa;
 mod map_qa;
 mod navigation_qa;
 mod offline_qa;
+mod ranked_fixture;
 mod record_qa;
 mod result_qa;
 mod roster_qa;

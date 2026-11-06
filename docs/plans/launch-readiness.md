@@ -1803,8 +1803,11 @@ Area: rating model · **minor** · L · code+owner
   - Profile/archive API and current-season ladder reads pass actual PostgreSQL
     privacy/runtime-role tests. Portal fa4dc7f tier/badge/archive UI passes unit,
     type/build and focused RU browser fixtures. Native Home/profile/friend badges
-    and scoped calibration/promotion/demotion notices compile under strict clippy;
-    execution/current native pixels and complete public/final CI remain required.
+    and scoped calibration/promotion/demotion notices are implemented. Four new
+    helper/system tests execute in CI; one stale Home expectation is repaired.
+    Six RU native pixel checks pass; coherent penalty demotion/final native CI
+    remain required. Core236d1c13 full7-job/18-stage CI and independent exact
+    all-ten seasonal-game verification PASS; local669 PG and18 public stages PASS.
   - Native signed movement records declared touch/mouse/mixed/unknown controls per participant; no platform/device identifier is collected. Durable checkpoints and a bounded win-rate comparison are implemented (see `docs/ranked-input-statistics.md`).
 - **Requirement:**
   - `tier(rating, rated_matches)` with owner-set thresholds.

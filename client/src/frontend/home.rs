@@ -2642,7 +2642,7 @@ mod tests {
         app.update();
         assert_eq!(
             named_text(&mut app, "HomeRating").as_deref(),
-            Some("Рейтинг 1199 · 20 рейтинговых")
+            Some("Рейтинг 1199 · Серебро")
         );
         app.world_mut().resource_mut::<HomePortal>().origin = Err("test unavailable".into());
         harness::press(app.world_mut(), "HomeLeaderboard");

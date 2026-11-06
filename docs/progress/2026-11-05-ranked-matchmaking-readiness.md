@@ -864,3 +864,48 @@ c40dd273b659d468ef54bcdcd917569b. JS syntax, queue policy and seven isolated
 queue-only boundary cases PASS. Server/API binaries remain core236d1c13; native
 13abace6 changes are separate and not proved by this wire scenario. Public v2
 remains failed; complete fresh public verification must pass after this repair.
+
+
+### P6 checkpoint — full schema10 core proof and targeted native QA
+
+Schema10 core236d1c13 full CI42168782869 PASS:all7 jobs/18 public stages. Downloaded
+artifact13481319080, verified SHA256
+8c0338d3886cfeb2dc1d2ce101845d832aa307e9a8cee477842fcfdec04f657c before bounded,
+path/duplicate/symlink-safe extraction (139 entries,10.95MB expanded). Independent
+award/profile/history/season verifier PASS for all10 signed AI controllers in
+human seats. Actual Rankedf7a85df6eadb8fd9c071bf1a6bdbea1f,454307ms gameplay;
+season1 counters0->1, exact K/XP, noAFK/disconnection. Real tenth-public/noVK and
+early crash PASS; private provider fixture absent. Backend source is unchanged
+through56b86dec; later native UI remains a distinct gate.
+Summary: .agent/tasks/RANKED-LAUNCH-READINESS-20261105/ci-236-independent-summary.json.
+
+Fresh local full PostgreSQL:669 PASS across18 suites, zero failures/ignored.
+Full public v3 on56b86dec:all18 stages PASS in2346.68s after separating ready
+fixture preparation from Search; raw v1/v2 failures are retained. Reports:
+p6-season-full-v2-verify-report.json and p6-season-public-v3-verify-report.json in
+the task directory. Native changes do not alter the server/API core proved here.
+
+Native RU build on shared cacheB PASS (982.92s, minimum root38.94GiB), binary
+SHA25651ba584e1b48c089102c34c1c1d5ccea5a9d3f2f313d109de6ff4ebca5dbf868.
+Six inspected RU852x393 pixels PASS: Home Gold, Home0/20 with100 lifetime games,
+own/visited profile season2 and retained season1 Platinum2300 badge, friend pill
+and scoped Gold promotion. Owned synthetic returning-user settings and capture
+power assertions are disclosed; these prove neither legal acceptance, actual
+accounts/gameplay, physical phones nor the game's keep-awake feature.
+
+The existing Result QA deliberately owns its snapshot/profile: a helper server
+in the first capture attempt overwrote those fixtures and hid the notification.
+The capture driver was corrected to use no server; invalid images were preserved.
+The initial demotion image showed a negative award on a winning team without
+abandonment evidence. It is not accepted as a coherent example. The fixture now
+models a proved returning leaver, -32 rating, zero XP and no honest completed-game
+increment; only that state needs recapture. No captured pixels were edited.
+Exact first-source patch/helper and inspection records are retained in the task
+directory (native-season-qawip-v1.*,native-ranked-ui-inspection-v1.json).
+
+CI56b86dec executed the four new rank-change helper/system tests successfully;
+1576 client tests PASS, one fails only on the stale pre-tier Home string
+(1199/20 games now correctly displays Silver). The expectation is repaired here.
+Strict RU native test-target clippy PASS (45.05s,min35.87GiB), including the new
+QA realism test. Formatting PASS. New final native CI and coherent demotion pixels
+remain required; overall68-finding counts are unchanged.
