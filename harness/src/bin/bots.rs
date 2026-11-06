@@ -18,6 +18,7 @@
 
 use std::{
     net::SocketAddr,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -51,6 +52,7 @@ struct CliArgs {
     exit_after_result: bool,
     ranked_eligibility_probe: bool,
     rush_objectives: bool,
+    search_gate: Option<PathBuf>,
     preference: shared::match_service::MatchPreference,
 }
 
@@ -61,6 +63,7 @@ fn parse_args() -> CliArgs {
     let mut exit_after_result = false;
     let mut ranked_eligibility_probe = false;
     let mut rush_objectives = false;
+    let mut search_gate = None;
     let mut preference = shared::match_service::MatchPreference::Ranked;
     let mut server: SocketAddr = "127.0.0.1:4000".parse().expect("default addr parses");
     let mut args = std::env::args().skip(1);
@@ -95,6 +98,13 @@ fn parse_args() -> CliArgs {
             "--exit-after-result" => exit_after_result = true,
             "--ranked-eligibility-probe" => ranked_eligibility_probe = true,
             "--rush-objectives" => rush_objectives = true,
+            "--search-gate" => {
+                let value = args.next().filter(|s| !s.is_empty()).unwrap_or_else(|| {
+                    eprintln!("--search-gate requires a file path");
+                    std::process::exit(2);
+                });
+                search_gate = Some(PathBuf::from(value));
+            }
             "--preference" => {
                 preference = match args.next().as_deref() {
                     Some("humans_only") => shared::match_service::MatchPreference::Ranked,
@@ -110,7 +120,7 @@ fn parse_args() -> CliArgs {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: bots [--count 1..10] [--server IP:PORT] [--telemetry] [--public] [--exit-after-result] [--rush-objectives] [--preference humans_only|quick|bot_practice]"
+                    "Usage: bots [--count 1..10] [--server IP:PORT] [--telemetry] [--public] [--exit-after-result] [--rush-objectives] [--search-gate FILE] [--preference humans_only|quick|bot_practice]"
                 );
                 std::process::exit(0);
             }
@@ -122,6 +132,10 @@ fn parse_args() -> CliArgs {
     }
     if exit_after_result && !public {
         eprintln!("--exit-after-result requires --public");
+        std::process::exit(2);
+    }
+    if search_gate.is_some() && !(public && server.ip().is_loopback()) {
+        eprintln!("--search-gate requires public loopback admission");
         std::process::exit(2);
     }
     if rush_objectives && !server.ip().is_loopback() {
@@ -148,6 +162,7 @@ fn parse_args() -> CliArgs {
         exit_after_result,
         ranked_eligibility_probe,
         rush_objectives,
+        search_gate,
         preference,
     }
 }
@@ -205,6 +220,9 @@ fn main() {
         if args.ranked_eligibility_probe {
             bot.enable_ranked_eligibility_probe(args.server);
         }
+        if args.search_gate.is_some() {
+            bot.set_public_search_enabled(false);
+        }
         println!(
             "bot#{index}: join sent ({:?}, lane {:?}, avatar {})",
             class,
@@ -251,7 +269,18 @@ fn main() {
 
     let mut last_telemetry = Instant::now() - Duration::from_secs(1);
     let mut last_phase = String::new();
+    let mut search_gate_open = args.search_gate.is_none();
     loop {
+        if !search_gate_open
+            && args.search_gate.as_ref().is_some_and(|path| {
+                std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() == 0)
+            })
+        {
+            for runner in &runners {
+                runner.bot.set_public_search_enabled(true);
+            }
+            search_gate_open = true;
+        }
         let mut observed = None;
         let elapsed = started.elapsed().as_secs_f32();
         for (index, runner) in runners.iter_mut().enumerate() {

@@ -123,6 +123,17 @@ impl Bot {
             .map(|session| session.borrow().status.clone())
     }
 
+    /// Owned loopback load fixtures may finish sign-in before pressing Search.
+    /// Authentication, signed keepalives and normal consent remain active.
+    pub fn set_public_search_enabled(&self, enabled: bool) {
+        assert!(self.socket.peer_addr().unwrap().ip().is_loopback());
+        self.public
+            .as_ref()
+            .expect("public session required")
+            .borrow_mut()
+            .set_search_enabled(enabled);
+    }
+
     pub fn transport_stats(&self) -> TransportStats {
         self.transport_stats
     }

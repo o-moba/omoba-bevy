@@ -61,6 +61,23 @@ def validate_population(samples, count):
                      for peers in allocations.values()}) == count // 10)
 
 
+def authenticated_population(samples, count):
+    """All real sign-ins must finish before any controller presses Search."""
+    if len(samples) != count // 10 or any(len(s.get("peers", [])) != 10 for s in samples):
+        return False
+    profiles = []
+    for sample in samples:
+        for peer in sample["peers"]:
+            status = peer.get("public") or {}
+            profile = status.get("profile_id")
+            if (status.get("phase") != "authenticated" or status.get("error") is not None
+                    or status.get("allocation") is not None or not isinstance(profile, str)
+                    or len(profile) != 64 or any(c not in "0123456789abcdef" for c in profile)):
+                return False
+            profiles.append(profile)
+    return len(set(profiles)) == count
+
+
 def percentile(values, fraction):
     values = sorted(values)
     return values[min(len(values) - 1, int(len(values) * fraction))]
@@ -183,6 +200,7 @@ def main(argv=None):
         parser.error("isolated test DB needs at least rooms+8 existing connections; no setting was changed")
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
+    search_gate = root / "start-search"
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("OMOBA_", "GAME_")) and k != "SERVER_ADDR"}
     env.update(SERVER_ADDR=f"127.0.0.1:{args.port}", OMOBA_SERVER_ROLE="lobby",
@@ -222,6 +240,7 @@ def main(argv=None):
              "process_group": p.pid} for i, p in enumerate(children)
         ], indent=2) + "\n")
     started, baseline, running_at = time.monotonic(), None, None
+    authenticated_since = None
     try:
         log = (root / "lobby.log").open("w"); writers.append(log)
         lobby = subprocess.Popen([str(args.server_bin.resolve())], env=env, cwd=root,
@@ -235,7 +254,7 @@ def main(argv=None):
             log = (root / f"bots-{index:03d}.log").open("w"); writers.append(log)
             process = subprocess.Popen([str(args.bots_bin.resolve()), "--count", "10", "--server",
                                         f"127.0.0.1:{args.port}", "--public", "--telemetry",
-                                        "--preference", "quick"], env=env, cwd=root,
+                                        "--preference", "quick", "--search-gate", str(search_gate)], env=env, cwd=root,
                                        stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             register(process); shards.append(process)
             readers.append((root / f"bots-{index:03d}.log").open())
@@ -249,6 +268,17 @@ def main(argv=None):
                         latest[index] = (now, sample)
             current = [latest[i][1] for i in range(rooms) if i in latest]
             fresh = len(latest) == rooms and all(now - at < 3 for at, _ in latest.values())
+            if not search_gate.exists():
+                if fresh and authenticated_population(current, args.clients):
+                    if authenticated_since is None:
+                        authenticated_since = now
+                        report["all_authenticated_after_seconds"] = now - started
+                    if now - authenticated_since >= 5:
+                        search_gate.touch(exist_ok=False)
+                        report["search_released_after_seconds"] = now - started
+                        report["login_fixture"] = "ordinary sign-in; all profiles stable5s before pressing Search; no qualification or policy override"
+                else:
+                    authenticated_since = None
             valid = fresh and validate_population(current, args.clients)
             if running_at is None and valid:
                 running_at, baseline = now, current

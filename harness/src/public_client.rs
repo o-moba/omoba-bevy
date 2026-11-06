@@ -60,6 +60,7 @@ pub(crate) struct PublicSession {
     class: HeroClass,
     view: Option<MatchServiceView>,
     joined: bool,
+    search_enabled: bool,
     next_probe: Instant,
     next_auth: Instant,
     next_action: Instant,
@@ -127,6 +128,7 @@ impl PublicSession {
             class,
             view: None,
             joined: false,
+            search_enabled: true,
             next_probe: now,
             next_auth: now,
             next_action: now,
@@ -157,6 +159,18 @@ impl PublicSession {
             "eligibility rehearsal is loopback only"
         );
         self.eligibility_lobby = Some(lobby);
+    }
+
+    pub fn set_search_enabled(&mut self, enabled: bool) {
+        self.search_enabled = enabled;
+        if self.lobby && self.auth.is_some() {
+            self.status.phase = if enabled {
+                "searching"
+            } else {
+                "authenticated"
+            };
+        }
+        self.next_action = Instant::now();
     }
 
     fn reset_transport(&mut self, lobby: bool) {
@@ -339,7 +353,15 @@ impl PublicSession {
             }
             self.status.profile = Some(profile);
             if matches!(self.status.phase, "authenticating" | "probing") {
-                self.status.phase = if self.lobby { "searching" } else { "joining" };
+                self.status.phase = if self.lobby {
+                    if self.search_enabled {
+                        "searching"
+                    } else {
+                        "authenticated"
+                    }
+                } else {
+                    "joining"
+                };
             }
         }
         self.match_vote = view.match_vote;
@@ -526,6 +548,10 @@ impl PublicSession {
         if now >= self.next_ping {
             self.next_ping = now + ACTION_RETRY;
             self.send(socket, &ClientPacket::Ping);
+        }
+        if self.lobby && !self.search_enabled {
+            self.status.phase = "authenticated";
+            return;
         }
         // The eligibility proof needs a legitimate completed public game, not
         // a second base-destruction benchmark. If it is still running after the
@@ -815,6 +841,44 @@ mod tests {
         assert!(session.auth.is_none() && session.path.is_none());
         assert_eq!((session.account_sequence, session.sequence), (0, 0));
         assert_eq!(session.status.phase, "probing");
+    }
+
+    #[test]
+    fn authenticated_home_keeps_the_session_alive_without_searching_until_released() {
+        let (socket, peer) = sockets();
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Mage, "Fill".into());
+        session.epoch = 19;
+        session.path = Some("b".repeat(64));
+        session.auth = Some("a".repeat(64));
+        session.next_ping = Instant::now() + Duration::from_secs(60);
+        session.set_search_enabled(false);
+        session.tick(&socket);
+        assert_eq!(session.status.phase, "authenticated");
+        peer.set_nonblocking(true).unwrap();
+        assert_eq!(
+            peer.recv(&mut [0; 8192]).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        peer.set_nonblocking(false).unwrap();
+        session.set_search_enabled(true);
+        session.tick(&socket);
+        let PublicClientDatagram::TransportBootstrap { payload, .. } = receive(&peer) else {
+            panic!("missing ordinary search request")
+        };
+        assert!(matches!(
+            serde_json::from_str::<ClientPacket>(&payload).unwrap(),
+            ClientPacket::Career {
+                request: CareerRequest::Authorized {
+                    action: CareerAction::FindMatch {
+                        preference: MatchPreference::Casual,
+                        ..
+                    },
+                    ..
+                }
+            }
+        ));
+        assert_eq!(session.status.phase, "searching");
     }
 
     #[test]

@@ -1290,13 +1290,17 @@ Area: netcode · **major** · M (L if delta encoding is needed) · code
 - **Now:**
   - Each recipient gets a full-world JSON snapshot every 50 ms (`server/src/snapshot.rs:16,39-70`).
   - Packets are split into 1200-byte fragments, and losing one fragment loses the whole snapshot (`shared/src/transport.rs:11-18`).
-  - There is no compression or delta encoding.
+  - Protocol16 now selectively compresses world JSON with the approved pinned
+    flate2/zlib codec; both sizes stay bounded and control packets remain plain.
+    Delta encoding and final WAN/budget acceptance remain open.
   - 5v5 snapshots "can exceed 8 KiB" (`docs/progress/2026-09-05-3d-readiness-audit.md:74`). The resulting ~160 KB/s per player is an estimate; nobody has measured it.
   - No WAN test has been run (`docs/progress/2026-09-22-public-mvp.md:131-134`), and the HUD shows no ping or loss.
   - The MTU-safe framing should be kept.
 - **Requirement:**
   - A declared per-player budget (e.g. ≤ 40 KB/s).
-  - zstd compression first; delta encoding if the budget is still missed.
+  - Owner-approved lossless world compression (flate2=1.1.0/zlib), preserving
+    exact personalized bytes and the1200-byte frame budget. Consider delta
+    encoding if the declared budget is still missed.
   - A netem WAN test.
   - Ping and loss in the HUD, with a warning.
   - The host's egress fits the plan.

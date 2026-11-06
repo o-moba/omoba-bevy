@@ -28,6 +28,19 @@ def sample(shard=0, elapsed=0, increment=0):
 
 
 class PopulationEvidenceTests(unittest.TestCase):
+    def test_search_release_requires_every_distinct_authenticated_unallocated_profile(self):
+        samples = [sample(0), sample(1)]
+        for index, peer in enumerate(p for s in samples for p in s["peers"]):
+            peer["public"].update(phase="authenticated", profile_id=f"{index:064x}", allocation=None)
+        self.assertTrue(probe.authenticated_population(samples, 20))
+        self.assertFalse(probe.authenticated_population(samples[:1], 20))
+        self.assertFalse(probe.authenticated_population(samples + samples, 40))
+        for key, value in [("phase", "authenticating"), ("error", "Busy"),
+                           ("profile_id", None), ("allocation", {"allocation_id": "unexpected"})]:
+            bad = copy.deepcopy(samples)
+            bad[0]["peers"][0]["public"][key] = value
+            self.assertFalse(probe.authenticated_population(bad, 20))
+
     def test_cli_refuses_remote_large_unbounded_and_overlapping_fixtures_before_io(self):
         required = ["--server-bin", "/not-used", "--bots-bin", "/not-used",
                     "--output", "/not-created"]

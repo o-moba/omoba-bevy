@@ -519,3 +519,32 @@ unused, old consent expires without penalty, new searches are refused, and
 cancellation creates a fresh confirmation and another real match. A second
 operation survives actual lobby restart with both workers adopted and Resume
 usable. Fresh visual/physical acceptance and final committed CI remain separate.
+
+
+### Protocol16 compression and controlled playing-load startup
+
+World framing uses selective bounded lossless zlib; the original JSON bytes,
+vision, ordering,1200-byte UDP limit and plain account/control packets remain.
+The exact40-frame corpus shrinks79.08%; this is a codec measurement. Full CI
+42139546925 passes all7 jobs/18 public stages, including actual rated victory
+and exact all-ten awards/history/participation. Actual native RU852×393 Home
+captures separately verify ten-public-game progress and rating placement.
+
+The first compressed1000-playing trial passes60s simultaneous fresh Running
+with100 ten-human Casual workers and zero server bots, p95 wire42014B/player/s.
+Received complete snapshots median9.54Hz remains below nominal20Hz. This is not
+a sustained SLA/RU-host or controlled A/B claim. Repeats are retained failures:
+v2 exposed a stale synthetic sign-in challenge; v3 recovers most clients but a
+legitimate five-human/five-bot Casual fallback consumes seats, preventing1000
+humans from fitting in the100-arena pool. Owned test PG settings are restored.
+
+`scripts/public_playing_capacity.py` now separates ordinary sign-in from Search:
+all distinct profiles must be authenticated, unallocated, error-free and fresh
+for5s before an empty owned marker releases queue intent. Native drivers use
+`--search-gate FILE` only with public loopback admission; a regular empty file
+releases the gate once. This models waiting on Home before pressing Search and
+keeps the normal Casual fallback, unanimous consent, draft and gameplay rules.
+Report fields record authentication, release and all-Running times separately.
+No synthetic prior games, qualification bypass or server policy override is used.
+Current-source ten-client pilot passes ordinary sign-in/search/draft/load and15s
+playing; full1000 repeat and fresh committed CI remain required.

@@ -926,3 +926,23 @@ clippy and current native test-target checking PASS. New actual1000-playing
 repeat/full CI remains required. Load provenance now includes public-client
 source/transport hashes and dirty-path disclosure. P6 primitives are preserved
 in local e459dab8 with the integration plan; persistence/UI remain open.
+
+
+Protocol16 ebf3a1fa full CI42139546925 PASS all7 jobs/18 stages (2549.47s).
+Artifact13469856606 SHA2566d83ff4a37ad62b7ba014315c44e2f3b26fb436694a8b76bb250fa429c652c75
+verified before safe extraction; independent exact all-ten Ranked proof
+bc9062cb291051251448828a595b5fc5,466788ms gameplay, zeroAFK/disconnection.
+Real tenth public game/noVK and early crash PASS. Later auth/helper changes
+still need their own full CI.
+
+P7 repeat v3 FAIL retained and owned test PG restored100:95 full rosters plus
+a valid five-human/five-bot Casual fallback consume the finite pool, so1000
+humans cannot all fit. Most expired-auth clients now recover; this finding
+does not justify changing Casual's30s fallback. The playing-capacity tool now
+waits for every distinct real sign-in to be fresh/error-free/unallocated for5s
+before releasing Search, like the native Home flow. Loopback-only actor gate
+keeps ordinary signed authentication, consent/draft and gameplay.31 harness
+unit cases,3 CLI refusals in1 process test,6 Python policy cases, fresh binaries
+and strict harness clippy PASS. Ten-client actual pilot PASS: all authenticated
+9.14s, Search released14.17s, all Running28.00s,15s soak; p95 wire58056B/s,
+complete received median17.69Hz.1000 repeat and full current CI remain required.

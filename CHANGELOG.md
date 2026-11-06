@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Start playing-capacity measurement after every ordinary sign-in is fresh,
+  error-free and stable for5s; release queue intent through a loopback-only
+  actor marker. Record login/release/play timings separately. This prevents
+  delayed sign-ups from consuming a1000-human benchmark's finite seats through
+  ordinary Casual bot fill.31 harness/1 CLI boundary/6 Python checks, strict
+  clippy and actual ten-client pilot PASS;1000 repeat remains pending.
+- Protocol16 compression checkpoint ebf3a1fa passes all7 CI jobs/18 public stages
+  in42139546925. Independent artifact recheck verifies Ranked base victory,
+  exact all-ten awards/history, zeroAFK/disconnection and real tenth/noVK gate.
+
 - Recover the public rehearsal client after a rejected challenge or explicit
   loss of account authority; request a fresh challenge/path with the same key,
   preserve retry pacing and reject foreign epochs. Recognize the server's
