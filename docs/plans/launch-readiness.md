@@ -1798,7 +1798,7 @@ Area: rating model · **minor** · L · code+owner
 - **Now:**
   - Rating uses K=48 for the first20 rated games, then K=32; Home shows placement progress. Tier/season implementation remains pending.
   - There is one lifetime rating and no seasons (`001_career.sql:5`).
-  - Matches record no input type or platform (`server/src/match_service.rs:15-25`).
+  - Native signed movement records declared touch/mouse/mixed/unknown controls per participant; no platform/device identifier is collected. Durable checkpoints and a bounded win-rate comparison are implemented (see `docs/ranked-input-statistics.md`).
 - **Requirement:**
   - `tier(rating, rated_matches)` with owner-set thresholds.
   - A provisional K and "Calibrating i/N".
@@ -1812,10 +1812,10 @@ Area: rating model · **minor** · L · code+owner
     separate owner action. Touch/mouse share one queue; retain input type for
     comparison rather than splitting queues.
 - **Acceptance:**
-  - [ ] Unit tests cover tier boundaries.
+  - [x] Unit tests cover tier boundaries.
   - [ ] Badges show in RU and EN.
   - [ ] Closing a season archives and soft-resets in one transaction.
-  - [ ] A win-rate-by-input query exists.
+  - [x] A win-rate-by-input query exists (bounded completed Ranked sample, four groups, wins and sample counts).
 - **Depends on:** LR-08, LR-47, O-5
 
 #### LR-54 — History and statistics polish
@@ -2096,7 +2096,7 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 | O-15 | Account deletion: self-service at launch, or a manual e-mail procedure first? Does the target store require in-app deletion? | LR-42, LR-04 |
 | O-16 | Hosting: one VPS vs separate web and game IPs, provider with UDP anti-DDoS, host city, budget for more capacity | LR-01, LR-09, LR-51 |
 | O-17 | Are custom/private matches in the first public release? | LR-56 |
-| O-18 | Decided2026-11-06: one Ranked queue for touch and mouse; retain participant input type for statistics. Implementation pending. | LR-53 |
+| O-18 | Decided2026-11-06: one Ranked queue for touch and mouse; retain participant input type for statistics. Signed native metadata, durable seat evidence and bounded anonymous query implemented; local checks pass. Full committed CI remains pending. | LR-53 |
 | O-19 | Consent model for attaching logs and crash data to feedback and crash reports | LR-20, LR-29 |
 | O-20 | When does the global market launch? This decides when the directory and global hostname work (D0/D1) is needed | LR-57 |
 | O-21 | Production app identity for the one app per platform. Default: a new id (for example `io.omoba.game`) chosen before the first public listing, before any IAP product is created and before the first public RU APK. Changing it later means a new app, lost reviews and new product ids. Android: own key uploaded to Play App Signing. | LR-68, LR-69, LR-24, LR-50 |

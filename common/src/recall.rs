@@ -163,6 +163,7 @@ mod tests {
                 &mut w,
                 address(),
                 &ClientPacket::Transform {
+                    input_kind: Default::default(),
                     input_active: false,
                     x: 0.0,
                     y: 99.0,
@@ -185,6 +186,7 @@ mod tests {
             &mut w,
             address(),
             &ClientPacket::Transform {
+                input_kind: Default::default(),
                 input_active: false,
                 x: 0.0,
                 y: 0.5,
@@ -204,6 +206,7 @@ mod tests {
             &mut w,
             address(),
             &ClientPacket::Transform {
+                input_kind: Default::default(),
                 input_active: false,
                 x: 1.0,
                 y: 0.5,

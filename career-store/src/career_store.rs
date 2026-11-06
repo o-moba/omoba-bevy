@@ -21,6 +21,7 @@ use std::{
 };
 
 mod fair_play;
+mod input_stats;
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
@@ -598,7 +599,7 @@ impl CareerStore {
         retry(|| self.checkpoint_inner(result.clone())).await
     }
     async fn checkpoint_inner(&self, result: MatchResult) -> StoreResult<()> {
-        let result = normalize(result)?;
+        let mut result = normalize(result)?;
         let mut tx = self.pool.begin().await?;
         let row = locked_match(&mut tx, &result.result_id)
             .await?
@@ -614,6 +615,7 @@ impl CareerStore {
             tx.commit().await?;
             return Ok(());
         }
+        input_stats::preserve(&previous, &mut result);
         fair_play::validate_participation_progress(&previous, &result)?;
         append_participants(&mut tx, &result, &previous.participants).await?;
         sqlx::query("UPDATE career_matches SET checkpoint=$2 WHERE result_id=$1")
@@ -631,11 +633,13 @@ impl CareerStore {
         retry(|| self.stage_inner(result.clone())).await
     }
     async fn stage_inner(&self, result: MatchResult) -> StoreResult<()> {
-        let result = normalize_terminal(result)?;
+        let mut result = normalize_terminal(result)?;
         let mut tx = self.pool.begin().await?;
         let row = locked_match(&mut tx, &result.result_id)
             .await?
             .ok_or("Match must be durably started first.")?;
+        let previous: Json<MatchResult> = row.try_get("checkpoint")?;
+        input_stats::preserve(&previous, &mut result);
         if let Some(intent) = row.try_get::<Option<Json<MatchResult>>, _>("intent")? {
             if intent.0 != result {
                 return Err("Conflicting immutable result for this match.".into());
@@ -648,7 +652,6 @@ impl CareerStore {
             return Ok(());
         }
         require_owner(&row, &self.owner)?;
-        let previous: Json<MatchResult> = row.try_get("checkpoint")?;
         same_terminal_allocation(&previous, &result)?;
         if !(result.outcome == MatchOutcome::Abandoned
             && !result.gameplay_started

@@ -44,6 +44,7 @@ pub fn apply(
             z,
             yaw,
             dash_sequence,
+            ..
         } => {
             world.ensure_connected(addr, now);
             let terrain = crate::skills::advanced::terrain(world, now);

@@ -42,6 +42,7 @@ impl Worker {
 
     fn transform(&self, x: f32, z: f32, input_active: bool) -> ClientPacket {
         ClientPacket::Transform {
+            input_kind: Default::default(),
             input_active,
             x,
             y: common::balance::PLAYER_GROUND_Y,
@@ -193,4 +194,52 @@ fn an_unplayed_later_draft_cannot_inherit_previous_round_participation() {
     w.rt.observe_fair_play(w.start + Duration::from_secs(91), false);
     assert!(w.rt.fair_play.humans.is_empty());
     assert!(w.rt.fair_play.round.is_none());
+}
+
+#[test]
+fn declared_controls_keep_switch_evidence_without_counting_as_activity() {
+    use shared::ranked::InputKind;
+    let mut w = Worker::new();
+    let id = w.rt.world.players[&w.addr].hero.identity.id;
+    let packet = |kind| ClientPacket::Transform {
+        input_kind: kind,
+        input_active: false,
+        dash_sequence: 0,
+        x: 1.0,
+        y: 0.5,
+        z: 1.0,
+        yaw: 0.0,
+    };
+    w.rt.handle_packet(w.addr, packet(InputKind::Touch), w.start);
+    assert_eq!(w.rt.fair_play.humans[&id].input_kind, InputKind::Touch);
+    w.rt.handle_packet(w.addr, packet(InputKind::Unknown), w.start);
+    assert_eq!(w.rt.fair_play.humans[&id].input_kind, InputKind::Touch);
+    w.idle(90);
+    assert!(w.rt.session_recovery.is_afk(w.addr));
+    w.rt.handle_packet(
+        w.addr,
+        packet(InputKind::Mouse),
+        w.start + Duration::from_secs(91),
+    );
+    assert!(w.rt.session_recovery.is_afk(w.addr));
+    assert_eq!(w.rt.fair_play.humans[&id].input_kind, InputKind::Mixed);
+    let mut reclaim = packet(InputKind::Touch);
+    if let ClientPacket::Transform { input_active, .. } = &mut reclaim {
+        *input_active = true;
+    }
+    w.rt.handle_packet(w.addr, reclaim, w.start + Duration::from_secs(92));
+    assert!(!w.rt.session_recovery.is_afk(w.addr));
+    assert_eq!(w.rt.fair_play.humans[&id].input_kind, InputKind::Mixed);
+    let mut rows = w.rt.combat_log.ledger.snapshot();
+    w.rt.fair_play.annotate(&mut rows);
+    assert_eq!(
+        rows.iter().find(|p| p.player_id == id).unwrap().input_kind,
+        InputKind::Mixed
+    );
+    w.rt.handle_packet(
+        w.addr,
+        ClientPacket::Leave,
+        w.start + Duration::from_secs(92),
+    );
+    assert_eq!(w.rt.fair_play.humans[&id].input_kind, InputKind::Mixed);
 }

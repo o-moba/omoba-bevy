@@ -532,6 +532,18 @@ impl PublicSession {
 
     pub fn tick(&mut self, socket: &UdpSocket) {
         let now = Instant::now();
+        // The Home warmup has no game snapshots to drive network recovery.
+        // A silent dead path must not keep its cached login forever. Re-probe
+        // with the same account key; never treat stale status as fresh authority.
+        if self.lobby
+            && !self.search_enabled
+            && self.auth.is_some()
+            && self
+                .auth_confirmed_at
+                .is_some_and(|at| now.saturating_duration_since(at) >= Duration::from_secs(25))
+        {
+            self.reset_transport(true);
+        }
         if self.auth.is_none() && now >= self.next_probe {
             self.next_probe = now + RETRY;
             Self::datagram(
@@ -898,6 +910,31 @@ mod tests {
             }
         ));
         assert_eq!(session.status.phase, "searching");
+    }
+
+    #[test]
+    fn silent_home_path_is_reprobed_without_changing_account_identity() {
+        let (socket, peer) = sockets();
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Mage, "Fill".into());
+        session.search_enabled = false;
+        session.path = Some("b".repeat(64));
+        session.auth = Some("a".repeat(64));
+        session.auth_confirmed_at = Some(Instant::now() - Duration::from_secs(26));
+        let public_key = session.public_key.clone();
+        let old_client_nonce = session.client_nonce.clone();
+        session.tick(&socket);
+        assert_eq!(session.public_key, public_key);
+        assert_ne!(session.client_nonce, old_client_nonce);
+        assert!(session.path.is_none() && session.auth.is_none());
+        assert!(session.status_view().auth_age_ms.is_none());
+        session.tick(&socket); // next event-loop turn opens the fresh probe
+        let mut bytes = [0u8; 4096];
+        let size = peer.recv(&mut bytes).unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<PublicClientDatagram>(&bytes[..size]).unwrap(),
+            PublicClientDatagram::TransportProbe { .. }
+        ));
     }
 
     #[test]

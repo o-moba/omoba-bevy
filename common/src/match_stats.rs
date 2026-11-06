@@ -355,6 +355,7 @@ mod tests {
 
     fn participant(id: u64, team: Team) -> ParticipantResult {
         ParticipantResult {
+            input_kind: Default::default(),
             participation: None,
             is_bot: false,
             player_id: id,

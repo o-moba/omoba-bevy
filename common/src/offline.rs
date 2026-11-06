@@ -247,6 +247,7 @@ impl PracticeSession {
                 .combat_log
                 .ledger
                 .register(shared::career::ParticipantResult {
+                    input_kind: Default::default(),
                     participation: None,
                     player_id: p.hero.identity.id,
                     is_bot: p.hero.identity.is_bot,
@@ -817,6 +818,7 @@ mod tests {
         hero.z = 0.0;
         run(&mut p, 0.1);
         p.command(ClientPacket::Transform {
+            input_kind: Default::default(),
             input_active: false,
             x: 10.5,
             y: 0.5,
@@ -834,6 +836,7 @@ mod tests {
         });
         let after = p.world.players[&LOCAL_ADDR].hero.x;
         p.command(ClientPacket::Transform {
+            input_kind: Default::default(),
             input_active: false,
             x: 10.0,
             y: 0.5,
@@ -885,6 +888,7 @@ mod tests {
                     predicted_x += direction * speed * dt;
                     let yaw = shared::math::hero_yaw_towards(direction, 0.0);
                     p.command(ClientPacket::Transform {
+                        input_kind: Default::default(),
                         input_active: false,
                         x: predicted_x,
                         y: crate::balance::PLAYER_GROUND_Y,

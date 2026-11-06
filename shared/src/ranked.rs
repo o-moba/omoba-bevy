@@ -73,6 +73,22 @@ impl InputKind {
     }
 }
 
+/// Counts, rather than rounded percentages, keep small/unknown samples visible.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputStatistics {
+    pub receipt_limit: u32,
+    pub scanned_receipts: u64,
+    pub completed_ranked_matches: u64,
+    pub rows: Vec<InputStatisticsRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputStatisticsRow {
+    pub kind: InputKind,
+    pub matches: u64,
+    pub wins: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

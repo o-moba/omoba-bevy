@@ -110,6 +110,7 @@ pub(crate) fn latch_movement_input(
 }
 
 pub(in crate::net) fn send_local_state(
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     time: Res<Time>,
     mut timer: ResMut<LocalStateSendTimer>,
     mut commands: MessageReader<NetworkCommand>,
@@ -161,6 +162,15 @@ pub(in crate::net) fn send_local_state(
 
     let (yaw, _pitch, _roll) = player_transform.rotation.to_euler(EulerRot::YXZ);
     let packet = ClientPacket::Transform {
+        input_kind: mobile
+            .as_ref()
+            .map_or(shared::ranked::InputKind::Unknown, |controls| {
+                if controls.enabled {
+                    shared::ranked::InputKind::Touch
+                } else {
+                    shared::ranked::InputKind::Mouse
+                }
+            }),
         input_active: latched_input
             || (movement_target && input.as_ref().is_none_or(|input| input.gameplay_allowed())),
         dash_sequence: utility.map_or(0, |u| u.state.dash_sequence),
@@ -729,6 +739,7 @@ mod tests {
         assert!(matches!(
             received.try_recv().unwrap(),
             ClientPacket::Transform {
+                input_kind: shared::ranked::InputKind::Unknown,
                 input_active: true,
                 ..
             }
@@ -749,6 +760,30 @@ mod tests {
                 ..
             }
         ));
+        // The same live sender reports a control switch without a new join.
+        for enabled in [true, false] {
+            {
+                let mut controls = app
+                    .world_mut()
+                    .get_resource_or_init::<crate::mobile_controls::MobileControls>();
+                controls.enabled = enabled;
+            }
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+            let ClientPacket::Transform { input_kind, .. } = received.try_recv().unwrap() else {
+                panic!()
+            };
+            assert_eq!(
+                input_kind,
+                if enabled {
+                    shared::ranked::InputKind::Touch
+                } else {
+                    shared::ranked::InputKind::Mouse
+                }
+            );
+        }
     }
 
     #[test]

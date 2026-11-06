@@ -205,6 +205,7 @@ impl Arena {
             .values()
             .filter(|p| p.joined)
             .map(|p| ParticipantResult {
+                input_kind: Default::default(),
                 participation: None,
                 is_bot: false,
                 player_id: p.hero.identity.id,

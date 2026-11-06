@@ -111,6 +111,9 @@ pub enum ClientPacket {
         protocol_version: u16,
     },
     Transform {
+        /// Client-declared controls for aggregate fairness statistics only.
+        #[serde(default, skip_serializing_if = "crate::ranked::InputKind::is_unknown")]
+        input_kind: crate::ranked::InputKind,
         /// Local movement intent, not a reflected authoritative pose. Required
         /// for AFK reclaim so the AI's own motion cannot count as human input.
         #[serde(default, skip_serializing_if = "is_false")]
@@ -1084,6 +1087,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&ClientPacket::Transform {
+                input_kind: Default::default(),
                 input_active: false,
                 dash_sequence: 3,
                 x: 1.5,
@@ -1401,6 +1405,42 @@ mod tests {
         );
         for (index, kind) in TeamBuffKind::ALL.into_iter().enumerate() {
             assert_eq!(kind.index(), index);
+        }
+    }
+}
+
+#[cfg(test)]
+mod declared_controls_tests {
+    use super::*;
+    #[test]
+    fn transform_metadata_is_additive_and_unknown_safe() {
+        let old = r#"{"type":"transform","x":0,"y":0,"z":0,"yaw":0}"#;
+        let packet: ClientPacket = serde_json::from_str(old).unwrap();
+        assert!(matches!(
+            packet,
+            ClientPacket::Transform {
+                input_kind: crate::ranked::InputKind::Unknown,
+                ..
+            }
+        ));
+        assert!(
+            !serde_json::to_string(&packet)
+                .unwrap()
+                .contains("input_kind")
+        );
+        let mut value: serde_json::Value = serde_json::from_str(old).unwrap();
+        for (raw, expected) in [
+            ("touch", crate::ranked::InputKind::Touch),
+            ("mouse", crate::ranked::InputKind::Mouse),
+            ("future", crate::ranked::InputKind::Unknown),
+        ] {
+            value["input_kind"] = raw.into();
+            let ClientPacket::Transform { input_kind, .. } =
+                serde_json::from_value(value.clone()).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(input_kind, expected);
         }
     }
 }

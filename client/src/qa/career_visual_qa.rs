@@ -143,6 +143,7 @@ fn fixture() -> CareerView {
     let classes = [HeroClass::Warrior, HeroClass::Mage, HeroClass::Ranger];
     let participants: Vec<_> = (0..10)
         .map(|index| ParticipantResult {
+            input_kind: Default::default(),
             participation: None,
             is_bot: false,
             player_id: index + 1,

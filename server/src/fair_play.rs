@@ -11,6 +11,7 @@ mod policy;
 mod tests;
 
 struct Human {
+    input_kind: shared::ranked::InputKind,
     time: policy::Seat,
 }
 
@@ -28,6 +29,9 @@ impl FairPlay {
     }
     pub(crate) fn annotate(&self, participants: &mut [ParticipantResult]) {
         for participant in participants {
+            if let Some(human) = self.humans.get(&participant.player_id) {
+                participant.input_kind = human.input_kind;
+            }
             participant.participation = self.humans.get(&participant.player_id).map(|human| {
                 let p = human.time.snapshot();
                 shared::career::Participation {
@@ -85,6 +89,7 @@ impl ServerRuntime {
             }
             let connected = addr.is_some_and(|a| !crate::bots::is_bot_address(a));
             let human = self.fair_play.humans.entry(id).or_insert_with(|| Human {
+                input_kind: Default::default(),
                 time: policy::Seat::new(started, connected, alive),
             });
             if human.time.observe(now, connected, alive)
@@ -150,6 +155,21 @@ impl ServerRuntime {
         let Some(human) = self.fair_play.humans.get_mut(&id) else {
             return true;
         };
+        if let ClientPacket::Transform {
+            input_kind,
+            x,
+            y,
+            z,
+            yaw,
+            ..
+        } = packet
+            && x.is_finite()
+            && y.is_finite()
+            && z.is_finite()
+            && yaw.is_finite()
+        {
+            human.input_kind = human.input_kind.observe(*input_kind);
+        }
         let meaningful = match packet {
             ClientPacket::Transform {
                 input_active,

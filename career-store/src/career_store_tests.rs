@@ -91,6 +91,7 @@ impl Fixture {
 }
 fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> ParticipantResult {
     ParticipantResult {
+        input_kind: Default::default(),
         participation: None,
         is_bot: false,
         player_id,
@@ -2616,5 +2617,80 @@ async fn ranked_eligibility_backfill_and_existing_allocation_recovery_preserve_p
         1
     );
     upgraded.pool.close().await;
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn declared_input_statistics_are_bounded_and_settlement_retry_is_exact() {
+    use shared::ranked::InputKind;
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for n in 1..=3 {
+        let mut completed = if n == 3 {
+            public_eligibility_fixture(&a, n)
+        } else {
+            result(&a, &b, n)
+        };
+        completed.participants[0].input_kind = if n == 1 {
+            InputKind::Touch
+        } else {
+            InputKind::Mixed
+        };
+        completed.participants[1].input_kind = if n == 1 {
+            InputKind::Mouse
+        } else {
+            InputKind::Unknown
+        };
+        let mut initial = starting(&completed);
+        if n == 2 {
+            initial.participants[0].input_kind = InputKind::Touch;
+        }
+        f.store.start(initial.clone()).await.unwrap();
+        if n == 2 {
+            let mut checkpoint = initial;
+            checkpoint.participants[0].input_kind = InputKind::Mouse;
+            checkpoint.duration_ms = 500;
+            checkpoint.ended_at_ms = 1500;
+            f.store.checkpoint(checkpoint).await.unwrap();
+            // A recovered older worker lacks the previous controls. The
+            // durable checkpoint must preserve both observations.
+            completed.participants[0].input_kind = InputKind::Unknown;
+        }
+        let saved = f.store.settle(completed.clone()).await.unwrap();
+        assert_eq!(saved, f.store.settle(completed).await.unwrap());
+        assert_eq!(
+            f.store
+                .detail(&a.profile_id, &saved.result_id)
+                .await
+                .unwrap(),
+            saved
+        );
+    }
+    let report = f.store.input_statistics(3).await.unwrap();
+    assert_eq!(
+        (report.scanned_receipts, report.completed_ranked_matches),
+        (3, 2)
+    );
+    assert_eq!(
+        report
+            .rows
+            .iter()
+            .map(|r| (r.kind, r.matches, r.wins))
+            .collect::<Vec<_>>(),
+        vec![
+            (InputKind::Touch, 1, 1),
+            (InputKind::Mouse, 1, 0),
+            (InputKind::Mixed, 1, 1),
+            (InputKind::Unknown, 1, 0),
+        ]
+    );
+    let recent = f.store.input_statistics(1).await.unwrap();
+    assert_eq!(recent.scanned_receipts, 1);
+    assert_eq!(recent.completed_ranked_matches, 0);
+    assert!(recent.rows.iter().all(|r| r.matches == 0 && r.wins == 0));
+    assert!(f.store.input_statistics(0).await.is_err());
+    assert!(f.store.input_statistics(10_001).await.is_err());
     f.close().await;
 }

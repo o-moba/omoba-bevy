@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Retain declared touch/mouse/mixed/unknown controls in immutable match receipts,
+  preserving checkpoint evidence across recovery and settlement retry. Native
+  signed movement reports selected controls; the queue stays shared. Add a
+  bounded anonymous wins/sample-size query and read-only reporting example.
+  192 shared,17 fair-play,55 real PG/store/matching and33 harness cases PASS;
+  native test-target check, strict native clippy and six affected-crate all-target
+  clippy PASS. Season/UI/full CI remain
+  required. Preserve the1000-client v5 failure (24 silent stale paths) and add
+  bounded same-key Home-path recovery to the disposable test actor.
+
 - Correct playing-capacity warmup telemetry: report authentication independently
   of world snapshots and require fresh matching-nonce acknowledgements. Preserve
   the v4 timeout caused by stale world-dependent observations.32 harness unit,

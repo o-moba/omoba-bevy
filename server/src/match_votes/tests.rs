@@ -117,6 +117,7 @@ impl Game {
                 .filter(|_| !self.rt.session_recovery.is_afk(addr))
             {
                 let packet = ClientPacket::Transform {
+                    input_kind: Default::default(),
                     input_active: true,
                     x: p.hero.x,
                     y: p.hero.y,

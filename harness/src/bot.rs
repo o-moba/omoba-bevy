@@ -310,6 +310,7 @@ impl Bot {
     /// Sends a movement/orientation update.
     pub fn send_transform(&self, x: f32, y: f32, z: f32, yaw: f32) {
         self.send(&ClientPacket::Transform {
+            input_kind: Default::default(),
             input_active: true,
             x,
             y,

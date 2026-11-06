@@ -3137,6 +3137,7 @@ mod tests {
                 unrated_reason: Some("test".into()),
                 saved: false,
                 participants: vec![ParticipantResult {
+                    input_kind: Default::default(),
                     participation: None,
                     is_bot: false,
                     player_id: 1,

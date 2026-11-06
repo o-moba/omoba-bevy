@@ -62,6 +62,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
         runtime.handle_packet(
             address,
             ClientPacket::Transform {
+                input_kind: Default::default(),
                 input_active: false,
                 dash_sequence: 0,
                 x: end[0],
@@ -99,6 +100,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
             runtime.handle_packet(
                 address,
                 ClientPacket::Transform {
+                    input_kind: Default::default(),
                     input_active: false,
                     dash_sequence: 0,
                     x: from[0] + dx * scale,

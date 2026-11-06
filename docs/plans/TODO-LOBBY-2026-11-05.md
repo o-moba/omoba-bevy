@@ -960,3 +960,29 @@ clippy PASS. Actual ten-client pilot PASS: all authenticated4.85s, Search9.86s,
 all Running23.46s,15s soak, p95 wire58166B/player/s and median complete snapshots
 17.77Hz. No qualification receipts or gameplay policy override. Fresh1000-client
 repeat remains required; season/input persistence and UI remain open.
+
+
+P6 declared controls persistence checkpoint: native movement carries the selected
+control scheme as additive signed metadata. Authenticated human-seat evidence
+is monotonic (unknown cannot erase touch/mouse; switching becomes mixed), survives
+AFK takeover/reclaim and checkpoints, and does not itself count as activity.
+The store merges prior checkpoint evidence before freezing intent, preserving
+recovery and idempotent settlement without changing append-only participant rows.
+Old receipts omit unknown metadata byte-for-byte. A bounded anonymous query and
+read-only ranked-input-stats example expose four groups with wins, sample sizes,
+scanned receipts and eligible completed Ranked games; bot/abandon seats excluded.
+Details: docs/ranked-input-statistics.md. No queue or matching weight uses controls.
+192 shared,17 fair-play and all55 real-PostgreSQL store/matching tests PASS;
+33 harness tests PASS, including a silent Home path re-probe after25s using the
+same account key. Native test-target check and strict native clippy PASS.
+Strict all-target clippy for shared/common/store/server/harness/browser PASS.
+Fresh server/actor binaries and full committed CI remain pending.
+Season/archive/badge persistence and native/portal season UI remain open.
+
+P7 independent-auth v5 FAIL retained: all1000 cached phases say authenticated,
+but only976 have fresh acknowledgements;24 are stale >25s (maximum265s).
+Search correctly remains held until the300s deadline; owned PG restored100.
+The disposable actor now re-probes a silent held-Home path after25s, retaining
+its key and never counting stale authority as fresh. Local unit proof PASS;
+actual repeated1000-playing acceptance remains required. No server authority,
+expiry, qualification or gameplay policy was relaxed.

@@ -70,6 +70,7 @@ fn utc_ms() -> u64 {
 }
 fn participant(player: &ConnectedPlayer) -> ParticipantResult {
     ParticipantResult {
+        input_kind: Default::default(),
         participation: None,
         is_bot: player.hero.identity.is_bot,
         player_id: player.hero.identity.id,

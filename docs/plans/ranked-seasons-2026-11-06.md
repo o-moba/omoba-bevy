@@ -16,9 +16,9 @@ The shared rules are implemented in `shared/src/ranked.rs`:
   known evidence across missing reports, and becomes mixed after a switch.
   This describes controls rather than verified hardware or operating system.
 
-191 shared tests pass, including tier boundaries, the twentieth placement,
+192 shared tests pass, including tier boundaries, the twentieth placement,
 all valid reset inputs, signed integer extremes and unknown future metadata.
-The matchmaking crate reuses the same maximum rating; 14 focused checks pass.
+The matchmaking crate reuses the same maximum rating; all55 store/matching checks pass on real PostgreSQL.
 
 Still required before LR-53/P6 completion:
 
@@ -28,12 +28,21 @@ Still required before LR-53/P6 completion:
   exactly-once archive/badge/reset and safe coordination with late settlement.
 - Document initial-season creation, expiry admission, badge eligibility and
   recovery. Live ratings must never reset through an incidental read/startup.
-- Save input in participant results and provide a bounded win-rate comparison
-  with sample counts; preserve unknown legacy data and the shared queue.
 - Native/portal tier, placement, season and badge presentation; localized
   promotion/demotion feedback and directly affected visual checks.
 - Real PostgreSQL retry/concurrency/rollback and migration tests, signed public
   journeys, final CI, then separately reviewed production application.
 
-Current helpers do not start a season, modify live ratings, persist input or
-change the active UI. Follow the full lobby TODO for the remaining work.
+Current season helpers do not start a season or modify live ratings. Input
+persistence/query is implemented below. Follow the full lobby TODO for the
+remaining work.
+
+
+Declared-input persistence/query is now implemented; see
+[controls comparison](../ranked-input-statistics.md). Native selected controls
+are signed; per-seat evidence and durable checkpoints preserve switches across
+reclaim/recovery. Old receipts remain unknown. The read-only bounded comparison
+reports counts and coverage; no queue split or matching weight was introduced.
+192 shared,17 fair-play,55 real PG/store/matching and33 harness cases PASS;
+native test targets and strict native clippy PASS. Current full CI remains required. Season/archive/badges
+are still pending; the pure season helpers do not reset live ratings.

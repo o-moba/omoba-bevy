@@ -43,6 +43,7 @@ fn main() -> Result<(), String> {
             let profile = store.profile(id).await?;
             for n in u64::from(profile.completed_public_matches)..target {
                 let participants = (0..10).map(|i| ParticipantResult {
+                    input_kind: Default::default(),
                     player_id: i + 1,
                     profile_id: (i == 0).then(|| id.to_owned()),
                     nickname: if i == 0 { profile.nickname.clone() } else { format!("FixtureBot{i}") },

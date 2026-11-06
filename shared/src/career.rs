@@ -100,6 +100,9 @@ pub struct Participation {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParticipantResult {
+    /// Declared controls observed for this seat; legacy receipts stay unknown.
+    #[serde(default, skip_serializing_if = "crate::ranked::InputKind::is_unknown")]
+    pub input_kind: crate::ranked::InputKind,
     pub player_id: u64,
     // Preserve rc6 JSON receipts exactly when this additive human default is absent.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -729,6 +732,7 @@ mod tests {
         });
         let participant: ParticipantResult = serde_json::from_value(original.clone()).unwrap();
         assert!(!participant.is_bot);
+        assert_eq!(participant.input_kind, crate::ranked::InputKind::Unknown);
         assert!(participant.participation.is_none());
         assert_eq!(serde_json::to_value(&participant).unwrap(), original);
 

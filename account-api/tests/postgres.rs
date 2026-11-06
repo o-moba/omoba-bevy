@@ -115,6 +115,7 @@ async fn login(app: &App, key: &SigningKey) -> (auth::Session, String) {
 }
 fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResult {
     let p = |profile: &ProfileSummary, player_id, team| ParticipantResult {
+        input_kind: Default::default(),
         participation: None,
         player_id,
         is_bot: false,

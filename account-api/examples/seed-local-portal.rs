@@ -42,6 +42,7 @@ async fn main() {
         .iter()
         .enumerate()
         .map(|(i, p)| ParticipantResult {
+            input_kind: Default::default(),
             participation: None,
             player_id: i as u64 + 1,
             is_bot: false,
