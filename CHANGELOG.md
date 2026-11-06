@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Allow the Fair Play harness to render the actual Home shell. The missing menu
+  came from world-only automation classification, not failed offscreen rendering.
+  Existing classification regression, strict RU clippy and native build PASS;
+  inspected RU852×393 Home/restarted-party warning is preserved. Real solo/party
+  admission remains a separate gate. Current CI client cache-lock failure is
+  recorded for investigation; the full branch gate is not green.
+
 - Preserve six inspected native offscreen fair-play images and exact source/
   binary/PNG hashes: remake entry/availability, both44px vote prompts, real first-
   match guide dismissal and coherent remake/surrender results. New Home fixture

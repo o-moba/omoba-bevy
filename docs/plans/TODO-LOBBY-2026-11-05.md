@@ -1622,3 +1622,27 @@ first-guide coexistence/dismissal and both saved result states. Final C5 closure
 still awaits corrected current full CI. The separate empty Home fixture is
 retained as a failed attempt;#45 and all physical/multi-host/RU release gates
 remain open. No diagnostic/empty/black image was promoted to acceptance.
+
+
+### Home native acceptance — correct the Fair Play shell classification
+
+`spawn_home` intentionally skips world-only automation. Fair Play exercises Home
+as well as match states, but was absent from `SHELL_HARNESSES`; its root constructor
+therefore returned immediately. Add it to that allowlist and the existing
+classification regression. No ordinary gameplay behavior or screen-lock setting
+changes. Existing regression PASS1; RU strict client/test-target clippy PASS74.23s,
+native build PASS605.95s, minimum root28.51GiB. Binaryafa5e8de… .
+
+The new real native RU852×393 Home image is inspected: menu, character, actions
+and the restart/dissolved-party notice are visible. Preserve exact PNG/build/source
+hashes in [Home acceptance](../evidence/fair-play-2026-11-06/offscreen-home-accepted.json).
+This closes the missing-Home visual failure, not the actual lobby-restart/public
+party journey. Row45 remains partial and row65 still needs real admission proof.
+The old rejected Home attempt remains rejected. A first real local solo runner
+attempt was also rejected: its gate file was nonempty and its button inventory
+included hidden controls. No ready-check/draft acceptance is claimed for that run.
+
+Currentbf359465 CI42233107055: format/core, gameplay harness, Android, Python and
+bot jobs PASS; dev-client job127943697882 FAILED1589 passed/1 failed/1 ignored
+with `CacheBusy` in expired-cache restart regression. PostgreSQL public journeys
+are still running. Investigate the lock lifecycle; do not report this as full green.
