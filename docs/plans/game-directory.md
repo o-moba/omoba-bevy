@@ -330,7 +330,7 @@ changed. D1/#12/P7 remain incomplete until these end-to-end gates pass.
 ## Build trust configuration candidate — 2026-11-07
 
 `client/src/game_directory/config.rs` parses the public JSON value baked by
-`option_env!("OMOBA_GAME_DIRECTORY_TRUST")`. The running process does not read
+`option_env!("OMOBA_DEFAULT_GAME_DIRECTORY_TRUST")`. The running process does not read
 that environment variable for trust. Version1 is bounded to16KiB and at most
 two unique regional profiles; each profile has1..4 independent public pins and
 a required concrete fallback. Region/contour, public key encoding/curve strength,
@@ -355,8 +355,10 @@ values before building:
 {"version":1,"contour":"production","regions":[{"region":"ru","pins":[{"key_id":"reviewed-key-id","public_key":"REVIEWED_64_LOWERCASE_HEX_PUBLIC_KEY"}],"fallback":{"id":"reviewed-ru-lobby","location":"moscow","host":"lobby.omoba.ru","addresses":["REVIEWED_PUBLIC_IP"],"port":4000}}]}
 ```
 
-Building with a public bundle can use the existing build environment; no workflow
-or release-script edit is made here. Every offered account region must have its
+Direct Cargo builds can receive this public value explicitly. Release packaging
+intentionally scrubs ambient compile-time defaults; it needs a separately reviewed
+explicit bundle option before a packaged artifact can enable D1. No workflow or
+release-script edit is made here. Every offered account region must have its
 reviewed profile before that region can use this path. Rotations retain the
 previous verifier while cached/owned admissions still need it. Five new cases
 cover scope/fallback/cache paths, malformed/partial bounds/weak pins, actual

@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Align the compiled directory trust setting with the existing scrubbed
+  OMOBA_DEFAULT_ namespace. Preserve the release guard: ambient public trust
+  cannot leak into a package, and packaging needs an explicit reviewed input.
+  All29 DevContour packaging checks PASS locally; workflows/tooling unchanged.
+
 - Prepare build-scoped public directory trust/fallback configuration and an
   operator-only compiled-binary audit. Refuse malformed/missing-region input,
   weak public keys and runtime environment replacement; keep scoped cache paths.

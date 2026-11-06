@@ -16,7 +16,7 @@ use std::{
 };
 
 const MAX_BUILD_BYTES: usize = 16_384;
-const COMPILED: Option<&str> = option_env!("OMOBA_GAME_DIRECTORY_TRUST");
+const COMPILED: Option<&str> = option_env!("OMOBA_DEFAULT_GAME_DIRECTORY_TRUST");
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

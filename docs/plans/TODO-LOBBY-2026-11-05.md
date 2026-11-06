@@ -2048,3 +2048,22 @@ worker compatibility and saved allocation/epoch checks remain mandatory. Four
 additional regressions (9 total in this candidate) await execution. Retained
 address values alone are explicitly not authorization for a fresh transport.
 The running network/Resume/policy UI is still not wired to this candidate.
+
+
+### Build trust packaging boundary correction — 2026-11-07
+
+Source57a93ad2 CI42284439321 fails one Python gate: the new compile-time key was
+not in the release tool's scrubbed namespace. The existing test correctly refuses
+ambient build settings that could leak between releases/contours. Rename the
+client/test setting to `OMOBA_DEFAULT_GAME_DIRECTORY_TRUST`, covered by the
+existing OMOBA_DEFAULT_ scrub rule; do not weaken or edit the packaging guard.
+All29 DevContour checks PASS using Python3.13, including the actual failing
+source-scan/scrub case. The initial system-Python3.9 run cannot execute one existing
+PEP604 test annotation and is rejected; no source workaround is added for it.
+Formatting/diff checks pass. Rust/new9-case CI still needs its current outcome.
+
+This also corrects the earlier packaging assumption: direct Cargo may receive a
+reviewed public bundle explicitly, while release packaging deliberately clears
+ambient values. A separately prepared/reviewed explicit package option is still
+required before D1 can ship configured. No release/workflow file, live key or
+service is changed. The full57a gate remains failed until corrected source passes.

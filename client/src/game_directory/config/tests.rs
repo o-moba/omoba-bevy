@@ -149,7 +149,7 @@ fn runtime_environment_cannot_replace_compiled_trust() {
             "--nocapture",
         ])
         .env(CHILD, "1")
-        .env("OMOBA_GAME_DIRECTORY_TRUST", "not-valid-json-at-runtime")
+        .env("OMOBA_DEFAULT_GAME_DIRECTORY_TRUST", "not-valid-json-at-runtime")
         .output()
         .unwrap();
     assert!(
