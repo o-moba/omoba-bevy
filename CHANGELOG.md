@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Register the shared seasonal QA fixture in the frontend/career screen map,
+  preserving source-coverage validation. Current native CI passes all1578 client
+  tests (one ignored), Android and strict checks; the Python registry repair is
+  verified separately. The locked-screen demotion image remains rejected.
+
 - Add opt-in seasonal data to the existing native QA paths and restrict seasonal
   career capture to the three changed profile/friend views. Six RU852x393 native
   pixel checks PASS: calibrated and reset Home, own/visited/friend badges and

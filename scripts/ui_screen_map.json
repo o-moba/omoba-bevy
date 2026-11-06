@@ -26,7 +26,8 @@
       },
       "note": "Front-end shell screens driven directly; searching/loading/post-match have no real match behind them.",
       "sources": [
-        "client/src/qa/frontend_qa.rs"
+        "client/src/qa/frontend_qa.rs",
+        "client/src/qa/ranked_fixture.rs"
       ],
       "ignore": {
         "11-server.png": "Legacy frame is skipped in all player builds; raw server configuration was removed with account-region routing."
@@ -93,7 +94,8 @@
       },
       "note": "Profile, friends, history, match detail, account and devices with labelled fixture data.",
       "sources": [
-        "client/src/qa/career_visual_qa.rs"
+        "client/src/qa/career_visual_qa.rs",
+        "client/src/qa/ranked_fixture.rs"
       ]
     },
     "supporter": {

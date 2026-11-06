@@ -909,3 +909,26 @@ CI56b86dec executed the four new rank-change helper/system tests successfully;
 Strict RU native test-target clippy PASS (45.05s,min35.87GiB), including the new
 QA realism test. Formatting PASS. New final native CI and coherent demotion pixels
 remain required; overall68-finding counts are unchanged.
+
+
+### P6 CI checkpoint — native tests pass; register the shared QA source
+
+CI e8b25cc7 run42181087939 executes all1578 client tests successfully (one
+pre-existing ignored case). This includes seasonal rank notices, the repaired
+Home tier expectation and the coherent returning-leaver QA fixture. Android,
+headless gameplay, difficulty and fmt/clippy/tests jobs also PASS. PostgreSQL
+public journeys are still running at this checkpoint.
+
+The Python tooling job rejects the newly added ranked_fixture.rs because the
+screen registry does not name it. Register that supporting source under the two
+existing frontend/career runs that use it; Result QA is already listed among
+other harnesses. Keep the source-coverage assertion intact and avoid unrelated
+JSON reformatting. Targeted screen-map tests:5 PASS. The full Python tooling rerun
+is in progress; its terminal result remains a separate verification gate.
+
+Native RU build-v2 is exact e8b25cc7, SHA256
+a5a4f91849a64b857c7439fd00934097cfe16d7f98d3376579e8ebb9387362ac. The v3
+demotion capture is fully black while Quartz confirms the session is locked;
+it is retained as failed evidence and does not satisfy the visual gate. Reuse
+this binary for the next capture rather than rebuilding it. No release or
+production action has occurred; overall68-finding counts are unchanged.
