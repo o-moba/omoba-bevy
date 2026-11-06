@@ -70,3 +70,11 @@ GRANT USAGE ON SEQUENCE career_sanctions_sanction_id_seq,career_moderation_event
 GRANT SELECT,INSERT ON career_abandon_events TO :"game_role";
 GRANT SELECT,INSERT,UPDATE ON career_play_penalties TO :"game_role";
 GRANT SELECT ON career_abandon_events,career_play_penalties TO :"portal_role";
+
+-- Ranked seasons (career schema10): metadata is readable; only the game may
+-- bind a new immutable allocation. Neither runtime may close/reset/archive.
+GRANT SELECT ON career_ranked_seasons TO :"portal_role", :"game_role";
+GRANT SELECT ON career_ranked_archives TO :"portal_role";
+GRANT SELECT,INSERT ON career_ranked_allocations TO :"game_role";
+-- The existing ALL SEQUENCES grant must not expose operator season identities.
+REVOKE ALL ON SEQUENCE career_ranked_seasons_season_id_seq FROM :"portal_role", :"game_role";

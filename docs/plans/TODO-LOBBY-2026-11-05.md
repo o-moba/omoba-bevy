@@ -1059,3 +1059,13 @@ verified before safe extraction. Actual Ranked9cf904dd956939d5332f54fe1f8b2786,
 418283ms gameplay, exact all-ten awards/profile/history and zeroAFK/disconnection;
 real tenth public/noVK and early crash PASS. Private provider fixture removed.
 This evidence precedes and does not cover the local schema10 engine.
+
+
+Owner approved the prepared season-role repository patch, including the disclosed
+portal archive read. Applied to account-api/ops/grants.sql: metadata SELECT,
+portal archive SELECT, game SELECT/INSERT on immutable mapping, explicit season
+sequence revoke. Runtime archive/close/reset writes remain ungranted. The exact
+permission delta, registration/temp-shadow and post-reset runtime gameplay tests
+PASS. Fresh full installation/role/public verification is starting in a new owned
+local PostgreSQL fixture; the older test fixture remains for prior evidence.
+No production role or deployment action was taken.

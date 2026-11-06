@@ -195,8 +195,8 @@ registration is stamped by a narrow owner trigger pinned to its owning schema
 before `pg_temp`, with PUBLIC execution revoked. Runtime roles need metadata
 reads and the game needs INSERT/SELECT on immutable allocation mappings. Only the
 operator can close, archive/reset or consume the season sequence. Apply the
-reviewed schema10 grants together with the paired runtime; the current prepared
-role patch still requires owner approval.
+reviewed schema10 grants together with the paired runtime; the repository role patch
+was owner-approved; production application remains a separate action.
 
 `ranked-season show` is read-only. The explicit close command requires expected
 identity, `--apply`, a separate authorized operator connection, an expired window

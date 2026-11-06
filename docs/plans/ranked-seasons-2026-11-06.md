@@ -1,8 +1,7 @@
 # Ranked seasons and input statistics
 
 Status: in progress. Owner O-5/O-18 decisions accepted 2026-11-06. The season
-storage/close engine is implemented locally; API/presentation, permission-patch
-approval, current full journeys/CI and deployment review remain required.
+storage/close engine is implemented locally; API/presentation, current full journeys/CI and deployment review remain required.
 Production rollover/reset is a separately authorized action.
 
 ## Rules
@@ -69,8 +68,8 @@ must account for schema9-to10 rollback compatibility; returning to an old
 schema9 binary after migration is not a valid rollback.
 
 The prepared deployment-role patch grants metadata reads, portal archive reads
-and game INSERT/SELECT on immutable allocation mappings. It is awaiting the
-owner's response; the actual `account-api/ops/grants.sql` remains unchanged.
+and game INSERT/SELECT on immutable allocation mappings. The owner approved this repository patch and it is applied in
+`account-api/ops/grants.sql`; fresh full-role/public verification remains required.
 No production migration, reset, role change or RU deployment was performed.
 
 ## Evidence and remaining acceptance
@@ -95,6 +94,6 @@ No production migration, reset, role change or RU deployment was performed.
 
 Still required: privacy-preserving API/current-season ladder and archive reads;
 native/portal season/tier/badge/promotion surfaces and affected RU visual proof;
-expiry/cache refresh UX; approved role patch and complete restricted-role/public
+expiry/cache refresh UX; complete restricted-role/public
 journeys; current final CI; reviewed deployment/drain/rollback integration.
 Follow the full lobby TODO for all other findings and release gates.

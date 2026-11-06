@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Apply owner-approved schema10 runtime permission patch: metadata/portal archive
+  reads and immutable game allocation inserts, with operator season sequence
+  access revoked from runtimes. Closing/archiving/reset writes remain operator
+  only. Restricted-role/temp-shadow and post-reset gameplay checks PASS; fresh
+  full installation and public journeys remain required. No production action.
+
 - Implement local schema10 seasonal progress, durable allocation identity and an
   explicit atomic/idempotent archive/badge/reset operator. Preserve lifetime/XP/
   public eligibility, fence old recovery and expired consent, and use seasonal
