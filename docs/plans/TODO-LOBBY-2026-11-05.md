@@ -1371,3 +1371,29 @@ Full scope and remaining gates:[game-directory.md](game-directory.md).
 Finding12 moves from open to partial. Current original list:59 done,7 partial,
 1 open,1 mostly refuted. Critic items remain separately tracked; P7/P8/P9 and
 other P5/P6 requirements are not closed by this checkpoint.
+
+
+### Full pre-directory CI independently verified — 2026-11-06
+
+Commit93a769ab, [run42191648464](https://github.com/o-moba/omoba-bevy/actions/runs/42191648464):
+all7 jobs and18 public/PostgreSQL stages PASS in2561.11s. Downloaded artifact
+13492089050 matches GitHub SHA256
+`00bcb20e9885731713d2b9bf9ba8f0aacd4979a52baec505335ca9b1f2a7980c`;
+139 entries pass bounded path/duplicate/symlink/size/CRC checks. Private fixture
+is absent and its removal is recorded. Independently recalculated all-ten
+rating/XP/lifetime/current-season increments and matched each own history entry
+for actual Ranked03f40b9047209635c7cb5e9d653bfa9d,463497ms,standard map,zero
+AFK/disconnection,ten signed AI-controlled human seats and no server bots.
+
+The ready journey proves15s/nine acceptances/no worker before unanimity/FIFO
+retention/stale rejection; party-disconnect reaches replacement Running with
+unchanged cancelled-match profiles/history. Eligibility proves the actual10th
+public completion without VK; early crash, unique picks, remake and surrender
+pass. This supersedes the prior full-CI pending note for93a769ab and its
+unchanged runtime through the documentation/directory checkpoint. It is not
+physical-phone, real-provider, WAN or RU-host proof. The new directory sources
+at2a45600c have a separate current CI run42201671041 in progress.
+
+Sanitized [committed summary](../evidence/ranked-2026-11-06/ci-93-summary.json).
+No original-finding status changes:59 done,7 partial,1 open,1 mostly refuted;
+remaining critic/UI/scale/operations/release gates stay required.

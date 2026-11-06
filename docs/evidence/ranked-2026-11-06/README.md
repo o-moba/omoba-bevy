@@ -41,3 +41,8 @@ The successful captures required no new native build or OS preference changes.
 | [portal-ru-2.png](portal-ru-2.png) | portal / ru | personal-penalty-demotion.png |
 | [portal-en-1.png](portal-en-1.png) | portal / en | reset-and-old-badge.png |
 | [portal-en-2.png](portal-en-2.png) | portal / en | calibrated-ladder.png |
+
+The separately downloaded [full gameplay CI summary](ci-93-summary.json) records
+93a769ab/run42191648464, all7 jobs/18 stages and independent all-ten settlement
+recalculation. This is signed loopback AI-controller proof, separate from these
+presentation fixtures and from physical/RU deployment acceptance.

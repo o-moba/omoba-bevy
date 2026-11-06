@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Independently verify93a769ab complete CI:all7 jobs/18 public-PG stages PASS.
+  Actual463497ms Ranked victory has exact all-ten rating/XP/history/season
+  updates and zeroAFK/disconnection;15s consent, party recovery, actual10th
+  eligibility/noVK, crash, unique picks, remake and surrender pass. Preserve
+  sanitized artifact identity/proof in docs/evidence/ranked-2026-11-06.
+  New directory checkpoint2a45600c has its own CI running; RU rollout remains open.
+
 - Add the bounded version1 signed game-directory contract, exact IP targets,
   scope/expiry/sequence and compatible weighted admission policy, plus an
   offline Ed25519 signer/verifier.197 shared/2 operator and9 independent
