@@ -1958,3 +1958,27 @@ Separate critic/physical requirements and UI-2/UI-3 native acceptance remain.
 Current game candidatef144c8f7 is pushed, full CI42273662478 is in progress:
 Android/Python/bots already PASS; remaining jobs are not yet certified.
 The previous84fa full gate remains failed, not retroactively relabelled green.
+
+
+### Current client gate and D1 admission candidate — 2026-11-07
+
+Sourcef144c8f7 dev-client job128084354047 in CI42273662478 passes1592 cases,
+0 failures,1 ignored. The new required-catalog guard regression actually executes
+and passes; both strict dev client clippy variants pass. Core/fmt/clippy, Android,
+Python, bots and headless gameplay also pass. PostgreSQL full public journeys
+are still running at this observation, so no full green gate is claimed.
+UI-2/UI-3 exact native pixels remain unaccepted. Root free space fell to11GiB;
+approved A/B caches are already on Orico. Release macOS jobs are terminal
+cancelled without steps/artifacts; no Android device is currently attached.
+A resource question is pending while independent work continues.
+
+Prepare the real D1 admission coordinator (bounded anonymous worker/cache,
+concrete signed destinations, validated pinned fallback, current policy outcomes,
+party affinity and retained owned route). Preserve the observed-newer-policy
+in-memory floor through a failed write so later unavailability cannot revive old
+open cache. New9 cases are written but unexecuted; formatting/source review pass.
+See [scope and remaining integration](game-directory.md#native-admission-coordinator-candidate--2026-11-07).
+No live trust or player-routing activation occurs. Compile/tests, build pin config,
+legal/region/network/UI integration, actual ownership/two-lobby/shared-discipline
+and RU/WAN evidence are still required. #12/P7 remain partial; original ledger
+stays62 done,5 partial,1 open. No production dependency or infrastructure change.

@@ -281,3 +281,45 @@ was created. [Source hashes/proof](../evidence/fair-play-2026-11-06/directory-na
 Runtime pin configuration,
 fetch/cache/fallback lifecycle, policy UI, party/Resume ownership and actual
 multi-host/WAN remain required D1/P7 work.
+
+
+## Native admission coordinator candidate — 2026-11-07
+
+`client/src/game_directory/admission.rs` composes the existing anonymous fixed-
+region transport, independent signature trust and durable cache. It has a single
+bounded fetch in flight and nonblocking main-thread polling; HTTP/filesystem work
+runs on its worker. Current validated directory data chooses a compatible open
+lobby and a concrete signed IP. A fallback must be separately supplied by the
+build/operator, passes the same public-address/region/contour guards and never
+performs DNS. No fallback configuration means unavailable, not an unchecked
+legacy hostname. Current valid update/maintenance/full/incompatible policy cannot
+silently escape through fallback.
+
+The coordinator retains authenticated sequence history after expiry and compares
+memory/disk floors before accepting a candidate. If a valid newer maintenance
+policy cannot persist, its in-memory floor prevents the running process from
+reusing older open cache on a later outage. Successful equally/newer durable
+publication repairs that state. This does not claim hardware-monotonic storage or
+preservation of an unpersisted observation across process death. Corrupt/nonregular
+cache and backwards clocks fail closed. Equal-sequence differing payloads remain
+refused, and expired bytes are never exposed as a signed admission document.
+
+A retained route keeps an existing seat's exact lobby address across policy
+refresh. New admission for an existing party may retain that lobby/IP only while
+still authorized/open/compatible; it never silently moves the group to another
+lobby or newly substituted address. Actual session/queue integration still must
+call the correct path; these value APIs are not server admission tickets.
+
+Nine new cases cover cache/fallback/expiry, closed policies, compatible alternate,
+party/IP retention, original Resume address, tamper/replay/equivocation, corruption/
+clock, actual Unix denied-write recovery and a single asynchronous worker. They
+have not executed yet: root disk is below the20GiB build threshold. Formatting
+and source review pass. Existing full CI atf144c8f7 proves the *previous* source
+only, and must not be cited as verification of this new coordinator.
+
+Remaining: execute the new cases/strict checks; add reviewed compiled public trust
+and fallback configuration; bind the asynchronous resolver to legal/region startup,
+new queue entry, policy UI, retry and exact-address transport; preserve actual
+party/worker/Resume ownership across refresh; prove two lobbies/shared discipline.
+No live pin, signing secret, public directory, service, workflow or deployment is
+changed. D1/#12/P7 remain incomplete until these end-to-end gates pass.

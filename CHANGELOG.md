@@ -5,6 +5,17 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Prepare the native D1 admission coordinator: bounded background anonymous fetch,
+  exact signed IP routing, durable cache/history, pinned fallback, maintenance/
+  update/full/compatibility decisions, party affinity and retained Resume address.
+  An observed newer policy fences older cache after a failed write in the running
+  process. Nine new targeted cases added; formatting/source review PASS, execution
+  pending CI while root disk is below20GiB. No live trust/routing activation.
+
+- Verify the Home required-catalog guard in the full dev-client CI:1592 cases
+  PASS,0 FAIL,1 ignored, including stale primary/Ranked/vs-Bots activations while
+  offline practice remains available. Exact new UI pixels are still pending.
+
 - Close finding28 after focused actual RU portal rendering: interrupted Ranked
   without an award stays neutral with a dash, detail retains singular Ranked tag,
   and personal rating is never invented. Three browser checks and257 portal units

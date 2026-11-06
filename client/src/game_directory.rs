@@ -11,6 +11,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub mod admission;
+
 mod cache_lock;
 use cache_lock::CacheLock;
 
@@ -35,7 +37,7 @@ impl VerifiedDirectory {
         &self.directory
     }
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DirectoryError {
     Invalid(&'static str),
     Rollback,
@@ -121,8 +123,18 @@ impl DirectoryTrust {
         directory
             .validate_at(self.region, &self.contour, directory.issued_at_ms, 0)
             .map_err(DirectoryError::Invalid)?;
+        self.validate_destinations(&directory.lobbies)?;
+        Ok(VerifiedDirectory {
+            envelope,
+            directory,
+        })
+    }
+    fn validate_destinations(
+        &self,
+        lobbies: &[shared::game_directory::Lobby],
+    ) -> Result<(), DirectoryError> {
         let contour = (self.contour != "production").then_some(self.contour.as_str());
-        for lobby in &directory.lobbies {
+        for lobby in lobbies {
             for host in std::iter::once(lobby.host.clone())
                 .chain(lobby.addresses.iter().map(ToString::to_string))
             {
@@ -138,10 +150,7 @@ impl DirectoryTrust {
                 }
             }
         }
-        Ok(VerifiedDirectory {
-            envelope,
-            directory,
-        })
+        Ok(())
     }
     pub fn verify_at(
         &self,
@@ -179,6 +188,7 @@ fn known_dev_destination(host: &str) -> bool {
         .any(|zone| host == *zone || host.ends_with(&format!(".{zone}")))
 }
 
+#[derive(Clone)]
 pub struct DirectoryCache {
     path: PathBuf,
     trust: DirectoryTrust,
@@ -245,9 +255,8 @@ impl DirectoryCache {
             .map(Some)
             .map_err(|_| DirectoryError::CacheInvalid)
     }
-    /// An expired authenticated file yields no admission data, but stays on
-    /// disk as a rollback fence. Corruption is an error, never a reset to zero.
-    pub fn load_at(&self, now_ms: u64) -> Result<Option<VerifiedDirectory>, DirectoryError> {
+    /// Internal history remains authenticated after expiry; never route from it.
+    fn load_history_at(&self, now_ms: u64) -> Result<Option<VerifiedDirectory>, DirectoryError> {
         let _lock = self.lock()?;
         let saved = self.read_locked()?;
         let Some(saved) = saved else {
@@ -258,6 +267,14 @@ impl DirectoryCache {
                 "directory cache clock moved backwards",
             ));
         }
+        Ok(Some(saved))
+    }
+    /// An expired authenticated file yields no admission data, but stays on
+    /// disk as a rollback fence. Corruption is an error, never a reset to zero.
+    pub fn load_at(&self, now_ms: u64) -> Result<Option<VerifiedDirectory>, DirectoryError> {
+        let Some(saved) = self.load_history_at(now_ms)? else {
+            return Ok(None);
+        };
         if saved.directory.expires_at_ms <= now_ms {
             return Ok(None);
         }
