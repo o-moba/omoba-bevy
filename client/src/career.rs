@@ -2981,10 +2981,19 @@ mod tests {
         app.world_mut()
             .resource_mut::<Locale>()
             .set(LocaleId::parse("ru").unwrap());
-        for known in [
-            shared::career::error_code::DODGE_COOLDOWN,
-            shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION,
-            shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED,
+        for (known, key) in [
+            (
+                shared::career::error_code::DODGE_COOLDOWN,
+                "queue.failed.dodge_cooldown",
+            ),
+            (
+                shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION,
+                "queue.failed.profile_has_another_session",
+            ),
+            (
+                shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED,
+                "queue.failed.allocation_cancelled_or_expired",
+            ),
         ] {
             for error_code in [None, Some(known.into())] {
                 let view = CareerView {
@@ -2992,10 +3001,7 @@ mod tests {
                     error_code,
                     ..Default::default()
                 };
-                assert_eq!(
-                    server_error_text(&view).unwrap(),
-                    tr(&format!("queue.failed.{known}"))
-                );
+                assert_eq!(server_error_text(&view).unwrap(), tr(key));
             }
         }
     }
