@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add schema13 bounded ready-receipt maintenance. Reconcile expired ownership
+  with the existing exact dodge policy, and prune only closed receipts older
+  than7 days without claims/unfinished matches. Preserve Resume, history and
+  discipline deduplication. Use indexed lookups, short lock/statement limits and
+  one timed async lobby task after reconnect warmup. All100 real-PG store and564
+  complete server cases PASS; runtime ACL/temp-shadow/upgrade/concurrency proofs
+  PASS; the actual default300s lobby scheduler prunes its isolated fixture after
+  304.71s. Paired migration/grants, current full CI and RU recovery remain gates.
+
 - Preserve the age of pending match results across identical durable retries;
   anchor terminal alerts to their original end time. Monitor typed queue-dodge
   journals with bounded reads, capacity/corruption checks and anonymous counts.

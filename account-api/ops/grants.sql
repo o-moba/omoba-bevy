@@ -78,6 +78,8 @@ GRANT SELECT,INSERT,UPDATE ON career_queue_penalties TO :"game_role";
 -- Ready consent/ownership is server-only; portal roles cannot alter it.
 GRANT SELECT,INSERT,UPDATE ON career_ready_checks,career_ready_members TO :"game_role";
 GRANT SELECT,INSERT,DELETE ON career_ready_claims TO :"game_role";
+-- Schema13: fixed seven-day, bounded closed-receipt policy; no table DELETE.
+GRANT EXECUTE ON FUNCTION career_prune_closed_ready(integer) TO :"game_role";
 
 -- Ranked seasons (career schema10): metadata is readable; only the game may
 -- bind a new immutable allocation. Neither runtime may close/reset/archive.

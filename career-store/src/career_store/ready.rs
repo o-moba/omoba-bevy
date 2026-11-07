@@ -9,6 +9,13 @@ const WINDOW_MS: i64 = 15_000;
 const HEARTBEAT_MS: i64 = 3_000;
 const HANDOFF_MS: i64 = 90_000;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Maintenance {
+    pub reconciled: u32,
+    pub pruned: u32,
+    pub deferred: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Seat {
     pub profile_id: String,
@@ -257,6 +264,65 @@ async fn reconcile(tx: &mut Transaction<'_, Postgres>, id: &str, at: i64) -> Sto
 }
 
 impl CareerStore {
+    /// Reconcile at most128 expired checks, then remove at most that many closed
+    /// receipts older than7 days. Existing admissions remain the Resume authority.
+    /// Queue-dodge identities/history are never removed by this operation.
+    pub async fn maintain_ready(&self, batch: u32) -> Result<Maintenance, String> {
+        if !(1..=128).contains(&batch) {
+            return Err("Invalid ready maintenance batch.".into());
+        }
+        retry(|| self.maintain_ready_inner(batch)).await
+    }
+
+    async fn maintain_ready_inner(&self, batch: u32) -> StoreResult<Maintenance> {
+        // No row lock before the normal sorted participant locks. Concurrent
+        // answer/admission paths keep their existing transaction/lock ordering.
+        let candidates: Vec<String> = sqlx::query_scalar(
+            "SELECT check_id FROM career_ready_checks WHERE state IN ('forming','open','approved') AND deadline_ms <= floor(extract(epoch FROM statement_timestamp())*1000)::bigint ORDER BY deadline_ms,check_id LIMIT $1",
+        )
+        .bind(i64::from(batch))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut result = Maintenance::default();
+        for id in candidates {
+            match self.reconcile_ready_for_maintenance(&id).await {
+                Ok(true) => result.reconciled += 1,
+                Ok(false) => {}
+                Err(_) => result.deferred += 1,
+            }
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET LOCAL statement_timeout='500ms'")
+            .execute(&mut *tx)
+            .await?;
+        let pruned: i32 = sqlx::query_scalar("SELECT career_prune_closed_ready($1)")
+            .bind(batch as i32)
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        result.pruned = u32::try_from(pruned).map_err(|_| "Invalid ready prune count.")?;
+        Ok(result)
+    }
+
+    async fn reconcile_ready_for_maintenance(&self, id: &str) -> StoreResult<bool> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET LOCAL lock_timeout='50ms'")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("SET LOCAL statement_timeout='500ms'")
+            .execute(&mut *tx)
+            .await?;
+        let roster = ids(&mut tx, id).await?;
+        lock_profiles(&mut tx, &roster).await?;
+        let c = check(&mut tx, id).await?;
+        let at = now(&mut tx).await?;
+        let expired =
+            matches!(c.state.as_str(), "forming" | "open" | "approved") && c.deadline <= at;
+        reconcile(&mut tx, id, at).await?;
+        tx.commit().await?;
+        Ok(expired)
+    }
+
     /// Reserve immutable consent ownership before exposing a found match. A
     /// separate Publish starts the actual15-second window, never a retry.
     pub async fn ready_reserve(

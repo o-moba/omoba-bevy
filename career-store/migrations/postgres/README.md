@@ -2,7 +2,7 @@
 
 `career_store.rs` uses these PostgreSQL migrations with SQLx dynamic queries. It
 does not use the older SQLite prototype. `connect` applies career schema versions
-1–6 transactionally under a migration advisory lock, upgrades supported earlier
+1–13 transactionally under a migration advisory lock, upgrades supported earlier
 versions, and rejects unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
 explicitly as the migration owner. The game worker uses `connect_runtime` and
 requires no DDL permissions; startup rejects missing/unknown versions. See
@@ -14,6 +14,34 @@ CareerStore runtime SQLx pools are bounded to one connection when
 They configure statement and lock timeouts plus `synchronous_commit = on`.
 The optional Account API pool and administrative connections need their own budget. Infrastructure backups,
 replication, credentials, TLS policy and disaster recovery remain deployment work.
+
+## Current ready-receipt maintenance (schema13)
+
+Apply013_ready_retention.sql and the paired runtime grants before the new binary.
+Runtime requires all13 versions; a schema12 binary is not a compatible rollback.
+The migration adds partial deadline/closed-time indexes and a narrow owner-pinned
+`career_prune_closed_ready(1..128)` function. PUBLIC/portal cannot execute it; the
+game may execute the fixed policy but receives no DELETE grant on consent tables.
+It removes only cancelled/expired/consumed receipts older than7 days, with neither
+ready claims nor an unfinished SQL match. Members cascade; queue-dodge event
+identity/history, profile totals and immutable allocations/results remain intact.
+
+`maintain_ready` first reconciles at most128 expired active checks using the normal
+sorted profile/check locks. A healthy missed-answer deadline charges only absent
+answers, exactly once. Failed ownership/unpublished/handoff faults cancel without
+a dodge. Busy profile locks defer after50ms; per-statement maintenance work is
+limited to500ms. Fresh closure starts a new7-day retention window.
+
+Lobby/standalone runtime schedules32 checks per minute in one async background
+task after a300-second reconnect warmup, with a5-second overall deadline and
+skipped missed intervals. Match-worker processes do not schedule it. Existing
+immutable SQL admission remains the authority for Resume even after consent
+cleanup; absent consent cannot admit an unknown public allocation. Do not reuse
+random check identities for a later roster. Terminal ready-update retries after
+cleanup return closed, never approval. This policy does not delete local recovery
+spools or discipline deduplication receipts. Monitor pre-persistence and SQL-ready
+availability separately. No RU migration or grant application is implied by these
+repository changes; current-schema recovery and the reviewed rollout stay gates.
 
 ## Accounts, profiles and friends
 

@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "schema": 13,
+  "scope": "actual production lobby and real closed-consent API fixture in isolated PostgreSQL18.6 schema; no players, WAN or load proof",
+  "warmup_seconds": 304.71,
+  "pruned": 1,
+  "counts": {
+    "profiles": 1,
+    "members": 0,
+    "claims": 0,
+    "events": 0,
+    "matches": 0,
+    "played": 0
+  },
+  "source": "current native server, default300s production warmup/60s interval; no test timing override",
+  "notifications_sent": 0,
+  "owned_schema_removed": true
+}

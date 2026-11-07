@@ -2,6 +2,343 @@ use super::*;
 use crate::career_store::ready::{Action, CLOSED, OWNED_ELSEWHERE, Phase, Seat};
 use shared::match_service::MatchPreference;
 
+async fn backdate_closed(f: &Fixture, id: &str) {
+    sqlx::query("UPDATE career_ready_checks SET updated_at=clock_timestamp()-interval '8 days' WHERE check_id=$1")
+        .bind(id).execute(&f.store.pool).await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_retention_is_bounded_keeps_recent_receipts_and_refuses_late_admission() {
+    let (f, a, b, roster, _) = fixture().await;
+    for n in 1..=3 {
+        let id = format!("{n:032x}");
+        f.store
+            .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+            .await
+            .unwrap();
+        f.store.ready_update(&id, Action::Cancel).await.unwrap();
+        if n < 3 {
+            backdate_closed(&f, &id).await;
+        }
+    }
+    assert!(f.store.maintain_ready(0).await.is_err());
+    assert!(f.store.maintain_ready(129).await.is_err());
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().pruned, 1);
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().pruned, 1);
+    assert_eq!(f.store.maintain_ready(128).await.unwrap().pruned, 0);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_ready_checks")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    let mut start = starting(&result(&a, &b, 3001));
+    start.result_id = format!("{:032x}", 1);
+    start.rated = false;
+    start.unrated_reason = Some("retention fixture".into());
+    assert_eq!(
+        f.store.start_public(start.clone()).await.unwrap_err(),
+        CLOSED
+    );
+    assert_eq!(
+        f.store.ensure_public_allocation(start).await.unwrap_err(),
+        CLOSED
+    );
+    assert_eq!(
+        f.store
+            .ready_update(&format!("{:032x}", 1), answer(&roster[0], true))
+            .await
+            .unwrap_err(),
+        CLOSED
+    );
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    assert_eq!(event_count(&f).await, 0);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_retention_preserves_unfinished_admission_and_settled_resume_authority() {
+    let (f, a, b, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Publish).await.unwrap();
+    for seat in &roster {
+        f.store.ready_update(&id, answer(seat, true)).await.unwrap();
+    }
+    let mut terminal = result(&a, &b, 3002);
+    terminal.result_id = id.clone();
+    terminal.rated = false;
+    terminal.unrated_reason = Some("retention fixture".into());
+    let initial = starting(&terminal);
+    f.store.start_public(initial.clone()).await.unwrap();
+    backdate_closed(&f, &id).await;
+    assert_eq!(f.store.maintain_ready(128).await.unwrap().pruned, 0);
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM career_ready_checks WHERE check_id=$1")
+            .bind(&id)
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(before, 1);
+    f.store.start_public(initial.clone()).await.unwrap();
+    let receipt = f.store.settle(terminal.clone()).await.unwrap();
+    assert_eq!(f.store.maintain_ready(128).await.unwrap().pruned, 1);
+    // Immutable admission/results, not an old consent row, authorize retries.
+    f.store
+        .ensure_public_allocation(initial.clone())
+        .await
+        .unwrap();
+    f.store.start_public(initial).await.unwrap();
+    assert_eq!(f.store.settle(terminal).await.unwrap(), receipt);
+    assert_eq!(
+        f.store.history(&a.profile_id, None).await.unwrap().0.len(),
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_maintenance_expires_healthy_missed_answers_once_and_preserves_events() {
+    let (f, a, _, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Publish).await.unwrap();
+    f.store
+        .ready_update(&id, answer(&roster[0], true))
+        .await
+        .unwrap();
+    expire(&f, &id, true).await;
+    let other = f.another_owner().await;
+    let (one, two) = tokio::join!(f.store.maintain_ready(1), other.maintain_ready(1));
+    assert_eq!(one.unwrap().reconciled + two.unwrap().reconciled, 1);
+    let view = f.store.ready_update(&id, Action::Poll).await.unwrap();
+    assert_eq!(view.phase, Phase::Expired);
+    assert_eq!(event_count(&f).await, 1);
+    assert!(
+        f.store
+            .queue_dodge_cooldown(&a.profile_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        f.store
+            .queue_dodge_cooldown(&roster[1].profile_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    backdate_closed(&f, &id).await;
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().pruned, 1);
+    assert_eq!(
+        event_count(&f).await,
+        1,
+        "retention never removes discipline deduplication"
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_maintenance_cancels_failed_owner_without_punishing_players_or_live_checks() {
+    let (f, _, _, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Publish).await.unwrap();
+    backdate_closed(&f, &id).await;
+    assert_eq!(
+        f.store.maintain_ready(1).await.unwrap(),
+        ready::Maintenance::default()
+    );
+    expire(&f, &id, false).await;
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().reconciled, 1);
+    assert_eq!(
+        f.store.ready_update(&id, Action::Poll).await.unwrap().phase,
+        Phase::Cancelled
+    );
+    assert_eq!(event_count(&f).await, 0);
+    assert_eq!(
+        f.store.maintain_ready(1).await.unwrap().pruned,
+        0,
+        "closure starts a fresh retention window"
+    );
+    let other = f.another_owner().await;
+    other
+        .ready_reserve(&"b".repeat(32), MatchPreference::Casual, roster)
+        .await
+        .unwrap();
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_retention_skips_locked_closed_receipts_and_keeps_claimed_ones() {
+    let (f, _, _, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Cancel).await.unwrap();
+    backdate_closed(&f, &id).await;
+    let mut held = f.store.pool.begin().await.unwrap();
+    sqlx::query("SELECT check_id FROM career_ready_checks WHERE check_id=$1 FOR UPDATE")
+        .bind(&id)
+        .execute(&mut *held)
+        .await
+        .unwrap();
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().pruned, 0);
+    held.rollback().await.unwrap();
+    // A malformed legacy closed row with a surviving claim must also be kept.
+    sqlx::query("INSERT INTO career_ready_claims(profile_id,check_id) VALUES($1,$2)")
+        .bind(&roster[0].profile_id)
+        .bind(&id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().pruned, 0);
+    sqlx::query("DELETE FROM career_ready_claims WHERE check_id=$1")
+        .bind(&id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().pruned, 1);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_retention_schema12_upgrade_preserves_live_membership_and_discipline() {
+    let (f, _, _, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    let before = f.store.ready_update(&id, Action::Publish).await.unwrap();
+    let penalized = f.profile(3).await;
+    let observed = queue_discipline_now(&f).await;
+    let penalty = f
+        .store
+        .record_queue_dodge(&"f".repeat(32), &penalized.profile_id, observed)
+        .await
+        .unwrap();
+    assert!(penalty.is_some());
+    sqlx::raw_sql("DROP FUNCTION career_prune_closed_ready(integer); DROP INDEX career_ready_expiry,career_ready_retention; DELETE FROM career_schema_version WHERE version=13;")
+        .execute(&f.store.pool).await.unwrap();
+    assert!(
+        CareerStore::runtime_from_pool(f.store.pool.clone())
+            .await
+            .is_err()
+    );
+    let upgraded = CareerStore::from_pool(f.store.pool.clone()).await.unwrap();
+    let after = f.store.ready_update(&id, Action::Poll).await.unwrap();
+    assert_eq!(before.deadline_ms, after.deadline_ms);
+    assert_eq!(before.members, after.members);
+    assert_eq!(
+        upgraded.maintain_ready(1).await.unwrap(),
+        ready::Maintenance::default()
+    );
+    assert_eq!(event_count(&f).await, 1);
+    assert_eq!(
+        upgraded
+            .queue_dodge_cooldown(&penalized.profile_id)
+            .await
+            .unwrap(),
+        penalty
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_maintenance_defers_busy_profiles_without_losing_answers_or_penalties() {
+    let (f, a, _, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Publish).await.unwrap();
+    f.store
+        .ready_update(&id, answer(&roster[0], true))
+        .await
+        .unwrap();
+    expire(&f, &id, true).await;
+    let mut busy = f.store.pool.begin().await.unwrap();
+    sqlx::query("SELECT profile_id FROM career_profiles WHERE profile_id=$1 FOR UPDATE")
+        .bind(&a.profile_id)
+        .execute(&mut *busy)
+        .await
+        .unwrap();
+    let report = tokio::time::timeout(Duration::from_secs(2), f.store.maintain_ready(1))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        report,
+        ready::Maintenance {
+            deferred: 1,
+            ..Default::default()
+        }
+    );
+    assert_eq!(event_count(&f).await, 0);
+    busy.rollback().await.unwrap();
+    assert_eq!(f.store.maintain_ready(1).await.unwrap().reconciled, 1);
+    assert_eq!(event_count(&f).await, 1);
+    assert!(
+        f.store
+            .queue_dodge_cooldown(&a.profile_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_maintenance_backlogs_use_deadline_and_retention_indexes() {
+    let f = Fixture::new().await;
+    // Real PG planner over a recent backlog: no old rows should require a
+    // table-wide scan merely to find that there is nothing to maintain.
+    sqlx::query("INSERT INTO career_ready_checks(check_id,owner_id,queue,member_count,state,deadline_ms,live_until_ms) SELECT lpad(to_hex(n),32,'0'),'fixture','quick',1,CASE WHEN n<=5000 THEN 'forming' ELSE 'cancelled' END, floor(extract(epoch FROM statement_timestamp())*1000)::bigint+3600000,0 FROM generate_series(1,10000) n")
+        .execute(&f.store.pool).await.unwrap();
+    sqlx::query("ANALYZE career_ready_checks")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    for (query, index) in [
+        (
+            "EXPLAIN (FORMAT JSON) SELECT check_id FROM career_ready_checks WHERE state IN ('forming','open','approved') AND deadline_ms <= floor(extract(epoch FROM statement_timestamp())*1000)::bigint ORDER BY deadline_ms,check_id LIMIT 32",
+            "career_ready_expiry",
+        ),
+        (
+            "EXPLAIN (FORMAT JSON) SELECT check_id FROM career_ready_checks WHERE state IN ('cancelled','expired','consumed') AND updated_at < statement_timestamp()-interval '7 days' ORDER BY updated_at,check_id LIMIT 32",
+            "career_ready_retention",
+        ),
+    ] {
+        let plan: serde_json::Value = sqlx::query_scalar(query)
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+        assert!(
+            plan.to_string().contains(index),
+            "expected indexed bounded lookup: {plan}"
+        );
+    }
+    assert_eq!(
+        f.store.maintain_ready(32).await.unwrap(),
+        ready::Maintenance::default()
+    );
+    f.close().await;
+}
+
 fn seats(a: &ProfileSummary, b: &ProfileSummary) -> Vec<Seat> {
     vec![
         Seat {
@@ -399,7 +736,7 @@ async fn ready_ownership_invalid_answers_and_schema_upgrade_preserve_discipline(
         .record_queue_dodge(&"f".repeat(32), &a.profile_id, at)
         .await
         .unwrap();
-    sqlx::raw_sql("DROP TABLE career_ready_claims,career_ready_members,career_ready_checks; DELETE FROM career_schema_version WHERE version=12;")
+    sqlx::raw_sql("DROP FUNCTION career_prune_closed_ready(integer); DROP TABLE career_ready_claims,career_ready_members,career_ready_checks; DELETE FROM career_schema_version WHERE version>=12;")
         .execute(&f.store.pool).await.unwrap();
     assert!(
         CareerStore::runtime_from_pool(f.store.pool.clone())

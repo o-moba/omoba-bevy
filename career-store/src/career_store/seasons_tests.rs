@@ -372,6 +372,7 @@ async fn runtime_roles_can_play_and_read_but_cannot_roll_over_or_archive() {
         GRANT SELECT,INSERT,UPDATE ON career_queue_penalties TO {game_role};
         GRANT SELECT,INSERT,UPDATE ON career_ready_checks,career_ready_members TO {game_role};
         GRANT SELECT,INSERT,DELETE ON career_ready_claims TO {game_role};
+        GRANT EXECUTE ON FUNCTION career_prune_closed_ready(integer) TO {game_role};
         GRANT USAGE ON ALL SEQUENCES IN SCHEMA {schema} TO {game_role};
         -- Exact new permission delta from the prepared deployment patch.
         GRANT SELECT ON career_ranked_seasons TO {game_role},{portal_role};
@@ -380,6 +381,25 @@ async fn runtime_roles_can_play_and_read_but_cannot_roll_over_or_archive() {
         REVOKE ALL ON SEQUENCE career_ranked_seasons_season_id_seq FROM {game_role},{portal_role};
     "#,schema=f.schema)).execute(&f.store.pool).await.unwrap();
     let url = std::env::var("OMOBA_TEST_DATABASE_URL").unwrap();
+    let retired_profile = f.profile(777).await;
+    let retired_check = "d".repeat(32);
+    f.store
+        .ready_reserve(
+            &retired_check,
+            shared::match_service::MatchPreference::Casual,
+            vec![ready::Seat {
+                profile_id: retired_profile.profile_id,
+                session_id: "retired-seat".into(),
+            }],
+        )
+        .await
+        .unwrap();
+    f.store
+        .ready_update(&retired_check, ready::Action::Cancel)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_ready_checks SET updated_at=clock_timestamp()-interval '8 days' WHERE check_id=$1")
+        .bind(&retired_check).execute(&f.store.pool).await.unwrap();
     let mut pools = Vec::new();
     for role in [&game_role, &portal_role] {
         let setup_path = format!("SET search_path TO {}", f.schema);
@@ -400,6 +420,55 @@ async fn runtime_roles_can_play_and_read_but_cannot_roll_over_or_archive() {
             .unwrap();
         let runtime = CareerStore::runtime_from_pool(pool.clone()).await.unwrap();
         assert_eq!(runtime.ranked_season().await.unwrap().season_id, 1);
+        if role == &game_role {
+            assert_eq!(
+                runtime.maintain_ready(1).await.unwrap(),
+                ready::Maintenance {
+                    pruned: 1,
+                    ..Default::default()
+                }
+            );
+            let error = sqlx::query("DELETE FROM career_ready_checks WHERE false")
+                .execute(&pool)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.as_database_error().and_then(|e| e.code()).as_deref(),
+                Some("42501")
+            );
+            // A caller-owned temp table cannot redirect the definer policy.
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query("CREATE TEMP TABLE career_ready_checks(spoofed integer)")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            let pruned: i32 = sqlx::query_scalar("SELECT career_prune_closed_ready(1)")
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+            assert_eq!(pruned, 0);
+            tx.rollback().await.unwrap();
+            for batch in [None, Some(0), Some(129)] {
+                let error = sqlx::query("SELECT career_prune_closed_ready($1)")
+                    .bind(batch)
+                    .execute(&pool)
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    error.as_database_error().and_then(|e| e.code()).as_deref(),
+                    Some("22023")
+                );
+            }
+        } else {
+            let error = sqlx::query("SELECT career_prune_closed_ready(1)")
+                .execute(&pool)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.as_database_error().and_then(|e| e.code()).as_deref(),
+                Some("42501")
+            );
+        }
         for sql in [
             "UPDATE career_ranked_seasons SET closed_at_ms=ends_at_ms WHERE false",
             "INSERT INTO career_ranked_archives(season_id,profile_id,rating,rated_matches,wins,losses,completed_matches) SELECT 1,repeat('f',64),1000,1,0,1,1 WHERE false",

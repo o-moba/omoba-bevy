@@ -2,15 +2,21 @@
 
 Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sessions. Source of truth for the plan: [ranked-launch-readiness-2026-11-05.md](ranked-launch-readiness-2026-11-05.md); decisions: ADR-027 in [../architecture/decisions.md](../architecture/decisions.md); progress: [../progress/2026-11-05-ranked-matchmaking-readiness.md](../progress/2026-11-05-ranked-matchmaking-readiness.md). Raw reviewer output (JSON, local only): `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/raw/review-findings.json`.
 
-Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career12, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
+Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career13, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
 
 ## Current release checkpoint — 2026-11-07
 
 Original68: **62 done,5 partial (#1,#2,#12,#20,#50),1 open (#13)**.
 Critic/physical/UI and deployment requirements remain additional acceptance gates.
-Current local proof: **564 actual server cases (13 real-PG) and108 monitor/host-tool
-cases PASS**; the unchanged store previously passed92 actual-PG18.6 cases. Pending
-result retries preserve their age, terminal alerts use source time, and bounded
+Current local proof: **564 actual server cases (13 real-PG) and100 actual-PG18.6
+store cases PASS**. Unchanged monitor/host-tool source retains its108-case proof.
+Schema13 adds bounded ready-receipt maintenance: expired ownership reconciles
+under the existing locks/dodge policy; only closed7-day-old unclaimed receipts
+without unfinished SQL matches are pruned. Resume, history and discipline event
+identity remain intact. [Current retention proof](../evidence/ready-retention-2026-11-07/README.md).
+The actual default300s scheduler prunes its isolated API-created receipt after
+304.71s, with no played match/penalty and complete fixture cleanup. Pending result
+retries preserve their age, terminal alerts use source time, and bounded
 typed queue-journal checks detect stale/corrupt/over-capacity delivery. Journal
 ownership explicitly unlocks when retired, including inherited-descriptor cases.
 [Current health/reopen proof](../evidence/outbox-health-2026-11-07/README.md).
@@ -19,7 +25,7 @@ are retained. Full current CI remains required. Public roles require
 committed SQL consent on every new admission; old disk receipts cannot invent an
 admission after partial restore. [Exact current scope](../evidence/public-consent-admission-2026-11-07/README.md).
 
-Next: ready/storage availability health and safe retention; current-schema recovery/replay
+Next: ready/storage availability health; current-schema13 recovery/replay
 rehearsal; UI-2/UI-3 exact current pixels and physical C3; actual multi-host/WAN
 and sustained host capacity/cadence; trust packaging/provisioning; current full CI.
 C2/C4 host-tool proposals still await their existing owner decisions. Original
@@ -165,14 +171,15 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
    `scripts/postgres_tests.py`, full public journeys and portal checks. The owner
    permits targeted local commits with the full gate in CI while root disk is
    below20GB; a prior head's green job does not certify the current source.
-2. Finish ready/storage availability health and bounded safe retention. Persisted
-   result/journal alerting now has actual native/monitor interoperability proof;
+2. Finish ready/storage availability health. Schema13 bounded ready retention
+   preserves active claims/unfinished matches and existing Resume. Persisted
+   result/journal alerting has actual native/monitor interoperability proof;
    pre-persistence failures and SQL ready/floor availability remain separate.
    Missing-consent public
    admission is now closed; retain authoritative recovery records and never turn
    absent/removed ready rows into a standalone bypass.
 3. Rehearse current-schema recovery and receipt replay against the exact release
-   binary. C4's older schema10 physical proofs are historical. New public replay
+   binary. C4's older schema10 physical proofs are historical; current target is13. New public replay
    preserves missing-admission evidence until matching SQL authority is restored;
    it does not prove a physical/WAL backup, off-host storage or RU recovery.
 4. Finish UI-2 widest-name/UI-3 compatibility current-source captures and C3
@@ -2507,3 +2514,31 @@ health, safe retention, pre-persistence failures or sustained heartbeat/capacity
 acceptance. Career12/portal11/protocol16 are unchanged. Current-schema PITR,
 UI/physical, trust/WAN/multi-host/RU gates and existing C2/C4 decisions remain open.
 Original68 stays62 done,5 partial,1 open. No RU changes or deployment.
+
+
+## 2026-11-07 — bounded ready maintenance (schema13)
+
+New partial indexes bound expired-check and closed-receipt lookups. Maintenance
+reconciles at most128 expired checks under existing sorted profile/check locks;
+healthy missed answers charge exactly one existing discipline event, failed
+ownership/handoff cancels without a dodge. Busy locks defer. A narrow pinned
+owner function removes at most128 closed receipts older than7 days, excluding
+claims and unfinished matches; members cascade, event deduplication/history and
+immutable SQL admissions/results remain. Runtime has function EXECUTE, no direct
+consent DELETE; PUBLIC/portal are denied and temp-table shadowing is tested.
+
+Lobby/standalone starts one async32-check/minute task after300s warmup; each run
+has a5s deadline and skips missed intervals. Match workers do not schedule it.
+All100 actual-PG18.6 store cases and564 actual whole-server cases (13 real-PG),
+strict native test/production/store checks and formatting PASS. The fresh signed
+15s timeout/FIFO/replacement journey PASS uses schema13.
+[Exact source, recovery invariants and runtime proof](../evidence/ready-retention-2026-11-07/README.md).
+
+Owned public fixture migrated12→13; isolated upgrade preserves live membership
+and penalty state, with no leaked per-test schemas. Paired013 migration, runtime
+function grants and binaries are required; a schema12 binary is not rollback.
+Schema13 physical/WAL/off-host recovery and restored rights still need rehearsal;
+older schema10/12 evidence is historical. Ready/floor SQL availability health,
+pre-persistence failures, controlled heartbeat/load cadence, trust/WAN/multi-host,
+UI/physical/RU and existing C2/C4 decisions remain open. Original68 remains
+62 done,5 partial,1 open. No RU migration, grant application or deployment.

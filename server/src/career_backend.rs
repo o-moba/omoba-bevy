@@ -2188,6 +2188,7 @@ fn worker(
     let mut heartbeat = Instant::now();
     let mut connected = true;
     let mut _heartbeat_task = None;
+    let mut _ready_maintenance_task = None;
     // Sign-ins and account actions that arrived while the database was not
     // connected (after a host reboot): answered once it is, or "unavailable"
     // after STORE_WAIT, instead of failing at once.
@@ -2214,6 +2215,34 @@ fn worker(
             last_retry = Instant::now();
             store = rt.block_on(CareerStore::connect_runtime(&url)).ok();
             if let Some(s) = &store {
+                // One bounded async background task per lobby/standalone. Never
+                // serialize maintenance SQL ahead of15-second consent jobs.
+                if !matches!(scope, RecoveryScope::Epoch(_)) {
+                    let maintenance_store = s.clone();
+                    _ready_maintenance_task = Some(rt.spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(300)).await;
+                        let mut timer = tokio::time::interval(Duration::from_secs(60));
+                        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                        loop {
+                            timer.tick().await;
+                            match tokio::time::timeout(
+                                Duration::from_secs(5),
+                                maintenance_store.maintain_ready(32),
+                            )
+                            .await
+                            {
+                                Ok(Ok(report)) if report != Default::default() => println!(
+                                    "READY_MAINTENANCE reconciled={} pruned={} deferred={}",
+                                    report.reconciled, report.pruned, report.deferred
+                                ),
+                                Ok(Ok(_)) => {}
+                                Ok(Err(_)) | Err(_) => eprintln!(
+                                    "Ready maintenance unavailable; consent records retained."
+                                ),
+                            }
+                        }
+                    }));
+                }
                 let s = s.clone();
                 _heartbeat_task = Some(rt.spawn(async move {
                     let mut timer = tokio::time::interval(Duration::from_secs(10));

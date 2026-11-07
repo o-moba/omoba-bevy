@@ -11,16 +11,18 @@ findings). Decision record: ADR-027.
 The authoritative remaining order is now at the top of
 [the full TODO](../plans/TODO-LOBBY-2026-11-05.md). Original68 remains62 done,
 5 partial,1 open; critic/UI/physical and RU gates are additional. Current local
-verification is564 whole-server cases (13 real-PG) and108 monitor/host-tool cases,
-with92 prior unchanged-store real-PG cases. Pending-result age survives retries;
+verification is564 whole-server cases (13 real-PG) and100 actual-PG18.6 store
+cases, plus108 prior unchanged monitor/host-tool cases. Schema13 bounded ready
+maintenance preserves claims, unfinished games, Resume and discipline identity.
+[Current retention proof](../evidence/ready-retention-2026-11-07/README.md). Pending-result age survives retries;
 typed penalty delivery is monitored without player identifiers. An explicit
 journal lock guard fixes the deterministic duplicated-descriptor reopen failure.
 [Current health/reopen proof](../evidence/outbox-health-2026-11-07/README.md).
 Mandatory SQL consent and preserved partial-restore evidence remain verified in
 [the admission proof](../evidence/public-consent-admission-2026-11-07/README.md).
-Full current CI, ready/storage health and safe retention, current-schema physical recovery, native/
+Full current CI, ready/storage availability health, schema13 physical recovery, native/
 physical acceptance, WAN/multi-host capacity/trust and owner-controlled RU rollout
-remain open. Career12/portal11, protocol16; older sections preserve dated history.
+remain open. Career13/portal11, protocol16; older sections preserve dated history.
 
 ## Initial changes — 2026-11-05
 
@@ -1556,3 +1558,30 @@ Parent6f6a9544's7-job green CI and hashed20-stage public artifact were inspected
 [Evidence, CI distinction and remaining scope](../evidence/outbox-health-2026-11-07/README.md).
 Safe retention and ready/SQL availability are still open; no original finding or
 physical/infra gate is waived, and no RU rollout is performed.
+
+
+## 2026-11-07 — safe ready receipt maintenance
+
+Schema13 adds bounded deadline/closed-time indexes and a narrow owner-pinned prune
+policy. Reconcile expired ready ownership using existing locks/penalties; prune
+only closed receipts older than7 days without claims or unfinished matches.
+Preserve immutable admission/Resume, results and discipline deduplication. Lobby
+maintenance is asynchronous after300s warmup,32 checks/minute,5s overall deadline;
+short SQL/lock limits defer contention. No match-worker task or catch-up burst.
+
+All100 real-PG18.6 store and564 actual whole-server cases PASS. Eight new store
+cases plus extended restricted-role proof cover batches, freshness, active/locked
+claims, unfinished/settled replay, exact missed-answer discipline, failed owners,
+busy profiles, schema12 upgrade and actual indexed plans over10000 rows. Strict
+native checks and schema13 signed15s/FIFO/replacement journey PASS.
+[Proof and deployment limits](../evidence/ready-retention-2026-11-07/README.md).
+
+Owned fixture is career13/portal11; runtime now requires13. Apply paired grants
+only through the reviewed rollout. Current full CI, schema13 physical/WAL/off-host
+recovery, ready/storage availability health and all remaining physical/capacity/
+trust/WAN/RU gates remain open. No production changes; original68 ledger unchanged.
+
+Actual production scheduler proof also PASS without a timing override: after
+304.71s it prunes the API-created closed receipt, preserves the zero-played profile
+and creates no match/penalty. The owned server exits and its isolated schema is
+removed. This is idle scheduler wiring, not multiplayer capacity/WAN proof.
