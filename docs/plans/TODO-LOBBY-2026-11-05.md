@@ -2277,3 +2277,30 @@ artifact inspection is claimed here. Shared cooldown reads/final durable-start,
 ready ownership/deadlines, legacy floor reconciliation, signed two-lobby fault
 proof, schema11 recovery and typed-journal health remain open. Original68 ledger
 stays62 done,5 partial,1 open. C2/C4 questions remain pending; no RU rollout.
+
+
+### Shared new-search and durable-start checks verified — 2026-11-07
+
+New search now uses shared queue discipline on both serial/parked and batched
+backend access paths. Normal account access/Resume remains separate. New durable
+allocation checks queue penalties after participant profile locks and rolls back
+all match/participant/active/season rows on refusal. Existing immutable allocation
+retry/adoption is preserved. A refused Start is retired through the durable
+rejection path so late terminal replay cannot start it after cooldown expiry.
+The client maps its stable dodge code to the existing Russian localized notice.
+
+All72 actual-PG18.6 store tests and all63 native backend tests PASS,0 failures/
+ignores; strict store/backend test-target Clippy and formatting/diff PASS. New
+proof includes three store cases (fresh cross-owner read, rollback/Resume and an
+observed real in-flight event/profile-lock race), two actual-worker PG cases and
+one backend dispatch unit. First71/1 store attempt exposed missing source grants
+in the restricted-role fixture; corrected, cleaned only its exact disposable
+schema/two NOLOGIN roles and reran72 PASS. [Exact scope/proof](../evidence/queue-admission-2026-11-07/README.md).
+
+Fresh full engine/client CI and rendered current Russian pixels remain required.
+Previousef9c865b CI42316037246 was still running at this checkpoint, with Android,
+Python, harness and bot jobs passed; it does not certify these newer changes.
+Shared ready ownership/deadlines BEFORE cross-host re-search, legacy floors and
+actual signed two-lobby/party/FIFO/Resume fault proof remain open. So do C2/C4
+approval/actual RU recovery, typed-journal health and physical/capacity gates.
+Original68 ledger stays62 done,5 partial,1 open; no acceptance criterion waived.

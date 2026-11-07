@@ -19,6 +19,35 @@ fn cooldown(row: Option<PgRow>) -> StoreResult<Option<PlayCooldown>> {
 }
 
 impl CareerStore {
+    /// Fresh new-search authorization. Ordinary access/Resume must remain
+    /// usable while a queue penalty is active. The final allocation transaction
+    /// rechecks discipline under profile locks; this read alone is no start lease.
+    pub async fn queue_access(
+        &self,
+        public_key: &str,
+        profile: &str,
+    ) -> Result<moderation::Access, String> {
+        let access = self.access(public_key, profile).await?;
+        if access.key_active && self.queue_dodge_cooldown(profile).await?.is_some() {
+            return Err(shared::career::error_code::DODGE_COOLDOWN.into());
+        }
+        Ok(access)
+    }
+
+    /// Caller holds every participant profile lock. Record and admission share
+    /// this serialization point across hosts; never call before locking profiles.
+    pub(super) async fn check_queue_discipline(
+        tx: &mut Transaction<'_, Postgres>,
+        profiles: &[String],
+    ) -> StoreResult<()> {
+        let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_queue_penalties WHERE profile_id=ANY($1) AND cooldown_until>clock_timestamp())")
+            .bind(profiles).fetch_one(&mut **tx).await?;
+        if blocked {
+            return Err(shared::career::error_code::DODGE_COOLDOWN.into());
+        }
+        Ok(())
+    }
+
     /// Read committed shared discipline without consulting a lobby's local
     /// state. Storage/permission/schema failures remain errors, never no-ban.
     pub async fn queue_dodge_cooldown(

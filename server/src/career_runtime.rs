@@ -1410,7 +1410,14 @@ impl ServerRuntime {
                 if player.hero.identity.id == participant.player_id {
                     player.joined = false;
                     self.career.backend.set_playing(*addr, false);
-                    self.career.errors.insert(*addr, format!("{error} Leave queue to clear this attempt, then retry after the other match ends."));
+                    let message = if error == shared::career::error_code::DODGE_COOLDOWN {
+                        error.clone()
+                    } else {
+                        format!(
+                            "{error} Leave queue to clear this attempt, then retry after the other match ends."
+                        )
+                    };
+                    self.career.errors.insert(*addr, message);
                 }
             }
         }

@@ -623,6 +623,7 @@ pub struct PlayCooldown {
 
 /// Stable codes of [`CareerView::error_code`].
 pub mod error_code {
+    pub const DODGE_COOLDOWN: &str = "dodge_cooldown";
     pub const PLAY_COOLDOWN: &str = "play_cooldown";
     pub const RANKED_LOCKED: &str = "ranked_locked";
     pub const RANKED_SEASON_ENDED: &str = "ranked_season_ended";

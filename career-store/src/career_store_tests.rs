@@ -3040,3 +3040,236 @@ async fn queue_discipline_small_host_clock_skew_cannot_extend_the_cooldown() {
     );
     f.close().await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_fresh_search_is_global_but_access_and_revocation_remain_usable() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let key = format!("{:064x}", 1);
+    assert!(
+        other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    f.store
+        .record_queue_dodge(
+            &format!("{:032x}", 1),
+            &profile.profile_id,
+            queue_discipline_now(&f).await,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap_err(),
+        shared::career::error_code::DODGE_COOLDOWN
+    );
+    assert!(
+        other
+            .access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active,
+        "login/access/Resume authorization is separate from starting a search"
+    );
+    let untouched = f.profile(2).await;
+    assert!(
+        other
+            .queue_access(&format!("{:064x}", 2), &untouched.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    sqlx::query("UPDATE career_queue_penalties SET cooldown_until=clock_timestamp()-interval '1 second' WHERE profile_id=$1")
+        .bind(&profile.profile_id).execute(&f.store.pool).await.unwrap();
+    assert!(
+        other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    sqlx::query("UPDATE career_keys SET revoked_at=clock_timestamp() WHERE public_key=$1")
+        .bind(&key)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert!(
+        !other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    sqlx::query("DROP TABLE career_queue_penalties")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert!(
+        other
+            .queue_access(&format!("{:064x}", 2), &untouched.profile_id)
+            .await
+            .is_err(),
+        "unknown shared penalty state cannot authorize a new search"
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_start_rechecks_rolls_back_and_preserves_existing_allocation_recovery() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let other = f.another_owner().await;
+    // The earlier queue read succeeds; a different host then commits a dodge.
+    assert!(
+        other
+            .queue_access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    f.store
+        .record_queue_dodge(
+            &format!("{:032x}", 1),
+            &a.profile_id,
+            queue_discipline_now(&f).await,
+        )
+        .await
+        .unwrap();
+    for (n, rated) in [(901, true), (902, false)] {
+        let mut initial = starting(&result(&a, &b, n));
+        initial.rated = rated;
+        if !rated {
+            initial.unrated_reason = Some("casual fixture".into());
+        }
+        assert_eq!(
+            other.start(initial).await.unwrap_err(),
+            shared::career::error_code::DODGE_COOLDOWN
+        );
+    }
+    for table in [
+        "career_matches",
+        "career_participants",
+        "career_active_profiles",
+        "career_ranked_allocations",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "rejected admission must roll back {table}");
+    }
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    sqlx::query(
+        "UPDATE career_queue_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    let initial = starting(&result(&a, &b, 903));
+    other.start(initial.clone()).await.unwrap();
+    f.store
+        .record_queue_dodge(
+            &format!("{:032x}", 2),
+            &a.profile_id,
+            queue_discipline_now(&f).await,
+        )
+        .await
+        .unwrap();
+    // This same immutable already admitted match must remain resumable.
+    other.start(initial.clone()).await.unwrap();
+    other.ensure_allocation(initial.clone()).await.unwrap();
+    f.expire(&initial.result_id).await;
+    f.store.ensure_allocation(initial.clone()).await.unwrap();
+    f.store.checkpoint(initial).await.unwrap();
+    f.close().await;
+}
+
+async fn queue_discipline_single_connection_owner(f: &Fixture) -> (CareerStore, i32) {
+    let schema = f.schema.clone();
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO {schema}"))
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("SET lock_timeout='5s'")
+                    .execute(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&std::env::var("OMOBA_TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let store = CareerStore::from_pool(pool).await.unwrap();
+    let pid = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    (store, pid)
+}
+async fn queue_discipline_wait_for_lock(f: &Fixture, pid: i32, statement: &str) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock' AND position($2 in query)>0)")
+                .bind(pid).bind(statement).fetch_one(&f.admin).await.unwrap();
+            if waiting { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("must observe this exact owner's blocked production statement");
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_start_waits_for_an_inflight_other_owner_dodge_commit() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let (recorder, recording_pid) = queue_discipline_single_connection_owner(&f).await;
+    let (starter, starting_pid) = queue_discipline_single_connection_owner(&f).await;
+    let initial = starting(&result(&a, &b, 904));
+    let at = queue_discipline_now(&f).await;
+    // Only this disposable schema: pause the real record method AFTER it has
+    // locked its profile, before committing. No production time/race test hook.
+    sqlx::raw_sql("CREATE FUNCTION pause_queue_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtextextended(TG_TABLE_SCHEMA,35)); RETURN NEW; END $$; CREATE TRIGGER pause_queue_receipt BEFORE INSERT ON career_queue_dodge_events FOR EACH ROW EXECUTE FUNCTION pause_queue_receipt();")
+        .execute(&f.store.pool).await.unwrap();
+    let mut pause = f.store.pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,35))")
+        .bind(&f.schema)
+        .execute(&mut *pause)
+        .await
+        .unwrap();
+    let profile = a.profile_id.clone();
+    let recording = tokio::spawn(async move {
+        recorder
+            .record_queue_dodge(&format!("{:032x}", 1), &profile, at)
+            .await
+    });
+    queue_discipline_wait_for_lock(&f, recording_pid, "INSERT INTO career_queue_dodge_events")
+        .await;
+    let starting = tokio::spawn(async move { starter.start(initial).await });
+    queue_discipline_wait_for_lock(&f, starting_pid, "SELECT * FROM career_profiles").await;
+    pause.commit().await.unwrap();
+    assert!(recording.await.unwrap().unwrap().is_some());
+    assert_eq!(
+        starting.await.unwrap().unwrap_err(),
+        shared::career::error_code::DODGE_COOLDOWN
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    f.close().await;
+}

@@ -549,3 +549,138 @@ fn corrupt_queue_dodge_journal_refuses_search_and_flush_but_keeps_access_refresh
     clear_queue_profile(&runtime, &pool, &profile);
     runtime.block_on(pool.close());
 }
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn queue_dodge_shared_access_checks_both_worker_paths_without_revoking_the_session() {
+    let (url, runtime, store, pool) = database();
+    let (key, profile, event) = queue_profile(&runtime, &store);
+    runtime
+        .block_on(store.record_queue_dodge(
+            &event.event_id,
+            &event.profile_id,
+            event.observed_at_ms,
+        ))
+        .unwrap();
+    let request = crate::career_port::MatchRequest {
+        addr: "127.0.0.1:51802".parse().unwrap(),
+        request_id: 701,
+        preference: shared::match_service::MatchPreference::Ranked,
+        also_casual: false,
+    };
+    let job = |sequence| Job::QueueAccess {
+        request,
+        nonce: "owned-access-fixture".into(),
+        sequence,
+        public_key: key.clone(),
+        profile_id: profile.profile_id.clone(),
+    };
+    assert!(
+        matches!(answer(&runtime, &store, job(1), &Admission::for_test()),
+        Some(Reply::QueueAccess { access: Err(error), .. }) if error == shared::career::error_code::DODGE_COOLDOWN)
+    );
+    let worker = OwnedWorker::spawn(url, false);
+    worker.send(job(2));
+    worker.send(Job::RefreshAccess {
+        addr: request.addr,
+        nonce: "owned-refresh-fixture".into(),
+        public_key: key.clone(),
+        profile_id: profile.profile_id.clone(),
+    });
+    let (mut refused, mut refreshed) = (false, false);
+    worker.wait_for(|reply| {
+        match reply {
+            Reply::QueueAccess {
+                sequence: 2,
+                access,
+                ..
+            } => {
+                assert_eq!(
+                    access.unwrap_err(),
+                    shared::career::error_code::DODGE_COOLDOWN
+                );
+                refused = true;
+            }
+            Reply::RefreshAccess {
+                key_active: Some(true),
+                ..
+            } => refreshed = true,
+            _ => {}
+        }
+        refused && refreshed
+    });
+    runtime.block_on(sqlx::query("UPDATE career_queue_penalties SET cooldown_until=clock_timestamp()-interval '1 second' WHERE profile_id=$1")
+        .bind(&profile.profile_id).execute(&pool)).unwrap();
+    worker.send(job(3));
+    worker.wait_for(|reply| match reply {
+        Reply::QueueAccess {
+            sequence: 3,
+            access,
+            ..
+        } => {
+            assert!(access.unwrap().unwrap().key_active);
+            true
+        }
+        _ => false,
+    });
+    drop(worker);
+    clear_queue_profile(&runtime, &pool, &profile);
+    runtime.block_on(pool.close());
+}
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn queue_dodge_rejected_start_retires_the_attempt_instead_of_waiting_for_penalty_expiry() {
+    let (url, runtime, store, pool) = database();
+    let (_, profile, event) = queue_profile(&runtime, &store);
+    runtime
+        .block_on(store.record_queue_dodge(
+            &event.event_id,
+            &event.profile_id,
+            event.observed_at_ms,
+        ))
+        .unwrap();
+    let rejected = allocation(&profile);
+    let worker = OwnedWorker::spawn(url, false);
+    worker.send(record(RecordKind::Start, rejected.clone()));
+    worker.send(record(RecordKind::Settle, terminal(&rejected)));
+    worker.wait_for(|reply| match reply {
+        Reply::Rejected(id, error) if id == rejected.result_id => {
+            assert_eq!(error, shared::career::error_code::DODGE_COOLDOWN);
+            true
+        }
+        Reply::Started(id) if id == rejected.result_id => panic!("blocked roster started"),
+        Reply::Settled { result, .. } if result.result_id == rejected.result_id => {
+            panic!("blocked roster settled")
+        }
+        _ => false,
+    });
+    runtime.block_on(sqlx::query("UPDATE career_queue_penalties SET cooldown_until=clock_timestamp()-interval '1 second' WHERE profile_id=$1")
+        .bind(&profile.profile_id).execute(&pool)).unwrap();
+    // A late terminal retry after expiry cannot resurrect the refused attempt.
+    worker.send(record(RecordKind::Settle, terminal(&rejected)));
+    worker.send(Job::Flush(905));
+    worker.wait_for(|reply| matches!(reply, Reply::Flushed(905, true)));
+    let count: i64 = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM career_matches WHERE result_id=$1")
+                .bind(&rejected.result_id)
+                .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    assert!(
+        !spool_path(&worker.outbox, &rejected.result_id)
+            .unwrap()
+            .exists()
+    );
+    assert_eq!(
+        runtime
+            .block_on(store.profile(&profile.profile_id))
+            .unwrap(),
+        profile
+    );
+    drop(worker);
+    clear_queue_profile(&runtime, &pool, &profile);
+    runtime.block_on(pool.close());
+}

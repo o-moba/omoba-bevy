@@ -82,3 +82,34 @@ fn a_commit_ack_for_a_conflicting_payload_cannot_clear_the_producer_event() {
         Some(&expected)
     );
 }
+
+#[test]
+fn a_fresh_shared_dodge_refusal_never_dispatches_a_queue_request() {
+    let mut backend = MemoryCareer::test_backend(9);
+    let addr = "127.0.0.1:51801".parse().unwrap();
+    backend.test_authenticated(
+        addr,
+        ProfileSummary::new("a".repeat(64), "Player".into()),
+        "session",
+    );
+    let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
+    backend.clients.get_mut(&addr).unwrap().queue_sequence = Some(1);
+    backend.link.replies.push_back(Reply::QueueAccess {
+        request: crate::career_port::MatchRequest {
+            addr,
+            request_id: 7,
+            preference: shared::match_service::MatchPreference::Ranked,
+            also_casual: false,
+        },
+        nonce,
+        sequence: 1,
+        access: Err(shared::career::error_code::DODGE_COOLDOWN.into()),
+    });
+    backend.poll();
+    assert!(backend.take_match_requests().is_empty());
+    assert_eq!(
+        backend.view(addr).error_code.as_deref(),
+        Some("dodge_cooldown")
+    );
+    assert!(backend.authenticated_session(addr).is_some());
+}

@@ -1079,6 +1079,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 }
                 c.sequence = sequence;
                 c.view.error = None;
+                c.view.error_code = None;
                 if let CareerAction::FindMatch {
                     request_id,
                     preference,
@@ -1217,6 +1218,9 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             }
                         }
                         Err(error) => {
+                            c.view.error_code = (error
+                                == shared::career::error_code::DODGE_COOLDOWN)
+                                .then(|| shared::career::error_code::DODGE_COOLDOWN.into());
                             c.view.error = Some(error);
                         }
                     }
@@ -1794,7 +1798,7 @@ fn answer(
             nonce,
             sequence,
             access: rt
-                .block_on(store.access(&public_key, &profile_id))
+                .block_on(store.queue_access(&public_key, &profile_id))
                 .map(Some),
         }),
         Job::Login { addr, challenge } => {
@@ -1916,7 +1920,7 @@ async fn answer_access_read(store: CareerStore, job: Job) -> Reply {
             request,
             nonce,
             sequence,
-            access: store.access(&public_key, &profile_id).await.map(Some),
+            access: store.queue_access(&public_key, &profile_id).await.map(Some),
         },
         Job::RefreshAccess {
             addr,
@@ -2346,9 +2350,12 @@ fn worker(
                             && (error
                                 == "A conflicting career identity or active assignment already exists."
                                 || error
-                                    == "Queued ratings changed. Clear the queue and try again.")
+                                    == "Queued ratings changed. Clear the queue and try again."
+                                || error == shared::career::error_code::DODGE_COOLDOWN)
                         {
-                            let message = if error.starts_with("Queued ratings") {
+                            let message = if error.starts_with("Queued ratings")
+                                || error == shared::career::error_code::DODGE_COOLDOWN
+                            {
                                 error.clone()
                             } else {
                                 "An account in this roster already has an active match. Clear the queue and retry after that match is saved.".into()

@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Enforce shared queue-dodge cooldowns on fresh searches and new durable starts
+  under profile locks. Preserve ordinary access/existing allocation recovery;
+  permanently retire refused starts and late terminal retries. Reuse localized
+  dodge notices. All72 PG store/63 native backend cases and strict native Clippy
+  PASS after fixing the restricted-role fixture grants. Fresh engine/client CI,
+  shared ready ownership/legacy floors and actual two-host/RU gates remain open.
+
 - Wire stable queue-dodge events through a separate durable journal to shared SQL,
   retaining producer state until exact commit ACK. Corrupt penalty state closes
   new search; storage failure preserves ready players and FIFO. All60 native

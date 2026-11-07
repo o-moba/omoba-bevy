@@ -368,6 +368,8 @@ async fn runtime_roles_can_play_and_read_but_cannot_roll_over_or_archive() {
         GRANT SELECT,INSERT(public_key,profile_id) ON career_keys TO {game_role};
         GRANT SELECT,INSERT ON career_abandon_events TO {game_role};
         GRANT SELECT,INSERT,UPDATE ON career_play_penalties TO {game_role};
+        GRANT SELECT,INSERT ON career_queue_dodge_events TO {game_role};
+        GRANT SELECT,INSERT,UPDATE ON career_queue_penalties TO {game_role};
         GRANT USAGE ON ALL SEQUENCES IN SCHEMA {schema} TO {game_role};
         -- Exact new permission delta from the prepared deployment patch.
         GRANT SELECT ON career_ranked_seasons TO {game_role},{portal_role};

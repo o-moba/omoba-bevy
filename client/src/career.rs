@@ -1267,6 +1267,11 @@ fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
 pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
     let error = view.error.as_ref()?;
     let code = view.error_code.as_deref();
+    if code == Some(shared::career::error_code::DODGE_COOLDOWN)
+        || error == shared::career::error_code::DODGE_COOLDOWN
+    {
+        return Some(tr("queue.failed.dodge_cooldown").into());
+    }
     if code == Some(shared::career::error_code::PLAY_COOLDOWN)
         || error == shared::career::error_code::PLAY_COOLDOWN
     {
@@ -2958,6 +2963,23 @@ mod tests {
             assert!(
                 failed("practice_cooldown").starts_with(cooldown),
                 "{locale}"
+            );
+        }
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        for error_code in [
+            None,
+            Some(shared::career::error_code::DODGE_COOLDOWN.into()),
+        ] {
+            let view = CareerView {
+                error: Some(shared::career::error_code::DODGE_COOLDOWN.into()),
+                error_code,
+                ..Default::default()
+            };
+            assert_eq!(
+                server_error_text(&view).unwrap(),
+                tr("queue.failed.dodge_cooldown")
             );
         }
     }

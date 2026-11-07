@@ -1,0 +1,50 @@
+{
+  "status": "PASS native scope; current standard Cargo/engine/client CI pending",
+  "source_sha256": {
+    "shared/src/career.rs": "babca802d8ddb39ef4588a1b82f1f6121d962bf12319add0d865f42e21e48cad",
+    "career-store/src/career_store.rs": "b32334f5cc46ec3912f49d728db30b04d2247a5f0423cf63a6344109021a9b35",
+    "career-store/src/career_store/queue_discipline.rs": "5b24853009b9502096b99231d9b8f1adb0f64533a628f3c619cbc7b75712d6e6",
+    "career-store/src/career_store_tests.rs": "6add5dd6dc1e06f346d65d9357eb14c4d73f907877700b1b276fc815de7a0ef8",
+    "career-store/src/career_store/seasons_tests.rs": "9ad3772da19e116227c64a5d1f8eba7b928646571fa3fb37b346ebc94b0440ad",
+    "server/src/career_backend.rs": "a15ad912dca517c0dd16fe93b65671ca220fd2005f59155ef4d67d2a61e84eea",
+    "server/src/career_backend_resilience_tests.rs": "3b8747bd86cf41c97d844be3a5a60a55de1f1e536987f3c98ad90d3ae26579ac",
+    "server/src/career_dodge_tests.rs": "5d0364e21387fbcded18ef3cd16620565bbe19b9aa9d2081dff7896bff1fd38a",
+    "server/src/career_runtime.rs": "dc7c71ed088c4bad1a6fb7b1c1f221dc688e2e7c4b73c52b88795e326c9726c0",
+    "client/src/career.rs": "a77ef3c12b94b9d72895722988be4eb67ebd6ee5f7e42a41eea46c2f0d14ab9f"
+  },
+  "tests": {
+    "store_all": {
+      "passed": 72,
+      "failed": 0,
+      "ignored": 0
+    },
+    "store_queue_discipline": {
+      "passed": 9,
+      "new": 3
+    },
+    "backend_all": {
+      "passed": 63,
+      "failed": 0,
+      "ignored": 0
+    },
+    "backend_new_actual_pg": 2,
+    "backend_new_unit": 1,
+    "strict_native_clippy": "PASS store and backend test targets with existing allowances",
+    "format_and_diff": "PASS"
+  },
+  "rejected_run": "Initial full store run71/1/0 exposed missing queue table grants in the restricted-role test fixture. Added the exact already-committed source grants; cleaned only its known disposable schema/two NOLOGIN roles, verified0 leftovers, and reran full72 PASS. Production roles unchanged.",
+  "limits": [
+    "Engine/career_runtime change not locally compiled/executed; fresh standard CI required",
+    "RU client string handling regression added for raw code and error_code; execution/current pixels await CI/visual verification; existing locale text reused",
+    "No signed two-live-lobby/WAN or physical-device proof",
+    "Pre-SQL event interval needs shared ready ownership/deadlines; legacy penalty floors still need reconciliation",
+    "No RU deploy or live keys/permissions changed"
+  ],
+  "ui_scope": {
+    "language": "ru",
+    "profile": "iPhone16 landscape852x393 when current artifact available",
+    "actual_pixel_check": false,
+    "matrix_requested": false
+  },
+  "next": "Durable shared ready claims/deadlines before broadcast and before cross-host re-search; preserve unanimous15s/accepted FIFO/parties and Resume; then actual two-lobby fault proof."
+}

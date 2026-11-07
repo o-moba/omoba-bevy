@@ -608,6 +608,7 @@ impl CareerStore {
             if blocked {
                 return Err(shared::career::error_code::PLAY_COOLDOWN.into());
             }
+            Self::check_queue_discipline(&mut tx, &ids).await?;
         }
         if result.rated {
             if !recover && profiles.values().any(|p| !p.ranked_unlocked()) {
