@@ -147,6 +147,13 @@ impl Bot {
         self.last_snapshot_meta
     }
 
+    pub fn public_running(&self) -> bool {
+        self.public.as_ref().is_some_and(|session| {
+            let session = session.borrow();
+            session.status.phase == "running" && session.status.error.is_none()
+        })
+    }
+
     fn record_receive(&mut self, len: usize) {
         self.transport_stats.received_datagrams =
             self.transport_stats.received_datagrams.saturating_add(1);
@@ -241,15 +248,15 @@ impl Bot {
 
     // --- Outbound packet helpers -------------------------------------------
 
-    fn send(&self, packet: &ClientPacket) {
+    fn send(&self, packet: &ClientPacket) -> bool {
         if let Some(session) = &self.public {
-            session.borrow_mut().send(&self.socket, packet);
-            return;
+            return session.borrow_mut().send(&self.socket, packet);
         }
         let bytes = serde_json::to_vec(packet).expect("client packet should serialize to JSON");
         self.socket
             .send(&bytes)
             .expect("bot failed to send packet to the server");
+        true
     }
 
     /// Negotiates coordinated draft and automatic server-side team assignment.
@@ -324,15 +331,29 @@ impl Bot {
 
     /// Sends a movement/orientation update.
     pub fn send_transform(&self, x: f32, y: f32, z: f32, yaw: f32) {
+        self.try_send_transform_with_activity(x, y, z, yaw, true);
+    }
+
+    /// Returns false when a public session has no current signing authority.
+    /// The native game sends an idle pose even while dead; idle input must not
+    /// fabricate AFK activity. Counts advance only after the signed UDP send.
+    pub fn try_send_transform_with_activity(
+        &self,
+        x: f32,
+        y: f32,
+        z: f32,
+        yaw: f32,
+        active: bool,
+    ) -> bool {
         self.send(&ClientPacket::Transform {
             input_kind: Default::default(),
-            input_active: true,
+            input_active: active,
             x,
             y,
             z,
             yaw,
             dash_sequence: self.dash_sequence,
-        });
+        })
     }
 
     /// Casts the Q ability at a target.
@@ -463,6 +484,39 @@ impl Bot {
 
         self.my_id = Some(latest.your_id());
         Some(latest)
+    }
+
+    /// Drain currently buffered input without waiting for another network
+    /// update. Fixed-cadence controllers must not pay one socket timeout for
+    /// each idle peer. Bound work so a busy socket cannot starve their inputs.
+    pub fn poll_snapshot(&mut self) -> Option<ServerPacket> {
+        self.socket
+            .set_nonblocking(true)
+            .expect("nonblocking bot poll");
+        let deadline = Instant::now() + Duration::from_millis(2);
+        let mut latest = None;
+        for _ in 0..256 {
+            if Instant::now() >= deadline {
+                break;
+            }
+            match self.socket.recv(&mut self.recv_buf) {
+                Ok(len) => {
+                    self.record_receive(len);
+                    if let Some(packet) = self.decode_received(len) {
+                        latest = Some(packet);
+                    }
+                }
+                Err(error) if is_timeout(&error) => break,
+                Err(error) => panic!("bot socket poll failed: {error}"),
+            }
+        }
+        self.socket
+            .set_nonblocking(false)
+            .expect("restore bot blocking mode");
+        if let Some(packet) = &latest {
+            self.my_id = Some(packet.your_id());
+        }
+        latest
     }
 
     /// Blocks until one snapshot arrives or `deadline` passes. Non-snapshot or

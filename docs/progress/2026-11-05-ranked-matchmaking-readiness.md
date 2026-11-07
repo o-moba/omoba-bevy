@@ -8,6 +8,15 @@ findings). Decision record: ADR-027.
 
 ## Current checkpoint — 2026-11-07
 
+Latest handoff packet: [actual input20 measurement and preserved rejection](../evidence/input20-handoff-2026-11-07/README.md).
+The10-client30s control passes20.020Hz;1000 clients remain Running120s but the
+full profile correctly FAILS18.163–19.300Hz (required19.5–20.5). A bounded
+nonblocking v2 driver passes36 library/4 UDP/23 Python/5 CLI and4 strict Clippy
+checks; its live repeat is **NOT RUN**. Next run the prepared v2 control/1000
+scenario, preserving source/build hashes and cleanup. No scope/status count is
+closed by this handoff. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
+
+
 The authoritative remaining order is now at the top of
 [the full TODO](../plans/TODO-LOBBY-2026-11-05.md). Original68 remains62 done,
 5 partial,1 open; critic/UI/physical and RU gates are additional. Current local

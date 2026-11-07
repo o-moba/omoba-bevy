@@ -42,6 +42,8 @@ pub struct PublicBotStatus {
     pub ranked_accepted_count: Option<u32>,
     pub stale_career_packets: u64,
     pub authority_resets: u64,
+    pub sent_gameplay_commands: u64,
+    pub sent_transforms: u64,
 }
 
 pub(crate) struct PublicSession {
@@ -159,6 +161,8 @@ impl PublicSession {
                 ranked_accepted_count: None,
                 stale_career_packets: 0,
                 authority_resets: 0,
+                sent_gameplay_commands: 0,
+                sent_transforms: 0,
             },
         }
     }
@@ -217,7 +221,11 @@ impl PublicSession {
 
     fn datagram(socket: &UdpSocket, value: &PublicClientDatagram) {
         let bytes = serde_json::to_vec(value).expect("public bot datagram serializes");
-        socket.send(&bytes).expect("send public bot datagram");
+        assert_eq!(
+            socket.send(&bytes).expect("send public bot datagram"),
+            bytes.len(),
+            "incomplete public bot datagram"
+        );
     }
 
     fn bootstrap(&self, socket: &UdpSocket, request: CareerRequest) {
@@ -255,9 +263,9 @@ impl PublicSession {
         );
     }
 
-    pub fn send(&mut self, socket: &UdpSocket, packet: &ClientPacket) {
+    pub fn send(&mut self, socket: &UdpSocket, packet: &ClientPacket) -> bool {
         let (Some(auth), Some(path)) = (&self.auth, &self.path) else {
-            return;
+            return false;
         };
         self.sequence += 1;
         let mut command = SignedCommand {
@@ -272,6 +280,11 @@ impl PublicSession {
         };
         command.signature = hex(&self.key.sign(&command.signing_bytes()).to_bytes());
         Self::datagram(socket, &PublicClientDatagram::SignedCommand { command });
+        self.status.sent_gameplay_commands = self.status.sent_gameplay_commands.saturating_add(1);
+        if matches!(packet, ClientPacket::Transform { .. }) {
+            self.status.sent_transforms = self.status.sent_transforms.saturating_add(1);
+        }
+        true
     }
 
     pub fn transport(&mut self, socket: &UdpSocket, packet: PublicServerDatagram) {
@@ -778,6 +791,59 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
     use shared::public_transport::decode_hex;
+
+    #[test]
+    fn transform_counts_follow_actual_signed_sends_and_idle_input_stays_idle() {
+        let (socket, peer) = sockets();
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Warden, "Fixture".into());
+        let pose = ClientPacket::Transform {
+            input_kind: Default::default(),
+            input_active: false,
+            dash_sequence: 0,
+            x: 1.0,
+            y: 0.5,
+            z: 2.0,
+            yaw: 0.0,
+        };
+        assert!(!session.send(&socket, &pose));
+        assert_eq!(session.status.sent_transforms, 0);
+        session.epoch = 19;
+        session.match_id = 7;
+        session.auth = Some("auth".into());
+        session.path = Some("path".into());
+        assert!(session.send(&socket, &pose));
+        let PublicClientDatagram::SignedCommand { command } = receive(&peer) else {
+            panic!("signed input required")
+        };
+        session
+            .key
+            .verifying_key()
+            .verify(
+                &command.signing_bytes(),
+                &Signature::from_bytes(&decode_hex(&command.signature).unwrap()),
+            )
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_str::<ClientPacket>(&command.payload).unwrap(),
+            ClientPacket::Transform {
+                input_active: false,
+                ..
+            }
+        ));
+        assert_eq!(session.status.sent_transforms, 1);
+        assert!(session.send(&socket, &ClientPacket::Ping));
+        assert!(matches!(
+            receive(&peer),
+            PublicClientDatagram::SignedCommand { .. }
+        ));
+        assert_eq!(session.status.sent_gameplay_commands, 2);
+        assert_eq!(session.status.sent_transforms, 1);
+        session.reset_transport(false);
+        assert!(!session.send(&socket, &pose));
+        assert_eq!(session.status.sent_gameplay_commands, 2);
+        assert_eq!(session.status.sent_transforms, 1);
+    }
 
     #[test]
     fn late_career_authority_error_cannot_revoke_newer_authenticated_state() {

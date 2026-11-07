@@ -30,6 +30,36 @@ def sample(shard=0, elapsed=0, increment=0):
 
 
 class PopulationEvidenceTests(unittest.TestCase):
+    def test_input_qualification_uses_actual_sends_instead_of_received_snapshots(self):
+        before, after = [sample()], [sample(elapsed=10, increment=20)]
+        for samples, count, cached in ((before, 10, 0), (after, 210, 180)):
+            samples[0]["input_hz_requested"] = 20
+            for peer in samples[0]["peers"]:
+                peer["public"].update(sent_transforms=count, sent_gameplay_commands=count + 5,
+                                      authority_resets=0)
+                peer["cached_input_transforms"] = cached
+        result = probe.summarize_input(before, after, 20)
+        self.assertTrue(result["all_peers_within_2_5_percent"])
+        self.assertEqual(result["successful_signed_transforms_per_second"]["min"], 20)
+        self.assertEqual(result["cached_snapshot_transforms"]["total"], 1800)
+        self.assertEqual(probe.summarize_wire(before, after)["accepted_snapshots_per_second_per_player"]["p50"], 2)
+        for count in (110, 310):
+            bad = copy.deepcopy(after)
+            for peer in bad[0]["peers"]:
+                peer["public"].update(sent_transforms=count, sent_gameplay_commands=count + 5)
+                peer["cached_input_transforms"] = 0
+            self.assertFalse(probe.summarize_input(before, bad, 20)["all_peers_within_2_5_percent"])
+        for key, value in (("sent_transforms", None), ("sent_transforms", True),
+                           ("sent_transforms", 9), ("sent_gameplay_commands", 1),
+                           ("authority_resets", 1)):
+            bad = copy.deepcopy(after)
+            bad[0]["peers"][0]["public"][key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(AssertionError):
+                probe.summarize_input(before, bad, 20)
+        bad = copy.deepcopy(after); bad[0]["input_hz_requested"] = None
+        with self.assertRaises(AssertionError):
+            probe.summarize_input(before, bad, 20)
+
     def test_pre_cleanup_diagnostics_include_archived_workers_without_auth_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

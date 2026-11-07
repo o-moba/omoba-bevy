@@ -63,6 +63,54 @@ fn snapshot_idle_poll_honors_short_deadline() {
 }
 
 #[test]
+fn nonblocking_poll_keeps_partial_frames_and_counts_only_real_snapshots() {
+    let fixture = UdpSocket::bind("127.0.0.1:0").unwrap();
+    fixture
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut bot = Bot::connect(fixture.local_addr().unwrap());
+    bot.send_raw(b"fixture");
+    let (_, peer) = fixture.recv_from(&mut [0; 64]).unwrap();
+    assert!(bot.poll_snapshot().is_none());
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "type":"snapshot", "players":[], "your_id":3,
+        "protocol_version":shared::protocol::PROTOCOL_VERSION,
+        "server_epoch":7, "match_id":8, "snapshot_tick":5,
+        "geometry_id": (0..4000).map(|n| format!("{n:04x}")).collect::<String>(),
+    }))
+    .unwrap();
+    let frames = shared::transport::encode_world_snapshot(&payload, 7, 5).unwrap();
+    assert!(frames.len() > 1);
+    fixture.send_to(&frames[0], peer).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while bot.transport_stats().received_datagrams == 0 {
+        assert!(Instant::now() < deadline);
+        assert!(bot.poll_snapshot().is_none());
+        thread::yield_now();
+    }
+    assert_eq!(bot.transport_stats().accepted_snapshots, 0);
+    assert_eq!(bot.snapshot_meta(), None);
+    for frame in &frames[1..] {
+        fixture.send_to(frame, peer).unwrap();
+    }
+    let snapshot = loop {
+        if let Some(snapshot) = bot.poll_snapshot() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    };
+    assert_eq!(snapshot.meta().snapshot_tick, 5);
+    assert_eq!(
+        bot.transport_stats().received_datagrams,
+        frames.len() as u64
+    );
+    assert_eq!(bot.transport_stats().accepted_snapshots, 1);
+    assert!(bot.poll_snapshot().is_none());
+    assert_eq!(bot.transport_stats().accepted_snapshots, 1);
+}
+
+#[test]
 fn wire_counters_cover_raw_blocking_drained_and_rejected_packets_once() {
     let fixture = UdpSocket::bind("127.0.0.1:0").unwrap();
     fixture

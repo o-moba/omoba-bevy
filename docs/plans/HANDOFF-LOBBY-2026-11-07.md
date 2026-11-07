@@ -1,5 +1,47 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
+## Актуальная точка передачи — measured input20, после f0e4b7d4
+
+Владелец попросил сохранить весь контекст для переключения агента. Этот блок
+приоритетнее исторических обновлений ниже. [Новый проверяемый пакет](../evidence/input20-handoff-2026-11-07/README.md)
+содержит точные сжатые отчёты, два разных build manifests, verifier и копии
+контроллера/сборочного helper. Текущий checkpoint сохраняет все шесть изменённых
+harness/scripts файлов; production server/store/shared/SDK не менялись.
+
+- Реальная отправка20Hz теперь измеряется по успешно отправленным signed UDP
+  Transform; не по requested flag и не по поступлению snapshots. Есть отдельный
+  счётчик использования cached snapshots; receive freshness он не обновляет.
+- Первый blocking v1:10 клиентов/30s PASS,20.020Hz у каждого.1000 клиентов/120s
+  удержались Running, но весь сценарий **FAIL**:18.163–19.300Hz, median18.780,
+  ниже строгих19.5–20.5. Все исходные FAIL/метрики сохранены. Authority resets0,
+  rosters100/1000, cleanup полный. Не считать это20Hz capacity PASS.
+- Исправление v2: bounded nonblocking socket drain вместо1ms ожидания на каждого
+  peer.36 library +4 real-UDP +23 Python +5 invalid CLI и4 strict Clippy PASS;
+  текущие исходники/3 binaries сверены с manifest. **V2 live ещё НЕ ЗАПУЩЕН**.
+- Никаких живых локальных build/load процессов этого пакета не осталось.
+  `.agent/codex-ranked-readiness/load-input20/rehearse_v2.py` подготовлен;
+  `live-v2` ещё не существует. Перед запуском заново проверить это состояние.
+- Следующий шаг: новая lease, проверка Git/process/source hashes, затем
+  `/opt/homebrew/bin/python3.13 .agent/codex-ranked-readiness/load-input20/rehearse_v2.py`
+  из игрового worktree. Он последовательно запускает10/30s и1000/120s в своей
+  PG18.6/schema13/11 fixture. Подробности/guardrails в новом README. Не менять
+  acceptance tolerance и реальные consent/auth/game/recovery таймеры.
+- При успехе дальше send gaps/per-command acceptance/input-to-snapshot latency,
+  duration/Linux/RU/uplink/WAN. Иначе исправлять подтверждённую причину и сохранять
+  точный отказ. Остальные UI/physical/off-host/trust/release gates не потеряны.
+- Parent f0 CI42354938539 на момент передачи:6/7 jobs SUCCESS, PostgreSQL-backed
+  ещё in_progress. После push нового checkpoint найти его собственный run;
+  parent green/живой job не является полным gate новых harness файлов.
+- Через GitHub API заново подтверждены **ровно6 открытых PR** двух репозиториев,
+  ссылки/ветки/draft приведены ниже. Все6 присутствуют во вкладках IAB. Ничего
+  не merge/release/deploy. Портал остался f868fa4641d74899d5c5844def5fd078281fd9a7.
+
+**Не потерять:** исходные68 =62 done/5 partial/1 open; дополнительно9 пунктов
+критика и UI/physical/RU. C2/C4 остаются review-only с существующими вопросами
+владельцу. Системный диск около12GiB: тяжёлый Bevy/SDK build запрещён; общий
+cache B только read-only для этого маленького headless harness. Unlock Mac
+не просить: offscreen recipe уже сохранён в репозиторном skill.
+
 **Обновление после30f69c5e:** [current opt1 local population](../evidence/optimized-playing-1000-2026-11-07/README.md)
 PASS:1000 signed AI peers/100 ten-seat Casual arenas/120s Running,0 server bots,
 0 observed auth resets;100 final health-v2 workers SQL/journal ready, no backlog.

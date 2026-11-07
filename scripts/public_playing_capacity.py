@@ -192,6 +192,38 @@ def summarize_wire(before, after):
             "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"}
 
 
+def summarize_input(before, after, requested_hz):
+    """Measure successful signed movement sends, including idle/dead poses."""
+    assert type(requested_hz) is int and 1 <= requested_hz <= 60, "invalid requested input profile"
+    assert before and len(before) == len(after), "missing input shard telemetry"
+    rates, cached = [], []
+    for initial, final in zip(before, after):
+        assert initial.get("input_hz_requested") == final.get("input_hz_requested") == requested_hz, "producer input mode mismatch"
+        seconds = final["elapsed_secs"] - initial["elapsed_secs"]
+        assert seconds > 0, "no fresh input measurement interval"
+        previous = {p["public"]["profile_id"]: p for p in initial["peers"]}
+        for peer in final["peers"]:
+            old = previous[peer["public"]["profile_id"]]
+            for item in (old, peer):
+                status = item["public"]
+                assert all(type(status.get(k)) is int and status[k] >= 0
+                           for k in ("sent_transforms", "sent_gameplay_commands", "authority_resets")), "missing/invalid actual-send counters"
+                assert type(item.get("cached_input_transforms")) is int and 0 <= item["cached_input_transforms"] <= status["sent_transforms"], "invalid cached-input count"
+                assert status["sent_gameplay_commands"] >= status["sent_transforms"], "signed command counters contradict movement"
+            a, b = old["public"], peer["public"]
+            assert b["sent_gameplay_commands"] >= a["sent_gameplay_commands"] and b["sent_transforms"] > a["sent_transforms"], "input stopped/counters moved backwards"
+            assert b["authority_resets"] == a["authority_resets"], "authority reset during input measurement"
+            assert peer["cached_input_transforms"] >= old["cached_input_transforms"], "cached input counter moved backwards"
+            rates.append((b["sent_transforms"] - a["sent_transforms"]) / seconds)
+            cached.append(peer["cached_input_transforms"] - old["cached_input_transforms"])
+    return {"requested_hz": requested_hz,
+            "successful_signed_transforms_per_second": {"min": min(rates), "p05": percentile(rates, .05),
+                "p50": percentile(rates, .5), "p95": percentile(rates, .95), "max": max(rates)},
+            "cached_snapshot_transforms": {"total": sum(cached), "min_per_peer": min(cached)},
+            "all_peers_within_2_5_percent": all(requested_hz * .975 <= rate <= requested_hz * 1.025 for rate in rates),
+            "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"}
+
+
 def process_sample(lobby, shards):
     result = subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,time="],
                             capture_output=True, text=True, check=True, timeout=5)
@@ -226,6 +258,8 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--clients", type=int, default=10)
     parser.add_argument("--seconds", type=float, default=15)
+    parser.add_argument("--input-hz", type=int, default=20,
+                        help="independent signed movement cadence1..60Hz;0 explicitly retains legacy snapshot-paced mode")
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument("--allow-large", action="store_true")
     parser.add_argument("--port", type=int, default=47600)
@@ -236,8 +270,9 @@ def main(argv=None):
         parser.error("set OMOBA_TEST_DATABASE_URL to a loopback /omoba_test URI without options")
     if (not 10 <= args.clients <= (1000 if args.allow_large else 100)
             or args.clients % 10 or not 15 <= args.seconds <= 120
+            or not 0 <= args.input_hz <= 60
             or not args.seconds + 30 <= args.timeout <= 600):
-        parser.error("require multiples of10 clients (large opt-in above100),15..120s soak and bounded timeout")
+        parser.error("require multiples of10 clients (large opt-in above100),15..120s soak,0..60 input Hz and bounded timeout")
     rooms = args.clients // 10
     if not (1024 <= args.port <= 65535 and 1024 <= args.worker_port <= 65536 - rooms
             and args.port not in range(args.worker_port, args.worker_port + rooms)):
@@ -271,8 +306,9 @@ def main(argv=None):
               "preference": "quick", "server_bots": 0, "soak_seconds": args.seconds,
               "scope": "local Casual signed native AI clients; not RU/cgroup or Ranked proof",
               "acceptance_scope": "Running population, freshness and durable rosters; received counters only",
+              "input_hz_requested": args.input_hz or None,
               "unverified_scope": [
-                  "Native20Hz movement-input workload: generator input cadence is not measured",
+                  "Per-command server acceptance, send-gap jitter and input-to-snapshot latency",
                   "Latency/SLA, physical devices, WAN and real RU host/uplink",
                   "Packet delivery/loss: snapshot sequence includes unsent bootstrap ticks",
               ],
@@ -314,9 +350,12 @@ def main(argv=None):
             time.sleep(.05)
         for index in range(rooms):
             log = (root / f"bots-{index:03d}.log").open("w"); writers.append(log)
-            process = subprocess.Popen([str(args.bots_bin.resolve()), "--count", "10", "--server",
+            command = [str(args.bots_bin.resolve()), "--count", "10", "--server",
                                         f"127.0.0.1:{args.port}", "--public", "--telemetry",
-                                        "--preference", "quick", "--search-gate", str(search_gate)], env=env, cwd=root,
+                                        "--preference", "quick", "--search-gate", str(search_gate)]
+            if args.input_hz:
+                command += ["--input-hz", str(args.input_hz)]
+            process = subprocess.Popen(command, env=env, cwd=root,
                                        stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             register(process); shards.append(process)
             readers.append((root / f"bots-{index:03d}.log").open())
@@ -353,6 +392,8 @@ def main(argv=None):
                     authenticated_since = None
             valid = fresh and validate_population(current, args.clients)
             if running_at is None and valid:
+                if args.input_hz:
+                    assert all(s.get("input_hz_requested") == args.input_hz for s in current), "native producer did not confirm requested input cadence"
                 running_at, baseline = now, current
                 report["all_running_after_seconds"] = now - started
                 report["initial_shards"] = {str(i): sample for i, sample in enumerate(current)}
@@ -364,6 +405,11 @@ def main(argv=None):
                 if now - running_at >= args.seconds:
                     report["durable_rosters"] = verify_manifests(root, current, args.clients)
                     report["wire"] = summarize_wire(baseline, current)
+                    if args.input_hz:
+                        report["input"] = summarize_input(baseline, current, args.input_hz)
+                        assert report["input"]["all_peers_within_2_5_percent"], "actual per-peer input cadence outside requested profile"
+                    else:
+                        report["input"] = {"status": "not measured; explicit legacy snapshot-paced mode"}
                     report["status"] = "PASS"
                     break
             time.sleep(.1)

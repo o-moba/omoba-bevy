@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add measured signed movement input to loopback native capacity probes, with
+  cached Running snapshots, truthful send counters and a strict per-peer20Hz
+  gate. Preserve a rejected1000-client120s attempt (18.16–19.30Hz), then prepare
+  bounded nonblocking polling with library/real-UDP/Python/CLI/Clippy checks.
+  The new live repetition has not run. Save a complete next-agent checkpoint,
+  all six open PRs and existing decisions/remaining UI/physical/WAN/RU gates.
+
+
 - Verify current signed1000-peer/100-arena Casual population for120s using an
   explicit coherent opt1 headless graph and restricted PG18.6/schema13/11 roles:
   zero observed auth resets, healthy final workers and complete owned cleanup.
