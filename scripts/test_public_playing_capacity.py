@@ -3,6 +3,8 @@ import contextlib
 import io
 import json
 import os
+import socket
+import sys
 from pathlib import Path
 import tempfile
 import time
@@ -30,6 +32,66 @@ def sample(shard=0, elapsed=0, increment=0):
 
 
 class PopulationEvidenceTests(unittest.TestCase):
+    def test_busy_loopback_port_refuses_before_sql_or_process_start(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as busy, tempfile.TemporaryDirectory() as temporary:
+            busy.bind(("127.0.0.1", 0))
+            port = busy.getsockname()[1]
+            worker = 36000 if port != 36000 else 37000
+            output = Path(temporary) / "not-created"
+            error = io.StringIO()
+            with mock.patch.dict(os.environ, {"OMOBA_TEST_DATABASE_URL": "postgres://fixture@127.0.0.1:1/omoba_test"}), \
+                    mock.patch.object(probe.subprocess, "run") as run, \
+                    mock.patch.object(probe.subprocess, "Popen") as start, \
+                    contextlib.redirect_stderr(error), self.assertRaises(SystemExit) as exited:
+                probe.main(["--server-bin", sys.executable, "--bots-bin", sys.executable, "--output", str(output),
+                            "--port", str(port), "--worker-port", str(worker)])
+            self.assertEqual(exited.exception.code, 2)
+            self.assertIn(f"loopback UDP port {port} is unavailable", error.getvalue())
+            self.assertFalse(output.exists())
+            run.assert_not_called()
+            start.assert_not_called()
+
+    def test_timing_subtracts_warmup_preserves_stalls_and_rejects_counter_corruption(self):
+        def histogram(count, total, buckets):
+            return {"count": count, "total_us": total, "buckets": buckets}
+        before, after = [sample()], [sample(elapsed=10)]
+        for samples, count, total, buckets in ((before, 100, 1000, [100, 0, 0]),
+                                               (after, 102, 151000, [100, 1, 1])):
+            h = histogram(count, total, buckets)
+            samples[0]["producer_timing"] = {"bucket_upper_us": [55000, 100000],
+                "loop_work": h, "receive_work": h, "wake_lateness": h,
+                "overrun_rebases": count}
+            for p in samples[0]["peers"]:
+                p["public"].update(transform_gaps=h, sent_transforms=count + 1)
+        result = probe.summarize_producer_timing(before, after)
+        self.assertEqual(result["loop_work"]["count"], 2)
+        self.assertEqual(result["loop_work"]["mean_us"], 75000)
+        self.assertIsNone(result["loop_work"]["p95_exclusive_upper_us"])
+        self.assertEqual(result["transform_gaps"]["buckets"], [0, 10, 10])
+        self.assertEqual(result["overrun_rebases"], 2)
+        for samples in (before, after):
+            for s in samples:
+                s["producer_timing"]["session_work"] = copy.deepcopy(s["producer_timing"]["loop_work"])
+                for p in s["peers"]:
+                    p["navigation_work"] = copy.deepcopy(s["producer_timing"]["loop_work"])
+        detail = probe.summarize_producer_timing(before, after)
+        self.assertEqual(detail["session_work"]["count"], 2)
+        self.assertEqual(detail["navigation_work"]["buckets"], [0, 10, 10])
+        self.assertIn("not measured", probe.summarize_producer_timing([sample()], [sample()])["status"])
+        for initial, final in (([], []), (before, after + after)):
+            with self.assertRaises(AssertionError):
+                probe.summarize_producer_timing(initial, final)
+        for broken in ({"count": True}, {"count": 103}, {"total_us": 999},
+                       {"buckets": [99, 1, 2]}, {"buckets": [102, 0]}):
+            bad = copy.deepcopy(after)
+            bad[0]["producer_timing"]["loop_work"].update(broken)
+            with self.subTest(broken=broken), self.assertRaises(AssertionError):
+                probe.summarize_producer_timing(before, bad)
+        bad = copy.deepcopy(after)
+        bad[0]["peers"][0]["public"]["sent_transforms"] += 1
+        with self.assertRaises(AssertionError):
+            probe.summarize_producer_timing(before, bad)
+
     def test_input_qualification_uses_actual_sends_instead_of_received_snapshots(self):
         before, after = [sample()], [sample(elapsed=10, increment=20)]
         for samples, count, cached in ((before, 10, 0), (after, 210, 180)):

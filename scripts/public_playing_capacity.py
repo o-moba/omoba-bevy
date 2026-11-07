@@ -224,6 +224,76 @@ def summarize_input(before, after, requested_hz):
             "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"}
 
 
+def timing_delta(before, after, bounds):
+    """Cumulative histogram difference: never let warm-up mask soak stalls."""
+    result = {}
+    for item in (before, after):
+        assert all(type(item.get(k)) is int and item[k] >= 0 for k in ("count", "total_us")), "invalid timing counters"
+        buckets = item.get("buckets")
+        assert isinstance(buckets, list) and len(buckets) == len(bounds) + 1, "missing timing buckets"
+        assert all(type(n) is int and n >= 0 for n in buckets), "invalid timing bucket"
+        assert sum(buckets) == item["count"], "timing count contradicts buckets"
+    for key in ("count", "total_us"):
+        result[key] = after[key] - before[key]
+        assert result[key] >= 0, "timing counters moved backwards"
+    result["buckets"] = [b - a for a, b in zip(before["buckets"], after["buckets"])]
+    assert all(n >= 0 for n in result["buckets"]), "timing buckets moved backwards"
+    return result
+
+
+def summarize_producer_timing(before, after):
+    assert before and len(before) == len(after), "missing timing shard telemetry"
+    if not all("producer_timing" in sample for sample in before + after):
+        return {"status": "not measured by this producer"}
+    bounds = before[0]["producer_timing"]["bucket_upper_us"]
+    assert bounds and all(type(n) is int and n > 0 for n in bounds), "invalid timing bounds"
+    assert bounds == sorted(set(bounds)), "timing bounds not strictly ordered"
+    shard_keys = ["loop_work", "receive_work", "wake_lateness"]
+    if all("session_work" in s["producer_timing"] for s in before + after):
+        shard_keys.append("session_work")
+    navigation = all("navigation_work" in p for s in before + after for p in s["peers"])
+    keys = shard_keys + ["transform_gaps"] + (["navigation_work"] if navigation else [])
+    totals = {key: {"count": 0, "total_us": 0, "buckets": [0] * (len(bounds) + 1)} for key in keys}
+    rebases = 0
+
+    def add(key, initial, final):
+        delta = timing_delta(initial, final, bounds)
+        for counter in ("count", "total_us"):
+            totals[key][counter] += delta[counter]
+        totals[key]["buckets"] = [a + b for a, b in zip(totals[key]["buckets"], delta["buckets"])]
+        return delta
+
+    for initial, final in zip(before, after):
+        a, b = initial["producer_timing"], final["producer_timing"]
+        assert a["bucket_upper_us"] == b["bucket_upper_us"] == bounds, "timing profile changed"
+        assert all(type(item.get("overrun_rebases")) is int and item["overrun_rebases"] >= 0
+                   for item in (a, b)), "invalid rebase counter"
+        assert b["overrun_rebases"] >= a["overrun_rebases"], "rebase counter moved backwards"
+        rebases += b["overrun_rebases"] - a["overrun_rebases"]
+        for key in shard_keys:
+            add(key, a[key], b[key])
+        old = {p["public"]["profile_id"]: p for p in initial["peers"]}
+        for peer in final["peers"]:
+            previous = old[peer["public"]["profile_id"]]
+            if navigation:
+                add("navigation_work", previous["navigation_work"], peer["navigation_work"])
+            a, b = previous["public"], peer["public"]
+            delta = add("transform_gaps", a["transform_gaps"], b["transform_gaps"])
+            assert delta["count"] == b["sent_transforms"] - a["sent_transforms"], "send-gap count contradicts actual sends"
+    for timing in totals.values():
+        timing["mean_us"] = timing["total_us"] / timing["count"] if timing["count"] else None
+        for quantile in (95, 99):
+            cumulative = 0
+            timing[f"p{quantile}_exclusive_upper_us"] = None
+            for index, count in enumerate(timing["buckets"]):
+                cumulative += count
+                if timing["count"] and cumulative * 100 >= timing["count"] * quantile:
+                    timing[f"p{quantile}_exclusive_upper_us"] = bounds[index] if index < len(bounds) else None
+                    break
+    return {"bucket_upper_us": bounds, **totals, "overrun_rebases": rebases,
+            "scope": "soak-only cumulative histogram differences; wall time includes OS descheduling; quantiles are bucket bounds, not exact percentiles; overflow has no finite upper bound"}
+
+
 def process_sample(lobby, shards):
     result = subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,time="],
                             capture_output=True, text=True, check=True, timeout=5)
@@ -282,7 +352,10 @@ def main(argv=None):
             parser.error(f"not an executable: {binary}")
     for port in [args.port, *range(args.worker_port, args.worker_port + rooms)]:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.bind(("127.0.0.1", port))
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError as error:
+                parser.error(f"loopback UDP port {port} is unavailable ({error.strerror}); no server was started")
     setting = subprocess.run(["psql", database, "--no-psqlrc", "-At", "-v", "ON_ERROR_STOP=1",
                               "-c", "SHOW max_connections"],
                              check=True, capture_output=True, text=True, timeout=10)
@@ -407,6 +480,7 @@ def main(argv=None):
                     report["wire"] = summarize_wire(baseline, current)
                     if args.input_hz:
                         report["input"] = summarize_input(baseline, current, args.input_hz)
+                        report["producer_timing"] = summarize_producer_timing(baseline, current)
                         assert report["input"]["all_peers_within_2_5_percent"], "actual per-peer input cadence outside requested profile"
                     else:
                         report["input"] = {"status": "not measured; explicit legacy snapshot-paced mode"}

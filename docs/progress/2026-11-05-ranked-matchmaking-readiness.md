@@ -8,13 +8,16 @@ findings). Decision record: ADR-027.
 
 ## Current checkpoint — 2026-11-07
 
-Latest handoff packet: [actual input20 measurement and preserved rejection](../evidence/input20-handoff-2026-11-07/README.md).
-The10-client30s control passes20.020Hz;1000 clients remain Running120s but the
-full profile correctly FAILS18.163–19.300Hz (required19.5–20.5). A bounded
-nonblocking v2 driver passes36 library/4 UDP/23 Python/5 CLI and4 strict Clippy
-checks; its live repeat is **NOT RUN**. Next run the prepared v2 control/1000
-scenario, preserving source/build hashes and cleanup. No scope/status count is
-closed by this handoff. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
+Latest measured continuation: [input20 timing, exact rejections and cleanup](../evidence/input20-timing-2026-11-07/README.md).
+The prepared nonblocking v2 now ran:10-client control PASS20.001Hz;1000/120s FAIL
+18.771–19.583Hz. Further v4/v5 full-target attempts also FAIL unchanged19.5–20.5
+per-peer input acceptance. All retain1000 fresh peers/100 arenas, rosters and zero
+observed auth resets, with complete owned cleanup. V5 wall histograms expose
+p99 loop stalls below150ms while receive/session/navigation p99 are below1ms;
+next isolate signing/serialization/send/telemetry before optimizing. Actual
+send-gap p95<75ms/p99<150ms are bucket bounds, not latency/SLA.38 library/4 UDP/
+25 Python/4 strict Clippy PASS. Original68 and all additional release gates stay
+open in their previous scopes. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
 
 
 The authoritative remaining order is now at the top of

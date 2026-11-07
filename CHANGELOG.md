@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Preserve actual nonblocking20Hz full-population rejections and add bounded
+  producer wall/send-gap histograms with soak-only baseline differences. Separate
+  receive, session and navigation timing; record rare loop stalls without
+  attributing them to packet loss or claiming RU/SLA acceptance. Reject occupied
+  local ports clearly before SQL/process startup.38 harness/4 UDP/25 Python and
+  4 strict Clippy checks pass; all owned fixtures/processes are cleaned up.
+
+
 - Add measured signed movement input to loopback native capacity probes, with
   cached Running snapshots, truthful send counters and a strict per-peer20Hz
   gate. Preserve a rejected1000-client120s attempt (18.16–19.30Hz), then prepare

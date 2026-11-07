@@ -211,6 +211,7 @@ struct BotRunner {
     pending_purchase: Option<(shared::shop::ItemId, u64)>,
     last_snapshot: Option<Arc<shared::wire::ServerPacket>>,
     cached_input_transforms: u64,
+    navigation_work: harness::cadence::TimingHistogram,
 }
 
 fn main() {
@@ -272,6 +273,7 @@ fn main() {
             pending_purchase: None,
             last_snapshot: None,
             cached_input_transforms: 0,
+            navigation_work: Default::default(),
         });
     }
 
@@ -301,7 +303,16 @@ fn main() {
         .map(|hz| Duration::from_secs_f64(1.0 / f64::from(hz)))
         .unwrap_or(TICK_INTERVAL);
     let mut next_tick = Instant::now();
+    let mut loop_work = harness::cadence::TimingHistogram::default();
+    let mut receive_work = harness::cadence::TimingHistogram::default();
+    let mut session_work = harness::cadence::TimingHistogram::default();
+    let mut wake_lateness = harness::cadence::TimingHistogram::default();
+    let mut overrun_rebases = 0_u64;
     loop {
+        let iteration_started = Instant::now();
+        if args.input_hz.is_some() {
+            wake_lateness.record(iteration_started.saturating_duration_since(next_tick));
+        }
         if !search_gate_open
             && args.search_gate.as_ref().is_some_and(|path| {
                 std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() == 0)
@@ -318,6 +329,7 @@ fn main() {
             // The fixed-cadence mode only drains buffered input. Legacy callers
             // get one blocking receive per tick; repeatedly waiting for world
             // updates would starve this peer's own signed commands.
+            let poll_started = Instant::now();
             let fresh = if args.input_hz.is_some() {
                 runner.bot.poll_snapshot()
             } else {
@@ -325,7 +337,14 @@ fn main() {
                     .bot
                     .recv_snapshot(Instant::now() + Duration::from_millis(20))
             };
+            if args.input_hz.is_some() {
+                receive_work.record(poll_started.elapsed());
+            }
+            let session_started = Instant::now();
             runner.bot.ping();
+            if args.input_hz.is_some() {
+                session_work.record(session_started.elapsed());
+            }
 
             let fresh_snapshot = fresh.is_some();
             let snapshot = if let Some(snapshot) = fresh {
@@ -539,9 +558,15 @@ fn main() {
                     let transform = decision
                         .move_target
                         .and_then(|target| {
-                            runner
-                                .navigation
-                                .next([x, z], [target.0, target.1], &structures)
+                            let started = Instant::now();
+                            let next =
+                                runner
+                                    .navigation
+                                    .next([x, z], [target.0, target.1], &structures);
+                            if args.input_hz.is_some() {
+                                runner.navigation_work.record(started.elapsed());
+                            }
+                            next
                         })
                         .map(|target| {
                             step_toward(
@@ -637,14 +662,19 @@ fn main() {
                     "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis()),
                     "transport":r.bot.transport_stats(),
                     "cached_input_transforms":r.cached_input_transforms,
+                    "navigation_work":r.navigation_work,
                     "snapshot_meta":r.bot.snapshot_meta(),
-                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count,"stale_career_packets":s.stale_career_packets,"authority_resets":s.authority_resets,"sent_transforms":s.sent_transforms,"sent_gameplay_commands":s.sent_gameplay_commands}))
+                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count,"stale_career_packets":s.stale_career_packets,"authority_resets":s.authority_resets,"sent_transforms":s.sent_transforms,"sent_gameplay_commands":s.sent_gameplay_commands,"transform_gaps":s.transform_gaps}))
                 })).collect();
                 println!(
                     "BOT_SAMPLE {}",
                     serde_json::json!({
                         "elapsed_secs":started.elapsed().as_secs_f64(),"meta":snapshot.meta(),
                         "input_hz_requested":args.input_hz,
+                        "producer_timing": {"loop_work":loop_work, "receive_work":receive_work,
+                            "session_work":session_work,
+                            "wake_lateness":wake_lateness,"overrun_rebases":overrun_rebases,
+                            "bucket_upper_us":harness::cadence::TIMING_BUCKET_UPPER_US},
                         "phase":phase,"state":format!("{:?}",snapshot.game_state()),
                         "players":players,"structures":structures,"peers":peers,
                         "minions":snapshot.minions().len(),"buffs":snapshot.team_buffs().len(),
@@ -707,11 +737,13 @@ fn main() {
             }
         }
         if args.input_hz.is_some() {
+            loop_work.record(iteration_started.elapsed());
             next_tick += tick_interval;
             let now = Instant::now();
             if next_tick > now {
                 std::thread::sleep(next_tick - now);
             } else if now.duration_since(next_tick) >= tick_interval {
+                overrun_rebases = overrun_rebases.saturating_add(1);
                 next_tick = now;
             }
         } else {

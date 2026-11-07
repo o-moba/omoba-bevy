@@ -1,6 +1,50 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальная точка передачи — measured input20, после f0e4b7d4
+## Актуальный checkpoint — timing, после de5291fd
+
+Предыдущий goal-turn был progress: сохранён и запушен полноценный checkpoint,
+не завершение всего релиза. В этом продолжении prepared v2 уже реально выполнен.
+[Точные новые отчёты, диагностика и verifier](../evidence/input20-timing-2026-11-07/README.md)
+приоритетнее исторического «v2 NOT RUN» ниже.
+
+- V2:10/30s PASS20.001Hz;1000/120s **FAIL**18.771–19.583Hz, median19.196.
+- V3 control PASS20.054Hz. Большой запуск остановлен preflight из-за занятого
+  UDP port; серверы не стартовали, затем wrapper сообщил об отсутствующем report.
+  Сохранён первичный отказ. Preflight теперь явно сообщает порт и exit2; настоящий
+  occupied-socket test доказывает отказ до SQL/process startup. Чужое не трогали.
+- V4 в отдельной fixture/других портах:1000/120s **FAIL**19.346–19.869Hz.
+- V5 с раздельными timing:1000/120s **FAIL**18.819–19.611Hz. Все три полных
+  попытки удержали Running100 арен/1000 signed AI peers, rosters совпадают,
+  authority resets0. Ни одна не закрывает неизменный19.5–20.5Hz per-peer gate.
+- Добавлены реальные меж-send gaps и cumulative wall histograms с вычитанием
+  baseline. В V5 loop p99<150ms, receive/session/navigation p99<1ms;3966 overrun
+  rebases, send-gap p95<75ms/p99<150ms. Это bucket bounds, не точные percentiles;
+  wall включает scheduling. Bulk stalls не доказаны как navigation issue.
+- Один проверенный собственный generator54 sampled3s/1ms вV5, call graph сохранён.
+  Это дополнительный диагностический overhead; не выдавать сравнение V5/V4 за
+  контрольный performance experiment. Most samples under sleep/receive/decode,
+  меньшая часть signed send. Следующим отдельно измерить serialization/signing,
+  syscall send и stdout/telemetry. Сначала короткий явно diagnostic interval на
+  полном населении для причины, после реального фикса снова120s acceptance.
+-38 whole-harness +4 UDP +25 Python и4 strict Clippy PASS, включая real signed
+  gap/Ping/reset и backwards/overflow histograms. Production server unchanged
+  SHA5c6f4e6f…; opt1 manifest содержит248 non-harness Rust sources (проверены),
+  а263 total включали15 harness, не все были production. Gameplay/authority/
+  timers/schema/dependencies/CI/RU configuration не менялись.
+- Все свои v2/v3/v4/v5 DB/volume удалены, финальные process inventories пусты.
+  **Живых локальных probes нет.** Helpers/build manifests/retained binaries:
+  `.agent/codex-ranked-readiness/load-input20/`. Native v2→v4→v5 имеют разные
+  hashes; не использовать отчёт от другого бинарника. Root≈12GiB: no heavy build.
+- Parent de5291fd CI42357470179 пока6/7 SUCCESS, PG in_progress; Release
+  42357470196 cancelled: macOS cancelled, Windows/Android/Linux success,
+  draft-release skipped. После push найти новый head/run, не перезапускать живые
+  jobs из-за observation timeout и не считать parent полным gate текущего пакета.
+
+Scope **68+9+UI/physical/off-host/WAN/trust/RU** сохраняется. Исходные68 всё ещё
+62done/5partial/1open, C2/C4 review-only с прежними вопросами владельцу; ни merge,
+ни production deploy/reset/keys/grants не было. Список6 PR и все решения ниже.
+
+## История передачи de5291fd — до live v2
 
 Владелец попросил сохранить весь контекст для переключения агента. Этот блок
 приоритетнее исторических обновлений ниже. [Новый проверяемый пакет](../evidence/input20-handoff-2026-11-07/README.md)

@@ -44,6 +44,7 @@ pub struct PublicBotStatus {
     pub authority_resets: u64,
     pub sent_gameplay_commands: u64,
     pub sent_transforms: u64,
+    pub transform_gaps: crate::cadence::TimingHistogram,
 }
 
 pub(crate) struct PublicSession {
@@ -72,6 +73,7 @@ pub(crate) struct PublicSession {
     next_auth: Instant,
     next_action: Instant,
     next_ping: Instant,
+    last_transform_at: Option<Instant>,
     next_join: Instant,
     next_result_query: Instant,
     result_query: u64,
@@ -142,6 +144,7 @@ impl PublicSession {
             next_auth: now,
             next_action: now,
             next_ping: now,
+            last_transform_at: None,
             next_join: now,
             next_result_query: now,
             result_query: 100,
@@ -163,6 +166,7 @@ impl PublicSession {
                 authority_resets: 0,
                 sent_gameplay_commands: 0,
                 sent_transforms: 0,
+                transform_gaps: Default::default(),
             },
         }
     }
@@ -283,6 +287,12 @@ impl PublicSession {
         self.status.sent_gameplay_commands = self.status.sent_gameplay_commands.saturating_add(1);
         if matches!(packet, ClientPacket::Transform { .. }) {
             self.status.sent_transforms = self.status.sent_transforms.saturating_add(1);
+            let now = Instant::now();
+            if let Some(previous) = self.last_transform_at.replace(now) {
+                self.status
+                    .transform_gaps
+                    .record(now.duration_since(previous));
+            }
         }
         true
     }
@@ -839,10 +849,20 @@ mod tests {
         ));
         assert_eq!(session.status.sent_gameplay_commands, 2);
         assert_eq!(session.status.sent_transforms, 1);
+        assert_eq!(session.status.transform_gaps.count, 0);
+        assert!(session.send(&socket, &pose));
+        assert!(matches!(
+            receive(&peer),
+            PublicClientDatagram::SignedCommand { .. }
+        ));
+        assert_eq!(session.status.sent_gameplay_commands, 3);
+        assert_eq!(session.status.sent_transforms, 2);
+        assert_eq!(session.status.transform_gaps.count, 1);
         session.reset_transport(false);
         assert!(!session.send(&socket, &pose));
-        assert_eq!(session.status.sent_gameplay_commands, 2);
-        assert_eq!(session.status.sent_transforms, 1);
+        assert_eq!(session.status.sent_gameplay_commands, 3);
+        assert_eq!(session.status.sent_transforms, 2);
+        assert_eq!(session.status.transform_gaps.count, 1);
     }
 
     #[test]
