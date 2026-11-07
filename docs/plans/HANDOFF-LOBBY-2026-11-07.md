@@ -1,5 +1,27 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
+**Обновление после30f69c5e:** [current opt1 local population](../evidence/optimized-playing-1000-2026-11-07/README.md)
+PASS:1000 signed AI peers/100 ten-seat Casual arenas/120s Running,0 server bots,
+0 observed auth resets;100 final health-v2 workers SQL/journal ready, no backlog.
+Тот же production source (263 hashes), но явный renderer-free workspace opt1
+с debug/overflow checks; dependencies read-only, без Cargo/SDK/Bevy build.
+Новое75.65MiB, root min12.24GiB. Все Running44.96s, received median12.726Hz/p05
+11.969, p95 wire74123B/player/s, total received485.77Mbit/s без IP/UDP overhead.
+Server3.644 cores/1694.67MiB peak summed RSS; generator2.764/625.64MiB.
+Это не full performance/RU PASS: native AI спит100ms и посылает transform после
+полученного snapshot; client update interval50ms. **Следующим дать измеренный20Hz
+input без привязки к поступлению snapshots и повторить полный target**, затем
+cadence/latency и Linux/RU/uplink/WAN. Этот прогон не покрывает20Hz movement input.
+Бывшие unoptimized failures остаются своими FAIL.
+Shared snapshot_tick резервируется ещё и на bootstrap1Hz до фильтрации игроков:
+accepted/sequence fraction — НЕ packet delivery/loss. Добавлены scope caveats в
+runner; старые значения/архивы неизменны. No zero-loss claim.
+Reusable opt1 server/bots + exact scripts/raw data:
+`.agent/codex-ranked-readiness/load-opt1/`; build.json содержит flags/хеши.
+Контроллер теперь ждёт стабильного post-exit inventory, сохраняет audit при
+отказе и не сигналит transient `(server)` labels. Final inventory пуст, свой
+DB/volume удалён. Другие scopes68+9+UI/physical/WAN/RU ниже сохраняются62/5/1.
+
 **Обновление после865e27be:** исправлены две подтверждённые ошибки native AI
 probe:20ms receive deadline фактически блокировался до200ms; Career envelopes
 не имели native epoch/sequence fence. Отрицательные UDP/authority tests

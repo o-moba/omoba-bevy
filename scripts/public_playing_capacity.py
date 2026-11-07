@@ -156,6 +156,9 @@ def verify_manifests(root, samples, count):
 
 
 def summarize_wire(before, after):
+    # The legacy broadcast-tick field name is retained for archived verifiers.
+    # Its sequence also advances for bootstrap views, even when no authenticated
+    # player receives one. The accepted/sequence ratio is NOT packet delivery.
     assert before and len(before) == len(after), "missing native shard telemetry"
     rates, snapshots, tick_rates, delivery = [], [], [], []
     for initial, final in zip(before, after):
@@ -267,6 +270,12 @@ def main(argv=None):
     report = {"status": "FAIL", "clients": args.clients, "arenas": rooms,
               "preference": "quick", "server_bots": 0, "soak_seconds": args.seconds,
               "scope": "local Casual signed native AI clients; not RU/cgroup or Ranked proof",
+              "acceptance_scope": "Running population, freshness and durable rosters; received counters only",
+              "unverified_scope": [
+                  "Native20Hz movement-input workload: generator input cadence is not measured",
+                  "Latency/SLA, physical devices, WAN and real RU host/uplink",
+                  "Packet delivery/loss: snapshot sequence includes unsent bootstrap ticks",
+              ],
               "fixture_allowances": {k: v for k, v in env.items() if k.startswith("OMOBA_LIMIT_")},
               "server_sha256": hashlib.sha256(args.server_bin.read_bytes()).hexdigest(),
               "bots_sha256": hashlib.sha256(args.bots_bin.read_bytes()).hexdigest(),

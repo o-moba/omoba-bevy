@@ -2,6 +2,12 @@
 
 **1000-client acceptance FAILED. No capacity finding is closed by this packet.**
 
+Later scope clarification: the shared sequence also advances on1Hz bootstrap
+passes with no gameplay recipient; its accepted fraction is not packet delivery
+or loss. This packet's original values/rejection remain unchanged. The separate
+[optimized current120s population proof](../optimized-playing-1000-2026-11-07/README.md)
+passes its local population gate and preserves20Hz-input/SLA/RU limits.
+
 The production server source is unchanged through efe32101: all263 recorded
 production source hashes and the accepted native binary SHA match the terminal
 recovery proof. This existing direct-rustc server has unoptimized root crates,

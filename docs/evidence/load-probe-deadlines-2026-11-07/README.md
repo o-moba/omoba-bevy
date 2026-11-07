@@ -1,7 +1,13 @@
 # Native load probe correctness — 2026-11-07
 
-Two real probe defects are fixed. **Current1000-client acceptance still FAILS.**
+Two real probe defects are fixed. **This packet's unoptimized1000 acceptance FAILS.**
 No original capacity, cadence, RU-host or release finding is closed here.
+
+This is the unoptimized packet's acceptance result. A separate
+[current opt1 run](../optimized-playing-1000-2026-11-07/README.md) passes120s of
+local1000 population; full20Hz-input/SLA/RU gates remain open. The original
+failures and values here are retained. Shared bootstrap ticks can advance with
+no recipient, so accepted/sequence fraction is not a packet-loss measurement.
 
 ## Fixes and discriminating checks
 

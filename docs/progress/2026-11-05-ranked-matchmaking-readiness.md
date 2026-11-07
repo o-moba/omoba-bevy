@@ -1792,3 +1792,37 @@ Never extend TTL, bypass SQL/consent or alter actual timers to turn this green.
 Original68 remains62 done,5 partial,1 open; UI/physical/WAN/RU/critic/release scope
 is unchanged. Parent865e27be CI42351039365 has6/7 jobs PASS and its PostgreSQL
 job remains live as last observed; this next source checkpoint needs its own CI.
+
+
+### Current opt1 full-population/health checkpoint — 2026-11-07
+
+[Exact current-source optimized proof](../evidence/optimized-playing-1000-2026-11-07/README.md).
+Same30f69c5e production sources/263 recorded hashes; only eight renderer-free
+workspace targets compiled at explicit opt1 with debug/overflow checks, coherent
+existing third-party/SDK libraries read-only. No Cargo/SDK/Bevy/platform build,
+no third cache or production change. Artifacts75.65MiB; min root12.24GiB.
+
+Actual restricted PG18.6/current13/11 loopback fixture:10-client30s control PASS,
+then1000 unique signed native AI peers in100 ten-seat Casual arenas, zero server
+bots,120s simultaneous Running PASS. All Running44.96s; ends165.21s. Zero observed
+auth resets/stale Career packets. All100 final health-v2 workers SQL/journal ready,
+matching epoch, zero blocked/backlog/closed recipient.59 process samples across
+120.045s:server3.644 mean cores/1694.67MiB peak summed RSS; generator2.764/625.64.
+Received median12.726Hz,p0511.969,p95wire74123B/player/s; aggregate485.77Mbit/s
+application/framing payload excludes IP/UDP/Ethernet overhead and is not WAN/NIC
+capacity. Summed RSS is not PSS. Both owned group inventories settle empty and
+DB/volume are removed. The controller now waits for transient identity labels and
+persists its audit on refusal; no unverified/foreign PID is signalled.
+
+Scope correction: prepare_tick invokes bootstrap views1Hz on public workers and
+increments shared snapshot_tick before filtering gameplay recipients. Therefore
+the legacy accepted/sequence fraction does NOT prove packet loss or delivery.
+All archived values stay unchanged; the runner now states this caveat. No claim
+of zero loss. Likewise the native AI loop sleeps100ms and drives transforms only
+after snapshots; it does not establish the real client's50ms/20Hz input workload.
+Next implement/measure independent20Hz input and repeat the full target, then
+cadence/latency, sustained Linux/RU or identical-host resources/uplink and WAN.
+Changing optimization across all roots together resolves the prior local symptom
+in this run, without identifying a single crate or proving overload impossible.
+Original68 remains62 done,5 partial,1 open; full CI and critic/UI/physical/trust/
+independent recovery/RU release requirements retain their complete scope.

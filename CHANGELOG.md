@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify current signed1000-peer/100-arena Casual population for120s using an
+  explicit coherent opt1 headless graph and restricted PG18.6/schema13/11 roles:
+  zero observed auth resets, healthy final workers and complete owned cleanup.
+  Preserve actual12.73Hz received cadence/CPU/egress and keep20Hz input, latency,
+  real RU and release gates open. Clarify that shared bootstrap sequence gaps
+  are not packet-loss measurements. No production source/configuration changes.
+
 - Fix native AI probe receive deadlines: an idle20ms poll no longer blocks for
   the fixed200ms socket timeout. Fence public Career replies by current epoch
   and sequence, matching the native game client; retain genuine auth-loss
