@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify current career13/portal11 physical/WAL recovery with actual runtime
+  grants on PostgreSQL16.15 and18.6:20 isolated checks each PASS. Named/latest
+  restoration preserves exact ready ownership, queue discipline and rating/history;
+  runtime privilege restrictions survive. The C4 helper remains a review-only
+  candidate. Actual worker replay, independent off-host/RU recovery and approved
+  integration/rollout remain required.
+
 - Bound critical Ready/Flush completion buffering to256 and retain exact work/
   generation/results while the live receiver is full. Pause job intake with timed
   async yielding; lease, SQL, probe and health work continue. Health report v2

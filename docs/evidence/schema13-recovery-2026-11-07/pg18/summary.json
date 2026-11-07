@@ -1,0 +1,628 @@
+{
+  "status": "PASS",
+  "run_id": "77fc99511a",
+  "checks": [
+    "current actual grants restrict runtime roles and execute bounded retention without direct consent DELETE",
+    "real ru_backup combines signed encrypted logical SFTP backup with the new physical/WAL pipeline",
+    "actual host-helper config/full-backup/live-check path executes with sanitized environment",
+    "actual career13/portal11 physical backup encrypted and stored through strict-host-key SFTP",
+    "named-point recovery returns exact post-base rating1024/history1",
+    "latest archive recovery returns exact post-base rating1048/history2",
+    "named/latest recovery preserve exact ready membership, claims, queue discipline and all13/11 migrations with restored runtime rights",
+    "real ru_backup monthly drill verifies the signed logical snapshot and isolated physical target recovery",
+    "actual host-helper isolated named-target drill proves source system/schema/replay and cleans its scratch cluster",
+    "missing post-base encrypted WAL refuses target recovery instead of returning stale data",
+    "corrupt encrypted post-base WAL refuses target recovery",
+    "wrong SFTP host pin refuses repository access",
+    "actual minute-check CLI alerts in its own journal while preserving logical backup metadata",
+    "actual host-helper records archive outage and health refuses inherited success",
+    "unreachable SFTP archive fails health rather than certifying freshness",
+    "actual full-backup retention keeps three completed bases and expires the older fourth only after success",
+    "real incomplete PITR still uploads independent signed logical backup while refusing combined success",
+    "actual repaired minute-check CLI resolves its own alert without changing backup metadata",
+    "real complete backup health requires archive/base/drill and actual secrets escrow together",
+    "actual host-helper health recovers only after a successful repaired-archive check"
+  ],
+  "scope": "Disposable two-container encrypted SFTP/current-schema13 recovery only; not real off-host/RU deployment, production RPO, physical UI or played-game evidence",
+  "source_parent": "a654f032755372944353b13d8c93fbf53f40f03b",
+  "fixture": "Direct SQL synthetic rating/history receipts with actual career/portal migrations",
+  "wal_segment_mib": 1,
+  "base_script_sha256": "fb244dcecf0f0db7e7b699c4890f0afd0735f45b8120ac56aee5d14544d6b940",
+  "source_sha256": {
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/001_career.sql": "013ea70d69c747dbb86a62c0c949e61bc69999b2b148c73e041ebc2c956d5649",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/002_player_handles.sql": "fcd5ff3160d77802269c6359f6f22224c4bdd088cea0d1420bf60cfd7cfbb59b",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/003_device_keys.sql": "72c747d5de42866bef9697ed0e034dfa23c05908250c223351b716dd6819d849",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/004_admission_limits.sql": "5f0fbb387a53014f011b747db41fd6ce5d87b1a813ec83e0af262f69d615286c",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/005_sanctions.sql": "896817ee8236359940da52350a0a3831b175a740e541da209035b13e5b054fe4",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/006_rating_ladder.sql": "e21e681c1de6003e10e6576c147f8a5c5c6295073b2f91fa6fa2e7a48248cf79",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/007_fair_play.sql": "afa51b69509c60104da5576ef65402764872c6bfdf43beceaef8032ca6907ef7",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/008_match_votes.sql": "586d5044d0c5c84bfb8a4766fd2c5087be38bfb93730eead4fa388a5bc803b15",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/009_ranked_eligibility.sql": "7dec42e68a97fb71d68eb9336c31da83f6fd273929e11210fd689a6fc9782b09",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/010_ranked_seasons.sql": "e53b76ecdf0ef59f2a07394086c3671f4b6548ace17a75d28019e008ef6642e5",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/011_queue_discipline.sql": "aa8a7552807e62b49f5eafebd63bce636c43d05784653abe856554f8ad56af8a",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/012_ready_ownership.sql": "450894081a890073d5c6946858381a8f3d60de127c7fcbc5288fb857992ae323",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/career-store/migrations/postgres/013_ready_retention.sql": "8f9299e86cfd8ef957e75ebf478f3d3e1e952c46ba7da9e93db536b56a483694",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/001_portal.sql": "4dc0d38d57a4f15be356f3c92f088ac659d687b29c56c9fadd91c613a03b474c",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/002_devices.sql": "b53fbb2d2dc4cdf2c2af021bd0b9e26a50c6733b958081c5ebf2857a11605021",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/003_supporter.sql": "3f8c97cb430dff4f2accf34e632caaa741c04e621ed210cddd76e6e5700dc6f4",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/004_class_builds.sql": "eab52272758412feb3cfcf07b2c75d9022f0e87faa08515235e4cac48b143d2a",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/005_ekza_library.sql": "fca37d742561fae60a72a410eb18ced1a593324dece06f1a3e773b6565253a34",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/006_supporter_recognition.sql": "c1dc68d9b95e80b24849d0b2b7a8a0e878b45dae71c7efd55303798cf53283bc",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/007_social_sign_in.sql": "318e6eff599ececdce4de7b975895aa0b616d55c2d73342d78c202c05293a8b2",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/009_yookassa_supporter.sql": "15f78761b3eeaf47dc648f864b32c8b48683324610a27a74a98e368b91f907a2",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/010_social_registration.sql": "7f24d1fe318e8ec2eb3124c0b51cdda095337599f11deb33bd94f9a37ac5e3fe",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/migrations/011_leaderboard.sql": "cf5ea73c120d2b049fe9b2ffd828efff3749ef1d227383508f6290f896381714",
+    "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/account-api/ops/grants.sql": "eb36f7739c23c17e22751c7bb25dddd8b2b0927f8248c76742aa2bbd2882ff86"
+  },
+  "review_helper_sha256": {
+    "ru_backup.py": "cce1de26c770266aa700c2ab3b3a9a4a030b3c2723e89b364f1c4a729d4b8801",
+    "ru_pitr.py": "0f0816936486df14dc650f46096b918671a0640c9c95cbb00c0adbb98a55ff38"
+  },
+  "image_id": "sha256:72480ba0c6fdec4e512e402ff728f25d1eb633512f3891a62fd6cca1822c550e",
+  "postgres": "postgres (PostgreSQL) 18.6",
+  "pgbackrest": "pgBackRest 2.58.0",
+  "schema": {
+    "career": 13,
+    "portal": 11
+  },
+  "system_identifier": "7705299751567851564",
+  "source_rights": {
+    "game_retention": true,
+    "portal_retention": false,
+    "game_consent_delete": false,
+    "portal_consent_read": false,
+    "game_season_update": false,
+    "portal_season_update": false,
+    "game_queue_append": true,
+    "game_queue_delete": false,
+    "game_schema_create": false,
+    "portal_schema_create": false,
+    "definer_policy": true,
+    "roles_unprivileged": true,
+    "actual_retention_rollback": true,
+    "forbidden_operations_rejected": 4
+  },
+  "kit_backup": {
+    "ok": true,
+    "at": "2026-11-07T05:38:29Z",
+    "label": "20261107-053826F",
+    "backup_at": "2026-11-07T05:38:29Z",
+    "system_id": "7705299751567851564",
+    "cipher": "aes-256-cbc",
+    "type": "full"
+  },
+  "logical_backup": {
+    "name": "omoba-ru-20261107T053826Z-manual.tar.gpg",
+    "schema_versions": {
+      "portal": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ],
+      "career": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ]
+    }
+  },
+  "base_snapshot": {
+    "rating": 1000,
+    "rated_matches": 20,
+    "matches_played": 20,
+    "history": 0,
+    "career_versions": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ],
+    "portal_versions": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      9,
+      10,
+      11
+    ],
+    "ready": [
+      {
+        "queue": "humans_only",
+        "state": "forming",
+        "check_id": "cccccccccccccccccccccccccccccccc",
+        "owner_id": "fixture",
+        "updated_at": "2026-11-07T05:38:25.628682+00:00",
+        "deadline_ms": 1794033505628,
+        "member_count": 1,
+        "opened_at_ms": null,
+        "live_until_ms": 1794033505628
+      },
+      {
+        "queue": "quick",
+        "state": "cancelled",
+        "check_id": "dddddddddddddddddddddddddddddddd",
+        "owner_id": "fixture",
+        "updated_at": "2026-10-30T05:38:25.62933+00:00",
+        "deadline_ms": 0,
+        "member_count": 1,
+        "opened_at_ms": null,
+        "live_until_ms": 0
+      }
+    ],
+    "members": [
+      {
+        "dodged": false,
+        "accepted": false,
+        "check_id": "cccccccccccccccccccccccccccccccc",
+        "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "session_id": "queue-fixture",
+        "dodge_event_id": "3b54d7e1069d427aa2fe9cb63f28bd20",
+        "dodge_observed_ms": null
+      }
+    ],
+    "claims": [
+      {
+        "check_id": "cccccccccccccccccccccccccccccccc",
+        "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "queue_events": null,
+    "queue_penalties": null
+  },
+  "backup_labels": [
+    "20261107-053826F"
+  ],
+  "repository_cipher": "aes-256-cbc",
+  "target_lsn": "0/1301668",
+  "post_base_segment": "000000010000000000000013",
+  "restored_rights": {
+    "point": {
+      "game_retention": true,
+      "portal_retention": false,
+      "game_consent_delete": false,
+      "portal_consent_read": false,
+      "game_season_update": false,
+      "portal_season_update": false,
+      "game_queue_append": true,
+      "game_queue_delete": false,
+      "game_schema_create": false,
+      "portal_schema_create": false,
+      "definer_policy": true,
+      "roles_unprivileged": true,
+      "actual_retention_rollback": true,
+      "forbidden_operations_rejected": 4
+    },
+    "latest": {
+      "game_retention": true,
+      "portal_retention": false,
+      "game_consent_delete": false,
+      "portal_consent_read": false,
+      "game_season_update": false,
+      "portal_season_update": false,
+      "game_queue_append": true,
+      "game_queue_delete": false,
+      "game_schema_create": false,
+      "portal_schema_create": false,
+      "definer_policy": true,
+      "roles_unprivileged": true,
+      "actual_retention_rollback": true,
+      "forbidden_operations_rejected": 4
+    }
+  },
+  "point": {
+    "expected": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1,
+      "career_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "portal_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ],
+      "ready": [
+        {
+          "queue": "humans_only",
+          "state": "approved",
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "owner_id": "fixture",
+          "updated_at": "2026-11-07T05:38:25.628682+00:00",
+          "deadline_ms": 1794033505628,
+          "member_count": 1,
+          "opened_at_ms": 1794033490628,
+          "live_until_ms": 1794033505628
+        },
+        {
+          "queue": "quick",
+          "state": "cancelled",
+          "check_id": "dddddddddddddddddddddddddddddddd",
+          "owner_id": "fixture",
+          "updated_at": "2026-10-30T05:38:25.62933+00:00",
+          "deadline_ms": 0,
+          "member_count": 1,
+          "opened_at_ms": null,
+          "live_until_ms": 0
+        }
+      ],
+      "members": [
+        {
+          "dodged": false,
+          "accepted": true,
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "session_id": "queue-fixture",
+          "dodge_event_id": "3b54d7e1069d427aa2fe9cb63f28bd20",
+          "dodge_observed_ms": null
+        }
+      ],
+      "claims": [
+        {
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "queue_events": null,
+      "queue_penalties": null
+    },
+    "actual": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1,
+      "career_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "portal_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ],
+      "ready": [
+        {
+          "queue": "humans_only",
+          "state": "approved",
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "owner_id": "fixture",
+          "updated_at": "2026-11-07T05:38:25.628682+00:00",
+          "deadline_ms": 1794033505628,
+          "member_count": 1,
+          "opened_at_ms": 1794033490628,
+          "live_until_ms": 1794033505628
+        },
+        {
+          "queue": "quick",
+          "state": "cancelled",
+          "check_id": "dddddddddddddddddddddddddddddddd",
+          "owner_id": "fixture",
+          "updated_at": "2026-10-30T05:38:25.62933+00:00",
+          "deadline_ms": 0,
+          "member_count": 1,
+          "opened_at_ms": null,
+          "live_until_ms": 0
+        }
+      ],
+      "members": [
+        {
+          "dodged": false,
+          "accepted": true,
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "session_id": "queue-fixture",
+          "dodge_event_id": "3b54d7e1069d427aa2fe9cb63f28bd20",
+          "dodge_observed_ms": null
+        }
+      ],
+      "claims": [
+        {
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "queue_events": null,
+      "queue_penalties": null
+    }
+  },
+  "latest": {
+    "expected": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2,
+      "career_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "portal_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ],
+      "ready": [
+        {
+          "queue": "humans_only",
+          "state": "consumed",
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "owner_id": "fixture",
+          "updated_at": "2026-11-07T05:38:25.628682+00:00",
+          "deadline_ms": 1794033505628,
+          "member_count": 1,
+          "opened_at_ms": 1794033490628,
+          "live_until_ms": 1794033505628
+        },
+        {
+          "queue": "quick",
+          "state": "cancelled",
+          "check_id": "dddddddddddddddddddddddddddddddd",
+          "owner_id": "fixture",
+          "updated_at": "2026-10-30T05:38:25.62933+00:00",
+          "deadline_ms": 0,
+          "member_count": 1,
+          "opened_at_ms": null,
+          "live_until_ms": 0
+        }
+      ],
+      "members": [
+        {
+          "dodged": false,
+          "accepted": true,
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "session_id": "queue-fixture",
+          "dodge_event_id": "3b54d7e1069d427aa2fe9cb63f28bd20",
+          "dodge_observed_ms": null
+        }
+      ],
+      "claims": null,
+      "queue_events": [
+        {
+          "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "recorded_at": "2026-11-07T05:38:29.932498+00:00",
+          "observed_at_ms": 1700000000000
+        }
+      ],
+      "queue_penalties": [
+        {
+          "strikes": 1,
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "cooldown_until": "2023-11-14T22:14:20+00:00",
+          "last_observed_ms": 1700000000000
+        }
+      ]
+    },
+    "actual": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2,
+      "career_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "portal_versions": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ],
+      "ready": [
+        {
+          "queue": "humans_only",
+          "state": "consumed",
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "owner_id": "fixture",
+          "updated_at": "2026-11-07T05:38:25.628682+00:00",
+          "deadline_ms": 1794033505628,
+          "member_count": 1,
+          "opened_at_ms": 1794033490628,
+          "live_until_ms": 1794033505628
+        },
+        {
+          "queue": "quick",
+          "state": "cancelled",
+          "check_id": "dddddddddddddddddddddddddddddddd",
+          "owner_id": "fixture",
+          "updated_at": "2026-10-30T05:38:25.62933+00:00",
+          "deadline_ms": 0,
+          "member_count": 1,
+          "opened_at_ms": null,
+          "live_until_ms": 0
+        }
+      ],
+      "members": [
+        {
+          "dodged": false,
+          "accepted": true,
+          "check_id": "cccccccccccccccccccccccccccccccc",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "session_id": "queue-fixture",
+          "dodge_event_id": "3b54d7e1069d427aa2fe9cb63f28bd20",
+          "dodge_observed_ms": null
+        }
+      ],
+      "claims": null,
+      "queue_events": [
+        {
+          "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "recorded_at": "2026-11-07T05:38:29.932498+00:00",
+          "observed_at_ms": 1700000000000
+        }
+      ],
+      "queue_penalties": [
+        {
+          "strikes": 1,
+          "profile_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "cooldown_until": "2023-11-14T22:14:20+00:00",
+          "last_observed_ms": 1700000000000
+        }
+      ]
+    }
+  },
+  "kit_drill": {
+    "ok": true,
+    "started_at": "2026-11-07T05:38:38Z",
+    "target": "omoba_pitr_b2a87ee0cceb40569588369e5f110aca",
+    "target_lsn": "0/1A21380",
+    "system_id": "7705299751567851564",
+    "replay_lsn": "0/1A21380",
+    "schema_versions": {
+      "career": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "portal": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ]
+    },
+    "finished_at": "2026-11-07T05:38:41Z",
+    "cleanup_complete": true
+  },
+  "wrong_sftp_pin": {
+    "exit_code": 0,
+    "status_codes": [
+      99
+    ],
+    "rejected": true
+  },
+  "retained_full_labels": [
+    "20261107-053903F",
+    "20261107-053907F",
+    "20261107-053910F"
+  ],
+  "incomplete_pitr": {
+    "combined_success": false,
+    "logical_archive_preserved": true
+  },
+  "root_health": {
+    "ok": true,
+    "codes": []
+  },
+  "owned_containers_network_removed": true
+}

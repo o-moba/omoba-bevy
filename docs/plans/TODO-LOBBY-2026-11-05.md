@@ -24,8 +24,12 @@ recovery, bounded ready retention, mandatory SQL consent and restore evidence
 remain verified. Current signed15s/FIFO/replacement through ten-human Running and
 fresh v2 health, plus real worker SIGTERM/durable shutdown, PASS. Full current CI
 and actual host/physical/recovery/load acceptance remain required.
-Next: current-schema13 recovery/replay
-rehearsal; UI-2/UI-3 exact current pixels and physical C3; actual multi-host/WAN
+Current-schema13 physical/WAL and restored runtime rights now PASS in isolated
+PG16.15/18.6 containers,20 checks each. Exact named/latest consent/claims,
+queue discipline and rating/history are preserved; the C4 helper remains unapplied.
+[Current local recovery proof](../evidence/schema13-recovery-2026-11-07/README.md).
+Next: actual current-worker replay/Resume against the restored database and
+independent off-host/RU acceptance; UI-2/UI-3 exact current pixels and physical C3; actual multi-host/WAN
 and sustained host capacity/cadence; trust packaging/provisioning; current full CI.
 C2/C4 host-tool proposals still await their existing owner decisions. Original
 review coordinates and dated checkpoints below preserve history; their older
@@ -157,7 +161,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 - [major/bug/M] **Lobby crash or deploy SIGTERMs every live match worker; workers have no signal handler, so all running (incl. Ranked) matches die and settle as unrated 'server_interrupted'** — `ops/vps/ru/omoba-lobby-ru.service:42`. Fix: Set `KillMode=process` (and `SendSIGHUP=no`) in omoba-lobby-ru.service and the ru_host.py unit rules so only the lobby PID is stopped and workers are adopted on restart (the code path already exists); add a SIGTERM handler in the worker that writes a checkpoint and settles Interrupted gracefully for the real host-shutdown case; add a release test that restarts the lobby unit under a running bot ma — **done in kit — KillMode=process preserves live workers; SIGTERM/SIGINT handler fsyncs terminal records, forces final status publication, process rehearsal passes (Interrupted, no Elo/XP, one played match). RU rollout remains pending.**
 - [major/gap/M] **No drain/maintenance mode: deploy is refused while any match runs, so at ~1000 concurrent players the server can never be updated or hot-fixed** — `ops/vps/ru/ru_host.py:1562`. Fix: Add a lobby drain flag (e.g. `OMOBA_MATCH_ROOT/drain` file or SIGUSR1) that refuses new allocations with a localized `searching.match.draining` ('Сервер готовится к обновлению · новые матчи скоро возобновятся') while live matches finish; add `ru_host.py ship --drain` that sets the flag, waits for `occupied == 0` (bounded by OMOBA_MATCH_MAX_DURATION_SECS), then restarts; keep `guard_no_matches` as  — **partial — runtime pauses new ready/allocation, preserves queued parties/FIFO without dodges and publishes operation acknowledgement.6 new server/656 real PG checks, native retry/localization and signed live/restart/adoption/Resume proof PASS. Host ship/wait/cancel and rollback now have a tested review-only candidate (28 new/184 combined tests,1 expected skip), composed with unapplied C4. Owner approval, integration/full CI and actual RU rollout remain required.**
 - [major/ux/M] **Mobile player who locks the screen while Searching silently loses the queue place after 15 s and is re-queued at the back on resume; no keep-awake and no match-found sound/vibration** — `server/src/match_service.rs:668`. Fix: Keep the screen awake while in Searching/Draft on Android (`ANativeActivity_setWindowFlags(AWINDOW_FLAG_KEEP_SCREEN_ON)` via the ndk crate) and iOS (`isIdleTimerDisabled`); raise the lobby expiry to 60 s and have the client, on resume with a gap >15 s, show `searching.status.resumed` ('Поиск был прерван · продолжаем'); play a short SFX + vibration when the view becomes allocated/assigned. — **partial — FIFO intent60s, foreground keep-awake/resume refresh, ready sound and approved iOS/Android haptics implemented. Android compile and all7-job CI42097650577 PASS with the approved VIBRATE/JNI patch; current native/mobile visual and physical keep-awake/haptic verification remain pending.**
-- [major/scale/M] **Daily pg_dump only: a host failure rolls every player's rating and history back up to 24 h; no WAL archiving or point-in-time recovery** — `ops/vps/ru/omoba-backup-ru.timer:7`. Fix: Enable `archive_mode=on` with an `archive_command` that ships WAL segments to the existing off-host backup target (pgBackRest or wal-g; or rsync as a stopgap), keep the nightly base dump, and extend `ru_backup.py check`/the restore drill to replay WAL to the latest point; as a one-line stopgap raise the dump cadence to hourly. — **open — production kit still uses daily pg_dump. Isolated PG18 native physical-base/WAL proof passes5 checks; real encrypted pgBackRest/SFTP named-point/latest, missing/corrupt-WAL, wrong-pin and outage proof passes7 checks at career10/portal11 in two local containers. Production tooling, archive/restore/check integration and approved independent-storage/RU rollout remain required.**
+- [major/scale/M] **Daily pg_dump only: a host failure rolls every player's rating and history back up to 24 h; no WAL archiving or point-in-time recovery** — `ops/vps/ru/omoba-backup-ru.timer:7`. Fix: Enable `archive_mode=on` with an `archive_command` that ships WAL segments to the existing off-host backup target (pgBackRest or wal-g; or rsync as a stopgap), keep the nightly base dump, and extend `ru_backup.py check`/the restore drill to replay WAL to the latest point; as a one-line stopgap raise the dump cadence to hourly. — **open — production kit still uses daily pg_dump. Isolated PG18 native physical-base/WAL proof passes5 checks; real encrypted pgBackRest/SFTP named-point/latest, missing/corrupt-WAL, wrong-pin and outage proof passes7 checks at career10/portal11 in two local containers. Current-schema13/portal11 combined candidate rehearsal now passes20 checks on each of PG16.15/18.6, including exact consent/claims/discipline and restored actual grants. The tested C4 integration patch remains review-only, awaiting its existing decision. Actual worker replay and approved independent-storage/RU rollout remain required.**
 - [major/gap/L] **No remake or surrender** — original finding at `server/src/session_recovery.rs:200`. Server-owned remake before180s after90s absence; strict majority of remaining humans, surrender from600s with4/5 (all when fewer remain),30s votes/120s failed cooldown. Innocent remakes are neutral; proved ranked leavers retain their individual penalty. — **done in software — server/store/ten-human product-controller checks and inspected RU852×393 menu,44px vote prompts, both saved results and real first-guide dismissal are verified. Corrected full CI42243761726 at6a61a7ac is SUCCESS across all7 jobs, including PostgreSQL/public journeys, full client, core, Android and gameplay harness. Exact native frame/source evidence remains in ../evidence/fair-play-2026-11-06/offscreen-manifest.json. Physical-phone and final current-revision release gates remain separate.**
 - [major/gap/S] **Ranked has no eligibility gate** — original finding at `server/src/match_service.rs:892`. Owner decision2026-11-06: ten completed public matches, including Casual/vs Bots; no mandatory VK. Separate authoritative `completed_public_matches` excludes interruptions, remakes, custom/offline practice and own proved leaves/AFK. Fresh search and locked allocation admission; Home progress; existing seats still resume. — **done in software — ten-public-match/noVK gate passes locked admission and real tenth-completion proofs, including current5aa all7-job/18-stage CI42132894282. Fresh protocol16 native RU852×393 Home0 shows disabled Ranked/progress; Home10 shows enabled Ranked/rating. Initial clipped caption was corrected and both actual pixel captures rechecked. Production rollout remains separate.**
 - [minor/ux/S] **Draft allows two players on one team to lock the same hero class; no per-team uniqueness or 'taken' feedback** — `server/src/prematch.rs:235`. Fix: In `handle_prematch` refuse `Select`/`Lock` whose `hero_class` is already locked by a joined teammate, setting `player.draft.error = Some("draft.error.hero_taken")` resolved client-side to 'Этого героя уже выбрал союзник'; grey the class card in the client draft when a teammate has locked it (draft snapshot already carries teammates' picks). — **done in software — authoritative Select/Lock/async/timeout enforcement, signed ten-human draft-to-play,13 native regressions and full CI are verified. Native f2214c66 RU852×393 now visibly shows Warrior Taken/disabled90×44 and available132×44 lock-in; exact PNG/hash/readback preserved in ../evidence/fair-play-2026-11-06. Class feedback only; roster loading/physical devices and other findings remain separate.**
@@ -176,10 +180,12 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
    liveness and late-completion/canonical-admission checks PASS. This does not
    establish1000-player sustained latency or RU capacity. Preserve authoritative
    recovery records and never treat missing ready rows as standalone admission.
-3. Rehearse current-schema recovery and receipt replay against the exact release
-   binary. C4's older schema10 physical proofs are historical; current target is13. New public replay
-   preserves missing-admission evidence until matching SQL authority is restored;
-   it does not prove a physical/WAL backup, off-host storage or RU recovery.
+3. Prove actual current-worker receipt replay/Resume against a restored schema13
+   database, then independent off-host/RU recovery and production RPO/RTO. Local
+   current13 physical/WAL and restored-grant checks now pass on PG16.15/18.6,
+   including exact ready claims/discipline and named/latest recovery. Older schema10
+   proofs stay historical. Synthetic SQL restoration does not prove worker replay;
+   preserve missing-admission evidence until matching SQL authority is restored.
 4. Finish UI-2 widest-name/UI-3 compatibility current-source captures and C3
    physical keep-awake/haptics. Use the repository UI skill's locked-Mac capture
    workflow and an exact matching native binary; preserve rejected visual evidence.
@@ -2617,3 +2623,32 @@ Fresh full CI, schema13 physical/WAL/off-host/rights/replay, sustained host cade
 and RU/WAN capacity, public trust packaging/provisioning, actual multi-host faults,
 current UI/physical and C2/C4 decisions remain open. Original68 stays62 done,
 5 partial,1 open. No RU migration/settings/credential/grant change or deployment.
+
+
+## 2026-11-07 — current-schema13 physical recovery and restored rights
+
+The unchanged review-only C4 helper executes actual combined encrypted logical
+and physical/WAL backup, named/latest restoration and fault checks against current
+career13/portal11 migrations on both PG16.15 and18.6. All20 checks per version
+PASS. Post-base synthetic SQL transitions preserve exact ready membership/claims,
+consent approval/consumption, queue event/cooldown, full migration histories and
+rating/history at both points. Source/restored game and portal roles execute the
+actual current grants; retention works through its definer function, while direct
+consent/event deletion, portal retention and season closure are refused. The
+verification transaction rolls back. Both own container/network sets are removed.
+[Exact runner, hashes, reports and limitations](../evidence/schema13-recovery-2026-11-07/README.md).
+
+An initial evidence-packaging assumption incorrectly expected portal version8,
+which no migration declares; declaration parsing and exact recovered histories
+were checked, without changing/rerunning any integration assertion. Current
+schema recovery is now evidenced locally, rather than borrowed from schema10.
+These are direct SQL fixtures on one local engine, not played-game, runtime
+authentication, actual worker replay/Resume, independent storage or RU RPO proof.
+C4 stays open and unapplied; existing C2/C4 decisions and approved rollout remain
+required. Full current CI, load/WAN/trust/UI/physical and original68 ledger remain
+unchanged. No RU setting, migration, credentials, grants, alert or deployment.
+
+Parentbc08eb52 CI42339705987 completed all7 jobs successfully. Its521888-byte
+artifact13562612775 matches SHA256/safe ZIP/CRC and all20 public stages, with
+private fixture removed. It is historical startup-health proof; a654 critical
+reply/v2 full CI42343372154 is still running, not yet accepted.

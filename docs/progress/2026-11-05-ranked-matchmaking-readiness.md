@@ -19,8 +19,11 @@ stress preserves all original sequence/generation/results and expired-consent
 admission fences. [Current proof](../evidence/critical-replies-2026-11-07/README.md).
 Health is now paired operational format v2, with critical backlog/known closure
 counts; career13/portal11/game protocol16 are unchanged. Current signed15s through
-ten-human Running/v2 health and SIGTERM durability PASS. Full current CI, schema13
-physical/WAL/off-host/rights recovery, sustained host/backpressure/cadence/load,
+ten-human Running/v2 health and SIGTERM durability PASS. Current13 physical/WAL
+and restored actual runtime grants now pass20 checks each on PG16.15/18.6:
+[isolated recovery proof](../evidence/schema13-recovery-2026-11-07/README.md).
+Actual worker replay/Resume after restoration, independent off-host/RU recovery,
+full current CI and sustained host/backpressure/cadence/load,
 native/physical UI, WAN/multi-host capacity/trust and reviewed RU rollout remain
 open. Older sections preserve dated history.
 
@@ -1628,3 +1631,21 @@ artifact is inspected; current full CI remains required.
 No host-load acceptance, physical/WAL recovery, UI/physical, trust/WAN/multi-host
 or RU rollout gate is waived. Existing C2/C4 decisions and original68 ledger
 unchanged. No live settings, credentials, grants, alerts or deployment changed.
+
+
+## 2026-11-07 — current13 restoration
+
+Current career13/portal11 migrations, ready ownership/discipline and actual
+runtime grants survive encrypted physical/WAL named/latest recovery on PG16.15
+and18.6:20 isolated checks each PASS. Forbidden consent/event deletion, portal
+retention and season closure remain refused; game retention succeeds within a
+rolled-back verification transaction. Missing/corrupt WAL, wrong storage pin,
+outage, retention, logical fallback, escrow and cleanup checks also pass.
+[Runner and exact scope](../evidence/schema13-recovery-2026-11-07/README.md).
+
+C4 helper hashes match the unchanged review-only candidate; no integration or
+RU change is applied. Direct SQL synthetic fixtures do not prove actual worker
+replay/Resume or independent production recovery. Those gates and current full
+CI/load/UI/physical/trust/WAN/C2/C4 decisions remain required. Parentbc08 seven-job
+CI and its20-stage public artifact are now completely green/hash-inspected; this
+is historical source and does not certify a654 critical replies/v2.
