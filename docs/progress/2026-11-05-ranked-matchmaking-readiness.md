@@ -11,10 +11,14 @@ findings). Decision record: ADR-027.
 The authoritative remaining order is now at the top of
 [the full TODO](../plans/TODO-LOBBY-2026-11-05.md). Original68 remains62 done,
 5 partial,1 open; critic/UI/physical and RU gates are additional. Current local
-public-admission verification is559 whole-server/92 real-PG cases, with mandatory
-SQL consent and preserved partial-restore evidence.
-[Exact source/proof](../evidence/public-consent-admission-2026-11-07/README.md).
-Full current CI, health/retention, current-schema physical recovery, native/
+verification is564 whole-server cases (13 real-PG) and108 monitor/host-tool cases,
+with92 prior unchanged-store real-PG cases. Pending-result age survives retries;
+typed penalty delivery is monitored without player identifiers. An explicit
+journal lock guard fixes the deterministic duplicated-descriptor reopen failure.
+[Current health/reopen proof](../evidence/outbox-health-2026-11-07/README.md).
+Mandatory SQL consent and preserved partial-restore evidence remain verified in
+[the admission proof](../evidence/public-consent-admission-2026-11-07/README.md).
+Full current CI, ready/storage health and safe retention, current-schema physical recovery, native/
 physical acceptance, WAN/multi-host capacity/trust and owner-controlled RU rollout
 remain open. Career12/portal11, protocol16; older sections preserve dated history.
 
@@ -1535,3 +1539,20 @@ admission guard is its prerequisite. Real schema12 PITR/receipt-restore operatio
 C2/C4 owner decisions and RU rollout, current full CI, multi-host/WAN/Resume,
 trust provisioning, typed-journal health and physical/UI/capacity gates remain
 open. Original68 remains62 done,5 partial,1 open; no criterion is waived.
+
+
+## 2026-11-07 — receipt age, penalty monitoring and reopen regression
+
+Persisted result retries now preserve exact bytes/age, and the terminal monitor
+uses original result time. Typed queue-dodge journal monitoring validates bounded
+regular files, source observation time, native capacity and corruption without
+player identifiers. A real Rust-to-monitor fixture proves the on-disk contract.
+
+The previous head's core CI failed on Busy when reopening a journal. A deterministic
+descriptor-alias regression fails before the explicit ownership guard and passes
+after it. All564 actual server cases (13 real-PG),34 monitor and74 host-tool cases
+and strict native test/production Clippy PASS. Full current CI remains required.
+Parent6f6a9544's7-job green CI and hashed20-stage public artifact were inspected.
+[Evidence, CI distinction and remaining scope](../evidence/outbox-health-2026-11-07/README.md).
+Safe retention and ready/SQL availability are still open; no original finding or
+physical/infra gate is waived, and no RU rollout is performed.

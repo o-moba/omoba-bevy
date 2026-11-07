@@ -160,9 +160,21 @@ fn private_options() -> OpenOptions {
     options
 }
 
+// Closing just the owner's descriptor need not release flock while a concurrent
+// process spawn still holds an inherited copy. Release ownership explicitly,
+// including when opening/scanning the journal fails after acquiring the lock.
+struct JournalLock(File);
+impl Drop for JournalLock {
+    fn drop(&mut self) {
+        if self.0.unlock().is_err() {
+            eprintln!("Cannot explicitly release queue journal lock; closing descriptor");
+        }
+    }
+}
+
 pub(crate) struct Journal {
     root: PathBuf,
-    _lock: File,
+    _lock: JournalLock,
     pending: BTreeMap<String, Event>,
 }
 impl Journal {
@@ -185,6 +197,7 @@ impl Journal {
             .open(lock_path)
             .map_err(|_| Error::Io)?;
         lock.try_lock().map_err(|_| Error::Busy)?;
+        let lock = JournalLock(lock);
         let mut pending = BTreeMap::new();
         for (count, entry) in fs::read_dir(&root).map_err(|_| Error::Io)?.enumerate() {
             if count > MAX_RECORDS * 2 {

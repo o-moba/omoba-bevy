@@ -1,0 +1,14 @@
+
+running 1 test
+
+thread 'career_backend::queue_dodges::tests::a_duplicate_descriptor_does_not_keep_a_retired_journal_locked' (17714766) panicked at /Users/wotori/git/ekza/_workspace/worktrees/mm-game/server/src/queue_dodge_outbox_tests.rs:15:36:
+called `Result::unwrap()` on an `Err` value: Busy
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test career_backend::queue_dodges::tests::a_duplicate_descriptor_does_not_keep_a_retired_journal_locked ... FAILED
+
+failures:
+
+failures:
+    career_backend::queue_dodges::tests::a_duplicate_descriptor_does_not_keep_a_retired_journal_locked
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 563 filtered out; finished in 0.02s

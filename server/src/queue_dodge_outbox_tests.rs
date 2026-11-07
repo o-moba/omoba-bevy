@@ -81,6 +81,22 @@ fn a_second_live_writer_is_refused_and_a_restart_can_take_the_lock() {
     assert!(Journal::open(f.root()).is_ok());
 }
 #[test]
+fn a_duplicate_descriptor_does_not_keep_a_retired_journal_locked() {
+    let f = Fixture::new();
+    let j = f.journal();
+    // Model the descriptor inherited by a concurrent process spawn before exec.
+    let duplicate = j._lock.0.try_clone().unwrap();
+    assert!(matches!(Journal::open(f.root()), Err(Error::Busy)));
+    drop(j);
+    let reopened = f.journal();
+    assert!(matches!(Journal::open(f.root()), Err(Error::Busy)));
+    drop(duplicate);
+    // Closing an old descriptor must not unlock the new journal's ownership.
+    assert!(matches!(Journal::open(f.root()), Err(Error::Busy)));
+    drop(reopened);
+    assert!(Journal::open(f.root()).is_ok());
+}
+#[test]
 fn corrupt_oversized_and_wrong_format_receipts_fail_closed_without_deletion() {
     for data in [
         b"{broken".to_vec(),

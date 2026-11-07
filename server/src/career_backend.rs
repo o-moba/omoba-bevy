@@ -9,7 +9,7 @@
 //! `MemoryCareer` runs the identical account logic without a database.
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -1767,6 +1767,28 @@ fn write_record(root: &Path, record: &PendingRecord) -> Result<(), String> {
     let temp = path.with_extension("tmp");
     let data =
         serde_json::to_vec(record).map_err(|_| "Cannot encode match receipt.".to_string())?;
+    // Delivery retries must not reset the pending-result alert clock. Bound the
+    // comparison and accept only a regular local file, never a symlink target.
+    if fs::symlink_metadata(&path).is_ok_and(|meta| {
+        meta.is_file() && !meta.file_type().is_symlink() && meta.len() == data.len() as u64
+    }) && let Ok(mut existing) = fs::File::open(&path)
+    {
+        let mut bytes = Vec::with_capacity(data.len());
+        if Read::by_ref(&mut existing)
+            .take(data.len() as u64 + 1)
+            .read_to_end(&mut bytes)
+            .is_ok()
+            && bytes == data
+        {
+            existing
+                .sync_all()
+                .map_err(|_| "Cannot sync career outbox.".to_string())?;
+            fs::File::open(root)
+                .and_then(|file| file.sync_all())
+                .map_err(|_| "Cannot sync career outbox directory.".to_string())?;
+            return Ok(());
+        }
+    }
     let mut file =
         fs::File::create(&temp).map_err(|_| "Cannot write career outbox.".to_string())?;
     file.write_all(&data)
@@ -3282,6 +3304,133 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("omoba-outbox-unit-{}", random_id::<16>()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn identical_outbox_retries_keep_the_original_age_and_exact_durable_bytes() {
+        let dir = outbox_dir();
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result: outbox_result("retry-age", MatchOutcome::Completed),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        write_record(&dir, &record).unwrap();
+        let path = spool_path(&dir, &record.result.result_id).unwrap();
+        let file = fs::File::open(&path).unwrap();
+        file.set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
+        )
+        .unwrap();
+        let before = file.metadata().unwrap().modified().unwrap();
+        let bytes = fs::read(&path).unwrap();
+        for _ in 0..3 {
+            write_record(&dir, &record).unwrap();
+        }
+        assert_eq!(
+            fs::metadata(&path).unwrap().modified().unwrap(),
+            before,
+            "a delivery retry must not reset the pending-result alert clock"
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn changed_checkpoint_still_replaces_the_exact_outbox_record() {
+        let dir = outbox_dir();
+        let mut record = PendingRecord {
+            kind: RecordKind::Checkpoint,
+            result: outbox_result("changed-checkpoint", MatchOutcome::Interrupted),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        write_record(&dir, &record).unwrap();
+        record.result.duration_ms += 1000;
+        write_record(&dir, &record).unwrap();
+        let saved: PendingRecord = serde_json::from_slice(
+            &fs::read(spool_path(&dir, &record.result.result_id).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved.result, record.result);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_symlink_is_not_accepted_as_an_identical_local_receipt() {
+        let dir = outbox_dir();
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result: outbox_result("symlink-retry", MatchOutcome::Completed),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        let bytes = serde_json::to_vec(&record).unwrap();
+        let outside = dir.join("outside.txt");
+        fs::write(&outside, &bytes).unwrap();
+        let path = spool_path(&dir, &record.result.result_id).unwrap();
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        write_record(&dir, &record).unwrap();
+        assert!(
+            !fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&outside).unwrap(), bytes);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_native_receipts_interoperate_with_the_read_only_ru_monitor() {
+        let root = outbox_dir();
+        let outbox = root.join("var/lib/omoba-ru/lobby-outbox");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let observed = now - 600_000;
+        let mut result = outbox_result("native-monitor", MatchOutcome::Completed);
+        result.started_at_ms = observed - 1000;
+        result.ended_at_ms = observed;
+        result.duration_ms = 1000;
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result,
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        write_record(&outbox, &record).unwrap();
+        write_record(&outbox, &record).unwrap();
+        let mut journal = queue_dodges::Journal::open(outbox.join("queue-dodges")).unwrap();
+        journal
+            .record(queue_dodges::Event::new(&"b".repeat(64), observed).unwrap())
+            .unwrap();
+        let helper = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("scripts/check_monitor_fixture.py");
+        let output = std::process::Command::new("python3")
+            .arg(helper)
+            .arg("--root")
+            .arg(&root)
+            .arg("--now-ms")
+            .arg(now.to_string())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "monitor interoperability: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["status"], "PASS");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(&"b".repeat(64)));
+        drop(journal);
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// O29: a missing outbox is empty; a terminal receipt is kept as is; a

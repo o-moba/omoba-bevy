@@ -1,0 +1,21 @@
+F
+======================================================================
+FAIL: test_old_terminal_time_alerts_even_when_retry_just_rewrote_the_file (test_ru_monitor.SettlementTest.test_old_terminal_time_alerts_even_when_retry_just_rewrote_the_file)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_ru_monitor.py", line 346, in test_old_terminal_time_alerts_even_when_retry_just_rewrote_the_file
+    self.assertEqual(report["codes"], ["settlement:outbox"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [] != ['settlement:outbox']
+
+Second list contains 1 additional elements.
+First extra element 0:
+'settlement:outbox'
+
+- []
++ ['settlement:outbox']
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+FAILED (failures=1)

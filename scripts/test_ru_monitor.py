@@ -335,6 +335,25 @@ class SettlementTest(MonitorCase):
         self.assertEqual(report["codes"], ["settlement:outbox"])
         self.assertTrue(report["facts"]["settlements"]["scan_limited"])
 
+    def test_old_terminal_time_alerts_even_when_retry_just_rewrote_the_file(self):
+        path = self.receipt(ru_monitor.LOBBY_OUTBOX, "rewritten", "Settle", 0)
+        path.write_text(json.dumps({"kind": "Settle", "result": {
+            "ended_at_ms": int((self.host.clock - 301) * 1000),
+            "nickname": "never expose this",
+        }}))
+        os.utime(path, (self.host.clock, self.host.clock))
+        report = self.check()
+        self.assertEqual(report["codes"], ["settlement:outbox"])
+        self.assertEqual(report["facts"]["settlements"]["oldest_seconds"], 301)
+        self.assertNotIn("never expose this", str(report))
+
+    def test_terminal_times_reject_malformed_and_future_values(self):
+        for ended in [True, -1, "old", 1.5, 2**64, int((self.host.clock + 30) * 1000)]:
+            path = self.receipt(ru_monitor.LOBBY_OUTBOX, "invalid-time", "Settle", 0)
+            path.write_text(json.dumps({"kind": "Settle", "result": {"ended_at_ms": ended}}))
+            self.assertEqual(self.check()["facts"]["settlements"]["unreadable"], 1, ended)
+            path.unlink()
+
     def test_receipts_symlinked_outside_the_outbox_are_not_read(self):
         path = self.receipt(ru_monitor.LOBBY_OUTBOX, "live", "Start", 900)
         outside = Path(self.root) / "outside.json"
@@ -342,6 +361,127 @@ class SettlementTest(MonitorCase):
         path.symlink_to(outside)
         self.assertTrue(self.check()["ok"])
         self.assertEqual(self.check()["facts"]["settlements"]["scanned"], 0)
+
+
+class QueueDodgeTest(MonitorCase):
+    def event(self, age=0, root=None, event_id="a" * 32):
+        folder = Path(self.p(root or ru_monitor.LOBBY_OUTBOX)) / "queue-dodges"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / (event_id + ".json")
+        event = {"version": 1, "event_id": event_id, "profile_id": "b" * 64,
+                 "observed_at_ms": int((self.host.clock - age) * 1000)}
+        path.write_text(json.dumps(event))
+        os.utime(path, (self.host.clock, self.host.clock))
+        return path, event
+
+    def test_new_journal_events_and_native_lock_temp_files_are_healthy(self):
+        path, _ = self.event(299)
+        (path.parent / ".lock").touch()
+        (path.parent / ".pending.tmp").write_text("incomplete write")
+        report = self.check()
+        self.assertTrue(report["ok"], report["problems"])
+        self.assertEqual(report["facts"]["queue_dodges"]["pending"], 1)
+        self.assertEqual(report["facts"]["queue_dodges"]["stale"], 0)
+        self.assertEqual(report["facts"]["settlements"]["scanned"], 0)
+
+    def test_old_lobby_and_worker_events_alert_without_exposing_identities(self):
+        self.event(301, event_id="1" * 32)
+        self.event(600, root=ru_monitor.MATCH_ROOT + "/" + "c" * 32 + "/outbox", event_id="2" * 32)
+        report = self.check()
+        self.assertEqual(report["codes"], ["queue-dodge:journal"])
+        facts = report["facts"]["queue_dodges"]
+        self.assertEqual((facts["pending"], facts["stale"], facts["oldest_seconds"]), (2, 2, 600))
+        self.assertEqual(report["facts"]["settlements"]["stale"], 0)
+        for identity in ["b" * 64, "1" * 32, "2" * 32]:
+            self.assertNotIn(identity, str(report))
+
+    def test_acknowledged_journal_removal_resolves_the_existing_alert(self):
+        path, _ = self.event(301)
+        self.monitor().alert_check()
+        self.assertEqual(len(self.telegram.sent), 1)
+        self.assertIn("matchmaking penalty delivery needs attention", self.telegram.sent[0])
+        path.unlink()
+        self.host.clock += 16 * 60
+        self.monitor().alert_check()
+        self.assertIn("matchmaking penalty delivery: ok again", self.telegram.sent[-1])
+        self.assertNotIn("b" * 64, " ".join(self.telegram.sent))
+
+    def test_corrupt_future_and_unknown_fields_are_actionable(self):
+        path, valid = self.event()
+        cases = [None, [], {**valid, "version": 2}, {**valid, "version": True},
+                 {**valid, "version": 1.0}, {**valid, "profile_id": "B" * 64},
+                 {**valid, "event_id": "f" * 32}, {**valid, "observed_at_ms": -1},
+                 {**valid, "observed_at_ms": True}, {**valid, "observed_at_ms": 2**63},
+                 {**valid, "observed_at_ms": int((self.host.clock + 30) * 1000)},
+                 {**valid, "private": TOKEN}]
+        for value in cases:
+            path.write_text(json.dumps(value))
+            report = self.check()
+            self.assertEqual(report["codes"], ["queue-dodge:journal"], value)
+            self.assertEqual(report["facts"]["queue_dodges"]["unreadable"], 1, value)
+            self.assertNotIn(TOKEN, str(report))
+        path.write_text("{")
+        self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1)
+        path.write_bytes(b" " * (ru_monitor.MAX_QUEUE_EVENT_BYTES + 1))
+        with mock.patch.object(ru_monitor.json, "loads", side_effect=AssertionError("oversized JSON parsed")):
+            _, facts = self.monitor().queue_dodge_problems()
+        self.assertEqual(facts["unreadable"], 1)
+
+    def test_leaf_and_root_symlinks_are_not_followed(self):
+        path, _ = self.event()
+        outside = Path(self.root) / "outside.json"
+        path.rename(outside)
+        path.symlink_to(outside)
+        with self.assertRaises(OSError):
+            ru_monitor.read_regular_json(path, ru_monitor.MAX_QUEUE_EVENT_BYTES)
+        with mock.patch.object(ru_monitor, "read_regular_json", side_effect=AssertionError("link followed")):
+            self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1)
+        path.unlink()
+        folder = path.parent
+        folder.rmdir()
+        target = Path(self.root) / "outside-journal"
+        target.mkdir()
+        folder.symlink_to(target, target_is_directory=True)
+        self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1)
+
+    def test_ignored_temp_entries_still_count_toward_the_bounded_scan(self):
+        path, _ = self.event()
+        path.unlink()
+        for name in [".one.tmp", ".two.tmp"]:
+            (path.parent / name).write_text("pending")
+        with mock.patch.object(ru_monitor, "MAX_QUEUE_JOURNAL_ENTRIES", 1):
+            report = self.check()
+        self.assertEqual(report["codes"], ["queue-dodge:journal"])
+        self.assertTrue(report["facts"]["queue_dodges"]["scan_limited"])
+        self.assertEqual(report["facts"]["queue_dodges"]["scanned"], 1)
+
+    def test_native_journal_capacity_limits_alert_before_any_event_is_old(self):
+        path, _ = self.event(event_id="1" * 32)
+        other, _ = self.event(event_id="2" * 32)
+        with mock.patch.object(ru_monitor, "MAX_QUEUE_EVENTS_PER_JOURNAL", 1):
+            report = self.check()
+        self.assertEqual(report["codes"], ["queue-dodge:journal"])
+        self.assertTrue(report["facts"]["queue_dodges"]["capacity_exceeded"])
+        path.unlink()
+        other.unlink()
+        for name in [".one.tmp", ".two.tmp"]:
+            (path.parent / name).touch()
+        with mock.patch.object(ru_monitor, "MAX_QUEUE_ENTRIES_PER_JOURNAL", 1):
+            report = self.check()
+        self.assertTrue(report["facts"]["queue_dodges"]["capacity_exceeded"])
+
+    def test_unexpected_entries_and_non_regular_files_block_journal_health(self):
+        path, _ = self.event()
+        path.unlink()
+        for name in [".lock", "note.txt", "d" * 32 + ".json"]:
+            entry = path.parent / name
+            entry.mkdir()
+            self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1, name)
+            entry.rmdir()
+        os.mkfifo(path)
+        with self.assertRaises(ValueError):
+            ru_monitor.read_regular_json(path, ru_monitor.MAX_QUEUE_EVENT_BYTES)
+        self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1)
 
 
 class AlertTest(MonitorCase):

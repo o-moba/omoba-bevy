@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Preserve the age of pending match results across identical durable retries;
+  anchor terminal alerts to their original end time. Monitor typed queue-dodge
+  journals with bounded reads, capacity/corruption checks and anonymous counts.
+  Explicitly release journal ownership despite duplicated/inherited descriptors,
+  fixing the reproduced CI reopen failure. All564 actual server cases (13 real-PG)
+  and108 monitor/host-tool cases PASS; strict native checks PASS. Fresh full CI,
+  safe receipt retention and the remaining RU gates are still required.
+
 - Require committed ready consent on every public new admission, including a
   spool whose SQL allocation is missing. Validate Ranked queue/full roster/current
   eligibility, preserve existing Resume and keep recovered receipt evidence until

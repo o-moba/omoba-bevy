@@ -8,13 +8,18 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 Original68: **62 done,5 partial (#1,#2,#12,#20,#50),1 open (#13)**.
 Critic/physical/UI and deployment requirements remain additional acceptance gates.
-Current local admission proof: **559 actual server cases and92 actual-PG18.6 store
-cases PASS**, plus signed Ranked replacement, Casual handoff and maintenance/
-restart/Resume journeys. Full current CI remains required. Public roles require
+Current local proof: **564 actual server cases (13 real-PG) and108 monitor/host-tool
+cases PASS**; the unchanged store previously passed92 actual-PG18.6 cases. Pending
+result retries preserve their age, terminal alerts use source time, and bounded
+typed queue-journal checks detect stale/corrupt/over-capacity delivery. Journal
+ownership explicitly unlocks when retired, including inherited-descriptor cases.
+[Current health/reopen proof](../evidence/outbox-health-2026-11-07/README.md).
+Signed Ranked replacement, Casual handoff and maintenance/restart/Resume journeys
+are retained. Full current CI remains required. Public roles require
 committed SQL consent on every new admission; old disk receipts cannot invent an
 admission after partial restore. [Exact current scope](../evidence/public-consent-admission-2026-11-07/README.md).
 
-Next: ready/journal health and safe retention; current-schema recovery/replay
+Next: ready/storage availability health and safe retention; current-schema recovery/replay
 rehearsal; UI-2/UI-3 exact current pixels and physical C3; actual multi-host/WAN
 and sustained host capacity/cadence; trust packaging/provisioning; current full CI.
 C2/C4 host-tool proposals still await their existing owner decisions. Original
@@ -152,7 +157,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 - [major/gap/S] **Ranked has no eligibility gate** — original finding at `server/src/match_service.rs:892`. Owner decision2026-11-06: ten completed public matches, including Casual/vs Bots; no mandatory VK. Separate authoritative `completed_public_matches` excludes interruptions, remakes, custom/offline practice and own proved leaves/AFK. Fresh search and locked allocation admission; Home progress; existing seats still resume. — **done in software — ten-public-match/noVK gate passes locked admission and real tenth-completion proofs, including current5aa all7-job/18-stage CI42132894282. Fresh protocol16 native RU852×393 Home0 shows disabled Ranked/progress; Home10 shows enabled Ranked/rating. Initial clipped caption was corrected and both actual pixel captures rechecked. Production rollout remains separate.**
 - [minor/ux/S] **Draft allows two players on one team to lock the same hero class; no per-team uniqueness or 'taken' feedback** — `server/src/prematch.rs:235`. Fix: In `handle_prematch` refuse `Select`/`Lock` whose `hero_class` is already locked by a joined teammate, setting `player.draft.error = Some("draft.error.hero_taken")` resolved client-side to 'Этого героя уже выбрал союзник'; grey the class card in the client draft when a teammate has locked it (draft snapshot already carries teammates' picks). — **done in software — authoritative Select/Lock/async/timeout enforcement, signed ten-human draft-to-play,13 native regressions and full CI are verified. Native f2214c66 RU852×393 now visibly shows Warrior Taken/disabled90×44 and available132×44 lock-in; exact PNG/hash/readback preserved in ../evidence/fair-play-2026-11-06. Class feedback only; roster loading/physical devices and other findings remain separate.**
 - [minor/scale/S] **nftables lobby rule is 400 pkt/s per source IP: ~250 players behind one carrier-grade NAT saturate it and the kernel drops FindMatch/presence for all of them** — `ops/vps/ru/nftables-omoba.conf:56`. Fix: Raise the lobby limit to e.g. 4000/s burst 8000 (it is a flood guard, not a fairness tool) or key the dynamic set by `ip saddr . udp sport` so each NAT'd client gets its own bucket; document the new figure in README 'Admission limits'. — **done — nftables lobby rule 4000/s burst 8000**
-- [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold, corrupt/oversized/limited-scan alerts, no active-checkpoint false positives; 24 monitor tests pass. RU installation remains part of deployment.**
+- [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold anchored to original result time; identical retries preserve file age. Typed queue-dodge journal checks cover stale/corrupt/capacity-limited delivery with no player IDs. All34 monitor cases and actual native receipt interoperability PASS. Ready/SQL availability remains separate; RU installation remains part of deployment.**
 
 ## Next steps, in order
 
@@ -160,7 +165,10 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
    `scripts/postgres_tests.py`, full public journeys and portal checks. The owner
    permits targeted local commits with the full gate in CI while root disk is
    below20GB; a prior head's green job does not certify the current source.
-2. Finish ready/journal health and bounded safe retention. Missing-consent public
+2. Finish ready/storage availability health and bounded safe retention. Persisted
+   result/journal alerting now has actual native/monitor interoperability proof;
+   pre-persistence failures and SQL ready/floor availability remain separate.
+   Missing-consent public
    admission is now closed; retain authoritative recovery records and never turn
    absent/removed ready rows into a standalone bypass.
 3. Rehearse current-schema recovery and receipt replay against the exact release
@@ -2469,3 +2477,33 @@ admission guard is its prerequisite. Real schema12 PITR/receipt-restore operatio
 C2/C4 owner decisions and RU rollout, current full CI, multi-host/WAN/Resume,
 trust provisioning, typed-journal health and physical/UI/capacity gates remain
 open. Original68 remains62 done,5 partial,1 open; no criterion is waived.
+
+
+## 2026-11-07 — receipt health and journal ownership
+
+Repeated identical settlement delivery refreshed mtime, which could indefinitely
+hide an unsaved result from the five-minute monitor. Preserve exact durable bytes
+and mtime on retry; terminal alerts also use original ended_at_ms. Typed queue
+journals use observation-anchored ages, bounded regular-file reads, exact native
+record validation, corruption/capacity/incomplete-scan alerts and anonymous counts.
+The real Rust producer and read-only Python monitor pass an interoperability case;
+no external alert is sent by tests.
+
+CI42330926635 at031833d7 exposed Busy while reopening a retired queue journal.
+A deterministic duplicated-descriptor case reproduces the original failure. An
+explicit lock guard releases ownership on retirement and failed open/scan, while
+a second active writer still fails; closing an old duplicate cannot release its
+replacement's lock. All564 actual whole-server tests (13 actual-PG cases),108
+monitor/host-tool tests and strict native test/production Clippy PASS.
+[Exact proof and limitations](../evidence/outbox-health-2026-11-07/README.md).
+
+Parent6f6a9544 CI42327346048 is fully green in7 jobs; its downloaded PostgreSQL
+artifact passes SHA256/ZIP/CRC checks and all20 stages, including actual cross-lobby
+ready discipline, legacy import and full Ranked victory. This is historical parent
+evidence, not certification of the new source. The current full CI must pass.
+
+This closes the persisted-receipt monitoring defects, not ready/floor availability
+health, safe retention, pre-persistence failures or sustained heartbeat/capacity
+acceptance. Career12/portal11/protocol16 are unchanged. Current-schema PITR,
+UI/physical, trust/WAN/multi-host/RU gates and existing C2/C4 decisions remain open.
+Original68 stays62 done,5 partial,1 open. No RU changes or deployment.
