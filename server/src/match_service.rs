@@ -142,6 +142,9 @@ impl Waiting {
     }
 }
 struct ReadyRoster {
+    consent: Option<crate::career_backend::consent::Consent>,
+    left: HashSet<String>,
+    close_code: Option<String>,
     entries: Vec<Waiting>,
     queue: MatchPreference,
     cohort: Option<CohortAllowance>,
@@ -156,6 +159,9 @@ pub(crate) struct Lobby {
     waiting: Vec<Waiting>,
     ready: HashMap<String, ReadyRoster>,
     ready_profiles: HashMap<String, String>,
+    shared_ready: bool,
+    handoff_consent: HashMap<String, (crate::career_backend::consent::Consent, Vec<String>)>,
+    ready_retry_at: Option<Instant>,
     penalties: HashMap<String, DodgePenalty>,
     penalty_store_failed: bool,
     assignments: HashMap<String, String>,
@@ -237,6 +243,9 @@ impl Lobby {
             pool,
             ready: HashMap::new(),
             ready_profiles: HashMap::new(),
+            shared_ready: false,
+            handoff_consent: HashMap::new(),
+            ready_retry_at: None,
             penalties,
             penalty_store_failed,
             waiting: Vec::new(),
@@ -429,6 +438,13 @@ impl Lobby {
             .map(|(id, _)| id.clone())
             .collect();
         for id in checks {
+            if let Some(check) = self.ready.get_mut(&id)
+                && let Some(consent) = &mut check.consent
+            {
+                consent.cancel();
+                check.close_code = Some(shared::career::error_code::RANKED_SEASON_ENDED.into());
+                continue;
+            }
             if let Some(check) = self.ready.remove(&id) {
                 for entry in check.entries {
                     self.ready_profiles.remove(&entry.profile.profile_id);
@@ -483,6 +499,19 @@ impl Lobby {
                     .insert(entry.profile.profile_id.clone(), code.into());
             }
         }
+        self.return_ready(check, &excluded, now);
+    }
+    fn return_ready(&mut self, check: ReadyRoster, excluded: &HashSet<String>, now: Instant) {
+        for entry in &check.entries {
+            if excluded.contains(&entry.profile.profile_id)
+                && let Some((party, _)) = entry.party
+            {
+                self.party_opt_outs
+                    .entry(party)
+                    .or_default()
+                    .insert(entry.profile.profile_id.clone(), now);
+            }
+        }
         let mut removed_by_party: HashMap<u64, usize> = HashMap::new();
         for entry in &check.entries {
             if excluded.contains(&entry.profile.profile_id)
@@ -505,6 +534,74 @@ impl Lobby {
         }
         self.waiting.sort_by_key(|w| w.order);
     }
+    fn finish_shared_ready(&mut self, id: &str, now: Instant) {
+        let Some(check) = self.ready.remove(id) else {
+            return;
+        };
+        let mut excluded = check.left.clone();
+        let mut changed = false;
+        if let Some(consent) = &check.consent {
+            if consent.failure.is_some() {
+                self.ready_retry_at = Some(now + Duration::from_secs(1));
+            }
+            if let Some(snapshot) = &consent.snapshot {
+                for member in &snapshot.members {
+                    if !member.dodged {
+                        continue;
+                    }
+                    excluded.insert(member.seat.profile_id.clone());
+                    self.errors
+                        .insert(member.seat.profile_id.clone(), DODGE_COOLDOWN_CODE.into());
+                    if let Some(cooldown) = member.cooldown {
+                        let old = self.penalties.get(&member.seat.profile_id);
+                        let recent =
+                            old.filter(|p| unix_ms().saturating_sub(p.last_ms) < 86_400_000);
+                        let penalty = DodgePenalty {
+                            strikes: recent
+                                .map_or(cooldown.strikes, |p| p.strikes.max(cooldown.strikes)),
+                            until_ms: old
+                                .map_or(0, |p| p.until_ms)
+                                .max((cooldown.until.max(0) as u64).saturating_mul(1000)),
+                            last_ms: recent
+                                .map_or(0, |p| p.last_ms)
+                                .max(member.observed_at_ms.unwrap_or(0).max(0) as u64),
+                            pending_events: old.map_or_else(Vec::new, |p| p.pending_events.clone()),
+                        };
+                        let remaining = penalty.until_ms.saturating_sub(unix_ms());
+                        if remaining > 0 {
+                            self.refusals.insert(
+                                member.seat.profile_id.clone(),
+                                (DODGE_COOLDOWN_CODE, now + Duration::from_millis(remaining)),
+                            );
+                        }
+                        self.penalties
+                            .insert(member.seat.profile_id.clone(), penalty);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed
+            && !self.penalty_store_failed
+            && crate::match_allocation::atomic_json(
+                &self.pool.root().join("dodge-penalties.json"),
+                &self.penalties,
+            )
+            .is_err()
+        {
+            self.penalty_store_failed = true;
+        }
+        if let Some(code) = check.close_code.as_ref() {
+            for entry in &check.entries {
+                self.ready_profiles.remove(&entry.profile.profile_id);
+                self.errors
+                    .insert(entry.profile.profile_id.clone(), code.clone());
+            }
+        } else {
+            self.return_ready(check, &excluded, now);
+        }
+    }
+
     fn pause_ready_for_failed_storage(&mut self, now: Instant) {
         self.pause_ready_for_drain(now);
         for entry in &self.waiting {
@@ -516,7 +613,9 @@ impl Lobby {
         let expired: Vec<_> = self
             .ready
             .iter()
-            .filter(|(_, r)| now >= r.deadline && r.accepted.len() != r.entries.len())
+            .filter(|(_, r)| {
+                r.consent.is_none() && now >= r.deadline && r.accepted.len() != r.entries.len()
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in expired {
@@ -529,7 +628,10 @@ impl Lobby {
         let mut approved: Vec<_> = self
             .ready
             .iter()
-            .filter(|(_, r)| r.accepted.len() == r.entries.len())
+            .filter(|(_, r)| {
+                r.accepted.len() == r.entries.len()
+                    && r.consent.as_ref().is_none_or(|c| c.approved())
+            })
             .map(|(id, r)| {
                 (
                     r.entries.iter().map(|w| w.order).min().unwrap_or(0),
@@ -542,11 +644,46 @@ impl Lobby {
             if self.pool.full() {
                 break;
             }
-            let check = self.ready.remove(&id).unwrap();
-            for entry in &check.entries {
-                self.ready_profiles.remove(&entry.profile.profile_id);
+            let mut check = self.ready.remove(&id).unwrap();
+            self.allocate_ready(
+                id.clone(),
+                check.entries.clone(),
+                check.queue,
+                check.cohort,
+                now,
+            );
+            if self.parked.contains_key(&id) {
+                if let Some(consent) = check.consent.take() {
+                    self.handoff_consent.insert(
+                        id.clone(),
+                        (
+                            consent,
+                            check
+                                .entries
+                                .iter()
+                                .map(|e| e.profile.profile_id.clone())
+                                .collect(),
+                        ),
+                    );
+                }
+                for entry in &check.entries {
+                    self.ready_profiles.remove(&entry.profile.profile_id);
+                }
+            } else if let Some(consent) = &mut check.consent {
+                consent.cancel();
+                check.close_code = Some(
+                    check
+                        .entries
+                        .iter()
+                        .find_map(|e| self.errors.get(&e.profile.profile_id).cloned())
+                        .unwrap_or_else(|| WORKER_SPAWN_FAILED.into()),
+                );
+                self.ready.insert(id, check);
+            } else {
+                for entry in &check.entries {
+                    self.ready_profiles.remove(&entry.profile.profile_id);
+                }
             }
-            self.allocate_ready(id, check.entries, check.queue, check.cohort, now);
         }
     }
 
@@ -556,13 +693,18 @@ impl Lobby {
         if self.ready.is_empty() {
             return;
         }
-        for check in std::mem::take(&mut self.ready).into_values() {
-            for mut entry in check.entries {
-                entry.touched = now + REQUEUE_GRACE;
-                self.waiting.push(entry);
+        for (id, mut check) in std::mem::take(&mut self.ready) {
+            if let Some(consent) = &mut check.consent {
+                consent.cancel();
+                self.ready.insert(id, check);
+            } else {
+                for mut entry in check.entries {
+                    self.ready_profiles.remove(&entry.profile.profile_id);
+                    entry.touched = now + REQUEUE_GRACE;
+                    self.waiting.push(entry);
+                }
             }
         }
-        self.ready_profiles.clear();
         self.waiting.sort_by_key(|entry| entry.order);
     }
 
@@ -576,6 +718,10 @@ impl Lobby {
         let Some(entries) = self.parked.remove(id) else {
             return false;
         };
+        if let Some((consent, _)) = self.handoff_consent.get_mut(id) {
+            consent.cancel();
+        }
+
         for mut entry in entries {
             // Those who left keep the dead assignment: the normal path tells
             // them it was cancelled; the others are back in the queue.
@@ -1071,12 +1217,97 @@ impl MatchService {
             .requests
             .insert(profile.to_owned(), (session, request_id, now));
         lobby.waiting.retain(|w| w.profile.profile_id != profile);
+        if let Some(id) = lobby.ready_profiles.get(profile)
+            && let Some(check) = lobby.ready.get_mut(id)
+            && let Some(consent) = &mut check.consent
+        {
+            check.left.insert(profile.into());
+            consent.cancel();
+        }
         lobby.errors.insert(profile.to_owned(), code.to_owned());
     }
     /// A signed `CancelQueue`: leaves the queue, and a found match that has not
     /// started. The other humans of that match go back to the queue with their
     /// place (LR-32); cancelling a found Ranked match costs a short cooldown. A
     /// party member's cancel leaves the party searching without them.
+    pub(crate) fn enable_shared_ready(&mut self, enabled: bool) {
+        if let Self::Lobby(lobby) = self {
+            lobby.shared_ready |= enabled;
+        }
+    }
+    pub(crate) fn poll_shared_ready(
+        &mut self,
+        backend: &mut dyn crate::career_port::CareerPort,
+        now: Instant,
+    ) {
+        let Self::Lobby(lobby) = self else {
+            return;
+        };
+        lobby.shared_ready |= backend.shared_ready_enabled();
+        for completion in backend.take_ready_completions() {
+            if let Some((consent, _)) = lobby.handoff_consent.get_mut(&completion.work.check_id) {
+                consent.complete(completion, now);
+                continue;
+            }
+            let Some(check) = lobby.ready.get_mut(&completion.work.check_id) else {
+                continue;
+            };
+            let Some(consent) = &mut check.consent else {
+                continue;
+            };
+            consent.complete(completion, now);
+            if let Some(snapshot) = &consent.snapshot {
+                check.accepted = snapshot
+                    .members
+                    .iter()
+                    .filter(|m| m.accepted)
+                    .map(|m| m.seat.profile_id.clone())
+                    .collect();
+            }
+            if let Some(deadline) = consent.deadline_ms() {
+                check.deadline = now
+                    + Duration::from_millis(
+                        (deadline.max(0) as u64)
+                            .saturating_sub(unix_ms())
+                            .min(15_000),
+                    );
+            }
+        }
+        let terminal: Vec<_> = lobby
+            .ready
+            .iter()
+            .filter(|(_, c)| c.consent.as_ref().is_some_and(|c| c.terminal()))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in terminal {
+            lobby.finish_shared_ready(&id, now);
+        }
+        lobby
+            .handoff_consent
+            .retain(|_, (consent, _)| !consent.terminal());
+        for (consent, profiles) in lobby.handoff_consent.values_mut() {
+            // A draft dodge still uses the durable legacy producer/outbox.
+            // Its exact SQL ACK must precede releasing shared consent claims.
+            // Otherwise another lobby could enter between release and penalty.
+            let pending = profiles.iter().any(|id| {
+                lobby
+                    .penalties
+                    .get(id)
+                    .is_some_and(|p| !p.pending_events.is_empty())
+            });
+            if !pending && let Some(work) = consent.next(now) {
+                backend.submit_ready(work);
+            }
+        }
+        for check in lobby.ready.values_mut() {
+            if let Some(consent) = &mut check.consent
+                && let Some(work) = consent.next(now)
+            {
+                backend.submit_ready(work);
+            }
+        }
+    }
+
     pub fn respond_ready(
         &mut self,
         profile: &str,
@@ -1100,6 +1331,13 @@ impl MatchService {
             lobby.pause_ready_for_failed_storage(now);
             return;
         }
+        if lobby.shared_ready {
+            lobby.drain.poll(lobby.pool.root());
+            if lobby.drain.active() {
+                lobby.pause_ready_for_drain(now);
+                return;
+            }
+        }
         let Some(check) = lobby.ready.get_mut(check_id) else {
             return;
         };
@@ -1109,6 +1347,10 @@ impl MatchService {
                 .iter()
                 .any(|w| w.profile.profile_id == profile && w.session == session)
         {
+            return;
+        }
+        if let Some(consent) = &mut check.consent {
+            consent.answer(profile, session, accepted);
             return;
         }
         if accepted {
@@ -1122,6 +1364,23 @@ impl MatchService {
             return;
         };
         if let Some(id) = lobby.ready_profiles.get(profile).cloned() {
+            if let Some(check) = lobby.ready.get_mut(&id)
+                && let Some(consent) = &mut check.consent
+            {
+                if consent.published() {
+                    if let Some(entry) = check
+                        .entries
+                        .iter()
+                        .find(|e| e.profile.profile_id == profile)
+                    {
+                        consent.answer(profile, &entry.session, false);
+                    }
+                } else {
+                    check.left.insert(profile.into());
+                    consent.cancel();
+                }
+                return;
+            }
             let expired = lobby.ready.get(&id).is_some_and(|r| now >= r.deadline);
             lobby.cancel_ready(&id, if expired { None } else { Some(profile) }, now);
             return;
@@ -1262,6 +1521,26 @@ impl MatchService {
                 .iter()
                 .any(|w| w.profile.profile_id == profile && w.session == session)
             {
+                if check.consent.as_ref().is_some_and(|c| !c.published()) {
+                    let entry = check
+                        .entries
+                        .iter()
+                        .find(|e| e.profile.profile_id == profile)
+                        .unwrap();
+                    return Some(MatchServiceView::Waiting {
+                        preference: entry.preference,
+                        humans: check.entries.len() as u32,
+                        needed: 10,
+                        elapsed_secs: now.saturating_duration_since(entry.queued).as_secs(),
+                        bot_fill_after_secs: None,
+                        capacity_wait: false,
+                        searching: None,
+                        casual_offer_after_secs: None,
+                        also_casual: entry.casual_since.is_some(),
+                        capacity_line: None,
+                        party_gathering: None,
+                    });
+                }
                 return Some(MatchServiceView::ReadyCheck {
                     check_id: id.clone(),
                     preference: check.queue,
@@ -1538,6 +1817,9 @@ impl MatchService {
             .retain(|id, _| queued_parties.contains(id));
         // At most four OS process launches per scheduling pass.
         for _ in 0..4 {
+            if lobby.ready_retry_at.is_some_and(|at| now < at) {
+                break;
+            }
             if lobby.penalty_store_failed || lobby.drain.active() {
                 break;
             }
@@ -1565,6 +1847,14 @@ impl MatchService {
                     .retain(|w| !refused.contains(&w.profile.profile_id));
                 continue;
             }
+            if indices.iter().any(|&i| {
+                lobby
+                    .handoff_consent
+                    .values()
+                    .any(|(_, profiles)| profiles.contains(&lobby.waiting[i].profile.profile_id))
+            }) {
+                break;
+            }
             let selected: Vec<_> = indices.iter().map(|&i| lobby.waiting[i].clone()).collect();
             let mut bytes = [0_u8; 16];
             if getrandom::fill(&mut bytes).is_err() {
@@ -1582,8 +1872,24 @@ impl MatchService {
                 lobby.ready_profiles.insert(profile, id.clone());
             }
             lobby.ready.insert(
-                id,
+                id.clone(),
                 ReadyRoster {
+                    consent: lobby.shared_ready.then(|| {
+                        crate::career_backend::consent::Consent::new(
+                            id.clone(),
+                            queue,
+                            selected
+                                .iter()
+                                .map(|w| omoba_career_store::career_store::ready::Seat {
+                                    profile_id: w.profile.profile_id.clone(),
+                                    session_id: w.session.clone(),
+                                })
+                                .collect(),
+                            now,
+                        )
+                    }),
+                    left: HashSet::new(),
+                    close_code: None,
                     entries: selected,
                     queue,
                     cohort,
@@ -2048,6 +2354,8 @@ impl ServerRuntime {
     }
     pub(crate) fn tick_match_service(&mut self, now: Instant) {
         self.apply_allocated_releases(now, false);
+        self.match_service
+            .poll_shared_ready(self.career.backend.as_mut(), now);
         // Only explicit FindMatch retries renew queue intent. An authenticated
         // Home heartbeat must not keep an abandoned queue alive after packet loss.
         self.match_service.tick(now);
@@ -2262,7 +2570,7 @@ mod tests {
     fn home() -> SourceIp {
         SourceIp::of(std::net::SocketAddr::from(([203, 0, 113, 1], 40000)))
     }
-    fn w(id: u64, p: MatchPreference, now: Instant) -> Waiting {
+    pub(super) fn w(id: u64, p: MatchPreference, now: Instant) -> Waiting {
         Waiting {
             profile: ProfileSummary {
                 ranked: None,
@@ -3089,7 +3397,10 @@ mod tests {
         lobby.tick_ready(now);
     }
 
-    fn lobby_with(pool: crate::match_pool::Pool, assignments: &[(&Waiting, &str)]) -> MatchService {
+    pub(super) fn lobby_with(
+        pool: crate::match_pool::Pool,
+        assignments: &[(&Waiting, &str)],
+    ) -> MatchService {
         MatchService::Lobby(Lobby {
             assignments: assignments
                 .iter()
@@ -3624,7 +3935,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
     }
 
-    fn enqueue_all(service: &mut MatchService, entries: &[Waiting], request_id: u64, at: Instant) {
+    pub(super) fn enqueue_all(
+        service: &mut MatchService,
+        entries: &[Waiting],
+        request_id: u64,
+        at: Instant,
+    ) {
         for entry in entries {
             service.enqueue(
                 entry.profile.clone(),
@@ -4788,3 +5104,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(directory);
     }
 }
+
+#[cfg(test)]
+#[path = "shared_ready_lobby_tests.rs"]
+mod shared_ready_tests;

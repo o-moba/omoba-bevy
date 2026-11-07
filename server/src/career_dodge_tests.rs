@@ -149,3 +149,72 @@ fn a_fresh_shared_dodge_refusal_never_dispatches_a_queue_request() {
     assert!(backend.view(addr).match_service_request_id.is_none());
     assert_eq!(backend.take_match_requests()[0].request_id, 8);
 }
+
+fn ready_work(n: u64) -> consent::Work {
+    consent::Work {
+        check_id: format!("{n:032x}"),
+        sequence: 1,
+        operation: consent::Operation::Reserve {
+            preference: shared::match_service::MatchPreference::Casual,
+            seats: vec![omoba_career_store::career_store::ready::Seat {
+                profile_id: "a".repeat(64),
+                session_id: "session".into(),
+            }],
+        },
+    }
+}
+#[test]
+fn consent_channel_acceptance_is_bounded_and_an_ack_requires_the_full_original_command() {
+    let mut backend = MemoryCareer::test_backend(9);
+    let work = ready_work(1);
+    assert!(backend.submit_ready(work.clone()));
+    let generation = backend.record_generation;
+    assert!(backend.submit_ready(work.clone()));
+    assert_eq!(backend.record_generation, generation);
+    assert_eq!(backend.link.jobs.len(), 1);
+    let mut wrong = work.clone();
+    wrong.operation =
+        consent::Operation::Update(omoba_career_store::career_store::ready::Action::Cancel);
+    backend
+        .link
+        .replies
+        .push_back(Reply::Ready(consent::Completion {
+            work: wrong,
+            result: Err("unknown".into()),
+        }));
+    backend.poll();
+    assert!(backend.take_ready_completions().is_empty());
+    assert_eq!(backend.ready_jobs.len(), 1);
+    backend
+        .link
+        .replies
+        .push_back(Reply::Ready(consent::Completion {
+            work: work.clone(),
+            result: Err(STORE_UNAVAILABLE.into()),
+        }));
+    backend.poll();
+    assert_eq!(backend.take_ready_completions().len(), 1);
+    assert!(backend.submit_ready(work));
+}
+#[test]
+fn undrained_consent_completions_apply_backpressure_instead_of_losing_an_ack() {
+    let mut backend = MemoryCareer::test_backend(9);
+    for n in 0..MAX_JOBS {
+        let work = ready_work(n as u64);
+        assert!(backend.submit_ready(work.clone()));
+        backend
+            .link
+            .replies
+            .push_back(Reply::Ready(consent::Completion {
+                work,
+                result: Err(STORE_UNAVAILABLE.into()),
+            }));
+    }
+    backend.poll();
+    assert!(!backend.submit_ready(ready_work(999)));
+    assert_eq!(backend.take_ready_completions().len(), MAX_JOBS);
+    // The test link still holds captured commands; draining those, as the
+    // real worker does, makes room without inventing a completed transaction.
+    backend.link.jobs.clear();
+    assert!(backend.submit_ready(ready_work(999)));
+}

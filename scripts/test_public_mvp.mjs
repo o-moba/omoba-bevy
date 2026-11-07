@@ -131,7 +131,7 @@ const scenario = opts.scenario || 'load';
 const draftExit=opts['draft-exit']||'leave';
 const exerciseStaleHandoff='exercise-stale-handoff' in opts;
 assert(['leave','disconnect'].includes(draftExit)&&(!opts['draft-exit']||scenario==='party-draft'), '--draft-exit=leave|disconnect is a party-draft option');
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','termination','early-recovery','party-draft','unique-draft','handoff-release','remake','surrender','drain'].includes(scenario), 'unknown scenario');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','cross-lobby-ready','termination','early-recovery','party-draft','unique-draft','handoff-release','remake','surrender','drain'].includes(scenario), 'unknown scenario');
 if(['remake','surrender','unique-draft'].includes(scenario)) assert(!mix&&preference==='humans_only'&&clientsCount===10, `${scenario} uses --clients=10 --preference=humans_only`);
 else if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
 else if(scenario==='handoff-release') assert(!mix&&preference==='quick'&&clientsCount===10&&isolatedQueueDatabase(process.env.OMOBA_TEST_DATABASE_URL), 'handoff-release requires10 Casual humans and the isolated loopback omoba_test database');
@@ -233,9 +233,9 @@ const queued=c=>Boolean(c.auth&&QUEUED_STATES.includes(c.career?.match_service?.
 const percentile=(sorted,q)=>sorted[Math.min(sorted.length-1,Math.floor(sorted.length*q))];
 // With limits, `systemd-run --scope` execs the server in a transient scope (same PID), so the
 // lobby and the workers it spawns share them like the lobby unit's cgroup.
-function launchLobby(){
+function launchLobby(overrides={}){
  const scope=Object.keys(limits).length?['systemd-run','--scope','--quiet','--collect',...Object.entries(limits).map(([k,v])=>`--property=${k}=${v}`),process.env.HARNESS_SERVER_BIN]:[process.env.HARNESS_SERVER_BIN];
- const child=spawn(scope[0], scope.slice(1), {env, detached:true, stdio:['ignore',logfile,logfile]});if(child.pid)ownedGroups.add(child.pid);return child;
+ const child=spawn(scope[0], scope.slice(1), {env:{...env,...overrides}, detached:true, stdio:['ignore',logfile,logfile]});if(child.pid)ownedGroups.add(child.pid);return child;
 }
 let lobby=launchLobby();
 const all=[]; const support=[]; const report={scenario,queue_only:queueOnly||undefined,clients:clientsCount,preference,mix:mix?Object.fromEntries(mix):undefined,capacity,limits,max_wait_secs:maxWaitSecs,protocol:protocolVersion,host:{platform:process.platform,cpus:os.cpus().length,cpu_model:os.cpus()[0]?.model,memory_gib:Math.round(os.totalmem()/2**30*10)/10},input_hz_requested:inputHz,input_model:['remake','surrender'].includes(scenario)?'signed_bounded_movement_intent':'signed_current_pose_transform',soak_seconds:soakSecs,started_at:new Date().toISOString(),scenarios:[],status:'RUNNING'};
@@ -263,6 +263,9 @@ function resourceSample(){
 function cleanup() {if(stopping)return;stopping=true;for(const child of qualificationChildren)child.kill('SIGTERM');for(const c of [...all,...support])c.close();for(const group of ownedGroups){try{process.kill(-group,'SIGTERM')}catch{}}fs.closeSync(logfile);}
 process.on('SIGINT',()=>{cleanup();process.exit(130)});
 process.on('SIGTERM',()=>{cleanup();process.exit(143)});
+function isLobbyPort(port) {
+ return port===lobbyPort || (scenario==='cross-lobby-ready' && port===lobbyPort+1);
+}
 class Client {
  constructor(index, target=lobbyPort, identity=null, mode={}) {
   this.keepActive=mode.keepActive===true;this.index=index;this.port=target;this.autoHandoff=mode.autoHandoff!==false;this.autoQueue=mode.autoQueue!==false;this.autoJoin=mode.autoJoin!==false;this.autoReady=mode.autoReady!==false;this.autoLock=mode.autoLock!==false;this.partyPresence=mode.partyPresence===true;this.preference=mode.preference || preferences[index] || preferences[0];this.active=true;this.createdAt=performance.now();this.runningBytes=0;this.worldSnapshots=0;this.bootstrapSnapshots=0;this.joinAttempts=0;this.allocationsSeen=[];this.profileResponses=new Map();this.careerGaps=[];this.lastCareer=0;this.key=identity?.key || crypto.generateKeyPairSync('ed25519').privateKey;
@@ -275,7 +278,7 @@ class Client {
   this.socketReady=false;this.bindError=null;
   this.nonce=crypto.randomBytes(16).toString('hex');this.epoch=0n;this.match=0;this.path=null;this.auth=null;this.authChallenge=null;this.lastProbe=0;this.accountSequence=0;this.sequence=0;this.prematchSequence=0;this.lastSend=0;this.lastQueue=0;this.next=0;
   bindLoopbackPeer({
-   isReserved:port=>port===lobbyPort||(port>=workerPort&&port<workerPort+capacity),
+   isReserved:port=>port===lobbyPort||(port>=workerPort&&port<workerPort+capacity)||(scenario==='cross-lobby-ready'&&(port===lobbyPort+1||(port>=workerPort+100&&port<workerPort+100+capacity))),
    active:()=>this.active&&!stopping,
    onSocket:socket=>{this.socket=socket;
     listenForLoopbackPeer(socket,()=>this.port,b=>{if(this.active&&this.socket===socket)this.receive(b);},()=>{this.foreignDatagrams=(this.foreignDatagrams||0)+1;});
@@ -294,7 +297,7 @@ class Client {
  receive(bytes) {
   this.packets++;this.bytes+=bytes.length;
   // Snapshot bytes per second per player (LR-28 input): what the worker sends while playing.
-  if(this.stage==='running'&&this.port!==lobbyPort)this.runningBytes+=bytes.length;
+  if(this.stage==='running'&&!isLobbyPort(this.port))this.runningBytes+=bytes.length;
   if(bytes.subarray(0,4).toString()==='OMB1') {
    const id=`${bytes.readBigUInt64LE(6)}:${bytes.readBigUInt64LE(14)}`;const index=bytes.readUInt16LE(22),count=bytes.readUInt16LE(24);
    if(!this.frames.has(id))this.frames.set(id,{parts:new Array(count),received:0});
@@ -310,10 +313,10 @@ class Client {
    const careerAt=performance.now();if(this.lastCareer)this.careerGaps.push(careerAt-this.lastCareer);this.lastCareer=careerAt;
    this.epoch=packet.server_epoch;const v=packet.career;this.career=v;if(v.response_id!=null&&v.profile){this.profileResponses.set(String(v.response_id),v.profile);if(this.profileResponses.size>16)this.profileResponses.delete(this.profileResponses.keys().next().value);}if(v.history_loaded)this.lastHistory=v.history;if(v.detail)this.lastDetail=v.detail;if(v.visited_profile)this.lastVisited=v.visited_profile;
    if(v.challenge && !v.auth_nonce && !this.auth && this.authChallenge?.nonce!==v.challenge.nonce) {this.authChallenge=v.challenge;this.next=0;}
-   if(v.auth_nonce && v.profile){this.auth=v.auth_nonce;this.profile=v.profile;if(this.stage==='authenticating')this.stage=this.port===lobbyPort?(this.autoQueue?'queued':'authenticated'):(this.autoJoin?'joining':'authenticated');}
-   if(this.port===lobbyPort&&v.match_service?.state==='waiting')this.maxQueueElapsed=Math.max(this.maxQueueElapsed||0,v.match_service.elapsed_secs);
-   if(this.port===lobbyPort&&!this.queuedAt&&QUEUED_STATES.includes(v.match_service?.state))this.queuedAt=performance.now();
-   if(this.port===lobbyPort && v.match_service?.state==='assigned' && v.match_service_request_id===this.queueId) {
+   if(v.auth_nonce && v.profile){this.auth=v.auth_nonce;this.profile=v.profile;if(this.stage==='authenticating')this.stage=isLobbyPort(this.port)?(this.autoQueue?'queued':'authenticated'):(this.autoJoin?'joining':'authenticated');}
+   if(isLobbyPort(this.port)&&v.match_service?.state==='waiting')this.maxQueueElapsed=Math.max(this.maxQueueElapsed||0,v.match_service.elapsed_secs);
+   if(isLobbyPort(this.port)&&!this.queuedAt&&QUEUED_STATES.includes(v.match_service?.state))this.queuedAt=performance.now();
+   if(isLobbyPort(this.port) && v.match_service?.state==='assigned' && v.match_service_request_id===this.queueId) {
     this.allocation=v.match_service.allocation;this.inMatch=v.match_service.in_match??null;this.allocationsSeen.push(this.allocation);if(!this.autoHandoff)return;
     const oldSocket=this.socket;this.snapshot=null;oldSocket.close();this.port=Number(this.allocation.endpoint.split(':').at(-1));this.stage='probing';this.bind();
     if(exerciseStaleHandoff){
@@ -355,7 +358,7 @@ class Client {
   // Representative signed movement-command verification/dispatch load. Current
   // authoritative pose avoids inventing movement or bypassing collision rules.
   const intentional=this.keepActive||['remake','surrender'].includes(scenario), hz=intentional?Math.max(1,inputHz):inputHz;
-  if(hz>0&&this.stage==='running'&&this.port!==lobbyPort&&now-this.lastInput>=1000/hz){
+  if(hz>0&&this.stage==='running'&&!isLobbyPort(this.port)&&now-this.lastInput>=1000/hz){
    const me=this.snapshot?.players?.find(p=>p.id===this.snapshot.your_id&&!p.is_bot);
    if(me){
     this.lastInput=this.lastInput?this.lastInput+1000/hz:now;
@@ -366,8 +369,8 @@ class Client {
    }
   }
   if(now-this.lastSend<300)return;this.lastSend=now;this.gameplay({type:'ping'});
-  if(this.port===lobbyPort&&this.partyPresence&&now-(this.lastPresence||0)>2000){this.lastPresence=now;this.gameplay({type:'party',command:{command:'presence',nickname:this.nickname,avatar:null}});}
-  if(this.port===lobbyPort){
+  if(isLobbyPort(this.port)&&this.partyPresence&&now-(this.lastPresence||0)>2000){this.lastPresence=now;this.gameplay({type:'party',command:{command:'presence',nickname:this.nickname,avatar:null}});}
+  if(isLobbyPort(this.port)){
    if(this.preference==='humans_only' && (this.profile?.completed_public_matches??0)<10 && process.env.HARNESS_RANKED_FIXTURE_BIN) {
     if(!this.qualificationRequested && this.profile) {
      this.qualificationRequested=true;
@@ -663,6 +666,45 @@ async function gracefulTermination(original) {
  report.termination={status:'PASS',signal:'SIGTERM',worker_pid:worker,terminal_result:saved.result_id,outcome:saved.outcome,outbox_durable:true,elapsed_seconds:(performance.now()-started)/1000};
  report.scenarios.push('sigterm_interrupts_and_fsyncs_terminal_result');
 }
+// Two real lobby processes with independent outboxes/match roots and the
+// same disposable PostgreSQL. No directory/signing-key provisioning is implied.
+async function crossLobbyReadyLifecycle() {
+ const secondPort=lobbyPort+1,secondRoot=path.join(root,'matches-b');
+ launchLobby({SERVER_ADDR:`127.0.0.1:${secondPort}`,OMOBA_MATCH_ROOT:secondRoot,
+  OMOBA_CAREER_OUTBOX:path.join(root,'lobby-outbox-b'),OMOBA_MATCH_FIRST_PORT:String(workerPort+100)});
+ const workers=dir=>fs.existsSync(dir)?fs.readdirSync(dir,{withFileTypes:true}).filter(e=>e.isDirectory()&&fs.existsSync(path.join(dir,e.name,'manifest.json'))).length:0;
+ const firstRoot=path.join(root,'matches'),before=workers(firstRoot),prepared=performance.now();
+ const first=Array.from({length:10},(_,i)=>new Client(12000+i,lobbyPort,null,{preference:'humans_only',autoQueue:false,autoHandoff:false,autoReady:i!==9}));
+ const second=Array.from({length:9},(_,i)=>new Client(12100+i,secondPort,null,{preference:'humans_only',autoQueue:false,autoHandoff:false}));
+ const departed=first[9];
+ const duplicate=new Client(12200,secondPort,departed,{preference:'humans_only',autoQueue:false,autoReady:false,autoHandoff:false});duplicate.queueId=101;
+ all.push(...first,...second,duplicate);
+ await pumpUntil('both lobby rosters qualified before Search',()=>[...first,...second,duplicate].every(c=>c.auth&&(c.profile?.completed_public_matches??0)>=10),120000);
+ assert.equal(duplicate.profile.profile_id,departed.profile.profile_id,'second endpoint must prove the same account key');
+ assert.equal(new Set([...first,...second].map(c=>c.profile.profile_id)).size,19);
+ const setupSeconds=(performance.now()-prepared)/1000;
+ for(const c of [...first,...second])c.autoQueue=true;
+ await pumpUntil('owning lobby has nine saved accepts',()=>first.every(c=>c.career?.match_service?.state==='ready_check')&&first[0].career.match_service.accepted_count===9,20000);
+ const check=first[0].career.match_service.check_id;duplicate.autoQueue=true;
+ await pumpUntil('another lobby refuses the account while original confirmation is open',()=>duplicate.career?.match_service?.state==='failed'&&duplicate.career.match_service.code==='profile_has_another_session'&&duplicate.career.match_service_request_id===duplicate.queueId,8000);
+ assert.equal(workers(firstRoot),before,'owning lobby launched before unanimous consent');assert.equal(workers(secondRoot),0,'another lobby launched an unconfirmed roster');
+ const firstRefusal=duplicate.career.match_service.code;
+ await pumpUntil('other lobby sees committed timeout penalty without old-host outbox delivery',()=>departed.career?.match_service?.state==='failed'&&departed.career.match_service.code==='dodge_cooldown'&&duplicate.career?.match_service?.state==='failed'&&duplicate.career.match_service.code==='dodge_cooldown'&&first.slice(0,9).every(c=>c.career?.match_service?.state==='waiting')&&second.every(c=>c.career?.match_service?.state==='waiting'),20000);
+ assert.equal(duplicate.career.match_service_request_id,101,'foreign refusal lost current search correlation');
+ for(const c of first.slice(0,9))assert(c.career.match_service.elapsed_secs>=15,'owning survivors lost FIFO age');
+ assert.equal(workers(firstRoot),before);assert.equal(workers(secondRoot),0);
+ const penalty=JSON.parse(fs.readFileSync(path.join(firstRoot,'dodge-penalties.json'),'utf8'))[departed.profile.profile_id];
+ assert.equal(penalty.strikes,1);assert.equal((penalty.pending_events||[]).length,0,'SQL ready timeout created a second producer event');
+ const foreignFile=path.join(secondRoot,'dodge-penalties.json');
+ assert(!fs.existsSync(foreignFile)||Object.keys(JSON.parse(fs.readFileSync(foreignFile,'utf8'))).length===0,'foreign lobby copied/fabricated local penalties');
+ report.cross_lobby_ready={status:'PASS',lobby_ports:[lobbyPort,secondPort],distinct_ranked_profiles:19,authenticated_duplicate_endpoints:2,
+  setup_seconds:setupSeconds,qualification:'disclosed synthetic prior public receipts',window_secs:15,first_refusal:firstRefusal,
+  after_timeout_refusal:'dodge_cooldown',owning_accepted_survivors:9,foreign_waiting_survivors:9,fifo_age_preserved:true,
+  new_workers_before_unanimity:0,foreign_local_penalty_copy:false,duplicate_producer_events:0,transport:'real UDP; signed player account requests; independent server epochs'};
+ report.scenarios.push('two_lobbies_share_ready_ownership_and_timeout_discipline');
+ for(const c of [...first,...second,duplicate]){c.autoQueue=false;c.close();}
+}
+
 async function readyCheckLifecycle() {
  const workers = () => fs.readdirSync(path.join(root,'matches'),{withFileTypes:true}).filter(e=>e.isDirectory()&&fs.existsSync(path.join(root,'matches',e.name,'manifest.json'))).length;
  const before=workers();
@@ -1329,6 +1371,7 @@ try {
  if(['remake','surrender'].includes(scenario))await teamVoteJourney(all.filter(c=>c.stage==='running'),scenario);
  if(scenario==='termination')await gracefulTermination(all[0]);
  if(scenario==='ready-check')await readyCheckLifecycle();
+ if(scenario==='cross-lobby-ready')await crossLobbyReadyLifecycle();
  if(scenario==='lifecycle')await lifecycle(all[0]);
  if(scenario==='abandoned')await abandoned(all[0]);
  if(scenario==='capacity-wait')await capacityWait();

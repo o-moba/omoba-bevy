@@ -41,6 +41,9 @@ pub(crate) trait CareerPort {
     /// and report guest play in the view.
     fn enabled(&self) -> bool;
     fn new_result_id(&self) -> String;
+    fn shared_ready_enabled(&self) -> bool;
+    fn submit_ready(&mut self, work: crate::career_backend::consent::Work) -> bool;
+    fn take_ready_completions(&mut self) -> Vec<crate::career_backend::consent::Completion>;
 
     // Account state per endpoint.
     fn profile(&self, addr: SocketAddr) -> Option<ProfileSummary>;
@@ -66,6 +69,7 @@ pub(crate) trait CareerPort {
     fn handle(&mut self, addr: SocketAddr, request: CareerRequest);
     fn poll(&mut self);
     fn take_match_requests(&mut self) -> Vec<MatchRequest>;
+    fn take_match_refusals(&mut self) -> Vec<(MatchRequest, String)>;
     fn take_ready_requests(&mut self) -> Vec<ReadyRequest>;
     fn take_cancelled(&mut self) -> Vec<SocketAddr>;
     fn take_social(&mut self) -> Vec<(SocketAddr, shared::social::SocialRequest)>;
@@ -95,6 +99,8 @@ pub(crate) trait CareerPort {
     // part of the trait under `cfg(test)`; both implementations share them.
     #[cfg(test)]
     fn test_authenticated(&mut self, addr: SocketAddr, profile: ProfileSummary, session_id: &str);
+    #[cfg(test)]
+    fn test_complete_ready(&mut self, completion: crate::career_backend::consent::Completion);
     #[cfg(test)]
     fn test_ack_start(&mut self, id: &str);
     #[cfg(test)]

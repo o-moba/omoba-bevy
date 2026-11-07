@@ -712,7 +712,10 @@ impl ServerRuntime {
                 },
                 gameplay_started: false,
                 end_reason: None,
-                result_id: self.career.backend.new_result_id(),
+                result_id: self.match_service.worker().map_or_else(
+                    || self.career.backend.new_result_id(),
+                    |worker| worker.manifest.allocation_id.clone(),
+                ),
                 server_epoch: self.server_epoch,
                 match_id: self.match_id,
                 started_at_ms: utc_ms(),
@@ -1263,6 +1266,22 @@ impl ServerRuntime {
             .errors
             .retain(|addr, _| self.world.players.contains_key(addr));
         self.career.backend.poll();
+        self.match_service
+            .enable_shared_ready(self.career.backend.shared_ready_enabled());
+        for (request, code) in self.career.backend.take_match_refusals() {
+            if let (Some(profile), Some(session)) = (
+                self.career.backend.profile(request.addr),
+                self.career.backend.authenticated_session(request.addr),
+            ) {
+                self.match_service.refuse(
+                    &profile.profile_id,
+                    session,
+                    request.request_id,
+                    &code,
+                    now,
+                );
+            }
+        }
         let mut invalidated = Vec::new();
         for (addr, player) in &mut self.world.players {
             // Retained humans have no transport authentication at their internal

@@ -213,6 +213,7 @@ def main(argv=None):
         public("mixed", ["--mix=humans_only:10,quick:5,bot_practice:2", "--max-wait-secs=60",
                          "--seconds=5", "--exercise-stale-handoff"])
         public("ready-check", ["--scenario=ready-check", "--seconds=1"])
+        public("cross-lobby-ready", ["--scenario=cross-lobby-ready", "--seconds=1"])
         public("unique-draft", ["--scenario=unique-draft", "--clients=10",
                                 "--preference=humans_only", "--seconds=1"])
         party = ["--scenario=party-draft", "--clients=10", "--preference=humans_only",

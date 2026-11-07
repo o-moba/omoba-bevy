@@ -41,8 +41,14 @@ pub struct Snapshot {
     pub opened_at_ms: Option<i64>,
     pub members: Vec<Member>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Answer {
+    pub seat: Seat,
+    pub accepted: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    Answers(Vec<Answer>),
     Publish,
     Poll,
     Answer {
@@ -378,18 +384,36 @@ impl CareerStore {
                 close(&mut tx, id, "cancelled", &[], at).await?;
             }
         } else {
-            // Wrong identities cannot cause even deadline side effects.
-            if let Action::Answer {
-                profile_id,
-                session_id,
-                ..
-            } = &action
-                && !members(&mut tx, id)
-                    .await?
-                    .iter()
-                    .any(|m| m.seat.profile_id == *profile_id && m.seat.session_id == *session_id)
-            {
-                return Err("Ready response does not belong to this seat.".into());
+            // Validate the entire bounded batch before any timeout or vote
+            // side effect; callers preserve signed response order per seat.
+            let answers = match &action {
+                Action::Answer {
+                    profile_id,
+                    session_id,
+                    accepted,
+                } => vec![Answer {
+                    seat: Seat {
+                        profile_id: profile_id.clone(),
+                        session_id: session_id.clone(),
+                    },
+                    accepted: *accepted,
+                }],
+                Action::Answers(answers) => {
+                    if answers.is_empty() || answers.len() > 10 {
+                        return Err("Invalid ready answer batch.".into());
+                    }
+                    answers.clone()
+                }
+                _ => Vec::new(),
+            };
+            let roster = members(&mut tx, id).await?;
+            let mut seen = HashSet::new();
+            for answer in &answers {
+                if !seen.insert(&answer.seat.profile_id)
+                    || !roster.iter().any(|m| m.seat == answer.seat)
+                {
+                    return Err("Ready response does not belong to this seat.".into());
+                }
             }
             reconcile(&mut tx, id, at).await?;
             let c = check(&mut tx, id).await?;
@@ -402,27 +426,35 @@ impl CareerStore {
                     sqlx::query("UPDATE career_ready_checks SET live_until_ms=$2,updated_at=clock_timestamp() WHERE check_id=$1")
                             .bind(id).bind(at+HEARTBEAT_MS).execute(&mut *tx).await?;
                 }
-                Action::Answer {
-                    profile_id,
-                    accepted,
-                    ..
-                } if c.state == "open" || (c.state == "approved" && !accepted) => {
-                    if *accepted {
-                        sqlx::query("UPDATE career_ready_members SET accepted=true WHERE check_id=$1 AND profile_id=$2")
-                                .bind(id).bind(profile_id).execute(&mut *tx).await?;
-                        if members(&mut tx, id).await?.iter().all(|m| m.accepted) {
-                            sqlx::query("UPDATE career_ready_checks SET state='approved',deadline_ms=$2,updated_at=clock_timestamp() WHERE check_id=$1")
-                                    .bind(id).bind(at+HANDOFF_MS).execute(&mut *tx).await?;
-                        }
-                    } else {
+                Action::Answer { .. } | Action::Answers(_)
+                    if c.state == "open"
+                        || (c.state == "approved" && answers.iter().any(|a| !a.accepted)) =>
+                {
+                    let first_no = answers.iter().position(|a| !a.accepted);
+                    let yes: Vec<_> = answers
+                        .iter()
+                        .take(first_no.unwrap_or(answers.len()))
+                        .map(|a| a.seat.profile_id.clone())
+                        .collect();
+                    if !yes.is_empty() {
+                        sqlx::query("UPDATE career_ready_members SET accepted=true WHERE check_id=$1 AND profile_id=ANY($2)")
+                            .bind(id).bind(&yes).execute(&mut *tx).await?;
+                    }
+                    if let Some(index) = first_no {
                         close(
                             &mut tx,
                             id,
                             "cancelled",
-                            std::slice::from_ref(profile_id),
+                            std::slice::from_ref(&answers[index].seat.profile_id),
                             at,
                         )
                         .await?;
+                    } else if members(&mut tx, id).await?.iter().all(|m| m.accepted) {
+                        sqlx::query("UPDATE career_ready_checks SET state='approved',deadline_ms=$2,updated_at=clock_timestamp() WHERE check_id=$1")
+                            .bind(id).bind(at+HANDOFF_MS).execute(&mut *tx).await?;
+                    } else {
+                        sqlx::query("UPDATE career_ready_checks SET live_until_ms=$2,updated_at=clock_timestamp() WHERE check_id=$1")
+                            .bind(id).bind(at+HEARTBEAT_MS).execute(&mut *tx).await?;
                     }
                 }
                 _ => {}

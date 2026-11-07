@@ -461,3 +461,88 @@ async fn ready_ownership_invalid_answers_and_schema_upgrade_preserve_discipline(
     assert_eq!(event_count(&f).await, 1);
     f.close().await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_ownership_answer_batches_are_validated_atomically_and_preserve_decline_order() {
+    use crate::career_store::ready::Answer;
+    let (f, _, _, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Publish).await.unwrap();
+    let good = Answer {
+        seat: roster[0].clone(),
+        accepted: true,
+    };
+    let mut wrong = roster[1].clone();
+    wrong.session_id = "wrong".into();
+    assert!(
+        f.store
+            .ready_update(
+                &id,
+                Action::Answers(vec![
+                    good.clone(),
+                    Answer {
+                        seat: wrong,
+                        accepted: true
+                    }
+                ])
+            )
+            .await
+            .is_err()
+    );
+    let unchanged = f.store.ready_update(&id, Action::Poll).await.unwrap();
+    assert!(unchanged.members.iter().all(|m| !m.accepted));
+    assert!(
+        f.store
+            .ready_update(&id, Action::Answers(vec![good.clone(), good.clone()]))
+            .await
+            .is_err()
+    );
+    let approved = f
+        .store
+        .ready_update(
+            &id,
+            Action::Answers(vec![
+                good,
+                Answer {
+                    seat: roster[1].clone(),
+                    accepted: true,
+                },
+            ]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(approved.phase, Phase::Approved);
+    let closed = f
+        .store
+        .ready_update(
+            &id,
+            Action::Answers(vec![
+                Answer {
+                    seat: roster[0].clone(),
+                    accepted: false,
+                },
+                Answer {
+                    seat: roster[1].clone(),
+                    accepted: false,
+                },
+            ]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(closed.phase, Phase::Cancelled);
+    assert_eq!(closed.members.iter().filter(|m| m.dodged).count(), 1);
+    assert!(
+        closed
+            .members
+            .iter()
+            .find(|m| m.seat == roster[0])
+            .unwrap()
+            .dodged
+    );
+    assert_eq!(event_count(&f).await, 1);
+    f.close().await;
+}

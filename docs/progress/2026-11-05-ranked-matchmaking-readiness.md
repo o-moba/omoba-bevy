@@ -1429,3 +1429,34 @@ Use the SQL penalty snapshot without a second local event. Actual signed two-
 lobby15s/party/FIFO/restart/Resume proof, legacy floor reconciliation, ready/journal
 health/retention and every other physical/capacity/release/RU gate remain open.
 C2/C4 questions remain pending; original68 ledger stays62 done,5 partial,1 open.
+
+### Committed ready consent active in lobby; local cross-lobby proof — 2026-11-07
+
+Production lobby now runs bounded off-tick reserve/publish/answer/poll/cancel
+jobs with exact SQL acknowledgements. No ready UI before publication; no worker
+before committed unanimity; immutable account/session/search binding, sticky
+explicit decline and15s SQL deadline. Timeout discipline updates the local cache
+without another event. Worker result ID equals the consent allocation ID.
+
+A real draft journey exposed old Approved claims blocking the next roster. Hold
+claims until pending draft-dodge SQL ACK, then release them. The unchanged five-
+stack journey now reaches a replacement Ranked match Running with nine retained
+peers, FIFO age and no false career/history credit. Two independent live lobbies
+share ownership/cooldown correctly across19 profiles/one duplicate endpoint; no
+worker before unanimity and no foreign penalty-file copy. Maintenance/restart/
+Resume also PASS on an actual two-arena BotPractice process pair. Ranked setup
+uses disclosed synthetic qualification receipts, not ten real played games.
+
+All551 actual whole-server tests and82 actual-PG18.6 store tests PASS, zero
+failures/ignores. Full native server test/production and store strict Clippy,
+formatting, four Node policy self-checks and5 tooling tests PASS. The actual full
+server target is linked without copied engine modules, using the read-only pinned
+cache graph; no heavy graphics rebuild under the disk floor.
+[Exact proof/scope](../evidence/ready-runtime-2026-11-07/README.md).
+
+Parent39d2fd53 PG/public CI now PASS; core/dev-client failed E0716 in a translation
+test, repaired separately in ba4bba35. Current full CI/client execution is pending.
+Actual multi-host/WAN failure/Resume, legacy floors, ready/journal retention/health,
+schema12 recovery, trust packaging/provisioning, physical/capacity/RU gates and
+existing C2/C4 owner decisions remain open. Original68 stays62 done,5 partial,
+1 open; this checkpoint waives no acceptance criterion and performs no RU rollout.

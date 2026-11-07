@@ -25,6 +25,8 @@ use shared::moderation::{Sanction, SanctionKind};
 use crate::admission::{Limits, SourceIp};
 use crate::career_port::CareerPort;
 
+#[path = "ready_consent.rs"]
+pub(crate) mod consent;
 #[path = "queue_dodge_outbox.rs"]
 pub(crate) mod queue_dodges;
 
@@ -151,6 +153,7 @@ pub(crate) enum Job {
     },
     Record(Box<PendingRecord>),
     QueueDodge(queue_dodges::Event),
+    Ready(consent::Work),
     Flush(u64),
     Presence(Vec<(String, Option<String>)>),
 }
@@ -163,6 +166,7 @@ pub(crate) enum Reply {
     },
     RecoveryChecked,
     QueueDodgeCommitted(queue_dodges::Event),
+    Ready(consent::Completion),
     Flushed(u64, bool),
     RefreshAccess {
         profile: Option<ProfileSummary>,
@@ -250,6 +254,9 @@ enum RecoveryScope {
 /// "busy" or retries later).
 pub(crate) trait JobLink {
     fn enabled(&self) -> bool;
+    fn durable_ready(&self) -> bool {
+        self.enabled()
+    }
     fn try_send(&mut self, job: Job) -> bool;
     fn try_recv(&mut self) -> Option<Reply>;
 }
@@ -409,6 +416,10 @@ impl MemoryLink {
                 RecordKind::Rejected => {}
             },
             Job::QueueDodge(event) => self.replies.push_back(Reply::QueueDodgeCommitted(event)),
+            Job::Ready(work) => self.replies.push_back(Reply::Ready(consent::Completion {
+                work,
+                result: Err(STORE_UNAVAILABLE.into()),
+            })),
             Job::Flush(generation) => self.replies.push_back(Reply::Flushed(generation, true)),
             Job::Presence(_) => {}
         }
@@ -416,6 +427,9 @@ impl MemoryLink {
 }
 #[cfg(test)]
 impl JobLink for MemoryLink {
+    fn durable_ready(&self) -> bool {
+        false
+    }
     fn enabled(&self) -> bool {
         self.enabled
     }
@@ -458,6 +472,9 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     pending_ids: HashSet<String>,
     queue_dodges: HashMap<String, queue_dodges::Event>,
     queue_dodge_acks: HashMap<String, queue_dodges::Event>,
+    ready_jobs: HashMap<(String, u64), consent::Work>,
+    ready_completions: Vec<consent::Completion>,
+    match_refusals: Vec<(crate::career_port::MatchRequest, String)>,
     record_generation: u64,
     flush_requested: Option<u64>,
     flushed_generation: Option<u64>,
@@ -536,6 +553,9 @@ impl<L: JobLink> CareerBackend<L> {
             pending_ids: HashSet::new(),
             queue_dodges: HashMap::new(),
             queue_dodge_acks: HashMap::new(),
+            ready_jobs: HashMap::new(),
+            ready_completions: Vec::new(),
+            match_refusals: Vec::new(),
             record_generation: 0,
             flush_requested: None,
             flushed_generation: None,
@@ -717,6 +737,14 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 ..Default::default()
             },
         );
+    }
+    #[cfg(test)]
+    fn test_complete_ready(&mut self, completion: consent::Completion) {
+        let key = (completion.work.check_id.clone(), completion.work.sequence);
+        if self.ready_jobs.get(&key) == Some(&completion.work) {
+            self.ready_jobs.remove(&key);
+            self.ready_completions.push(completion);
+        }
     }
     #[cfg(test)]
     fn test_ack_start(&mut self, id: &str) {
@@ -918,6 +946,39 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     }
     fn settle(&mut self, result: MatchResult) -> bool {
         self.record(RecordKind::Settle, result)
+    }
+    fn take_match_refusals(&mut self) -> Vec<(crate::career_port::MatchRequest, String)> {
+        std::mem::take(&mut self.match_refusals)
+    }
+    fn shared_ready_enabled(&self) -> bool {
+        self.link.durable_ready()
+    }
+    fn submit_ready(&mut self, work: consent::Work) -> bool {
+        if !self.enabled() || !work.valid() {
+            return false;
+        }
+        let key = (work.check_id.clone(), work.sequence);
+        if let Some(old) = self.ready_jobs.get(&key) {
+            return old == &work;
+        }
+        if let Some(old) = self
+            .ready_completions
+            .iter()
+            .find(|c| c.work.check_id == work.check_id && c.work.sequence == work.sequence)
+        {
+            return old.work == work;
+        }
+        if self.ready_jobs.len() + self.ready_completions.len() >= MAX_JOBS
+            || !self.link.try_send(Job::Ready(work.clone()))
+        {
+            return false;
+        }
+        self.ready_jobs.insert(key, work);
+        self.record_generation = self.record_generation.saturating_add(1);
+        true
+    }
+    fn take_ready_completions(&mut self) -> Vec<consent::Completion> {
+        std::mem::take(&mut self.ready_completions)
     }
     fn record_queue_dodge(&mut self, event: queue_dodges::Event) -> bool {
         if event.validate().is_err() || !self.enabled() {
@@ -1226,6 +1287,9 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                         Err(error) => {
                             c.view.error_code = queue_refusal_code(&error).map(str::to_owned);
                             if let Some(code) = queue_refusal_code(&error) {
+                                if self.match_refusals.len() < MAX_JOBS {
+                                    self.match_refusals.push((request, code.into()));
+                                }
                                 c.view.match_service =
                                     Some(shared::match_service::MatchServiceView::Failed {
                                         code: code.into(),
@@ -1242,6 +1306,13 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             Some(self.flushed_generation.unwrap_or(0).max(generation));
                     } else if self.flush_requested == Some(generation) {
                         self.flush_requested = None;
+                    }
+                }
+                Reply::Ready(completion) => {
+                    let key = (completion.work.check_id.clone(), completion.work.sequence);
+                    if self.ready_jobs.get(&key) == Some(&completion.work) {
+                        self.ready_jobs.remove(&key);
+                        self.ready_completions.push(completion);
                     }
                 }
                 Reply::RecoveryChecked => {
@@ -2104,6 +2175,44 @@ fn worker(
                 }
                 for reply in rt.block_on(answer_access_reads(store.as_ref().unwrap(), allowed)) {
                     let _ = replies.try_send(reply);
+                }
+            }
+            Ok(Job::Ready(work)) => {
+                let mut batch = vec![work];
+                while batch.len() < ACCESS_READ_BATCH {
+                    match jobs.try_recv() {
+                        Ok(Job::Ready(work)) => batch.push(work),
+                        Ok(other) => {
+                            deferred_job = Some(other);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let completed = match &store {
+                    Some(s) => rt.block_on(async {
+                        let mut tasks = tokio::task::JoinSet::new();
+                        for work in batch {
+                            tasks.spawn(consent::execute(s.clone(), work));
+                        }
+                        let mut completed = Vec::new();
+                        while let Some(result) = tasks.join_next().await {
+                            if let Ok(reply) = result {
+                                completed.push(reply);
+                            }
+                        }
+                        completed
+                    }),
+                    None => batch
+                        .into_iter()
+                        .map(|work| consent::Completion {
+                            work,
+                            result: Err(STORE_UNAVAILABLE.into()),
+                        })
+                        .collect(),
+                };
+                for completion in completed {
+                    let _ = replies.send(Reply::Ready(completion));
                 }
             }
             Ok(Job::Flush(generation)) => {

@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Activate SQL-acknowledged ready consent in the actual lobby: bounded batched
+  answers, committed unanimity, exact15s timeout and shared cross-lobby discipline.
+  Release a failed draft reservation only after the dodge commits, preserving the
+  replacement party/FIFO journey. All551 server/82 real-PG store cases and local
+  signed two-lobby, party-replacement and maintenance/restart journeys PASS.
+  Add the cross-lobby journey to the existing full PostgreSQL harness. Fresh full
+  CI, current client/physical, multi-host faults and RU release gates remain open.
+- Repair the parent client test E0716 using static queue translation keys
+  (ba4bba35); fresh CI must confirm client execution.
+
 - Add schema12 durable ready ownership/seat claims with immutable membership,
   exact15s publication, bound responses, transactional missed-answer discipline
   and fault cancellation. All81 PG store/64 native backend cases and strict
