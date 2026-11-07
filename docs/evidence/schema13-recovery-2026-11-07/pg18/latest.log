@@ -1,0 +1,20 @@
+2026-11-07 05:38:35.846 GMT [776] LOG:  starting PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-07 05:38:35.847 GMT [776] LOG:  listening on Unix socket "/tmp/pitr-runtime/native-latest-socket/.s.PGSQL.6545"
+2026-11-07 05:38:35.850 GMT [782] LOG:  database system was interrupted; last known up at 2026-11-07 05:38:26 GMT
+2026-11-07 05:38:35.923 GMT [782] LOG:  starting backup recovery with redo LSN 0/1100028, checkpoint LSN 0/1100080, on timeline ID 1
+2026-11-07 05:38:35.955 GMT [782] LOG:  restored log file "000000010000000000000011" from archive
+2026-11-07 05:38:35.956 GMT [782] LOG:  starting archive recovery
+2026-11-07 05:38:35.958 GMT [782] LOG:  redo starts at 0/1100028
+2026-11-07 05:38:35.992 GMT [782] LOG:  restored log file "000000010000000000000012" from archive
+2026-11-07 05:38:36.028 GMT [782] LOG:  restored log file "000000010000000000000013" from archive
+2026-11-07 05:38:36.030 GMT [782] LOG:  completed backup recovery with redo LSN 0/1100028 and end LSN 0/1100120
+2026-11-07 05:38:36.030 GMT [782] LOG:  consistent recovery state reached at 0/1100120
+2026-11-07 05:38:36.030 GMT [776] LOG:  database system is ready to accept read-only connections
+2026-11-07 05:38:36.094 GMT [782] LOG:  redo done at 0/1302850 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.13 s
+2026-11-07 05:38:36.094 GMT [782] LOG:  last completed transaction was at log time 2026-11-07 05:38:29.933641+00
+2026-11-07 05:38:36.125 GMT [782] LOG:  restored log file "000000010000000000000013" from archive
+2026-11-07 05:38:36.160 GMT [782] LOG:  selected new timeline ID: 2
+2026-11-07 05:38:36.195 GMT [782] LOG:  archive recovery complete
+2026-11-07 05:38:36.195 GMT [780] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-11-07 05:38:36.214 GMT [780] LOG:  checkpoint complete: wrote 36 buffers (1.8%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 3 recycled; write=0.002 s, sync=0.013 s, total=0.020 s; sync files=28, longest=0.002 s, average=0.001 s; distance=3072 kB, estimate=3072 kB; lsn=0/1400028, redo lsn=0/1400028
+2026-11-07 05:38:36.216 GMT [776] LOG:  database system is ready to accept connections

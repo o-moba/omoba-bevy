@@ -1,0 +1,231 @@
+import copy
+import io
+import os
+import subprocess
+import sys
+import unittest
+from unittest import mock
+
+import public_bots_rehearsal as rehearsal
+
+
+class PublicBotsRehearsalTests(unittest.TestCase):
+    def test_group_signal_denial_stops_live_children_before_reporting_incomplete_cleanup(self):
+        children = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                     start_new_session=True) for _ in range(2)]
+        real_killpg = os.killpg
+        def deny_one(group, sig):
+            if group == children[-1].pid:
+                raise PermissionError("fixture denial")
+            return real_killpg(group, sig)
+        try:
+            with mock.patch.object(rehearsal.os, "killpg", side_effect=deny_one):
+                with self.assertRaisesRegex(RuntimeError, "group cleanup unverified"):
+                    rehearsal.stop_owned(children)
+            self.assertTrue(all(child.poll() is not None for child in children))
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+
+    def test_denial_for_reaped_group_does_not_skip_remaining_live_child(self):
+        reaped = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+        reaped.wait(timeout=5)
+        live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                start_new_session=True)
+        real_killpg = os.killpg
+        def deny_reaped(group, sig):
+            if group == reaped.pid:
+                raise PermissionError("fixture denied old group")
+            return real_killpg(group, sig)
+        try:
+            with mock.patch.object(rehearsal.os, "killpg", side_effect=deny_reaped):
+                with self.assertRaisesRegex(RuntimeError, "group cleanup unverified"):
+                    rehearsal.stop_owned([live, reaped])
+            self.assertIsNotNone(live.poll())
+        finally:
+            if live.poll() is None:
+                live.kill()
+            live.wait(timeout=5)
+
+    def test_auth_progress_is_independent_of_world_frames_and_partial_lines_are_retained(self):
+        stream = io.StringIO('BOT_AUTH {"peers":[')
+        self.assertEqual(list(rehearsal.read_events(stream)), [])
+        offset = stream.tell()
+        stream.seek(0, 2)
+        stream.write(']}\n')
+        stream.seek(offset)
+        self.assertEqual(list(rehearsal.read_events(stream)), [("BOT_AUTH", {"peers": []})])
+        self.assertEqual(list(rehearsal.read_events(stream)), [])
+
+    def test_only_disposable_loopback_database_without_options_is_allowed(self):
+        for host in ("127.0.0.1", "localhost", "[::1]"):
+            self.assertTrue(rehearsal.isolated_database(f"postgres://tester:pass@{host}:5432/omoba_test"))
+        for url in (
+            "postgres://tester@127.0.0.1/omoba", "postgres://tester@db.example/omoba_test",
+            "postgres://tester@127.0.0.1/omoba_test?host=db.example", "postgres://localhost/omoba_test#other",
+            "postgres://[broken/omoba_test", "https://localhost/omoba_test", "",
+        ):
+            with self.subTest(url=url):
+                self.assertFalse(rehearsal.isolated_database(url))
+
+    def test_fog_of_war_does_not_require_ten_visible_enemies_but_every_peer_is_live(self):
+        sample = {"phase": "running", "players": [{"id": 1}], "peers": [
+            {"id": i, "snapshot_age_ms": 20, "public": {"phase": "running", "profile_id": str(i)}}
+            for i in range(1, 11)
+        ]}
+        self.assertTrue(rehearsal.running_roster(sample, 10))
+        for mutation in ("stale", "duplicate_identity", "still_loading"):
+            changed = copy.deepcopy(sample)
+            if mutation == "stale":
+                changed["peers"][-1]["snapshot_age_ms"] = 4000
+            elif mutation == "duplicate_identity":
+                changed["peers"][-1]["public"]["profile_id"] = "1"
+            else:
+                changed["peers"][-1]["public"]["phase"] = "draft"
+            self.assertFalse(rehearsal.running_roster(changed, 10))
+
+    def test_partially_flushed_result_line_is_retried_without_loss_or_duplicates(self):
+        stream = io.StringIO('BOT_RESULT [{"saved":true}')
+        self.assertEqual(list(rehearsal.read_events(stream)), [])
+        offset = stream.tell()
+        stream.seek(0, 2)
+        stream.write(']\nBOT_SAMPLE {"phase":"victory"}\n')
+        stream.seek(offset)
+        self.assertEqual(list(rehearsal.read_events(stream)), [
+            ("BOT_RESULT", [{"saved": True}]), ("BOT_SAMPLE", {"phase": "victory"})])
+        self.assertEqual(list(rehearsal.read_events(stream)), [])
+
+    @staticmethod
+    def completed_ranked(rated_matches=0):
+        delta = 24 if rated_matches < 20 else 16
+        participants = [{"profile_id": str(i), "team": "green" if i < 5 else "blue",
+                         "participation": {"connected_ms": 600000, "disconnected_ms": 0,
+                                           "afk_ms": 0, "abandoned": False},
+                         "rating": {"before": 1000, "after": 1000 + (delta if i < 5 else -delta),
+                                    "delta": delta if i < 5 else -delta},
+                         "progression_xp_gained": 150 if i < 5 else 100} for i in range(10)]
+        result = {"result_id": "result", "saved": True, "outcome": "completed", "rated": True,
+                  "winner": "green", "ruleset": "verdant-default-v1", "participants": participants}
+        return [{"result": copy.deepcopy(result),
+                 "initial_profile": {"rating": 1000, "rated_matches": rated_matches, "matches_played": rated_matches, "completed_public_matches": 10,
+                                     "wins": 0, "losses": rated_matches, "progression_xp": 0},
+                 "profile": {"profile_id": str(i), "matches_played": rated_matches + 1, "rated_matches": rated_matches + 1,
+                             "completed_public_matches": 11,
+                             "rating": participants[i]["rating"]["after"],
+                             "progression_xp": participants[i]["progression_xp_gained"],
+                             "wins": int(i < 5), "losses": rated_matches + int(i >= 5)},
+                 "history": [{"result_id": "result", "rating": participants[i]["rating"]}]} for i in range(10)]
+
+    def seasonal_ranked(self):
+        statuses = self.completed_ranked(19)
+        for i, status in enumerate(statuses):
+            status["initial_profile"].update(rated_matches=100, matches_played=100)
+            status["profile"].update(rated_matches=101, matches_played=101)
+            season = {"season_id": 2, "started_at_ms": 1000, "ends_at_ms": 7776001000,
+                      "rated_matches": 19, "wins": 0, "losses": 19, "completed_matches": 19}
+            status["initial_profile"]["ranked"] = season
+            status["profile"]["ranked"] = dict(season, rated_matches=20, completed_matches=20,
+                                              wins=int(i < 5), losses=19 + int(i >= 5))
+            status["result"]["ranked_season_id"] = 2
+        return statuses
+
+    def test_new_season_placements_use_current_count_and_preserve_lifetime(self):
+        self.assertEqual(rehearsal.verify_results(self.seasonal_ranked(), 10, True), "result")
+
+    def test_season_proof_rejects_wrong_identity_counters_or_lifetime_k(self):
+        for mutation in ("identity", "missing_frozen", "counter", "lifetime_k"):
+            with self.subTest(mutation=mutation):
+                statuses = self.seasonal_ranked()
+                if mutation == "identity":
+                    statuses[0]["profile"]["ranked"]["season_id"] = 3
+                elif mutation == "missing_frozen":
+                    statuses[0]["result"].pop("ranked_season_id")
+                elif mutation == "counter":
+                    statuses[0]["profile"]["ranked"]["rated_matches"] += 1
+                else:
+                    for i, status in enumerate(statuses):
+                        delta = 16 if i < 5 else -16
+                        status["profile"]["rating"] = 1000 + delta
+                        for result in statuses:
+                            result["result"]["participants"][i]["rating"].update(after=1000 + delta, delta=delta)
+                        status["history"][0]["rating"].update(after=1000 + delta, delta=delta)
+                with self.assertRaises(AssertionError):
+                    rehearsal.verify_results(statuses, 10, True)
+
+    def test_a_complete_rated_result_checks_every_profile_and_history(self):
+        self.assertEqual(rehearsal.verify_results(self.completed_ranked(), 10, True), "result")
+
+    def test_ordinary_ranked_proof_cannot_accept_afk_or_missing_participation(self):
+        for mutation in ("afk", "disconnected", "abandoned", "missing"):
+            statuses = self.completed_ranked()
+            for status in statuses:
+                participant = status["result"]["participants"][5]
+                if mutation == "missing":
+                    participant.pop("participation")
+                else:
+                    key = {"afk": "afk_ms", "disconnected": "disconnected_ms",
+                           "abandoned": "abandoned"}[mutation]
+                    participant["participation"][key] = True if mutation == "abandoned" else 1
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(AssertionError, "active connected"):
+                rehearsal.verify_results(statuses, 10, True)
+
+    def test_twentieth_match_uses_placement_k_and_the_next_uses_regular_k(self):
+        for count, delta in [(19, 24), (20, 16)]:
+            statuses = self.completed_ranked(count)
+            self.assertEqual(statuses[0]["result"]["participants"][0]["rating"]["delta"], delta)
+            self.assertEqual(rehearsal.verify_results(statuses, 10, True), "result")
+
+    def test_consistent_but_wrong_placement_award_is_rejected(self):
+        statuses = self.completed_ranked()
+        for status in statuses:
+            for p in status["result"]["participants"]:
+                p["rating"].update(after=1016 if p["team"] == "green" else 984,
+                                   delta=16 if p["team"] == "green" else -16)
+            me = status["result"]["participants"][int(status["profile"]["profile_id"])]
+            status["profile"]["rating"] = me["rating"]["after"]
+            status["history"][0]["rating"] = me["rating"].copy()
+        with self.assertRaisesRegex(AssertionError, "wrong placement/team Elo"):
+            rehearsal.verify_results(statuses, 10, True)
+
+    def test_rated_proof_rejects_partial_or_uncredited_or_duplicated_settlement(self):
+        for mutation in ("unrated", "not_saved", "wrong_xp", "duplicate", "missing_client", "unplayed", "duplicate_profile", "wrong_history_rating"):
+            statuses = self.completed_ranked()
+            if mutation == "unrated":
+                statuses[-1]["result"]["rated"] = False
+            elif mutation == "not_saved":
+                statuses[-1]["result"]["saved"] = False
+            elif mutation == "wrong_xp":
+                statuses[-1]["profile"]["progression_xp"] = 0
+            elif mutation == "duplicate":
+                statuses[-1]["history"] *= 2
+            elif mutation == "unplayed":
+                statuses[-1]["result"]["gameplay_started"] = False
+            elif mutation == "duplicate_profile":
+                statuses[-1] = copy.deepcopy(statuses[0])
+            elif mutation == "wrong_history_rating":
+                statuses[-1]["history"][0]["rating"] = None
+            else:
+                statuses.pop()
+            with self.subTest(mutation=mutation), self.assertRaises(AssertionError):
+                rehearsal.verify_results(statuses, 10, True)
+
+    def test_custom_map_victory_must_remain_unrated_without_progression(self):
+        statuses = self.completed_ranked()
+        for status in statuses:
+            status["result"]["ruleset"] = "custom-unrated-v1"
+            status["result"]["rated"] = False
+            for participant in status["result"]["participants"]:
+                participant["rating"] = None
+                participant["progression_xp_gained"] = 0
+            status["profile"].update(rating=1000, rated_matches=0, progression_xp=0, completed_public_matches=10)
+            status["history"][0]["rating"] = None
+        self.assertEqual(rehearsal.verify_results(statuses, 10, False, True), "result")
+        statuses[-1]["profile"]["rated_matches"] = 1
+        with self.assertRaises(AssertionError):
+            rehearsal.verify_results(statuses, 10, False, True)
+
+
+if __name__ == "__main__":
+    unittest.main()

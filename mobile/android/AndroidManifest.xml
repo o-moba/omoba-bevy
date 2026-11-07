@@ -5,6 +5,7 @@
     android:versionName="__VERSION__">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
     <!-- allowBackup="false" (ADR-026): the device key in the settings folder never goes to

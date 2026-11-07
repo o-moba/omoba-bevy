@@ -15,5 +15,8 @@
   "postmatch.button.play_again": "再来一局",
   "postmatch.button.back_to_menu": "返回主菜单",
   "postmatch.gold_earned": "获得金币",
-  "postmatch.total": "合计"
+  "postmatch.total": "合计",
+  "postmatch.summary.remade": "提前重新比赛，不发放常规奖励",
+  "postmatch.summary.surrender": "队伍投降，比赛结束 · {minutes}分钟",
+  "postmatch.outcome.remade": "重新比赛"
 }

@@ -24,6 +24,7 @@ mod creator_loop_qa;
 mod dagger_qa;
 mod demo_qa;
 mod equipped_skills_qa;
+mod fair_play_qa;
 mod forest_pickup_qa;
 mod frontend_flow_qa;
 mod frontend_qa;
@@ -31,6 +32,8 @@ mod help_qa;
 mod map_qa;
 mod navigation_qa;
 mod offline_qa;
+pub(crate) mod offscreen;
+mod ranked_fixture;
 mod record_qa;
 mod result_qa;
 mod roster_qa;
@@ -55,6 +58,7 @@ pub(crate) struct QaPlugins;
 impl PluginGroup for QaPlugins {
     fn build(self) -> PluginGroupBuilder {
         let group = PluginGroupBuilder::start::<Self>()
+            .add(offscreen::OffscreenQaPlugin)
             .add(frontend_qa::FrontendQaPlugin)
             .add(visual_qa::VisualQaPlugin)
             .add(social_qa::SocialQaPlugin)
@@ -77,6 +81,7 @@ impl PluginGroup for QaPlugins {
             .add(demo_qa::DemoQaPlugin)
             .add(dagger_qa::DaggerQaPlugin)
             .add(equipped_skills_qa::EquippedSkillsQaPlugin)
+            .add(fair_play_qa::FairPlayQaPlugin)
             .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
             .add(help_qa::HelpQaPlugin)

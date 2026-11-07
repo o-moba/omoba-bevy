@@ -1,0 +1,15 @@
+2026-11-06 19:18:03.941 GMT [55919] LOG:  starting PostgreSQL 18.3 (Postgres.app) on aarch64-apple-darwin23.6.0, compiled by Apple clang version 15.0.0 (clang-1500.3.9.4), 64-bit
+2026-11-06 19:18:03.942 GMT [55919] LOG:  listening on IPv4 address "127.0.0.1", port 58064
+2026-11-06 19:18:03.953 GMT [55925] LOG:  database system was shut down at 2026-11-06 19:18:03 GMT
+2026-11-06 19:18:03.956 GMT [55919] LOG:  database system is ready to accept connections
+2026-11-06 19:18:04.554 GMT [55923] LOG:  checkpoint starting: immediate force wait
+2026-11-06 19:18:04.653 GMT [55923] LOG:  checkpoint complete: wrote 1011 buffers (49.4%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 7 recycled; write=0.058 s, sync=0.038 s, total=0.100 s; sync files=532, longest=0.006 s, average=0.001 s; distance=6628 kB, estimate=6628 kB; lsn=0/F00080, redo lsn=0/F00028
+2026-11-06 19:18:05.424 GMT [55976] LOG:  restore point "omoba_fixture_earned" created at 0/1124C60
+2026-11-06 19:18:05.424 GMT [55976] STATEMENT:  SELECT pg_create_restore_point('omoba_fixture_earned')
+2026-11-06 19:18:11.216 GMT [55919] LOG:  received fast shutdown request
+2026-11-06 19:18:11.217 GMT [55919] LOG:  aborting any active transactions
+2026-11-06 19:18:11.218 GMT [55919] LOG:  background worker "logical replication launcher" (PID 55929) exited with exit code 1
+2026-11-06 19:18:11.218 GMT [55923] LOG:  shutting down
+2026-11-06 19:18:11.219 GMT [55923] LOG:  checkpoint starting: shutdown immediate
+2026-11-06 19:18:11.223 GMT [55923] LOG:  checkpoint complete: wrote 44 buffers (2.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 3 recycled; write=0.002 s, sync=0.002 s, total=0.005 s; sync files=22, longest=0.001 s, average=0.001 s; distance=3072 kB, estimate=6272 kB; lsn=0/1200028, redo lsn=0/1200028
+2026-11-06 19:18:11.229 GMT [55919] LOG:  database system is shut down

@@ -1,0 +1,19 @@
+{
+  "status": "not acceptance",
+  "attempts": [
+    {
+      "scope": "first targeted4 receipt tests passed",
+      "rejected": "local harness incorrectly required public-schema13 even though targeted isolated tests leave public12 unchanged; full final run records actual versions and zero leaked schemas"
+    },
+    {
+      "scope": "test-only upgrade assertion expansion",
+      "rejected": "compile E0308 Option nesting; a shell newline then ran the previous test binary, so that run/hash manifest is not accepted",
+      "resolution": "final log requires successful current test-target link before subprocess execution; all100 pass with real preserved penalty"
+    },
+    {
+      "scope": "manual background probe preparation",
+      "rejected": "Python quoting error before any fixture/process started",
+      "resolution": "fixed helper; actual default300s scheduler proof passes and owned schema is removed"
+    }
+  ]
+}

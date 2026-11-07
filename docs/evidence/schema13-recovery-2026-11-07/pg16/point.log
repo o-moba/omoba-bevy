@@ -1,0 +1,20 @@
+2026-11-07 05:40:05.098 GMT [648] LOG:  starting PostgreSQL 16.15 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-07 05:40:05.099 GMT [648] LOG:  listening on Unix socket "/tmp/pitr-runtime/native-point-socket/.s.PGSQL.6545"
+2026-11-07 05:40:05.102 GMT [651] LOG:  database system was interrupted; last known up at 2026-11-07 05:39:57 GMT
+2026-11-07 05:40:05.197 GMT [651] LOG:  starting point-in-time recovery to "omoba_fixture_earned"
+2026-11-07 05:40:05.197 GMT [651] LOG:  starting backup recovery with redo LSN 0/D00028, checkpoint LSN 0/D00060, on timeline ID 1
+2026-11-07 05:40:05.229 GMT [651] LOG:  restored log file "00000001000000000000000D" from archive
+2026-11-07 05:40:05.232 GMT [651] LOG:  redo starts at 0/D00028
+2026-11-07 05:40:05.263 GMT [651] LOG:  restored log file "00000001000000000000000E" from archive
+2026-11-07 05:40:05.294 GMT [651] LOG:  restored log file "00000001000000000000000F" from archive
+2026-11-07 05:40:05.304 GMT [651] LOG:  completed backup recovery with redo LSN 0/D00028 and end LSN 0/D00100
+2026-11-07 05:40:05.304 GMT [651] LOG:  consistent recovery state reached at 0/D00100
+2026-11-07 05:40:05.304 GMT [648] LOG:  database system is ready to accept read-only connections
+2026-11-07 05:40:05.305 GMT [651] LOG:  recovery stopping at restore point "omoba_fixture_earned", time 2026-11-07 05:40:01.684578+00
+2026-11-07 05:40:05.305 GMT [651] LOG:  redo done at 0/F016C0 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.07 s
+2026-11-07 05:40:05.305 GMT [651] LOG:  last completed transaction was at log time 2026-11-07 05:40:01.553329+00
+2026-11-07 05:40:05.339 GMT [651] LOG:  selected new timeline ID: 2
+2026-11-07 05:40:05.374 GMT [651] LOG:  archive recovery complete
+2026-11-07 05:40:05.375 GMT [649] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-11-07 05:40:05.389 GMT [649] LOG:  checkpoint complete: wrote 28 buffers (1.4%); 0 WAL file(s) added, 0 removed, 2 recycled; write=0.001 s, sync=0.009 s, total=0.016 s; sync files=20, longest=0.003 s, average=0.001 s; distance=2053 kB, estimate=2053 kB; lsn=0/F01728, redo lsn=0/F01728
+2026-11-07 05:40:05.392 GMT [648] LOG:  database system is ready to accept connections

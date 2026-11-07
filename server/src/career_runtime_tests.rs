@@ -45,6 +45,7 @@ fn addr(port: u16) -> SocketAddr {
 }
 fn profile(id: u64, rating: i32, experienced: bool) -> ProfileSummary {
     let mut p = ProfileSummary::new(format!("{id:064x}"), format!("Hero {id}"));
+    p.completed_public_matches = 10; // Explicit maturity fixture; admission tests use fresh profiles.
     p.rating = rating;
     p.rated_matches = if experienced { 25 } else { 0 };
     p
@@ -86,6 +87,12 @@ fn start(rt: &mut ServerRuntime, now: Instant) {
     ));
     let allocation = rt.career_allocation_for_test().unwrap();
     rt.career.backend.test_ack_start(&allocation.result_id);
+    rt.tick(now, 0.0);
+    assert!(matches!(
+        rt.world.game_state,
+        GameState::Starting { countdown_ms: 0 }
+    ));
+    rt.career.backend.test_ack_gameplay(&allocation.result_id);
     rt.tick(now, 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
 }
@@ -155,6 +162,13 @@ fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocatio
     }
     rt.career.backend.test_ack_start(&allocation.result_id);
     rt.tick(now + Duration::from_millis(4), 0.0);
+    assert_eq!(rt.world.game_state, GameState::Starting { countdown_ms: 0 });
+    assert!(!rt.career_allocation_for_test().unwrap().gameplay_started);
+    assert!(!rt.combat_log.ledger.is_started());
+    assert_eq!(rt.world.players[&addr(59301)].economy.gold, before);
+    rt.career.backend.test_ack_gameplay(&allocation.result_id);
+    rt.tick(now + Duration::from_millis(5), 0.0);
+    assert!(rt.career_allocation_for_test().unwrap().gameplay_started);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_eq!(rt.combat_log.ledger.snapshot().len(), 2);
     assert_eq!(rt.career.queue.len(), 2);
@@ -196,8 +210,8 @@ fn immediate_memory_career_acknowledges_start_and_settle_through_poll() {
     authenticated_join(&mut rt, addr(59302), 2, 1000, false, now);
     rt.tick(now, 0.0);
     rt.tick(now, 3.0);
-    // The durable start was enqueued and answered at once; the next poll
-    // delivers the acknowledgement and the countdown ends without a hook.
+    // Both allocation and gameplay-start checkpoints are acknowledged by
+    // the real port polling contract, without either manual ACK hook.
     let allocation = rt.career_allocation_for_test().unwrap();
     assert!(matches!(
         rt.world.game_state,
@@ -205,6 +219,11 @@ fn immediate_memory_career_acknowledges_start_and_settle_through_poll() {
     ));
     rt.poll_career(now);
     assert!(rt.career.backend.started(&allocation.result_id));
+    rt.tick(now, 0.0);
+    assert_eq!(rt.world.game_state, GameState::Starting { countdown_ms: 0 });
+    assert!(!rt.career.backend.gameplay_committed(&allocation.result_id));
+    rt.poll_career(now);
+    assert!(rt.career.backend.gameplay_committed(&allocation.result_id));
     rt.tick(now, 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
     let later = now + Duration::from_secs(30);
@@ -537,6 +556,29 @@ fn empty_roster_finalizes_abandoned_before_reset_without_ranked_winner() {
     assert!(result.participants[0].disconnected);
 }
 
+// Prior-maturity snapshots for unrelated two-player UDP/store integration cases.
+// The separate process journey creates real synthetic public receipts and proves
+// a standard-map tenth completion; these fixtures keep their existing stat baselines.
+fn qualify_ranked_test_key(url: &str, public_key: &str, nickname: &str) {
+    let admin = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    admin.block_on(async {
+        let store = career_store::CareerStore::connect_runtime(url)
+            .await
+            .unwrap();
+        let profile = store.authenticate(public_key, nickname).await.unwrap();
+        let pool = sqlx::PgPool::connect(url).await.unwrap();
+        sqlx::query("UPDATE career_profiles SET completed_public_matches=10 WHERE profile_id=$1")
+            .bind(&profile.profile_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    });
+}
+
 #[test]
 fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     use ed25519_dalek::Signer;
@@ -569,7 +611,7 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     ));
     rt.career.backend = Box::new(career_backend::CareerBackend::test_with_database(
         rt.server_epoch,
-        url,
+        url.clone(),
         outbox,
     ));
     let sockets = [
@@ -587,6 +629,7 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
+        qualify_ranked_test_key(&url, &public_key, &format!("UDP Hero {index}"));
         let address = socket.local_addr().unwrap();
         let session = format!("live-signed-{index}");
         send(
@@ -637,6 +680,11 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     ));
     pump_worker(&mut rt, &sockets, |rt| {
         rt.career.backend.started(&allocation.result_id)
+    });
+    rt.tick(Instant::now(), 0.0);
+    assert_ne!(rt.world.game_state, GameState::Running);
+    pump_worker(&mut rt, &sockets, |rt| {
+        rt.career.backend.gameplay_committed(&allocation.result_id)
     });
     rt.tick(Instant::now(), 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
@@ -1294,7 +1342,7 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
     ));
     rt.career.backend = Box::new(career_backend::CareerBackend::test_with_database(
         rt.server_epoch,
-        url,
+        url.clone(),
         outbox,
     ));
     let sockets = [
@@ -1312,6 +1360,7 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
+        qualify_ranked_test_key(&url, &public_key, &format!("Tier Hero {index}"));
         let address = socket.local_addr().unwrap();
         let session = format!("tier-signed-{index}");
         send(
@@ -1357,6 +1406,11 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
     let allocation = rt.career_allocation_for_test().unwrap();
     pump_worker(&mut rt, &sockets, |rt| {
         rt.career.backend.started(&allocation.result_id)
+    });
+    rt.tick(Instant::now(), 0.0);
+    assert_ne!(rt.world.game_state, GameState::Running);
+    pump_worker(&mut rt, &sockets, |rt| {
+        rt.career.backend.gameplay_committed(&allocation.result_id)
     });
     rt.tick(Instant::now(), 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
@@ -1469,4 +1523,47 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
     println!(
         "LIVE_TIER_AURA_UDP donation_points=1000 equip=crimson prism_i=refused other_client=crimson expiry=cleared_after_one_refresh"
     );
+}
+
+#[test]
+fn career_season_hint_tracks_the_server_window_without_a_find_request() {
+    use shared::ranked::{SEASON_DURATION_MS, SeasonProfile};
+    let now = Instant::now();
+    let utc = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let mut rt = runtime(MatchConfig::release(1), true);
+    let address = addr(30451);
+    let p = profile(90, 1650, true);
+    rt.career
+        .backend
+        .test_authenticated(address, p.clone(), "window-session");
+    assert_eq!(rt.career_view(address, now).ranked_season_open, None);
+    for (start, open) in [
+        (utc - SEASON_DURATION_MS - 60_000, false),
+        (utc + 60_000, false),
+        (utc - 60_000, true),
+    ] {
+        let mut p = p.clone();
+        p.ranked = Some(SeasonProfile {
+            season_id: 2,
+            started_at_ms: start,
+            ends_at_ms: start + SEASON_DURATION_MS,
+            rated_matches: 0,
+            wins: 0,
+            losses: 0,
+            completed_matches: 0,
+            latest_badge: None,
+        });
+        rt.career
+            .backend
+            .test_authenticated(address, p, "window-session");
+        let view = rt.career_view(address, now);
+        assert_eq!(view.ranked_season_open, Some(open));
+        assert_eq!(view.profile.unwrap().rating, 1650);
+        assert!(rt.career.backend.take_match_requests().is_empty());
+    }
+    rt.career.backend.forget(address);
+    assert_eq!(rt.career_view(address, now).ranked_season_open, None);
 }

@@ -1,0 +1,171 @@
+{
+  "scenario": "drain",
+  "clients": 1,
+  "preference": "bot_practice",
+  "capacity": 2,
+  "limits": {},
+  "max_wait_secs": null,
+  "protocol": 16,
+  "host": {
+    "platform": "darwin",
+    "cpus": 14,
+    "cpu_model": "Apple M4 Pro",
+    "memory_gib": 48
+  },
+  "input_hz_requested": 20,
+  "input_model": "signed_current_pose_transform",
+  "soak_seconds": 1,
+  "started_at": "2026-11-07T03:29:28.511Z",
+  "scenarios": [
+    "raw_ping_no_replication",
+    "allocated_draft_countdown_loading_running",
+    "distinct_workers_and_ten_player_rosters",
+    "lobby_restart_preserves_worker_and_assignment",
+    "maintenance_pauses_new_matches_and_preserves_live_play_fifo_consent"
+  ],
+  "status": "PASS",
+  "arenas": 1,
+  "total_bytes": 297371,
+  "total_datagrams": 329,
+  "elapsed_seconds": 13.685376458,
+  "snapshot_gap_ms": {
+    "p50": 52.742333000000144,
+    "p95": 61.02262499999961,
+    "p99": 61.02262499999961,
+    "max": 61.02262499999961
+  },
+  "per_arena_type": {
+    "bot_practice": {
+      "arenas": 1,
+      "players": 1,
+      "snapshot_gap_ms": {
+        "p50": 52.742333000000144,
+        "p95": 61.02262499999961,
+        "p99": 61.02262499999961,
+        "max": 61.02262499999961
+      },
+      "running_after_secs": {
+        "p50": 12.629785416999999,
+        "p95": 12.629785416999999,
+        "p99": 12.629785416999999,
+        "max": 12.629785416999999
+      },
+      "snapshot_bytes_per_second_per_player": {
+        "p50": 59483.42757154187,
+        "p95": 59483.42757154187,
+        "p99": 59483.42757154187,
+        "max": 59483.42757154187
+      }
+    }
+  },
+  "soak_resources": {
+    "samples": 2,
+    "processes": 2,
+    "cpu_percent_mean": 22.2,
+    "cpu_percent_peak": 31.6,
+    "rss_mib_mean": 38,
+    "rss_mib_peak": 38.1,
+    "per_arena": {
+      "cpu_percent": 22.18,
+      "rss_mib": 38.1
+    }
+  },
+  "running_after_secs": {
+    "p50": 12.629785416999999,
+    "p95": 12.629785416999999,
+    "p99": 12.629785416999999,
+    "max": 12.629785416999999
+  },
+  "recovery": {
+    "checks": [
+      {
+        "name": "lobby_restart_adopts_live_worker",
+        "status": "PASS",
+        "old_lobby_pid": 68587,
+        "new_lobby_pid": 69014,
+        "worker_pid": 68627,
+        "server_epoch": 1794022176051834001,
+        "endpoint": "127.0.0.1:46600",
+        "roster": [
+          "1",
+          "10",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9"
+        ]
+      }
+    ],
+    "allocation_id": "6362b92203fa627a904dc91a827f77ed",
+    "worker_pid": 68627
+  },
+  "drain": {
+    "status": "PASS",
+    "operation_id": "b3bbae78e71694412b0d79f7798d9daf",
+    "restart_operation_id": "802a69c034f430fe5ef6aa3706fd0041",
+    "capacity": 2,
+    "existing_allocation": "6362b92203fa627a904dc91a827f77ed",
+    "new_allocation": "1a14632b83f41f056de3e3d9cc42d058",
+    "paused_ready_without_penalty": true,
+    "late_decline_rejected": true,
+    "new_search_correlated_refusal": true,
+    "existing_worker_advanced": true,
+    "fresh_consent_required": true,
+    "lobby_restart_keeps_drain_and_adopted_workers": true,
+    "resume_allowed_during_drain": true,
+    "observation_seconds": 16
+  },
+  "total_transforms_sent": 1123,
+  "total_sent_datagrams": 1661,
+  "total_sent_bytes": 870017,
+  "resources": [
+    {
+      "at": "2026-11-07T03:29:30.040Z",
+      "wall_ms": 1548.664709,
+      "processes": 1,
+      "cpu_percent": 89.8,
+      "rss_mib": 9.75,
+      "cpu_seconds": 0.67
+    },
+    {
+      "at": "2026-11-07T03:29:35.058Z",
+      "wall_ms": 6567.008792,
+      "processes": 2,
+      "cpu_percent": 61.5,
+      "rss_mib": 27.625,
+      "cpu_seconds": 1.73,
+      "cpu_percent_interval": 21.12250540154921
+    },
+    {
+      "at": "2026-11-07T03:29:40.088Z",
+      "wall_ms": 11597.088292,
+      "processes": 2,
+      "cpu_percent": 6.9,
+      "rss_mib": 36.6875,
+      "cpu_seconds": 2.9299999999999997,
+      "cpu_percent_interval": 23.85648179119236
+    },
+    {
+      "at": "2026-11-07T03:29:42.685Z",
+      "wall_ms": 14193.959125,
+      "processes": 2,
+      "cpu_percent": 92.4,
+      "rss_mib": 38.03125,
+      "cpu_seconds": 3.75,
+      "cpu_percent_interval": 31.57646462734177
+    },
+    {
+      "at": "2026-11-07T03:29:43.702Z",
+      "wall_ms": 15211.01775,
+      "processes": 2,
+      "cpu_percent": 14.9,
+      "rss_mib": 38.0625,
+      "cpu_seconds": 3.88,
+      "cpu_percent_interval": 12.781957382250182
+    }
+  ]
+}

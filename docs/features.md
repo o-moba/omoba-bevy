@@ -1,5 +1,80 @@
 # Feature Inventory
 
+## Ranked matchmaking readiness (2026-11-05)
+
+A found match that falls apart before it starts no longer drops everyone: the
+lobby returns the other humans to the queue with their place and the client
+searches again with a notice; the member who cancelled a found Ranked match waits
+a minute. The Ranked window widens with the wait (300 → 600 points over four
+minutes, newcomer and veteran brackets merge after five) so ten humans across
+cohorts can meet; parties stay one cohort. Ready 5v5 rosters take a scarce arena
+before solo bot games. Lobby ceilings are sized for ~1000 players (configurable
+queue, 2048 endpoints, carrier-grade-NAT per-IP limits, `server_full`/`lobby_busy`
+instead of silence), the party lobby stops broadcasting on every heartbeat, party
+refusals and all lobby/prematch messages reach players as localized text, and the
+portal gains a leaderboard with an opt-out. See
+[match progression](match-progression.md#ranked-window-at-low-population-lr-35),
+[the plan](plans/ranked-launch-readiness-2026-11-05.md) and ADR-027.
+
+## Connected playing-load evidence (unreleased)
+
+A guarded loopback runner drives signed native clients in ten-client AI shards
+and records actual received UDP bytes, complete snapshots and decoding errors.
+It requires simultaneous fresh Running state, unique profiles and matching
+ten-human immutable worker receipts, with generator resources measured separately.
+A short1000-client/100-arena Casual run passes on M4 Pro with zero server bots;
+received snapshot cadence falls below20Hz, so egress/latency and RU-host capacity
+remain open. See [load procedure](public-mvp.md#native-playing-load-evidence).
+
+## Maintenance drain runtime (C2, in progress)
+
+The lobby can pause new matches while active workers finish normally. Pending
+confirmations return to their original party/FIFO entries without dodge strikes;
+new/paused searches receive localized maintenance text and remain cancellable.
+A unique operator marker is acknowledged in capacity reports; invalid markers
+fail closed. Current matches and Resume survive an actual draining-lobby
+restart. Removing the marker requires a fresh confirmation before a new match.
+Runtime, native state/localization and signed process checks pass; host update
+controller integration, full CI and RU rollout remain required.
+
+## Fair play: remake and surrender (C5, unreleased)
+
+Authenticated teammates can start a remake before minute 3 when a teammate has
+been continuously absent for 90 seconds, or surrender from minute 10. Votes last
+30 seconds; a failed vote has a 120-second cooldown. A remake needs a strict
+majority of the remaining eligible humans; surrender needs four of five, or all
+remaining humans when fewer than four remain. Bots cannot vote. Round and vote
+generations prevent stale or opposing-team ballots from affecting the decision.
+
+Remakes have a distinct history result: innocent players receive no ordinary
+match/rating/XP credit, while a proved ranked leaver keeps the personal penalty.
+Surrender awards an ordinary win/loss with an explicit surrender explanation.
+Native pause controls and a live voting prompt use server eligibility; the portal
+shows neutral remakes, personal remake forfeits and surrender separately.
+Protocol 15 and career schema 8 require coordinated client/server rollout.
+
+## Ranked eligibility (C6, in progress)
+
+Ranked opens after ten completed public games, including approved public vs-Bots
+and Casual PvP. A separate authoritative counter excludes remakes, interruptions,
+custom/offline practice and the player's proved leaves/AFK. The store increments
+it exactly once with settlement and migrates trusted historical completions.
+New Ranked searches read current progress asynchronously; new allocations check
+all profiles under locks. Existing allocations/recovery remain usable. Home
+shows completed-public progress and disables Ranked until it reaches10. Linking
+VK is optional. Core schema9 is required. Full software/public CI proves wire
+denial at0/9 and acceptance after a real tenth standard-map public completion
+without VK; fresh affected-screen native visual acceptance remains pending.
+
+## TLS dependency maintenance (unreleased)
+
+The existing HTTP/database TLS dependency is locked to Rustls0.23.46, covering
+the four open0.23.25 advisory ranges found during release review. The update
+adds no packages and keeps certificate validation enabled. See the upstream
+[release and advisories](https://github.com/rustls/rustls/releases/tag/v/0.23.46).
+Local650 PG/API/server tests and strict affected-crate clippy pass; fresh full
+CI is still required. This is not a complete dependency security audit.
+
 ## Classic hero design authoring foundation
 
 The existing game-contract exporter also publishes a versioned hero design
@@ -511,7 +586,7 @@ Starting durability and Q intervals now leave an early response window; levels i
 
 ## Public multiplayer MVP (0.22.0-rc.2)
 
-The public lobby offers Casual PvP (30-second bot fallback, never rated), Ranked (ten humans of one cohort, never bot-filled) and vs Bots; see [LR-08](#ranked-casual-pvp-and-vs-bots-lr-08-unreleased). Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
+The public lobby offers Casual PvP (30-second bot fallback, never rated), Ranked (ten humans of one cohort, never bot-filled) and vs Bots; see [LR-08](#ranked-casual-pvp-and-vs-bots-lr-08-unreleased). Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. A terminal arena releases its port as soon as this lobby reaps the exact child; live children and adopted processes without exit proof keep their safety hold. Retained receipts sharing a reused bind endpoint count as one occupied port after restart. Handoff status and cancellation are refreshed once per bounded view batch (at most four times per second), shared by every player; fresh search/cancel admission still reads current state. Observed settlement cannot revert to a playable handoff, and cancelling an already ended allocation creates no dodge penalty. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
 
 ## Shared running and VRM skeletal motion (0.21.0-rc.5)
 
@@ -525,8 +600,14 @@ Canonical version: `0.32.0`
 
 Normal Find match assigns a team and map side automatically. Each assigned team
 can inspect accepted avatar/class choices, choose an intended Solo, Jungle, Mid,
-Carry or Support role, and lock or unlock its choice. Duplicate and composition
-warnings inform the team without banning duplicate classes or roles. The shared stage displays up to five teammates.
+Carry or Support role, and lock or unlock its choice. A class locked by a human
+teammate is shown as Taken and cannot be selected or locked by another teammate;
+the opposite team may mirror it. Avatar and role composition warnings remain
+advisory. The shared stage displays up to five teammates. At selection expiry,
+valid human locks are preserved, idle collisions receive available free classes,
+and bots fill the remaining classes. The public formation boundary applies this
+rule even when a client opts out of the draft; existing durable/played rosters
+retain their original metadata.
 
 The shared three-second countdown begins after everyone locks, or after the
 selection deadline expires and pending avatar checks finish. The
@@ -1559,3 +1640,51 @@ the aura on and off; ongoing bots, jungle and HUD work prevent isolating its GPU
 cost. The earlier 35-element body-glow captures remain historical. See
 [Supporter operations](supporter.md#live-hero-world-verification) for results,
 limits and the reproducible QA scope. No real payment or deployment is implied.
+
+## Bounded lobby selection and views (#21, unreleased)
+
+Ranked candidates are swept through the shared rating/newcomer policy windows.
+Only a bounded oldest set per party size enters exact team packing; mandatory
+anchors, Casual bot-fill eligibility, party integrity and FIFO behavior remain
+preserved. Queue counts use shared250ms indexed snapshots while visible elapsed
+times remain current. The capacity line retains exact roster positions and
+invalidates on membership/policy/source-capacity changes, not heartbeat renewal.
+A private lobby account request immediately replies to its endpoint; the usual
+periodic broadcast continues independently for all players.
+
+Authorization refresh is paced through bounded oldest-due jobs; a missing DB
+reply still expires authority at the original30s boundary. Profile presence is
+deduplicated across devices and written in512-entry store batches. Consecutive
+account reads use a bounded4-task batch on the existing pool/runtime; non-read
+barriers and older parked operations keep their order.
+
+Independent subset oracles, randomized legacy-view comparisons and649 real
+PG/API/server tests pass locally. Algorithm timings at1000/4096 waiters are
+recorded separately from signed process load and do not certify playing capacity
+or the RU host. See the [progress record](progress/2026-11-05-ranked-matchmaking-readiness.md).
+
+The current candidate retains immediate signed ready/cancel effects at packet
+receipt and performs common lobby account maintenance from tick. Its bounded
+receive slice is8ms/128 packets; game workers/private servers retain2ms/128.
+Real signed ready-timeout/FIFO/replacement, party departure and unique-draft
+journeys pass, as does a ten-client queue/presence smoke. The1000-client run
+reaches all targets Waiting but FAILs final Busy-error acceptance; throughput
+work continues. This is not a capacity certification.
+
+### Verified local queue and arena samples
+
+The follow-up query candidate passes650 real PG/API/server tests. One statement
+returns the same bounded supporter grants, points and optional aura preference
+as the old read-only transaction, including explicit opt-out and expiry rules.
+This removes repeated account-refresh roundtrips without weakening access checks.
+
+Actual signed1000-client Casual search now passes with all targets Waiting, no
+final account/socket errors or ServerFull, fresh request-correlated career views
+and1000 fresh DB presence rows. The disclosed capacity-holder is excluded from
+target counts. A separate raw transport probe admits2048 endpoints and returns
+non-amplifying ServerFull to the next; global and per-source limits are both2048
+in that proof, not independently distinguished. It creates no accounts/arenas.
+
+A100-arena vs-Bots sample passes with100 connected humans and900 server bots.
+These are local Mac measurements;1000 connected playing humans, reduced snapshot
+traffic and measured RU-host capacity remain required.

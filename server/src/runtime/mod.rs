@@ -89,6 +89,8 @@ impl ServerRuntime {
 }
 
 pub(crate) struct ServerRuntime {
+    pub(crate) fair_play: crate::fair_play::FairPlay,
+    pub(crate) match_votes: crate::match_votes::MatchVotes,
     pub(crate) session_recovery: crate::session_recovery::SessionRecovery,
     pub(crate) sandbox: Option<sandbox::SandboxRuntime>,
     pub(crate) match_service: match_service::MatchService,
@@ -205,6 +207,8 @@ impl ServerRuntime {
     ) -> Self {
         let now = clock.now();
         Self {
+            fair_play: Default::default(),
+            match_votes: Default::default(),
             session_recovery: Default::default(),
             sandbox: None,
             match_service: match_service::MatchService::default(),
@@ -243,7 +247,53 @@ impl ServerRuntime {
     }
 }
 
+impl ServerRuntime {
+    fn shutdown_gracefully(&mut self) -> io::Result<()> {
+        let now = self.clock.now();
+        let outcome = if self.match_started_at.is_some() {
+            shared::career::MatchOutcome::Interrupted
+        } else {
+            shared::career::MatchOutcome::Abandoned
+        };
+        self.finish_career_round(outcome, None, now);
+        if let match_service::MatchService::Worker(worker) = &mut self.match_service {
+            worker.aborted = !matches!(
+                self.world.game_state,
+                shared::wire::GameState::Victory { .. }
+            );
+            worker.last_status = None;
+        }
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let now = self.clock.now();
+            let flushed = self.flush_career_for_shutdown(now);
+            if flushed && let match_service::MatchService::Worker(worker) = &mut self.match_service
+            {
+                // The final terminal receipt must not wait for the normal 1 s
+                // heartbeat: exiting with a stale Settling receipt would spawn
+                // an unnecessary recovery worker despite successful settlement.
+                worker.last_status = None;
+            }
+            if self.match_service.worker().is_some() {
+                self.tick_match_service(now);
+            }
+            self.send_career_views(now);
+            if flushed {
+                println!("SHUTDOWN_METRIC terminal_outbox=durable");
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other(
+                    "Graceful shutdown could not confirm the durable outbox within 15 seconds; preserve outboxes and inspect storage errors",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
 pub(crate) fn run() -> io::Result<()> {
+    let shutdown = crate::shutdown::ShutdownSignal::install()?;
     shared::catalog::ensure_loaded();
     // The one environment read of the avatar roster source; admission and
     // slug normalization use this roster for the process lifetime.
@@ -350,6 +400,9 @@ pub(crate) fn run() -> io::Result<()> {
         println!("Combat Sandbox enabled (local, unrated)");
     }
     loop {
+        if shutdown.requested() {
+            return runtime.shutdown_gracefully();
+        }
         let step_started = Instant::now();
         let (now, dt) = runtime.prepare_tick();
         runtime.tick(now, dt);

@@ -1,0 +1,125 @@
+{
+  "status": "TARGETED_PASS_FULL_CI_PENDING",
+  "baseline": "84fa23443bbf664902152b718877e16a41555802",
+  "ci": {
+    "run": 42268366799,
+    "postgres_job": 128066152395,
+    "status": "FAIL",
+    "other_jobs": "6 of 7 PASS",
+    "artifact_id": 13529266556,
+    "artifact_sha256": "d8e9003975af2d1cc74b20058fd6ec799544a39c791c043b104d18f104da4be1",
+    "failure": "party-draft waited45s for all10 seats; client6 remained outside the9-seat Draft",
+    "observed_endpoint_reuse": {
+      "new_worker_client_index": 6,
+      "new_worker_local_port": 59898,
+      "former_lobby_client_index": 7,
+      "former_lobby_port": 59898
+    },
+    "interpretation": "Late lobby packets can reach the new worker socket after OS endpoint reuse. The probe accepted every sender and could replace worker epoch/authentication. A controlled replay reproduces the fault. Native transport already uses a connected UDP socket."
+  },
+  "change": "Filter every probe datagram by the current loopback peer port before decoding; retain old-socket identity fence; exercise both stale callback and same-new-socket old-lobby packets on each flagged handoff. No server/production/CI workflow change.",
+  "checks": {
+    "node_socket_tests": {
+      "passed": 3,
+      "failed": 0
+    },
+    "python_policy_tests": {
+      "passed": 5,
+      "failed": 0
+    },
+    "negative_control": {
+      "status": "EXPECTED_FAILURE",
+      "without": "sender port filter",
+      "observed": "stale lobby auth enters new worker context"
+    },
+    "actual_party_process": {
+      "status": "PASS",
+      "checks": [
+        {
+          "name": "five_stack_signed_invite_accept",
+          "status": "PASS",
+          "party_id": 1,
+          "members": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "name": "ranked_party_team_and_held_draft",
+          "status": "PASS",
+          "allocation_id": "c6cba0437996cb2db77d230b609d286a",
+          "team": "green",
+          "humans": 10,
+          "bots": 0
+        },
+        {
+          "name": "draft_departure_requeues_nine_without_credit",
+          "status": "PASS",
+          "exit": "leave",
+          "original_queue_ages_secs": [
+            6,
+            6,
+            6,
+            6,
+            6,
+            6,
+            6,
+            6,
+            6,
+            0
+          ],
+          "elapsed_secs": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            10
+          ],
+          "all_profiles_unchanged": true,
+          "all_histories_empty": true,
+          "all_survivors_received_return_code": true,
+          "dodger_code": "dodge_cooldown"
+        },
+        {
+          "name": "stale_ready_search_id_refresh",
+          "status": "PASS",
+          "clients": 10,
+          "explicit_current_search_consent": true
+        },
+        {
+          "name": "replacement_party_ranked_running",
+          "status": "PASS",
+          "allocation_id": "1d0a33e9b807a732fb84746bb26eb7d2",
+          "humans": 10,
+          "bots": 0,
+          "party_team": "green"
+        }
+      ],
+      "stale_handoff_checks": 20,
+      "stale_endpoint_checks": 20,
+      "report_sha256": "9ac3c380f1b8e212c60520693bfbdb6d976d070671664fd823cd63f4036ef4d7",
+      "report_local_path": ".agent/codex-ranked-readiness/p9-party-leave-endpoint-v1/report.json",
+      "database": "owned loopback disposable omoba_test on55582",
+      "prerequisites": "synthetic10 public Casual completion receipts per test profile, not10 played games",
+      "server_binary_sha256": "04950a93d8fe6593bbf228c6cb1c88d248e0302d04f7fe2de123258b04dfc950"
+    }
+  },
+  "source_sha256": {
+    "scripts/public_probe_socket.mjs": "d8a4c2bfd291f5bb6f5ef2f23bb4ec6c21a5a5852e9964bf8d173cf6df57f8e1",
+    "scripts/test_public_probe_socket.mjs": "4d4faac35adbfd3666e3075c0a0d709e87c5c5f395e808617d1fcebacb7b1dc1",
+    "scripts/test_public_mvp.mjs": "981330cd1ad3a1ad3be5733c41c6bcfa90407dafd795867ad1924592013999de",
+    "scripts/test_public_mvp_policy.py": "0330c18df5050e96c319adc8965c5be37bc9a52604bec303f6d11bc094bb59be"
+  },
+  "limits": [
+    "Fresh complete branch CI remains required.",
+    "No winner/settlement/physical-phone/WAN/RU-host evidence in this targeted process run.",
+    "Current UI WIP has not been compiled or visually accepted: root disk below20GiB stops heavy builds."
+  ]
+}

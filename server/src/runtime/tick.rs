@@ -23,6 +23,22 @@ impl ServerRuntime {
         self.sandbox.as_mut().map_or((now, dt), |s| s.advance(dt))
     }
 
+    /// Unplayed cancellation has no result receipt to open a result screen.
+    /// Repeat its draft return code throughout retirement, so a dropped UDP
+    /// snapshot cannot leave survivors waiting on a worker that already ended.
+    fn send_retired_worker_views(&mut self, now: Instant) {
+        if self.match_started_at.is_none()
+            && self
+                .match_service
+                .worker()
+                .is_some_and(|w| w.aborted && !w.recovery)
+        {
+            self.tick_prematch(now);
+            self.broadcast_snapshots(now, self.career_flow_active());
+        }
+        self.send_career_views(now);
+    }
+
     /// Advances the world by one simulation step and sends what changed.
     pub(crate) fn tick(&mut self, now: Instant, dt: f32) {
         common::tick::prepare(&mut self.world, &mut self.combat_log, now, dt);
@@ -38,7 +54,7 @@ impl ServerRuntime {
             .worker()
             .is_some_and(|w| w.recovery || w.aborted)
         {
-            self.send_career_views(now);
+            self.send_retired_worker_views(now);
             return;
         }
         // Completed workers keep repeating Victory snapshots throughout their
@@ -51,9 +67,8 @@ impl ServerRuntime {
         });
         self.enforce_match_lifecycle(now);
         if self.match_service.worker().is_some_and(|w| w.aborted) {
-            // A retired worker stops simulating at once; its players get the
-            // terminal receipt through their career views.
-            self.send_career_views(now);
+            // Keep terminal views flowing without advancing gameplay.
+            self.send_retired_worker_views(now);
             return;
         }
         self.refresh_takeover_controllers(now);
@@ -76,6 +91,12 @@ impl ServerRuntime {
             tick_match_formation(&mut self.world, self.rules, dt, now);
         }
         self.track_round_start(now);
+        self.observe_fair_play(now, false);
+        self.tick_match_votes(now);
+        if self.match_service.worker().is_some_and(|w| w.aborted) {
+            self.send_retired_worker_views(now);
+            return;
+        }
         common::tick::skills(&mut self.world, &mut self.combat_log, now, dt);
         self.simulate_bots(now, dt);
         self.simulate_sandbox(now, dt);

@@ -38,5 +38,14 @@
   "home.recovery.bot": "Бот",
   "home.recovery.idle": "Ожидание",
   "home.recovery.seat": "{name} · {policy}",
-  "home.recovery.team": "Управление союзниками ({count})"
+  "home.recovery.team": "Управление союзниками ({count})",
+  "home.rating.pending": "Рейтинг · Таблица игроков",
+  "home.rating.newcomer": "Рейтинг {rating} · Калибровка {played}/{total}",
+  "home.rating.rated": "Рейтинг {rating} · {tier}",
+  "home.ranked.rating": "Рейтинговый\nРейтинг {rating}",
+  "home.button.leaderboard": "Таблица игроков",
+  "home.leaderboard.error": "Не удалось открыть таблицу игроков. Повторите попытку.",
+  "home.recovery.afk": "Вы были неактивны: героем управляет ИИ. Двигайтесь или примените умение, чтобы вернуть управление. Отметка AFK сохранится до конца матча.",
+  "home.ranked.locked": "Ranked закрыт\nМатчи {played}/{total}",
+  "home.ranked.between_seasons": "Ranked\nМежсезонье"
 }

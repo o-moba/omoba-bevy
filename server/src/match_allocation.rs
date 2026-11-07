@@ -15,6 +15,8 @@ use shared::wire::ClientPacket;
 use crate::runtime::ServerRuntime;
 use crate::session::normalize_session_id;
 
+pub(crate) mod releases;
+
 pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -22,7 +24,7 @@ pub(crate) fn unix_ms() -> u64 {
         .as_millis()
         .min(u64::MAX as u128) as u64
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct AllocatedHuman {
     pub profile_id: String,
     pub session_id: String,
@@ -30,6 +32,8 @@ pub(crate) struct AllocatedHuman {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranked_season_id: Option<u64>,
     pub version: u32,
     pub allocation_id: String,
     pub endpoint: String,
@@ -37,12 +41,18 @@ pub(crate) struct Manifest {
     pub preference: MatchPreference,
     pub humans: Vec<AllocatedHuman>,
     pub join_deadline_ms: u64,
+    /// The widened rated cohort a Ranked roster was formed with (LR-35):
+    /// `[spread, merge_newcomers]`, absent for the base cohort and for every
+    /// other queue. Additive: older manifests on disk read as the base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cohort: Option<(i32, bool)>,
 }
 impl Manifest {
     pub fn validate(&self) -> Result<(), String> {
         let ids: HashSet<_> = self.humans.iter().map(|h| &h.profile_id).collect();
         let sessions: HashSet<_> = self.humans.iter().map(|h| &h.session_id).collect();
-        if self.version != 1
+        if self.ranked_season_id.is_some_and(|id| id == 0 || id > i64::MAX as u64 || !self.preference.rated())
+            || self.version != 1
             || self.allocation_id.len() != 32
             || !self.allocation_id.bytes().all(|b| b.is_ascii_hexdigit())
             || self.humans.is_empty()
@@ -62,6 +72,13 @@ impl Manifest {
                 .any(|t| self.humans.iter().filter(|h| h.team == *t).count() > 5)
             // Ranked is ten humans; it is never filled with bots.
             || (self.preference == MatchPreference::Ranked && self.humans.len() != 10)
+            // A widened cohort belongs to Ranked and stays within the policy's caps.
+            || self.cohort.is_some_and(|(spread, _)| {
+                self.preference != MatchPreference::Ranked
+                    || !(omoba_career_store::matchmaking::MAX_RATING_SPREAD
+                        ..=omoba_career_store::matchmaking::MAX_WIDENED_SPREAD)
+                        .contains(&spread)
+            })
             // Bot practice seats one player or one party, all on one team.
             || (self.preference == MatchPreference::BotPractice
                 && (self.humans.len() > shared::party::MAX_PARTY_SIZE
@@ -121,6 +138,13 @@ pub(crate) struct Status {
     /// abandoned-match reaping. The lobby shows it to a player who left (LR-13).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ends_by_ms: Option<u64>,
+    /// Sessions of the allocated humans who have joined this worker. Before
+    /// the match starts, the lobby re-queues these when the allocation ends
+    /// (LR-32); a human who never came is not re-queued. Additive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub joined_sessions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub released_sessions: Vec<String>,
 }
 impl Status {
     /// The match was played: it is running or ended with a winner.
@@ -156,6 +180,11 @@ pub(crate) struct Worker {
     pub booted_at: Instant,
     pub last_status: Option<Instant>,
     pub terminal_at: Option<Instant>,
+    /// An allocated human joined at least once. A worker nobody ever reached
+    /// aborts early instead of holding its arena for the whole join deadline.
+    pub saw_human: bool,
+    pub released: Vec<String>,
+    pub last_release_scan: Option<Instant>,
 }
 impl Worker {
     pub fn cancelled(&self) -> bool {
@@ -174,6 +203,9 @@ impl ServerRuntime {
         };
         let profile = self.career.backend.profile(addr)?;
         if self.career.backend.authenticated_session(addr).as_deref() != Some(session) {
+            return None;
+        }
+        if worker.released.iter().any(|s| s == session) {
             return None;
         }
         worker.manifest.team(&profile.profile_id, session)
@@ -209,16 +241,21 @@ impl ServerRuntime {
     }
     pub(crate) fn allocated_humans_ready(&self) -> bool {
         self.match_service.worker().is_none_or(|worker| {
-            worker.manifest.humans.iter().all(|h| {
-                self.world.players.values().any(|p| {
-                    p.joined
-                        && !p.hero.identity.is_bot
-                        && p.session_id.as_deref() == Some(h.session_id.as_str())
-                        && p.career_profile
-                            .as_ref()
-                            .is_some_and(|p| p.profile_id == h.profile_id)
+            worker
+                .manifest
+                .humans
+                .iter()
+                .filter(|h| !worker.released.contains(&h.session_id))
+                .all(|h| {
+                    self.world.players.values().any(|p| {
+                        p.joined
+                            && !p.hero.identity.is_bot
+                            && p.session_id.as_deref() == Some(h.session_id.as_str())
+                            && p.career_profile
+                                .as_ref()
+                                .is_some_and(|p| p.profile_id == h.profile_id)
+                    })
                 })
-            })
         })
     }
 }
@@ -228,6 +265,7 @@ mod tests {
     use shared::map::Team;
     fn fixture() -> Manifest {
         Manifest {
+            ranked_season_id: None,
             version: 1,
             allocation_id: "a".repeat(32),
             endpoint: "127.0.0.1:41000".into(),
@@ -239,6 +277,7 @@ mod tests {
                 team: shared::map::Team::Green,
             }],
             join_deadline_ms: 1,
+            cohort: None,
         }
     }
     #[test]
@@ -321,6 +360,7 @@ pub(crate) mod runtime_tests {
             .test_authenticated(addr, profile.clone(), "seat-a");
         rt.match_service = crate::match_service::MatchService::Worker(Worker {
             manifest: Manifest {
+                ranked_season_id: None,
                 version: 1,
                 allocation_id: "b".repeat(32),
                 endpoint: "127.0.0.1:41000".into(),
@@ -332,6 +372,7 @@ pub(crate) mod runtime_tests {
                     team: shared::map::Team::Blue,
                 }],
                 join_deadline_ms: unix_ms() + 180_000,
+                cohort: None,
             },
             directory: std::env::temp_dir().join(format!(
                 "omoba-allocation-test-{}-{}",
@@ -344,6 +385,9 @@ pub(crate) mod runtime_tests {
             booted_at: Instant::now(),
             last_status: None,
             terminal_at: None,
+            saw_human: false,
+            released: Vec::new(),
+            last_release_scan: None,
         });
         let join = ClientPacket::Join {
             handheld: Default::default(),
@@ -358,11 +402,44 @@ pub(crate) mod runtime_tests {
         };
         (rt, addr, join)
     }
+
+    #[test]
+    fn casual_leave_releases_only_the_exact_profile_session_and_keeps_other_reserved_seats() {
+        let (mut rt, member, _) = fixture();
+        let outsider = "127.0.0.1:60309".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            outsider,
+            shared::career::ProfileSummary::new("c".repeat(64), "Other".into()),
+            "seat-a",
+        );
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.humans.push(AllocatedHuman {
+                profile_id: "d".repeat(64),
+                session_id: "seat-b".into(),
+                team: Team::Blue,
+            });
+        }
+        rt.leave_match(outsider, Instant::now());
+        assert!(
+            rt.match_service.worker().unwrap().released.is_empty(),
+            "session collision must not release someone else's allocation"
+        );
+        rt.leave_match(member, Instant::now());
+        let worker = rt.match_service.worker().unwrap();
+        assert_eq!(worker.released, ["seat-a"]);
+        assert!(
+            !worker.aborted,
+            "the other allocated player may still arrive"
+        );
+    }
     #[test]
     fn only_allocated_profile_and_session_can_cancel_an_unstarted_worker() {
         use ed25519_dalek::{Signer, SigningKey};
         use shared::career::{CareerAction, CareerRequest, authorized_signing_bytes};
         let (mut rt, member, _) = fixture();
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.preference = MatchPreference::Ranked;
+        }
         let now = Instant::now();
         let directory = rt.match_service.worker().unwrap().directory.clone();
         fs::create_dir_all(&directory).unwrap();
@@ -420,6 +497,126 @@ pub(crate) mod runtime_tests {
     }
 
     #[test]
+    fn gameplay_leave_cancels_only_its_unstarted_ranked_allocation_and_blocks_rejoin() {
+        let (mut rt, member, join) = fixture();
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.preference = MatchPreference::Ranked;
+        }
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let cancellation = directory.join("cancel.json");
+        let now = Instant::now();
+        let outsider = "127.0.0.1:60303".parse().unwrap();
+        let wrong_session = "127.0.0.1:60304".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            outsider,
+            shared::career::ProfileSummary::new("c".repeat(64), "Other".into()),
+            "seat-a",
+        );
+        rt.career.backend.test_authenticated(
+            wrong_session,
+            shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+            "other-session",
+        );
+        for addr in [outsider, wrong_session] {
+            rt.handle_packet(addr, ClientPacket::Leave, now);
+            assert!(
+                !cancellation.exists(),
+                "a foreign profile/session cancelled the draft"
+            );
+            assert!(!rt.match_service.worker().unwrap().aborted);
+        }
+        rt.handle_packet(member, ClientPacket::Leave, now);
+        rt.handle_packet(member, ClientPacket::Leave, now);
+        let left: Vec<String> = serde_json::from_slice(&fs::read(cancellation).unwrap()).unwrap();
+        assert_eq!(left, ["seat-a"]);
+        assert!(rt.match_service.worker().unwrap().aborted);
+        assert!(
+            !rt.authorize_allocated_join(member, &join),
+            "late Join revived a cancelled allocation"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gameplay_leave_does_not_cancel_a_started_ranked_worker() {
+        let (mut rt, member, _) = fixture();
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.preference = MatchPreference::Ranked;
+        }
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let now = Instant::now();
+        rt.match_started_at = Some(now);
+        rt.handle_packet(member, ClientPacket::Leave, now);
+        assert!(!directory.join("cancel.json").exists());
+        assert!(!rt.match_service.worker().unwrap().aborted);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn aborted_ranked_draft_repeats_return_views_without_simulating_for_leave_or_deadline() {
+        for explicit_leave in [true, false] {
+            let (mut rt, member, mut join) = fixture();
+            rt.rules = crate::match_rules::MatchRules::from(MatchConfig {
+                mode: MatchMode::Release,
+                team_size: 5,
+            });
+            let survivor: SocketAddr = "127.0.0.1:60305".parse().unwrap();
+            let other = shared::career::ProfileSummary::new("c".repeat(64), "Bob".into());
+            rt.career
+                .backend
+                .test_authenticated(survivor, other.clone(), "seat-b");
+            if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+                worker.manifest.preference = MatchPreference::Ranked;
+                worker.manifest.humans.push(AllocatedHuman {
+                    profile_id: other.profile_id,
+                    session_id: "seat-b".into(),
+                    team: Team::Green,
+                });
+            }
+            if let ClientPacket::Join { prematch, .. } = &mut join {
+                *prematch = true;
+            }
+            let mut other_join = join.clone();
+            if let ClientPacket::Join { session_id, .. } = &mut other_join {
+                *session_id = Some("seat-b".into());
+            }
+            let directory = rt.match_service.worker().unwrap().directory.clone();
+            fs::create_dir_all(&directory).unwrap();
+            let now = rt.clock.now();
+            rt.handle_packet(member, join, now);
+            rt.handle_packet(survivor, other_join, now);
+            assert!(rt.world.players[&survivor].joined);
+            if explicit_leave {
+                rt.handle_packet(member, ClientPacket::Leave, now);
+            } else {
+                if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+                    worker.manifest.join_deadline_ms = 0;
+                }
+                rt.tick_match_service(now);
+            }
+            assert!(rt.match_service.worker().unwrap().aborted);
+            let gold = rt.world.players[&survivor].economy.gold;
+            let before = rt.snapshot_tick;
+            for step in 1..=2 {
+                rt.tick(now + Duration::from_millis(100 * step), 0.1);
+                assert_eq!(
+                    rt.world.players[&survivor].draft.error.as_deref(),
+                    Some("allocation_cancelled_or_expired")
+                );
+                assert_eq!(rt.world.players[&survivor].economy.gold, gold);
+                assert!(rt.match_started_at.is_none());
+            }
+            assert!(
+                rt.snapshot_tick >= before + 2,
+                "retired draft stopped publishing its return signal"
+            );
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
     fn allocated_practice_forces_draft_team_and_durable_start() {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now();
@@ -443,6 +640,11 @@ pub(crate) mod runtime_tests {
         assert!(!allocation.rated);
         assert_eq!(allocation.participants.len(), 10);
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
     }
 
@@ -459,6 +661,7 @@ pub(crate) mod runtime_tests {
                 })
                 .collect();
             let manifest = Manifest {
+                ranked_season_id: None,
                 version: 1,
                 allocation_id: "c".repeat(32),
                 endpoint: "127.0.0.1:41000".into(),
@@ -466,6 +669,7 @@ pub(crate) mod runtime_tests {
                 preference,
                 humans: humans.clone(),
                 join_deadline_ms: unix_ms() + 180_000,
+                cohort: None,
             };
             assert_eq!(manifest.validate(), Ok(()));
             let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -493,6 +697,9 @@ pub(crate) mod runtime_tests {
                 booted_at: Instant::now(),
                 last_status: None,
                 terminal_at: None,
+                saw_human: false,
+                released: Vec::new(),
+                last_release_scan: None,
             });
             let now = Instant::now();
             for (i, human) in humans.iter().enumerate() {
@@ -573,6 +780,11 @@ pub(crate) mod runtime_tests {
         let allocation = rt.career_allocation_for_test().unwrap();
         assert_eq!(allocation.ruleset, "public-casual-v1");
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         assert!(
             rt.rules.debug_commands,
@@ -602,6 +814,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -653,6 +870,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -682,6 +904,11 @@ pub(crate) mod runtime_tests {
             rt.begin_career_round(now);
             let result = rt.career_allocation_for_test().unwrap();
             rt.career.backend.test_ack_start(&result.result_id);
+            assert!(
+                !rt.begin_career_round(now),
+                "gameplay activation also needs an ACK"
+            );
+            rt.career.backend.test_ack_gameplay(&result.result_id);
             assert!(rt.begin_career_round(now));
             rt.world.game_state = GameState::Running;
             rt.match_started_at = Some(now);
@@ -721,6 +948,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -800,6 +1032,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -872,6 +1109,11 @@ pub(crate) mod runtime_tests {
             rt.begin_career_round(now);
             let result = rt.career_allocation_for_test().unwrap();
             rt.career.backend.test_ack_start(&result.result_id);
+            assert!(
+                !rt.begin_career_round(now),
+                "gameplay activation also needs an ACK"
+            );
+            rt.career.backend.test_ack_gameplay(&result.result_id);
             assert!(rt.begin_career_round(now));
             rt.world.game_state = GameState::Running;
             rt.match_started_at = Some(now);
@@ -976,6 +1218,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -1139,6 +1386,11 @@ pub(crate) mod runtime_tests {
         rt.begin_career_round(now);
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&result.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -1264,6 +1516,11 @@ pub(crate) mod runtime_tests {
         assert!(!rt.begin_career_round(now));
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -1359,5 +1616,58 @@ pub(crate) mod runtime_tests {
         assert_eq!(rt.server_epoch, epoch);
         assert_eq!(rt.match_id, match_id);
         assert!(rt.match_service.worker().unwrap().aborted);
+    }
+
+    /// LR-32: a worker no allocated human ever reached frees its arena 60 s
+    /// after boot instead of holding it for the whole join deadline; one a
+    /// human did reach keeps waiting for the rest.
+    #[test]
+    fn a_worker_nobody_reached_aborts_a_minute_after_boot() {
+        let (mut rt, _addr, _join) = fixture();
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let now = Instant::now();
+        let status = || -> Status {
+            serde_json::from_slice(&fs::read(directory.join("status.json")).unwrap()).unwrap()
+        };
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.booted_at = now - Duration::from_secs(59);
+        }
+        rt.tick_match_service(now);
+        assert_eq!(status().phase, Phase::Ready, "still waiting at 59 s");
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.booted_at = now - Duration::from_secs(60);
+            worker.last_status = None;
+        }
+        rt.tick_match_service(now);
+        assert!(
+            matches!(status().phase, Phase::Failed | Phase::Settling),
+            "nobody came: the arena is given up"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A worker's receipt names the humans who joined, so the lobby knows
+    /// whom to re-queue when the allocation ends before its match (LR-32).
+    #[test]
+    fn the_receipt_names_the_humans_who_joined() {
+        let (mut rt, addr, join) = fixture();
+        let directory = rt.match_service.worker().unwrap().directory.clone();
+        fs::create_dir_all(&directory).unwrap();
+        let now = Instant::now();
+        rt.tick_match_service(now);
+        let before: Status =
+            serde_json::from_slice(&fs::read(directory.join("status.json")).unwrap()).unwrap();
+        assert!(before.joined_sessions.is_empty());
+        rt.handle_packet(addr, join, now);
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.last_status = None;
+        }
+        rt.tick_match_service(now + Duration::from_secs(1));
+        let after: Status =
+            serde_json::from_slice(&fs::read(directory.join("status.json")).unwrap()).unwrap();
+        assert_eq!(after.joined_sessions, vec!["seat-a".to_owned()]);
+        assert!(rt.match_service.worker().unwrap().saw_human);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

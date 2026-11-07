@@ -8,6 +8,7 @@ pub mod avatars;
 pub mod community;
 pub mod device_account;
 pub mod entitlements;
+pub mod game_directory;
 pub mod humanoid;
 pub mod release_catalog;
 pub mod sponsorship;

@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 // The release handshake also gates the compact map and revised combat catalogue.
 // Version 12 adds the seven Hero tier aura styles (`AuraStyle`, a strict enum) and
 // the tier fields of `SupporterStatus` (LR-67); client and server ship together.
-pub const PROTOCOL_VERSION: u16 = 12;
+// Version 13 adds unanimous 15-second ready checks and signed answers.
+// Version 14 distinguishes movement input from reflected poses for AFK reclaim.
+// Version 15 adds team votes and the strict Remade result variant.
+pub const PROTOCOL_VERSION: u16 = 16;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

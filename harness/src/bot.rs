@@ -8,6 +8,7 @@
 //! `expect` with descriptive messages rather than bare `unwrap`.
 
 use std::{
+    cell::RefCell,
     io::{self, ErrorKind},
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
@@ -26,9 +27,21 @@ pub const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
 /// Storage exceeds the legal payload limit, preventing prefix truncation.
 const DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 
+/// Monotonic received-wire counters, including lobby/auth traffic. Safe for
+/// load telemetry: no packet contents, identities or session credentials.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct TransportStats {
+    pub received_datagrams: u64,
+    pub received_bytes: u64,
+    pub accepted_snapshots: u64,
+    pub decode_errors: u64,
+    pub framing_errors: u64,
+}
+
 /// A connected bot client.
 pub struct Bot {
     socket: UdpSocket,
+    public: Option<RefCell<crate::public_client::PublicSession>>,
     /// Cached own player id, learned from the first snapshot.
     my_id: Option<u64>,
     /// Reusable receive buffer, allocated once instead of per `recv` call.
@@ -37,8 +50,8 @@ pub struct Bot {
     order: shared::protocol::SnapshotOrder,
     framed: bool,
     dash_sequence: u64,
-    /// Decode failures are reported once per bot, then counted silently.
-    decode_errors: u64,
+    transport_stats: TransportStats,
+    last_snapshot_meta: Option<shared::protocol::SnapshotMeta>,
 }
 
 impl Bot {
@@ -58,13 +71,15 @@ impl Bot {
             .expect("bot failed to set a socket read timeout");
         Self {
             socket,
+            public: None,
             my_id: None,
             recv_buf: vec![0u8; DATAGRAM_RECEIVE_CAPACITY],
             assembler: Default::default(),
             order: Default::default(),
             framed: false,
             dash_sequence: 0,
-            decode_errors: 0,
+            transport_stats: TransportStats::default(),
+            last_snapshot_meta: None,
         }
     }
 
@@ -77,16 +92,99 @@ impl Bot {
         bot
     }
 
+    /// Starts an asynchronous signed lobby handshake. Call `ping` and
+    /// `recv_snapshot` for every bot while waiting; no roster blocks creation
+    /// of its remaining peers. Public fill clients explicitly accept each
+    /// ready check, then lock and load their selected hero in the worker.
+    pub fn connect_public(
+        server_addr: SocketAddr,
+        preference: shared::match_service::MatchPreference,
+        class: HeroClass,
+        nickname: String,
+    ) -> Self {
+        let mut bot = Self::connect(server_addr);
+        bot.framed = true;
+        bot.public = Some(RefCell::new(crate::public_client::PublicSession::new(
+            preference, class, nickname,
+        )));
+        bot.ping();
+        bot
+    }
+
+    pub fn enable_ranked_eligibility_probe(&self, lobby: SocketAddr) {
+        self.public
+            .as_ref()
+            .expect("public session required")
+            .borrow_mut()
+            .enable_eligibility_probe(lobby);
+    }
+
+    pub fn public_status(&self) -> Option<crate::PublicBotStatus> {
+        self.public
+            .as_ref()
+            .map(|session| session.borrow().status_view())
+    }
+
+    /// Owned loopback load fixtures may finish sign-in before pressing Search.
+    /// Authentication, signed keepalives and normal consent remain active.
+    pub fn set_public_search_enabled(&self, enabled: bool) {
+        assert!(self.socket.peer_addr().unwrap().ip().is_loopback());
+        self.public
+            .as_ref()
+            .expect("public session required")
+            .borrow_mut()
+            .set_search_enabled(enabled);
+    }
+
+    pub fn transport_stats(&self) -> TransportStats {
+        self.transport_stats
+    }
+
+    /// Latest fully decoded, ordered and authorized snapshot. Observing the
+    /// producer tick separately from accepted counts distinguishes slow server
+    /// broadcasts from missing complete snapshots at the load generator.
+    pub fn snapshot_meta(&self) -> Option<shared::protocol::SnapshotMeta> {
+        self.last_snapshot_meta
+    }
+
+    pub fn public_running(&self) -> bool {
+        self.public.as_ref().is_some_and(|session| {
+            let session = session.borrow();
+            session.status.phase == "running" && session.status.error.is_none()
+        })
+    }
+
+    fn record_receive(&mut self, len: usize) {
+        self.transport_stats.received_datagrams =
+            self.transport_stats.received_datagrams.saturating_add(1);
+        self.transport_stats.received_bytes = self
+            .transport_stats
+            .received_bytes
+            .saturating_add(len as u64);
+    }
+
     fn decode_received(&mut self, len: usize) -> Option<ServerPacket> {
-        let bytes = self
-            .assembler
-            .push(&self.recv_buf[..len], Instant::now())
-            .ok()??;
+        let bytes = match self.assembler.push(&self.recv_buf[..len], Instant::now()) {
+            Ok(bytes) => bytes?,
+            Err(_) => {
+                self.transport_stats.framing_errors =
+                    self.transport_stats.framing_errors.saturating_add(1);
+                return None;
+            }
+        };
+        if let Some(session) = &self.public
+            && let Ok(packet) =
+                serde_json::from_slice::<shared::public_transport::PublicServerDatagram>(&bytes)
+        {
+            session.borrow_mut().transport(&self.socket, packet);
+            return None;
+        }
         let packet: ServerPacket = match serde_json::from_slice(&bytes) {
             Ok(packet) => packet,
             Err(error) => {
-                self.decode_errors += 1;
-                if self.decode_errors == 1 {
+                self.transport_stats.decode_errors =
+                    self.transport_stats.decode_errors.saturating_add(1);
+                if self.transport_stats.decode_errors == 1 {
                     eprintln!(
                         "bot: dropping undecodable server packet ({error}); \
                          later decode failures are counted, not logged"
@@ -95,30 +193,70 @@ impl Bot {
                 return None;
             }
         };
+        if let Some(session) = &self.public
+            && let ServerPacket::Career {
+                server_epoch,
+                sequence,
+                career,
+            } = packet
+        {
+            if let Some(endpoint) =
+                session
+                    .borrow_mut()
+                    .career_packet(server_epoch, sequence, career)
+            {
+                self.socket
+                    .connect(endpoint)
+                    .expect("connect allocated worker");
+                self.assembler = Default::default();
+                self.order = Default::default();
+                self.my_id = None;
+                self.last_snapshot_meta = None;
+                self.dash_sequence = 0;
+            }
+            return None;
+        }
         // Scenarios read gameplay snapshots; social and career envelopes use
         // their own datagram paths and are not surfaced here.
         if !matches!(packet, ServerPacket::Snapshot { .. }) {
+            return None;
+        }
+        if self
+            .public
+            .as_ref()
+            .is_some_and(|session| !session.borrow().accepts(packet.meta().server_epoch))
+        {
             return None;
         }
         if (self.framed || packet.meta().protocol_version != 0) && !self.order.accept(packet.meta())
         {
             return None;
         }
+        if let Some(session) = &self.public {
+            session.borrow_mut().snapshot(&self.socket, &packet);
+        }
         self.dash_sequence = packet
             .players()
             .iter()
             .find(|p| p.id == packet.your_id())
             .map_or(0, |p| p.utility.dash_sequence);
+        self.transport_stats.accepted_snapshots =
+            self.transport_stats.accepted_snapshots.saturating_add(1);
+        self.last_snapshot_meta = Some(packet.meta());
         Some(packet)
     }
 
     // --- Outbound packet helpers -------------------------------------------
 
-    fn send(&self, packet: &ClientPacket) {
+    fn send(&self, packet: &ClientPacket) -> bool {
+        if let Some(session) = &self.public {
+            return session.borrow_mut().send(&self.socket, packet);
+        }
         let bytes = serde_json::to_vec(packet).expect("client packet should serialize to JSON");
         self.socket
             .send(&bytes)
             .expect("bot failed to send packet to the server");
+        true
     }
 
     /// Negotiates coordinated draft and automatic server-side team assignment.
@@ -193,13 +331,29 @@ impl Bot {
 
     /// Sends a movement/orientation update.
     pub fn send_transform(&self, x: f32, y: f32, z: f32, yaw: f32) {
+        self.try_send_transform_with_activity(x, y, z, yaw, true);
+    }
+
+    /// Returns false when a public session has no current signing authority.
+    /// The native game sends an idle pose even while dead; idle input must not
+    /// fabricate AFK activity. Counts advance only after the signed UDP send.
+    pub fn try_send_transform_with_activity(
+        &self,
+        x: f32,
+        y: f32,
+        z: f32,
+        yaw: f32,
+        active: bool,
+    ) -> bool {
         self.send(&ClientPacket::Transform {
+            input_kind: Default::default(),
+            input_active: active,
             x,
             y,
             z,
             yaw,
             dash_sequence: self.dash_sequence,
-        });
+        })
     }
 
     /// Casts the Q ability at a target.
@@ -250,6 +404,10 @@ impl Bot {
 
     /// Sends a keep-alive ping (also registers the bot with the server).
     pub fn ping(&self) {
+        if let Some(session) = &self.public {
+            session.borrow_mut().tick(&self.socket);
+            return;
+        }
         if self.framed {
             self.send(&ClientPacket::Hello {
                 protocol_version: shared::protocol::PROTOCOL_VERSION,
@@ -261,15 +419,31 @@ impl Bot {
 
     // --- Inbound snapshot helpers ------------------------------------------
 
+    fn prepare_read(&self, deadline: Instant) -> bool {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        // One idle lobby peer must not consume the fixed200ms socket timeout
+        // when the multi-peer driver only gave it a20ms polling budget.
+        self.socket
+            .set_read_timeout(Some(remaining.min(RECV_TIMEOUT)))
+            .expect("bot failed to apply remaining receive deadline");
+        true
+    }
+
     /// Receives one complete raw datagram for transport-level assertions.
     /// Invalid JSON is returned unchanged and is never treated as a snapshot.
     pub fn recv_raw_datagram(&mut self, deadline: Instant) -> Option<Vec<u8>> {
         loop {
-            if Instant::now() >= deadline {
+            if !self.prepare_read(deadline) {
                 return None;
             }
             match self.socket.recv(&mut self.recv_buf) {
-                Ok(len) => return Some(self.recv_buf[..len].to_vec()),
+                Ok(len) => {
+                    self.record_receive(len);
+                    return Some(self.recv_buf[..len].to_vec());
+                }
                 Err(error) if is_timeout(&error) => {}
                 Err(error) => panic!("bot socket raw recv failed: {error}"),
             }
@@ -293,6 +467,7 @@ impl Bot {
         loop {
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
+                    self.record_receive(len);
                     if let Some(packet) = self.decode_received(len) {
                         latest = packet;
                     }
@@ -301,8 +476,8 @@ impl Bot {
                 Err(error) => panic!("bot socket recv failed while draining: {error}"),
             }
         }
-        // Restore blocking-with-timeout mode (the SO_RCVTIMEO set in `connect`
-        // is independent of the non-blocking flag and is still in effect).
+        // Restore blocking mode. The next blocking receive derives its timeout
+        // from that call's deadline, independently of the non-blocking flag.
         self.socket
             .set_nonblocking(false)
             .expect("bot failed to restore blocking socket mode after draining");
@@ -311,15 +486,49 @@ impl Bot {
         Some(latest)
     }
 
+    /// Drain currently buffered input without waiting for another network
+    /// update. Fixed-cadence controllers must not pay one socket timeout for
+    /// each idle peer. Bound work so a busy socket cannot starve their inputs.
+    pub fn poll_snapshot(&mut self) -> Option<ServerPacket> {
+        self.socket
+            .set_nonblocking(true)
+            .expect("nonblocking bot poll");
+        let deadline = Instant::now() + Duration::from_millis(2);
+        let mut latest = None;
+        for _ in 0..256 {
+            if Instant::now() >= deadline {
+                break;
+            }
+            match self.socket.recv(&mut self.recv_buf) {
+                Ok(len) => {
+                    self.record_receive(len);
+                    if let Some(packet) = self.decode_received(len) {
+                        latest = Some(packet);
+                    }
+                }
+                Err(error) if is_timeout(&error) => break,
+                Err(error) => panic!("bot socket poll failed: {error}"),
+            }
+        }
+        self.socket
+            .set_nonblocking(false)
+            .expect("restore bot blocking mode");
+        if let Some(packet) = &latest {
+            self.my_id = Some(packet.your_id());
+        }
+        latest
+    }
+
     /// Blocks until one snapshot arrives or `deadline` passes. Non-snapshot or
     /// unparsable datagrams are skipped.
     fn recv_one_blocking(&mut self, deadline: Instant) -> Option<ServerPacket> {
         loop {
-            if Instant::now() >= deadline {
+            if !self.prepare_read(deadline) {
                 return None;
             }
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
+                    self.record_receive(len);
                     if let Some(packet) = self.decode_received(len) {
                         return Some(packet);
                     }

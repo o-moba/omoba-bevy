@@ -4,9 +4,9 @@ Rust 0.21.0-rc.1 HTTP adapter for the existing game career store. Axum 0.8.9,
 SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rewards.
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
-version 5 (3 = revocable device keys, 4 = admission limits and profile retention, LR-16,
-5 = sanctions, moderation audit and chat switch, LR-15);
-portal schema has its own versions 1–7, 9 and 10 (8 is reserved for LR-20 feedback) and never
+version 6 (3 = revocable device keys, 4 = admission limits and profile retention, LR-16,
+5 = sanctions, moderation audit and chat switch, LR-15, 6 = the rating ladder index, LR-47);
+portal schema has its own versions 1–7 and 9–11 (8 is reserved for LR-20 feedback) and never
 runs Prisma/Drizzle push.
 
 ## Database and migration
@@ -21,7 +21,7 @@ psql "$MIGRATION_DATABASE_URL" -v portal_role=omoba_portal -v game_role=omoba_ga
 ```
 
 The migration command initializes the game’s existing v1 migration when needed,
-then applies portal v1–v7 and v9 under an advisory lock. Repeated execution is safe. Existing
+then applies portal v1–v7 and v9–v11 under an advisory lock. Repeated execution is safe. Existing
 unknown versions fail closed. Runtime startup verifies versions and performs no DDL.
 For game-only initialization, `cargo run -p server --bin migrate-career --locked` uses
 `OMOBA_DATABASE_URL`. This replaces implicit DDL at game-worker startup.
@@ -334,6 +334,38 @@ migrations before starting matching client/server/API releases. Exact authentica
 accounts; prefix discovery still requires opt-in. Friend mutations bind the resolved
 immutable ID. See [handle rules and migration](../docs/player-handles.md).
 
+## Leaderboard (portal schema 11, LR-47)
+
+Authenticated `GET /v1/leaderboard?limit=1..100` (default 100, 30 requests per
+minute per profile, unknown parameters rejected) returns the rating ladder:
+`entries` are the profiles with `rated_matches >= min_rated_matches` (20, the
+newcomer bracket of `shared::career::NEWCOMER_MATCHES`) that have not opted out,
+ordered by rating, then rated matches, then profile id, each with `rank`,
+`profile_id`, `nickname`, `rating`, `rated_matches`, `wins` and `losses`. `me`
+carries the caller's `rating`, `rated_matches`, `listed` and `rank`: the caller's
+1-based position under the same order and filter whatever the page size, or
+`null` for a newcomer or an unlisted profile. Both reads share one
+`REPEATABLE READ` snapshot, so the rank agrees with the page. The query is an index
+range scan over `career_profiles_ladder` (core migration 006, partial on
+`rated_matches >= 20`); the portal role needs only its existing SELECT on
+`career_profiles` and its `portal.profile_settings` grants.
+
+Privacy: the ladder is an **opt-out**, not an opt-in like public profiles or
+prefix discovery. Every opponent already receives a player's nickname, rating and
+rated-match count in the match report of each rated game, so listing the same
+fields in rating order reveals nothing a match did not; hiding them by default
+would make the ladder empty for the players it is meant for. Portal migration
+011 adds `profile_settings.leaderboard_listed` (default true; a profile without a
+settings row counts as listed). `GET /v1/me` returns it in `settings`, and
+`PATCH /v1/me/settings` requires it like every other preference, under the same
+`expected_version` check. The flag hides the profile from the ladder only; match
+reports, friends and the public-profile settings are unchanged. A hidden profile
+still gets its own `me.rating`/`me.rated_matches` with `rank: null`.
+
+`GET /v1/me/matches` and `GET /v1/me/statistics` accept `hero_class` for every
+playable class by its wire id (17 classes, `shared::HeroClass`), not only
+the four legacy ones.
+
 ## Shared devices and Supporter
 
 See [Supporter operations](../docs/supporter.md) for enrollment/recovery, billing
@@ -345,7 +377,7 @@ these capabilities. Old limited sessions are invalidated by the account upgrade.
 
 Portal migration 004 adds owner-scoped private class preferences; 005 adds the
 separate encrypted Ekza library connection. Startup requires exactly the portal
-schema versions this build serves (`PORTAL_SCHEMA`, 1–7, 9 and 10) and runs no DDL, so run
+schema versions this build serves (`PORTAL_SCHEMA`, 1–7 and 9–11) and runs no DDL, so run
 `migrate` first. No new browser authorization scopes are
 added: private named builds use the existing personal-settings consent.
 

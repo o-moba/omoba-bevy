@@ -11,7 +11,8 @@
 //! every frame.
 //!
 //! Text comes from the `loading` dictionary; the render key includes the
-//! locale generation. Server-authored draft errors stay English.
+//! locale generation. A server prematch error only re-keys the render here;
+//! the draft footer shows it (`frontend::draft::error_text`).
 // i18n-strict
 use bevy::{
     asset::RecursiveDependencyLoadState,
@@ -520,6 +521,10 @@ fn shell_status(
         stage: None,
     };
     let mut status = match link {
+        LinkStatus::Directory(crate::net::directory::DirectoryNotice::Fetching) => {
+            waiting(link.detail())
+        }
+        LinkStatus::Directory(_) => return failure(link.detail().unwrap_or_default()),
         LinkStatus::Compatibility(_)
         | LinkStatus::Rejected(_)
         | LinkStatus::Unconfirmed
@@ -1533,6 +1538,21 @@ fn sync_loading(
                     "loading.ready_count",
                     &[("ready", &ready), ("total", &total)],
                 )
+            };
+            let missing = prematch
+                .players
+                .iter()
+                .filter(|p| !p.is_bot && !p.loaded)
+                .map(|p| p.nickname.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let count = if prematch.phase == PrematchPhase::Loading && !missing.is_empty() {
+                format!(
+                    "{count}\n{}",
+                    trf("loading.waiting_players", &[("names", &missing)])
+                )
+            } else {
+                count
             };
             set_text(parts.stage, &count, color::TEXT_GOLD);
         }

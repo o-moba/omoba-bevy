@@ -42,6 +42,8 @@ async fn main() {
         .iter()
         .enumerate()
         .map(|(i, p)| ParticipantResult {
+            input_kind: Default::default(),
+            participation: None,
             player_id: i as u64 + 1,
             is_bot: false,
             profile_id: Some(p.profile_id.clone()),
@@ -75,6 +77,9 @@ async fn main() {
         })
         .collect();
     let mut r = MatchResult {
+        ranked_season_id: None,
+        gameplay_started: true,
+        end_reason: None,
         result_id: result_id.clone(),
         server_epoch: 1,
         match_id: now() as u64,

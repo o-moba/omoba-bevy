@@ -1,0 +1,117 @@
+{
+  "status": "PASS120s current1000-client local population; NOT full performance/RU/release acceptance",
+  "source_parent": "30f69c5e75a0d19d0e253e593f5827214f0c43fb",
+  "files": {
+    "build.json.gz": {
+      "source_path": "build.json",
+      "raw_bytes": 120714,
+      "raw_sha256": "28df5eecfacd87d3ae5944ea46524d17e3540fbeaf1429a64fdbf93e0b1a334a",
+      "gzip_sha256": "e993ba231b8d3ca7e51ccb772638b1ceb08610e7b2a60448d7eddb827d5b8018"
+    },
+    "transport-tests.log.gz": {
+      "source_path": "transport-tests.log",
+      "raw_bytes": 293,
+      "raw_sha256": "aed62e11151551ab9e5e865d5c24a083919672d739d7e81bb90f0bb9231dc6b2",
+      "gzip_sha256": "42bde2a654263a46dc4c0ec3fe3eff7ffb77f84117136c0260cc7ac7a5e1dbd8"
+    },
+    "rehearse.py.gz": {
+      "source_path": "rehearse.py",
+      "raw_bytes": 7525,
+      "raw_sha256": "721636c47d327e426972140a8ad80ca7c66192f62044ac0715c34d84e289a98e",
+      "gzip_sha256": "53cd12e725e61728634c3a186721c6db3a594357fb66a1f169f01803b31484d5"
+    },
+    "build.py.gz": {
+      "source_path": "build.py",
+      "raw_bytes": 4600,
+      "raw_sha256": "da01ebafc810ce4dee4a9b058a08e5df72fe033ed404a2ee724bd697b2df2000",
+      "gzip_sha256": "1383c2089d30db262a713921a914303f0dfe38b4b35d8dc16959c408166a9d9e"
+    },
+    "live-v1--isolated-summary.json.gz": {
+      "source_path": "live-v1/isolated-summary.json",
+      "raw_bytes": 23681,
+      "raw_sha256": "e5cde068c3eaa414520d0236c2110898fc4df1257d3d67723133458b85a0171b",
+      "gzip_sha256": "34107b7832575ab5d0311a8558130818ac15946364b1ac85a583d2a0b2d2cbb2"
+    },
+    "live-v1--instrumented-10--report.json.gz": {
+      "source_path": "live-v1/instrumented-10/report.json",
+      "raw_bytes": 54133,
+      "raw_sha256": "46190f90ace7ed792f1fefa8c2565f72ee7f54a97a9e8c830b5f42ac1b29c749",
+      "gzip_sha256": "da3135f46a101754f12412dd917000b5b2dc948e3eb2fe4d8255cb216239e8de"
+    },
+    "live-v1--instrumented-1000--report.json.gz": {
+      "source_path": "live-v1/instrumented-1000/report.json",
+      "raw_bytes": 4941797,
+      "raw_sha256": "bbb420ad285eb446bccb923ea0d77ee1fae0bf707901c12bb8e44f0c1117de9b",
+      "gzip_sha256": "845f6c250abf1c25e1ef595f5a0331fd4af221f319618f9e874a2f697bc14153"
+    }
+  },
+  "profile": "Only renderer-free workspace roots opt1, debug assertions/overflow enabled, existing coherent third-party libraries read-only; no Cargo, SDK, Bevy or platform compilation",
+  "opt_flags": [
+    "opt-level=1",
+    "debug-assertions=yes",
+    "overflow-checks=yes",
+    "debuginfo=0",
+    "codegen-units=256"
+  ],
+  "server_sha256": "5c6f4e6fc0795e5008cdd423168b17c515ed93c7b2eda3cd839aa514925c0edd",
+  "bots_sha256": "e495ff34dc6e0b590c23c23be2834be7b6b9ddc06443ea5f4394650aeea9255a",
+  "production_source_reference": "../terminal-spool-replay-2026-11-07/summary.json",
+  "unchanged_recorded_production_files": 263,
+  "all_running_after_seconds": 44.96189166698605,
+  "soak_seconds": 120.0,
+  "elapsed_seconds": 165.20535304199439,
+  "wire": {
+    "bytes_per_second_per_player": {
+      "p50": 59263.54697893888,
+      "p95": 74123.07135528774,
+      "p99": 76901.57311208884,
+      "max": 79325.9056610971
+    },
+    "accepted_snapshots_per_second_per_player": {
+      "p50": 12.726377355411831,
+      "p05": 11.968909285962187
+    },
+    "observed_broadcast_tick_span_per_second_per_player": {
+      "p50": 13.71467306892478,
+      "p05": 12.958694001062605
+    },
+    "accepted_fraction_of_observed_tick_span": {
+      "p50": 0.9280532043530835,
+      "p05": 0.9235709698137444
+    },
+    "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+  },
+  "aggregate_received_bytes_per_second": 60720820.44713725,
+  "aggregate_received_mbit_per_second": 485.766563577098,
+  "resources": {
+    "server": {
+      "mean_cores": 3.6443730571570603,
+      "peak_summed_rss_mib": 1694.671875
+    },
+    "generator": {
+      "mean_cores": 2.7643722119764345,
+      "peak_summed_rss_mib": 625.640625
+    }
+  },
+  "resource_window_seconds": 120.04533925000578,
+  "auth_resets_observed": 0,
+  "stale_career_observed": 0,
+  "worker_health_at_end": {
+    "workers": 100,
+    "all_running": true,
+    "same_epoch": true,
+    "sql_ready_count": 100,
+    "journal_ready_count": 100,
+    "critical_replies_max": 0,
+    "closed_reply_receivers": 0
+  },
+  "cleanup_complete": true,
+  "limits": [
+    "Native AI loop sleeps100ms; actual20Hz client input load is not proved (client/src/net/mod.rs UPDATE_INTERVAL_SECONDS0.05).",
+    "Observed sequence ticks include1Hz bootstrap reservations, even with zero receivers; accepted/sequence ratio is not packet delivery/loss.",
+    "Received median12.726Hz remains below nominal20Hz and the17.949Hz10-client control; no independent latency/send timestamps.",
+    "One local engine/M4Pro and two minutes; not sustained production SLA, real RU/uplink, WAN, physical devices, ten-human Ranked or independent failure-domain acceptance.",
+    "Optimization was changed across all renderer-free workspace roots together; no single-crate causal attribution.",
+    "Additive scope caveats were added to the runner after this live proof; archived original report bytes are preserved."
+  ]
+}

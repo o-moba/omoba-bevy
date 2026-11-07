@@ -1,0 +1,9 @@
+Avatar roster: 15 avatars from /Users/wotori/git/ekza/_workspace/worktrees/mm-game/client/assets/avatars/manifest.json
+Map profile: verdant_default geometry: verdant-confluence-compact-v2 structures: 20
+UDP game server is listening on 127.0.0.1:47500
+Admission limits: probes 8/s per IP, 32/s per network, 64/s in all (16 kept for new sources); 8 endpoints per IP; new profiles per 24 h 10 per IP, 5000 in all; 1 arena(s) per IP; vs Bots cooldown 120 s after 3 unplayed in 10 min; profile retention 30 days
+Match mode: release - matches form to 5v5 before starting (OMOBA_MATCH_MODE=dev for instant start)
+Match duration cap: 2700 s (OMOBA_MATCH_MAX_DURATION_SECS)
+Chat: on (OMOBA_CHAT; `omoba-account-api chat off` also turns it off at runtime); reactions always on
+READY_MAINTENANCE reconciled=0 pruned=1 deferred=0
+SHUTDOWN_METRIC terminal_outbox=durable

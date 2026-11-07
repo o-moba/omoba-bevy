@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "scope": "Actual current renderer-free shared/store source; coherent cached third-party dependencies; no Cargo/Bevy build or cache mutation",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "commands": [
+    {
+      "crate": "shared",
+      "source": "shared/src/lib.rs",
+      "dependencies": {
+        "serde": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde-b7f89bf2e8085ad9.rlib",
+        "serde_json": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde_json-e3ae0e86c339e589.rlib",
+        "flate2": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libflate2-a0633ce254890692.rlib"
+      },
+      "output": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/codex-ranked-readiness/queue-discipline/libshared.rlib"
+    },
+    {
+      "crate": "omoba_career_store",
+      "source": "career-store/src/lib.rs",
+      "dependencies": {
+        "tokio": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libtokio-2103d2eff50c8fc5.rlib",
+        "shared": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/codex-ranked-readiness/queue-discipline/libshared.rlib",
+        "sqlx": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libsqlx-1b0f57f250251a24.rlib",
+        "serde_json": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde_json-e3ae0e86c339e589.rlib",
+        "getrandom": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libgetrandom-d4a5344f6007f6a9.rlib"
+      },
+      "output": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/codex-ranked-readiness/queue-discipline/store-tests"
+    }
+  ]
+}

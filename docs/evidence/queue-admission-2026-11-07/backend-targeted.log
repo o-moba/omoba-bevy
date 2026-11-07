@@ -1,0 +1,78 @@
+PASS: current actual native backend/store source compiled
+
+running 63 tests
+test admission::tests::a_network_shares_one_budget ... ok
+test admission::tests::a_busy_source_never_takes_the_reserve_of_new_sources ... ok
+test admission::tests::sources_are_ipv4_addresses_and_ipv6_slash_64s ... ok
+test admission::tests::limits_read_overrides_and_refuse_bad_values ... ok
+test career_backend::dodge_tests::a_commit_ack_for_a_conflicting_payload_cannot_clear_the_producer_event ... ok
+test career_backend::dodge_tests::a_dodge_invalidates_an_earlier_shutdown_barrier ... ok
+test career_backend::dodge_tests::disabled_or_full_links_never_claim_to_accept_a_dodge ... ok
+test career_backend::dodge_tests::a_fresh_shared_dodge_refusal_never_dispatches_a_queue_request ... ok
+test career_backend::dodge_tests::dodge_submission_waits_for_sql_ack_and_retries_do_not_advance_the_barrier ... ok
+test career_backend::dodge_tests::dodge_pending_and_undrained_ack_capacity_apply_backpressure_without_dropping_ids ... ok
+test career_backend::queue_dodges::tests::a_changed_receipt_cannot_be_retired_or_certified_by_flush ... ok
+test career_backend::queue_dodges::tests::a_failed_publication_retains_the_foreign_entry_and_can_retry_after_repair ... ok
+test career_backend::queue_dodges::tests::a_second_live_writer_is_refused_and_a_restart_can_take_the_lock ... ok
+test career_backend::queue_dodges::tests::a_symlinked_journal_root_is_not_opened ... ok
+test career_backend::queue_dodges::tests::capacity_refusal_keeps_all_older_receipts_in_memory ... ok
+test career_backend::queue_dodges::tests::corrupt_or_foreign_pending_producer_state_is_not_an_empty_success ... ok
+test career_backend::queue_dodges::tests::completion_removes_only_the_committed_receipt_and_does_not_claim_other_ids ... ok
+test career_backend::queue_dodges::tests::duplicate_delivery_is_one_file_and_conflicting_content_never_overwrites_it ... ok
+test career_backend::queue_dodges::tests::filename_identity_must_match_the_receipt ... ok
+test career_backend::queue_dodges::tests::corrupt_oversized_and_wrong_format_receipts_fail_closed_without_deletion ... ok
+test career_backend::queue_dodges::tests::legacy_counter_load_is_compatible_and_keeps_pending_events_after_expiry ... ok
+test career_backend::queue_dodges::tests::producer_snapshot_reads_are_bounded_and_refuse_special_files ... ok
+test career_backend::queue_dodges::tests::incomplete_temporary_file_is_preserved_without_fabricating_a_committed_event ... ok
+test career_backend::queue_dodges::tests::static_symlinks_and_special_files_are_rejected_without_following_or_blocking ... ok
+test career_backend::queue_dodges::tests::record_is_durable_and_recovery_keeps_exact_identity_and_original_observation ... ok
+test career_backend::refresh_tests::a_full_link_retries_without_claiming_a_successful_refresh ... ok
+test career_backend::refresh_tests::a_reply_for_an_old_nonce_cannot_complete_the_current_refresh ... ok
+test career_backend::queue_dodges::tests::unsafe_or_unknown_typed_records_are_refused_before_publication ... ok
+test career_backend::refresh_tests::a_thousand_presence_profiles_are_deduplicated_with_live_seats_preserved ... ok
+test career_backend::refresh_tests::missing_replies_are_retried_boundedly_and_never_extend_authorization ... ok
+test career_backend::refresh_tests::postgres_access_read_batches_preserve_identity_errors_and_revocation ... ignored, requires isolated OMOBA_TEST_DATABASE_URL; exercises concurrent account reads on real PostgreSQL
+test career_backend::refresh_tests::read_batches_never_take_more_than_the_existing_lobby_connection_budget ... ok
+test career_backend::refresh_tests::read_batches_stop_before_barriers_and_leave_the_next_read_in_order ... ok
+test career_backend::refresh_tests::season_reset_refreshes_a_signed_session_without_reconnect_and_fences_late_replies ... ok
+test career_backend::resilience_tests::corrupt_queue_dodge_journal_refuses_search_and_flush_but_keeps_access_refresh ... ignored, requires real isolated PostgreSQL
+test career_backend::resilience_tests::postgres_worker_rejected_start_discards_already_queued_terminal_without_resurrection ... ignored, requires isolated OMOBA_TEST_DATABASE_URL; real worker rejection tombstone
+test career_backend::resilience_tests::postgres_worker_renews_lease_with_full_reply_buffer_and_retries_critical_acks ... ignored, requires isolated OMOBA_TEST_DATABASE_URL; real worker heartbeat/backpressure
+test career_backend::resilience_tests::queue_dodge_full_reply_channel_retains_receipt_and_retries_the_commit_ack ... ignored, requires real isolated PostgreSQL
+test career_backend::resilience_tests::queue_dodge_offline_flush_restart_and_duplicate_delivery_are_exactly_once ... ignored, requires real isolated PostgreSQL
+test career_backend::resilience_tests::queue_dodge_rejected_start_retires_the_attempt_instead_of_waiting_for_penalty_expiry ... ignored, requires real isolated PostgreSQL
+test career_backend::resilience_tests::queue_dodge_shared_access_checks_both_worker_paths_without_revoking_the_session ... ignored, requires real isolated PostgreSQL
+test career_backend::refresh_tests::a_thousand_clients_get_fair_bounded_refresh_before_authorization_expires ... ok
+test career_backend::tests::a_sign_in_queues_one_login_and_a_refusal_carries_its_code ... ok
+test career_backend::tests::access_refreshes_apply_and_lift_sanctions_and_a_name_reset ... ok
+test career_backend::tests::an_account_ban_refuses_sign_in_with_its_end_and_lifting_it_needs_no_restart ... ok
+test career_backend::tests::flush_barrier_requires_an_ack_and_is_invalidated_by_a_later_record ... ok
+test career_backend::tests::forged_and_replayed_account_actions_cannot_cancel_queue ... ok
+test career_backend::tests::late_duplicate_login_ack_cannot_reset_sequence ... ok
+test career_backend::tests::missing_key_refresh_never_extends_authority_during_a_database_outage ... ok
+test career_backend::tests::one_ip_holds_at_most_n_career_clients ... ok
+test career_backend::tests::postgres_outbox_restart_restores_terminal_and_interrupts_live_checkpoint ... ignored, requires isolated OMOBA_TEST_DATABASE_URL; exercises a real PostgreSQL worker restart
+test career_backend::tests::queue_access_is_fresh_correlated_and_fails_closed ... ok
+test career_backend::tests::ready_answers_require_a_signature_and_bind_check_identity_and_acceptance ... ok
+test career_backend::tests::receipt_paths_cannot_escape_outbox ... ok
+test career_backend::tests::recover_outbox_keeps_an_existing_recovery_allocation ... ok
+test career_backend::tests::recover_outbox_restores_terminal_interrupts_live_and_skips_junk ... ok
+test career_backend::tests::revoked_key_refresh_clears_cached_authority_and_cannot_resurrect_via_profile_ready ... ok
+test career_backend::tests::signatures_bind_domain_nonce_epoch_sequence_and_action ... ok
+test career_backend::tests::social_signatures_bind_message_and_session_without_sending_sql_jobs ... ok
+test career_backend::tests::supporter_is_denied_for_free_expired_disabled_stale_and_unauthenticated_profiles ... ok
+test career_backend::tests::tier_auras_need_points_and_end_with_the_tier ... ok
+test career_backend::tests::unsigned_cosmetic_equip_never_reaches_persisted_preferences ... ok
+test career_backend::tests::a_sign_in_at_the_client_ceiling_gets_server_full ... ok
+
+test result: ok. 54 passed; 0 failed; 9 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+
+running 5 tests
+test career_backend::resilience_tests::corrupt_queue_dodge_journal_refuses_search_and_flush_but_keeps_access_refresh ... ok
+test career_backend::resilience_tests::queue_dodge_full_reply_channel_retains_receipt_and_retries_the_commit_ack ... ok
+test career_backend::resilience_tests::queue_dodge_offline_flush_restart_and_duplicate_delivery_are_exactly_once ... ok
+test career_backend::resilience_tests::queue_dodge_rejected_start_retires_the_attempt_instead_of_waiting_for_penalty_expiry ... ok
+test career_backend::resilience_tests::queue_dodge_shared_access_checks_both_worker_paths_without_revoking_the_session ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 5.93s

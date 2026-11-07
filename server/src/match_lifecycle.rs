@@ -93,11 +93,9 @@ impl ServerRuntime {
                 && self.match_started_at.is_some()
                 && matches!(self.world.game_state, GameState::Running)
         });
-        let connected = self
-            .world
-            .players
-            .iter()
-            .any(|(addr, player)| player.joined && network_endpoint(*addr, player));
+        let connected = self.world.players.iter().any(|(addr, player)| {
+            player.joined && network_endpoint(*addr, player) && !self.session_recovery.is_afk(*addr)
+        });
         if !live || connected {
             self.unattended_since = None;
             return None;
@@ -140,7 +138,11 @@ impl ServerRuntime {
             .world
             .players
             .iter()
-            .filter(|(addr, player)| player.joined && network_endpoint(**addr, player))
+            .filter(|(addr, player)| {
+                player.joined
+                    && network_endpoint(**addr, player)
+                    && !self.session_recovery.is_afk(**addr)
+            })
             .count();
         let detail = match end {
             ForcedEnd::AbandonedReaped => format!(
@@ -163,7 +165,12 @@ impl ServerRuntime {
                 &detail
             )
         );
-        self.finish_career_round(MatchOutcome::Interrupted, None, now);
+        self.finish_career_round_with_reason(
+            MatchOutcome::Interrupted,
+            None,
+            now,
+            Some(end.metric()),
+        );
         self.unattended_since = None;
         if let MatchService::Worker(worker) = &mut self.match_service {
             // `tick_match_service` reports `settling` until the result is
@@ -200,6 +207,11 @@ mod tests {
         assert!(!rt.begin_career_round(now));
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(
+            !rt.begin_career_round(now),
+            "gameplay activation also needs an ACK"
+        );
+        rt.career.backend.test_ack_gameplay(&allocation.result_id);
         assert!(rt.begin_career_round(now));
         rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
@@ -280,8 +292,8 @@ mod tests {
         assert_eq!(result.ruleset, "public-casual-v1");
         assert_eq!(
             result.unrated_reason.as_deref(),
-            Some("allocated_bots"),
-            "the store's public-casual policy accepts only its own reason"
+            Some("abandoned_reaped"),
+            "the forced reason reaches settlement instead of being lost as generic interruption"
         );
         // An aborted worker admits nobody and no longer simulates.
         assert!(!rt.authorize_allocated_join(addr, &join));

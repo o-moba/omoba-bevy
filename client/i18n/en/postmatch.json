@@ -15,5 +15,8 @@
   "postmatch.button.play_again": "Play again",
   "postmatch.button.back_to_menu": "Back to menu",
   "postmatch.gold_earned": "Gold earned",
-  "postmatch.total": "Total"
+  "postmatch.total": "Total",
+  "postmatch.summary.remade": "Early remake · Ordinary match awards were not granted",
+  "postmatch.summary.surrender": "Match ended by surrender · {minutes} min",
+  "postmatch.outcome.remade": "Remade"
 }

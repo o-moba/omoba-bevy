@@ -1,0 +1,36 @@
+{
+  "common": {
+    "fingerprint": "/Volumes/Orico/omoba-build-cache/target-b/debug/.fingerprint/common-55b41237b5454877/lib-common.json",
+    "features": "[\"test-support\"]",
+    "dependencies": {
+      "shared": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libshared-1fea36d842216582.rlib"
+    }
+  },
+  "omoba_passport": {
+    "fingerprint": "/Volumes/Orico/omoba-build-cache/target-b/debug/.fingerprint/omoba-passport-16a61de58c40f086/lib-omoba_passport.json",
+    "features": "[]",
+    "dependencies": {
+      "shared": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libshared-1fea36d842216582.rlib",
+      "ekza_bevy_sdk": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libekza_bevy_sdk-270a463f79596203.rlib",
+      "sha2": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libsha2-c7de71daa70a071e.rlib",
+      "serde": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde-b7f89bf2e8085ad9.rlib",
+      "serde_json": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde_json-e3ae0e86c339e589.rlib",
+      "reqwest": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libreqwest-cf5f0f4504bba262.rlib"
+    }
+  },
+  "server": {
+    "dependencies": {
+      "tokio": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libtokio-2103d2eff50c8fc5.rlib",
+      "shared": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libshared-1fea36d842216582.rlib",
+      "ekza_bevy_sdk": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libekza_bevy_sdk-270a463f79596203.rlib",
+      "omoba_passport": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libomoba_passport-16a61de58c40f086.rlib",
+      "common": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libcommon-55b41237b5454877.rlib",
+      "ed25519_dalek": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libed25519_dalek-07e8e74834c18542.rlib",
+      "omoba_career_store": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libomoba_career_store-f8a39b4474b8fdc6.rlib",
+      "sqlx": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libsqlx-1b0f57f250251a24.rlib",
+      "serde": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde-b7f89bf2e8085ad9.rlib",
+      "serde_json": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde_json-e3ae0e86c339e589.rlib",
+      "getrandom": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libgetrandom-d4a5344f6007f6a9.rlib"
+    }
+  }
+}

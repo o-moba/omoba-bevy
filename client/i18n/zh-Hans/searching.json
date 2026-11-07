@@ -17,5 +17,6 @@
   "searching.match.waiting": "已找到玩家 · {humans}/{needed}\n{policy} · 已等待 {elapsed} 秒",
   "searching.match.allocating": "已找到对局 · 正在准备竞技场…",
   "searching.match.assigned": "已找到对局 · 正在连接你的队伍…",
-  "searching.match.failed": "无法开始对局：{code}\n请取消后重试。"
+  "searching.match.failed": "无法开始对局：{code}\n请取消后重试。",
+  "searching.status.resumed": "搜索曾暂停，正在更新匹配…"
 }

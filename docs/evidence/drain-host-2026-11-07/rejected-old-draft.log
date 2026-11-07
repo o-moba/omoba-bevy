@@ -1,0 +1,37 @@
+test_backup_failure_keeps_old_services_and_owned_marker (__main__.ShipDrainFaults.test_backup_failure_keeps_old_services_and_owned_marker) ... ok
+test_existing_operation_cannot_be_borrowed_by_another_ship (__main__.ShipDrainFaults.test_existing_operation_cannot_be_borrowed_by_another_ship) ... ok
+test_explicit_rollback_refuses_live_workers_then_preserves_existing_maintenance (__main__.ShipDrainFaults.test_explicit_rollback_refuses_live_workers_then_preserves_existing_maintenance) ... ok
+test_failed_cancel_is_durable_in_history_and_does_not_reopen_queue (__main__.ShipDrainFaults.test_failed_cancel_is_durable_in_history_and_does_not_reopen_queue) ... FAIL
+test_failed_new_start_rolls_back_and_keeps_admission_closed (__main__.ShipDrainFaults.test_failed_new_start_rolls_back_and_keeps_admission_closed) ... ok
+test_live_roster_survives_until_exact_ack_and_both_slot_and_pid_are_empty (__main__.ShipDrainFaults.test_live_roster_survives_until_exact_ack_and_both_slot_and_pid_are_empty) ... ok
+test_migration_failure_keeps_old_services_and_owned_marker (__main__.ShipDrainFaults.test_migration_failure_keeps_old_services_and_owned_marker) ... ok
+test_new_health_failure_rolls_back_and_keeps_admission_closed (__main__.ShipDrainFaults.test_new_health_failure_rolls_back_and_keeps_admission_closed) ... ok
+test_restart_needs_a_new_capacity_ack_even_when_old_timestamp_equals_now (__main__.ShipDrainFaults.test_restart_needs_a_new_capacity_ack_even_when_old_timestamp_equals_now) ... FAIL
+test_timeout_never_stops_services_or_backs_up_or_migrates_and_holds_admission (__main__.ShipDrainFaults.test_timeout_never_stops_services_or_backs_up_or_migrates_and_holds_admission) ... ok
+test_wrong_or_stale_ack_does_not_authorize_migration (__main__.ShipDrainFaults.test_wrong_or_stale_ack_does_not_authorize_migration) ... ok
+
+======================================================================
+FAIL: test_failed_cancel_is_durable_in_history_and_does_not_reopen_queue (__main__.ShipDrainFaults.test_failed_cancel_is_durable_in_history_and_does_not_reopen_queue)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/codex-ranked-readiness/c2-draft/test_ship_faults.py", line 176, in test_failed_cancel_is_durable_in_history_and_does_not_reopen_queue
+    self.assertEqual(record.get('drain_operation_id'),self.operation())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != '36f164cfae2959d7c8bb07367ced094d'
+
+======================================================================
+FAIL: test_restart_needs_a_new_capacity_ack_even_when_old_timestamp_equals_now (__main__.ShipDrainFaults.test_restart_needs_a_new_capacity_ack_even_when_old_timestamp_equals_now)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/codex-ranked-readiness/c2-draft/test_ship_faults.py", line 164, in test_restart_needs_a_new_capacity_ack_even_when_old_timestamp_equals_now
+    self.assertEqual(result['status'],'DEPLOYED_DRAIN_HELD')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'DEPLOYED' != 'DEPLOYED_DRAIN_HELD'
+- DEPLOYED
++ DEPLOYED_DRAIN_HELD
+
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.259s
+
+FAILED (failures=2)

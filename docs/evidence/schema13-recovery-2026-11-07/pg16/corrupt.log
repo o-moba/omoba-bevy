@@ -1,0 +1,21 @@
+2026-11-07 05:40:20.295 GMT [1077] LOG:  starting PostgreSQL 16.15 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-07 05:40:20.295 GMT [1077] LOG:  listening on Unix socket "/tmp/pitr-runtime/native-corrupt-socket/.s.PGSQL.6545"
+2026-11-07 05:40:20.297 GMT [1080] LOG:  database system was interrupted; last known up at 2026-11-07 05:39:57 GMT
+2026-11-07 05:40:20.377 GMT [1080] LOG:  starting point-in-time recovery to "omoba_fixture_earned"
+2026-11-07 05:40:20.377 GMT [1080] LOG:  starting backup recovery with redo LSN 0/D00028, checkpoint LSN 0/D00060, on timeline ID 1
+2026-11-07 05:40:20.407 GMT [1080] LOG:  restored log file "00000001000000000000000D" from archive
+2026-11-07 05:40:20.413 GMT [1080] LOG:  redo starts at 0/D00028
+2026-11-07 05:40:20.441 GMT [1080] LOG:  restored log file "00000001000000000000000E" from archive
+2026-11-07 05:40:20.471 P00  ERROR: [042]: unable to get 00000001000000000000000F:
+                                    repo1: 16-1/0000000100000000/00000001000000000000000F-b4d341db7b0175fd0bb00f5bbf3f2d0a2e471dc8.gz [FormatError] zlib threw error: [-3] data error
+2026-11-07 05:40:20.472 GMT [1080] LOG:  completed backup recovery with redo LSN 0/D00028 and end LSN 0/D00100
+2026-11-07 05:40:20.472 GMT [1080] LOG:  consistent recovery state reached at 0/D00100
+2026-11-07 05:40:20.472 GMT [1077] LOG:  database system is ready to accept read-only connections
+2026-11-07 05:40:20.502 P00  ERROR: [042]: unable to get 00000001000000000000000F:
+                                    repo1: 16-1/0000000100000000/00000001000000000000000F-b4d341db7b0175fd0bb00f5bbf3f2d0a2e471dc8.gz [FormatError] zlib threw error: [-3] data error
+2026-11-07 05:40:20.502 GMT [1080] LOG:  redo done at 0/E00090 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.08 s
+2026-11-07 05:40:20.502 GMT [1080] FATAL:  recovery ended before configured recovery target was reached
+2026-11-07 05:40:20.503 GMT [1077] LOG:  startup process (PID 1080) exited with exit code 1
+2026-11-07 05:40:20.503 GMT [1077] LOG:  terminating any other active server processes
+2026-11-07 05:40:20.504 GMT [1077] LOG:  shutting down due to startup process failure
+2026-11-07 05:40:20.504 GMT [1077] LOG:  database system is shut down

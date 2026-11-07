@@ -1,6 +1,7 @@
 mod apply;
 mod commands;
 mod components;
+pub(crate) mod directory;
 mod ingest;
 mod interpolate;
 mod offline;
@@ -36,6 +37,7 @@ use apply::{
     StagedSnapshot, respawn_players_with_new_store_models, respawn_sandbox_models,
     snapshot_apply_systems,
 };
+pub(crate) use commands::latch_movement_input;
 use commands::{LocalStateSendTimer, send_local_state, send_network_commands};
 use ingest::{PendingServerSnapshotFrame, ingest_server_snapshot_packets};
 use interpolate::{
@@ -157,6 +159,7 @@ impl Plugin for NetworkingPlugin {
             .init_resource::<PendingServerSnapshotFrame>()
             .init_resource::<StagedSnapshot>()
             .init_resource::<ClientSession>()
+            .init_resource::<directory::DirectoryRouting>()
             .init_resource::<NetIncomingDisconnected>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
@@ -181,6 +184,14 @@ impl Plugin for NetworkingPlugin {
                     .after(crate::account_region::ActivateRegion)
                     .run_if(on_message::<crate::legal::LegalAccepted>)
                     .before(ClientNetPipeline::SendLocalState),
+            )
+            .add_systems(
+                Update,
+                directory::poll_directory
+                    .after(crate::account_region::ActivateRegion)
+                    .after(start_networking)
+                    .before(ClientNetPipeline::SendLocalState)
+                    .run_if(crate::legal::bound_and_accepted),
             )
             .add_systems(
                 Update,
@@ -257,6 +268,11 @@ impl Plugin for NetworkingPlugin {
 /// A region switch takes effect only at the next cold start. Dropping the sole
 /// outgoing channel closes its UDP thread; no old account traffic continues.
 pub(crate) fn stop_for_region_switch(world: &mut World) {
+    // A pending directory fetch must not reopen transport after account/region
+    // switch. The process exits/restarts before a new region is installed.
+    if world.contains_resource::<directory::DirectoryRouting>() {
+        world.insert_resource(directory::DirectoryRouting::default());
+    }
     if world
         .remove_resource::<transport::NetworkChannels>()
         .is_some()
@@ -287,6 +303,10 @@ mod tests {
             "start_networking on acceptance",
         );
         for (system, what) in [
+            (
+                IntoSystem::system_type_id(&directory::poll_directory),
+                "directory::poll_directory",
+            ),
             (
                 IntoSystem::system_type_id(&update_session_lifecycle),
                 "update_session_lifecycle",

@@ -1,0 +1,30 @@
+{
+  "commit": "93a769aba0bfbcab4ca28328e5207d5a8908be05",
+  "run": 42191648464,
+  "artifact": 13492089050,
+  "sha256": "00bcb20e9885731713d2b9bf9ba8f0aacd4979a52baec505335ca9b1f2a7980c",
+  "archive_entries": 139,
+  "jobs": 7,
+  "stages": 18,
+  "independent_recheck": "PASS",
+  "seconds": 2561.11,
+  "ranked_result_id": "03f40b9047209635c7cb5e9d653bfa9d",
+  "gameplay_ms": 463497,
+  "zero_afk_disconnects": true,
+  "exact_all_ten_awards_profile_history_season_counters": true,
+  "ready_window_secs": 15,
+  "eligibility": {
+    "status": "PASS",
+    "wire_denials": [
+      0,
+      9
+    ],
+    "wire_acceptance": 10,
+    "real_standard_map_tenth_completion": true,
+    "completion_reason": "surrender",
+    "vk_required": false
+  },
+  "early_crash": "PASS",
+  "private_fixture_removed": true,
+  "scope": "Latest pre-directory gameplay/client source; loopback signed AI-controlled human seats, not physical devices or real provider accounts"
+}

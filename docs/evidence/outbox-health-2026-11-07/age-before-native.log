@@ -1,0 +1,16 @@
+
+running 1 test
+
+thread 'career_backend::tests::identical_outbox_retries_keep_the_original_age_and_exact_durable_bytes' (17600228) panicked at /Users/wotori/git/ekza/_workspace/worktrees/mm-game/server/src/career_backend.rs:3309:9:
+assertion `left == right` failed: a delivery retry must not reset the pending-result alert clock
+  left: SystemTime { tv_sec: 1794020289, tv_nsec: 826654890 }
+ right: SystemTime { tv_sec: 1700000000, tv_nsec: 0 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test career_backend::tests::identical_outbox_retries_keep_the_original_age_and_exact_durable_bytes ... FAILED
+
+failures:
+
+failures:
+    career_backend::tests::identical_outbox_retries_keep_the_original_age_and_exact_durable_bytes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 561 filtered out; finished in 0.12s
