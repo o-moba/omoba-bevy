@@ -1,0 +1,152 @@
+{
+  "head": "1e7607b7dd9b332138c0d9d2ffd681083b7e26e9",
+  "schema": 13,
+  "run_id": 42336326091,
+  "conclusion": "success",
+  "jobs": 7,
+  "artifact_id": 13561237197,
+  "bytes": 502215,
+  "sha256": "211e9667eebf5a1a21d5c31918c19fe20e40d388dfc5722b7c142f62922d5da5",
+  "zip_entries": 206,
+  "uncompressed_bytes": 10495864,
+  "safe_paths_crc": "PASS",
+  "stages": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "log": "build.log",
+      "seconds": 130.02
+    },
+    {
+      "name": "build-ranked-fixture",
+      "status": "PASS",
+      "log": "build-ranked-fixture.log",
+      "seconds": 38.95
+    },
+    {
+      "name": "migrate",
+      "status": "PASS",
+      "log": "migrate.log",
+      "seconds": 0.03
+    },
+    {
+      "name": "admission-300",
+      "status": "PASS",
+      "log": "admission-300.log",
+      "seconds": 63.95
+    },
+    {
+      "name": "registration-api",
+      "status": "PASS",
+      "log": "registration-api.log",
+      "seconds": 15.5
+    },
+    {
+      "name": "registration-game",
+      "status": "PASS",
+      "log": "registration-game.log",
+      "seconds": 32.89
+    },
+    {
+      "name": "lifecycle",
+      "status": "PASS",
+      "log": "lifecycle.log",
+      "proof": "lifecycle/report.json",
+      "seconds": 109.83
+    },
+    {
+      "name": "mixed",
+      "status": "PASS",
+      "log": "mixed.log",
+      "proof": "mixed/report.json",
+      "seconds": 47.96
+    },
+    {
+      "name": "ready-check",
+      "status": "PASS",
+      "log": "ready-check.log",
+      "proof": "ready-check/report.json",
+      "seconds": 43.8
+    },
+    {
+      "name": "cross-lobby-ready",
+      "status": "PASS",
+      "log": "cross-lobby-ready.log",
+      "proof": "cross-lobby-ready/report.json",
+      "seconds": 38.09
+    },
+    {
+      "name": "legacy-penalty",
+      "status": "PASS",
+      "log": "legacy-penalty.log",
+      "proof": "legacy-penalty/report.json",
+      "seconds": 28.47
+    },
+    {
+      "name": "unique-draft",
+      "status": "PASS",
+      "log": "unique-draft.log",
+      "proof": "unique-draft/report.json",
+      "seconds": 32.68
+    },
+    {
+      "name": "party-leave",
+      "status": "PASS",
+      "log": "party-leave.log",
+      "proof": "party-leave/report.json",
+      "seconds": 38.08
+    },
+    {
+      "name": "party-disconnect",
+      "status": "PASS",
+      "log": "party-disconnect.log",
+      "proof": "party-disconnect/report.json",
+      "seconds": 89.23
+    },
+    {
+      "name": "ranked-early-crash",
+      "status": "PASS",
+      "log": "ranked-early-crash.log",
+      "proof": "ranked-early-crash/report.json",
+      "seconds": 142.54
+    },
+    {
+      "name": "termination",
+      "status": "PASS",
+      "log": "termination.log",
+      "proof": "termination/report.json",
+      "seconds": 20.1
+    },
+    {
+      "name": "remake",
+      "status": "PASS",
+      "log": "remake.log",
+      "proof": "remake/report.json",
+      "seconds": 116.83
+    },
+    {
+      "name": "surrender",
+      "status": "PASS",
+      "log": "surrender.log",
+      "proof": "surrender/report.json",
+      "seconds": 620.6
+    },
+    {
+      "name": "ranked-eligibility",
+      "status": "PASS",
+      "log": "ranked-eligibility.log",
+      "proof": "ranked-eligibility/report.json",
+      "seconds": 616.33
+    },
+    {
+      "name": "ranked-victory",
+      "status": "PASS",
+      "log": "ranked-victory.log",
+      "proof": "ranked-victory/report.json",
+      "seconds": 445.8
+    }
+  ],
+  "private_fixture_removed": true,
+  "private_key_path_present": false,
+  "scope": "historical schema13 retention source; no current backpressure/healthv2, WAN, physical recovery or RU capacity acceptance"
+}

@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Bound critical Ready/Flush completion buffering to256 and retain exact work/
+  generation/results while the live receiver is full. Pause job intake with timed
+  async yielding; lease, SQL, probe and health work continue. Health report v2
+  exposes the backlog and known closed recipients. Reproduced lease starvation
+  fails before and passes after the fix; all575 actual server cases (16 real-PG),
+  strict native checks and116 monitor/host-tool cases PASS. Current signed15s/
+  ten-human Running and real worker SIGTERM/durable-shutdown proofs PASS. Current
+  complete CI and the remaining physical/load/RU gates stay required.
+
 - Publish anonymous live career-worker health before any durable receipt:
   authenticated schema/primary/runtime-permission preflight, staged queue/floor
   work and failed result writes. Monitor missing/stale/corrupt reports and

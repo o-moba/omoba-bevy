@@ -27,6 +27,8 @@ use crate::career_port::CareerPort;
 
 #[path = "ready_consent.rs"]
 pub(crate) mod consent;
+#[path = "critical_replies.rs"]
+mod critical;
 #[path = "worker_health.rs"]
 mod health;
 #[path = "queue_dodge_outbox.rs"]
@@ -2219,6 +2221,7 @@ fn worker(
     let mut _heartbeat_task = None;
     let mut _ready_maintenance_task = None;
     let mut _health_probe_task = None;
+    let mut critical_replies = critical::CriticalReplies::new();
     // Sign-ins and account actions that arrived while the database was not
     // connected (after a host reboot): answered once it is, or "unavailable"
     // after STORE_WAIT, instead of failing at once.
@@ -2234,6 +2237,7 @@ fn worker(
         || !queue_floors.is_empty()
         || queue_journal.as_ref().is_some_and(|j| !j.is_empty())
     {
+        critical_replies.poll(&replies);
         worker_health.publish(
             &outbox,
             crate::match_allocation::unix_ms(),
@@ -2247,6 +2251,8 @@ fn worker(
                 staged_dodges: queue_staged.len(),
                 legacy_floors: queue_floors.len(),
                 unpersisted_results: unpersisted_records.len(),
+                critical_replies: critical_replies.len(),
+                reply_receiver_closed: critical_replies.receiver_closed(),
             },
         );
         if queue_journal.is_none() && last_queue_open.elapsed() >= Duration::from_secs(2) {
@@ -2323,7 +2329,12 @@ fn worker(
             }
         }
         // A reconnect drains older parked operations before any fresh read.
-        let next = if store.is_some() && !parked.is_empty() {
+        let next = if !critical_replies.can_take_job() {
+            // Keep timers/SQL/health live, without growing the completion buffer
+            // or spinning a CPU while the game thread temporarily stops reading.
+            rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
+            Err(mpsc::RecvTimeoutError::Timeout)
+        } else if store.is_some() && !parked.is_empty() {
             Err(mpsc::RecvTimeoutError::Timeout)
         } else {
             deferred_job
@@ -2386,7 +2397,7 @@ fn worker(
                         .collect(),
                 };
                 for completion in completed {
-                    let _ = replies.send(Reply::Ready(completion));
+                    critical_replies.retain(Reply::Ready(completion));
                 }
             }
             Ok(Job::Flush(generation)) => {
@@ -2400,9 +2411,9 @@ fn worker(
                 ) && queue_journal.as_ref().is_some_and(|j| j.flush().is_ok());
                 queue_storage_ready = queue_flushed;
                 let flushed = matches_flushed && queue_flushed;
-                // Shutdown keeps polling the receiver; unlike an optional view,
-                // this durability acknowledgement must not be dropped on a full channel.
-                let _ = replies.send(Reply::Flushed(generation, flushed));
+                // Keep the exact barrier result until its live recipient reads;
+                // delivery pressure must not park lease/probe timers or SQL I/O.
+                critical_replies.retain(Reply::Flushed(generation, flushed));
             }
             Ok(Job::QueueFloor(floor)) => {
                 if queue_floors.len() >= MAX_JOBS && !queue_floors.contains_key(&floor.profile_id) {

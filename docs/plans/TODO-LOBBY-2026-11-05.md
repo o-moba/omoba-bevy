@@ -8,19 +8,22 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 Original68: **62 done,5 partial (#1,#2,#12,#20,#50),1 open (#13)**.
 Critic/physical/UI and deployment requirements remain additional acceptance gates.
-Current local proof: **570 actual whole-server cases (14 real-PG),101 actual-PG18.6
-store cases and116 monitor/host-tool cases PASS**. Required anonymous process
-reports expose authenticated SQL/schema/role/primary health, staged dodges/floors
-and unpersisted result writes. A reproduced startup reconnect starvation is fixed
-with separate connection/delivery timers; real schema/IO failure and recovery
-passes without restart. [Current availability proof](../evidence/storage-health-2026-11-07/README.md).
+Current local proof: **575 actual whole-server cases (16 real-PG) and116 current
+monitor/host-tool cases PASS**. Store code is unchanged from its101 actual-PG18.6
+case checkpoint. Bounded Ready/Flush completions retain exact work/generation/
+result data while a live receiver is full. Intake pauses before the256-slot
+budget can overflow, with SQL/lease/probe/health work continuing. The reproduced
+lease starvation fails before and passes after; a seeded full-budget stress case
+retains256 completions, keeps the independent active-match lease above60s after
+12s with no pending Start, and delivers every original sequence plus the barrier.
+[Current critical-reply proof](../evidence/critical-replies-2026-11-07/README.md).
 
-Schema13 bounded retention, mandatory SQL consent/restore evidence and persisted
-receipt age/typed-journal monitoring remain verified. The strengthened signed15s
-journey now explicitly continues the replacement roster through ten-human Running
-and fresh actual lobby/worker health. Older ready-check reports proved replacement
-Assigned, not that final Running condition; separate earlier full-party journeys
-retain their own scope. Full current CI remains required.
+Health report v2 exposes critical backlog/known closed recipients; paired monitor
+validates the new format. Required schema13/permission/storage health, reconnect
+recovery, bounded ready retention, mandatory SQL consent and restore evidence
+remain verified. Current signed15s/FIFO/replacement through ten-human Running and
+fresh v2 health, plus real worker SIGTERM/durable shutdown, PASS. Full current CI
+and actual host/physical/recovery/load acceptance remain required.
 Next: current-schema13 recovery/replay
 rehearsal; UI-2/UI-3 exact current pixels and physical C3; actual multi-host/WAN
 and sustained host capacity/cadence; trust packaging/provisioning; current full CI.
@@ -167,13 +170,12 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
    `scripts/postgres_tests.py`, full public journeys and portal checks. The owner
    permits targeted local commits with the full gate in CI while root disk is
    below20GB; a prior head's green job does not certify the current source.
-2. Remove remaining blocking Ready/Flush reply sends with bounded retained ACKs;
-   prove full-buffer lease/health liveness. Verify paired rollout of the health
-   producer/monitor and controlled SQL/heartbeat/backpressure latency. Schema13
-   ready retention and pre-persistence/schema/role/storage fault/recovery checks
-   now have actual native/PG/monitor proof. Missing-consent public
-   admission is now closed; retain authoritative recovery records and never turn
-   absent/removed ready rows into a standalone bypass.
+2. Verify controlled SQL/heartbeat/backpressure/cadence under the full target load
+   and paired health-v2 rollout. Direct blocking Ready/Flush sends are removed;
+   bounded full-receiver/budget, unchanged generations, actual lease/health
+   liveness and late-completion/canonical-admission checks PASS. This does not
+   establish1000-player sustained latency or RU capacity. Preserve authoritative
+   recovery records and never treat missing ready rows as standalone admission.
 3. Rehearse current-schema recovery and receipt replay against the exact release
    binary. C4's older schema10 physical proofs are historical; current target is13. New public replay
    preserves missing-admission evidence until matching SQL authority is restored;
@@ -2577,3 +2579,41 @@ controlled heartbeat/cadence/load, public trust, WAN/multi-host, UI/physical and
 gates remain open. C2/C4 decisions remain pending; C4's patch still applies cleanly.
 Career13/portal11/protocol16 unchanged; original68 stays62 done,5 partial,1 open.
 No RU migration, grant/settings/credential change, alert send or deployment.
+
+
+## 2026-11-07 — bounded critical completions and full-receiver liveness
+
+Replace the two remaining blocking Ready/Flushed sends with an exact FIFO of at
+most256 critical completions. Reserve room for a whole current Ready batch before
+intake; pause intake with10ms async timer yielding when the budget is tight. SQL,
+leases, pending record/journal retries and operational reports continue. Keep
+work/sequence, result errors, flush generation and success unchanged. Known closed
+recipients abandon undeliverable callbacks; SQL/outboxes retain durable authority.
+Shutdown still polls before accepting a flush barrier. Input/output channel caps
+are unchanged. No new pool/thread, dependency, DB schema or game protocol.
+
+The real red test leaves only2.987s of a15s active-match lease after12s while output
+is full. The fixed version passes the unchanged>60s threshold and delivers both
+Ready and Flush. The stronger seeded stress first ACKs Start/removes its spool,
+then retains256 critical completions and bounds extra input. Its only lease renewal
+comes from heartbeat work;82.964s remain after the same12s hold. All256 original
+work sequences and exact barrier arrive after reading resumes; expired unpublished
+consent stays cancelled, cannot start a public match and gives no game/penalty.
+The unseeded fixture's legitimate ownership-retry refusal is rejected as setup;
+only the seeded pass is acceptance, with both rejected schemas verified/removed.
+[Exact code/proofs/limits](../evidence/critical-replies-2026-11-07/README.md).
+
+All575 actual server cases (16 real-PG), strict native test/production checks and
+42 monitor/74 host-tool cases PASS. Unchanged store retains its101-case proof.
+Anonymous health v2 adds critical backlog and known closed receivers; the monitor
+checks256 capacity and includes aggregate counts. Native report/parser checks and
+current signed15s/FIFO/ten-human Running with fresh v2 health PASS. Actual worker
+SIGTERM flushes durably and records Interrupted, with no ranked rewards.
+
+Parent1e7607b7 CI42336326091 is fully green across7 jobs; artifact13561237197 matches
+SHA256/size/safe ZIP/CRC and all20 public stages with private fixture removed.
+This is historical schema13 retention proof, not current backpressure/v2 acceptance.
+Fresh full CI, schema13 physical/WAL/off-host/rights/replay, sustained host cadence
+and RU/WAN capacity, public trust packaging/provisioning, actual multi-host faults,
+current UI/physical and C2/C4 decisions remain open. Original68 stays62 done,
+5 partial,1 open. No RU migration/settings/credential/grant change or deployment.

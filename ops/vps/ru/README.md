@@ -372,9 +372,15 @@ or "answers again" from the probe. Messages carry unit names, paths, numbers and
 allocation ids, never a log line, an address or a secret. Aggregate allocation-failure
 rates and sustained SQL/game-loop latency still need their controlled-load gates.
 
-Career workers publish anonymous operational state every5s under each outbox's
+Career workers publish anonymous v2 operational state every5s under each outbox's
 `health/status.json`: authenticated SQL preflight/time, journal availability and
-counts of staged dodges, legacy floors and failed result writes. The preflight
+counts of staged dodges, legacy floors, failed result writes and retained critical
+replies, plus known reply-recipient disconnection. The worker retains at most256
+Ready/Flush completions and pauses input before its next bounded batch could
+overflow that budget; SQL/lease/probe/health work continues while output is full.
+Actual completion payload, request sequence and flush generation/success survive
+the pause. Dropped recipients abandon delivery; durable SQL/outboxes remain the
+authority. Shutdown keeps polling before accepting a flush barrier. The preflight
 checks required schema13, a writable primary and actual runtime permissions before
 player requests; a listening port is not sufficient. Its10s background probe has
 a2s deadline. Missing/stale reports also reveal failure to write operational state

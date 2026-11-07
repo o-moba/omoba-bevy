@@ -9,6 +9,7 @@ use super::*;
 struct OwnedWorker {
     jobs: Option<SyncSender<Job>>,
     replies: Receiver<Reply>,
+    reply_filler: SyncSender<Reply>,
     handle: Option<JoinHandle<()>>,
     outbox: PathBuf,
 }
@@ -54,11 +55,13 @@ impl OwnedWorker {
             }
         }
         let path = outbox.clone();
+        let reply_filler = sender.clone();
         let handle =
             std::thread::spawn(move || worker(url, path, receiver, sender, scope, admission));
         Self {
             jobs: Some(jobs),
             replies,
+            reply_filler,
             handle: Some(handle),
             outbox,
         }
@@ -69,6 +72,20 @@ impl OwnedWorker {
             .unwrap()
             .send(job)
             .expect("live fixture worker");
+    }
+    fn fill_replies(&self) {
+        for _ in 0..MAX_JOBS * 2 {
+            match self.reply_filler.try_send(Reply::RecordError(
+                "filler".into(),
+                "paused fixture recipient".into(),
+            )) {
+                Ok(()) => {}
+                Err(mpsc::TrySendError::Full(_)) => break,
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    panic!("fixture recipient disconnected")
+                }
+            }
+        }
     }
     fn wait_for(&self, mut accept: impl FnMut(Reply) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(25);
@@ -91,6 +108,10 @@ impl OwnedWorker {
 impl Drop for OwnedWorker {
     fn drop(&mut self) {
         self.jobs.take();
+        // Abandon the test recipient before joining: a regression that blocks
+        // on a full reply channel must fail the assertion, not hang teardown.
+        let (_, abandoned) = mpsc::sync_channel(1);
+        drop(std::mem::replace(&mut self.replies, abandoned));
         if let Some(handle) = self.handle.take() {
             let result = handle.join();
             if !std::thread::panicking() {
@@ -102,6 +123,251 @@ impl Drop for OwnedWorker {
             let _ = fs::remove_dir_all(&self.outbox);
         }
     }
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL; real Ready/Flush full-reply liveness"]
+fn postgres_worker_renews_lease_with_full_ready_and_flush_replies() {
+    let (url, runtime, store, pool, admin, schema) = isolated_public_database();
+    eprintln!("CRITICAL_REPLY_TEST_SCHEMA={schema}");
+    let playing = runtime
+        .block_on(store.authenticate(&random_id::<32>(), "Reply game"))
+        .unwrap();
+    let searching = runtime
+        .block_on(store.authenticate(&random_id::<32>(), "Reply ready"))
+        .unwrap();
+    let start = allocation(&playing);
+    let fixture = OwnedWorker::spawn(url, true);
+    fixture.send(record(RecordKind::Start, start.clone()));
+    wait_until(|| {
+        runtime
+            .block_on(
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS(SELECT 1 FROM career_matches WHERE result_id=$1)",
+                )
+                .bind(&start.result_id)
+                .fetch_one(&pool),
+            )
+            .unwrap()
+    });
+    let work = consent::Work {
+        check_id: random_id::<16>(),
+        sequence: 1201,
+        operation: consent::Operation::Reserve {
+            preference: shared::match_service::MatchPreference::Casual,
+            seats: vec![omoba_career_store::career_store::ready::Seat {
+                profile_id: searching.profile_id.clone(),
+                session_id: "reply-ready".into(),
+            }],
+        },
+    };
+    fixture.send(Job::Ready(work.clone()));
+    fixture.send(Job::Flush(1201));
+    wait_until(|| {
+        runtime
+            .block_on(
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS(SELECT 1 FROM career_ready_checks WHERE check_id=$1)",
+                )
+                .bind(&work.check_id)
+                .fetch_one(&pool),
+            )
+            .unwrap()
+    });
+    runtime.block_on(sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()+interval '15 seconds' WHERE result_id=$1")
+        .bind(&start.result_id).execute(&pool)).unwrap();
+    let before = crate::match_allocation::unix_ms();
+    std::thread::sleep(Duration::from_secs(12));
+    let seconds: f64 = runtime.block_on(sqlx::query_scalar("SELECT extract(epoch FROM lease_until-clock_timestamp())::double precision FROM career_matches WHERE result_id=$1")
+        .bind(&start.result_id).fetch_one(&pool)).unwrap();
+    assert!(
+        seconds > 60.0,
+        "Ready/Flush reply backpressure stalled lease renewal: {seconds}s remaining"
+    );
+    let status: health::Report =
+        serde_json::from_slice(&fs::read(fixture.outbox.join("health/status.json")).unwrap())
+            .unwrap();
+    assert!(
+        status.updated_ms > before && status.sql_ready,
+        "full replies stalled health: {status:?}"
+    );
+    let mut ready = false;
+    let mut flushed = false;
+    fixture.wait_for(|reply| {
+        match reply {
+            Reply::Ready(done) if done.work == work => {
+                assert_eq!(done.result.unwrap().check_id, work.check_id);
+                ready = true;
+            }
+            Reply::Flushed(1201, true) => flushed = true,
+            _ => {}
+        }
+        ready && flushed
+    });
+    fixture.send(record(RecordKind::Settle, terminal(&start)));
+    fixture.wait_for(|reply| matches!(reply, Reply::Settled { ref result, .. } if result.result_id == start.result_id));
+    assert_eq!(
+        runtime
+            .block_on(store.profile(&searching.profile_id))
+            .unwrap()
+            .matches_played,
+        0
+    );
+    drop(fixture);
+    close_public_database(&runtime, store, pool, admin, &schema);
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL; bounded full-buffer critical completions"]
+fn postgres_worker_bounds_critical_backpressure_and_keeps_every_live_completion() {
+    let (url, runtime, store, pool, admin, schema) = isolated_public_database();
+    eprintln!("CRITICAL_BOUND_TEST_SCHEMA={schema}");
+    let playing = runtime
+        .block_on(store.authenticate(&random_id::<32>(), "Bound game"))
+        .unwrap();
+    let searching = runtime
+        .block_on(store.authenticate(&random_id::<32>(), "Bound ready"))
+        .unwrap();
+    let start = allocation(&playing);
+    let fixture = OwnedWorker::spawn(url, false);
+    fixture.send(record(RecordKind::Start, start.clone()));
+    fixture.wait_for(|reply| matches!(reply, Reply::Started(ref id) if id == &start.result_id));
+    wait_until(|| {
+        !spool_path(&fixture.outbox, &start.result_id)
+            .unwrap()
+            .exists()
+    });
+    let work = consent::Work {
+        check_id: random_id::<16>(),
+        sequence: 1,
+        operation: consent::Operation::Reserve {
+            preference: shared::match_service::MatchPreference::Casual,
+            seats: vec![omoba_career_store::career_store::ready::Seat {
+                profile_id: searching.profile_id.clone(),
+                session_id: "bounded-ready".into(),
+            }],
+        },
+    };
+    // Establish immutable ownership before duplicating requests concurrently.
+    // Racing first-time claims may correctly return a retryable ownership error.
+    fixture.send(Job::Ready(work.clone()));
+    fixture.wait_for(|reply| match reply {
+        Reply::Ready(done) if done.work == work => {
+            assert_eq!(done.result.unwrap().check_id, work.check_id);
+            true
+        }
+        _ => false,
+    });
+    fixture.fill_replies();
+    for sequence in 1..=MAX_JOBS as u64 {
+        fixture.send(Job::Ready(consent::Work {
+            sequence,
+            ..work.clone()
+        }));
+    }
+    let report = || -> Option<health::Report> {
+        serde_json::from_slice(&fs::read(fixture.outbox.join("health/status.json")).ok()?).ok()
+    };
+    wait_until(|| report().is_some_and(|r| r.critical_replies > MAX_JOBS - ACCESS_READ_BATCH));
+    let held = report().unwrap();
+    assert!(held.critical_replies <= MAX_JOBS && !held.reply_receiver_closed);
+    fixture.send(Job::Flush(1202));
+    let mut extra = 0;
+    for _ in 0..=MAX_JOBS {
+        match fixture
+            .jobs
+            .as_ref()
+            .unwrap()
+            .try_send(Job::Ready(work.clone()))
+        {
+            Ok(()) => extra += 1,
+            Err(mpsc::TrySendError::Full(_)) => break,
+            Err(mpsc::TrySendError::Disconnected(_)) => panic!("live worker disconnected"),
+        }
+    }
+    assert!(
+        extra > 0 && extra <= MAX_JOBS,
+        "input must remain bounded while intake pauses"
+    );
+    runtime.block_on(sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()+interval '15 seconds' WHERE result_id=$1")
+        .bind(&start.result_id).execute(&pool)).unwrap();
+    std::thread::sleep(Duration::from_secs(12));
+    let seconds: f64 = runtime.block_on(sqlx::query_scalar("SELECT extract(epoch FROM lease_until-clock_timestamp())::double precision FROM career_matches WHERE result_id=$1")
+        .bind(&start.result_id).fetch_one(&pool)).unwrap();
+    assert!(
+        seconds > 60.0,
+        "bounded intake stalled heartbeat with no pending Start: {seconds}"
+    );
+    let current = report().unwrap();
+    assert!(current.updated_ms > held.updated_ms && current.sql_ready);
+    assert_eq!(current.critical_replies, held.critical_replies);
+    assert!(current.critical_replies <= MAX_JOBS && !current.reply_receiver_closed);
+    assert!(current.blocked_since_ms.is_some());
+    let mut sequences = HashSet::new();
+    let mut flushed = false;
+    fixture.wait_for(|reply| {
+        match reply {
+            Reply::Ready(done) if done.work.check_id == work.check_id => {
+                assert_eq!(done.work.operation, work.operation);
+                let snapshot = done.result.unwrap();
+                assert_eq!(snapshot.check_id, work.check_id);
+                assert!(matches!(
+                    snapshot.phase,
+                    omoba_career_store::career_store::ready::Phase::Forming
+                        | omoba_career_store::career_store::ready::Phase::Cancelled
+                ));
+                sequences.insert(done.work.sequence);
+            }
+            Reply::Flushed(1202, true) => flushed = true,
+            _ => {}
+        }
+        sequences.len() == MAX_JOBS && flushed
+    });
+    assert!(sequences.iter().all(|s| (1..=MAX_JOBS as u64).contains(s)));
+    // Buffering a completion cannot restart an expired, unpublished check.
+    runtime
+        .block_on(store.ready_queue_access(&searching.profile_id))
+        .unwrap();
+    let phase: String = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT state FROM career_ready_checks WHERE check_id=$1")
+                .bind(&work.check_id)
+                .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(phase, "cancelled");
+    let mut refused = allocation(&searching);
+    refused.result_id = work.check_id.clone();
+    assert_eq!(
+        runtime.block_on(store.start_public(refused)).unwrap_err(),
+        omoba_career_store::career_store::ready::CLOSED
+    );
+    assert_eq!(
+        runtime
+            .block_on(store.profile(&searching.profile_id))
+            .unwrap()
+            .matches_played,
+        0
+    );
+    let events: i64 = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events").fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(events, 0);
+    fixture.send(record(RecordKind::Settle, terminal(&start)));
+    fixture.wait_for(|reply| matches!(reply, Reply::Settled { ref result, .. } if result.result_id == start.result_id));
+    wait_until(|| {
+        report().is_some_and(|r| {
+            r.critical_replies == 0 && !r.reply_receiver_closed && r.blocked_since_ms.is_none()
+        })
+    });
+    eprintln!(
+        "CRITICAL_BOUND_PASS retained={} extra_input={} lease_seconds={seconds:.3}",
+        held.critical_replies, extra
+    );
+    drop(fixture);
+    close_public_database(&runtime, store, pool, admin, &schema);
 }
 
 #[test]

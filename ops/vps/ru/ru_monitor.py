@@ -621,7 +621,8 @@ class Monitor:
     def storage_health_problems(self, lobby):
         """Required live-process reports expose failure before any durable receipt."""
         facts = dict(checked=0, blocked=0, persistent=0, missing=0, stale=0,
-                     unreadable=0, scan_limited=False)
+                     unreadable=0, scan_limited=False, critical_replies=0,
+                     closed_reply_receivers=0)
         up = self.active_seconds(lobby)
         if lobby.get("ActiveState") != "active" or up is None or up < STORAGE_BLOCKED_SECONDS:
             facts["skipped"] = "the lobby is not running or started recently"
@@ -630,7 +631,7 @@ class Monitor:
         now = self.now()
         expected_keys = {"version", "updated_ms", "server_epoch", "probe_checked_ms", "sql_ready",
                          "journal_ready", "staged_dodges", "legacy_floors", "unpersisted_results",
-                         "blocked_since_ms"}
+                         "critical_replies", "reply_receiver_closed", "blocked_since_ms"}
         for root in roots:
             epoch, grace_until = None, 0
             try:
@@ -665,16 +666,21 @@ class Monitor:
                     continue
                 facts["checked"] += 1
                 if (not isinstance(report, dict) or set(report) != expected_keys
-                        or type(report["version"]) is not int or report["version"] != 1
+                        or type(report["version"]) is not int or report["version"] != 2
                         or report["server_epoch"] != epoch
                         or (epoch is not None and type(report["server_epoch"]) is not int)
                         or type(report["sql_ready"]) is not bool
-                        or type(report["journal_ready"]) is not bool):
+                        or type(report["journal_ready"]) is not bool
+                        or type(report["reply_receiver_closed"]) is not bool):
                     raise ValueError("invalid health contract")
                 updated = observed_seconds(report["updated_ms"], now)
-                counts = [report[k] for k in ("staged_dodges", "legacy_floors", "unpersisted_results")]
+                counts = [report[k] for k in ("staged_dodges", "legacy_floors", "unpersisted_results", "critical_replies")]
                 if any(type(n) is not int or not 0 <= n <= 2**32 - 1 for n in counts):
                     raise ValueError("invalid pending counts")
+                if report["critical_replies"] > 256:
+                    raise ValueError("critical reply budget exceeded")
+                facts["critical_replies"] += report["critical_replies"]
+                facts["closed_reply_receivers"] += int(report["reply_receiver_closed"])
                 probe = report["probe_checked_ms"]
                 if probe is not None:
                     probe = observed_seconds(probe, now)
@@ -682,7 +688,8 @@ class Monitor:
                         raise ValueError("probe ahead of report")
                 if report["sql_ready"] and probe is None:
                     raise ValueError("SQL readiness without a probe")
-                blocked = not report["sql_ready"] or not report["journal_ready"] or any(counts)
+                blocked = (not report["sql_ready"] or not report["journal_ready"]
+                           or report["reply_receiver_closed"] or any(counts))
                 since = report["blocked_since_ms"]
                 if (since is None) != (not blocked):
                     raise ValueError("inconsistent blocked interval")
@@ -702,7 +709,9 @@ class Monitor:
         repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60
         text = (f"career storage needs attention: {facts['persistent']} blocked for at least2 min, "
                 f"{facts['missing']} missing, {facts['stale']} stale, {facts['unreadable']} unreadable "
-                f"process reports, scan limited={facts['scan_limited']}; check schema/runtime grants, "
+                f"process reports, scan limited={facts['scan_limited']}, "
+                f"critical replies={facts['critical_replies']}, closed reply receivers={facts['closed_reply_receivers']}; "
+                "check reply backpressure, schema/runtime grants, "
                 "PostgreSQL and outbox storage; preserve recovery receipts")
         return [("career:storage", text, repeat)], facts
 

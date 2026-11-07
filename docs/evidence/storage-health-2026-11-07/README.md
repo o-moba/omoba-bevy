@@ -1,5 +1,10 @@
 # Career storage health before persistence
 
+Historical bc08eb52 checkpoint: health report v1. The current paired report is
+[v2 with bounded critical-reply delivery](../critical-replies-2026-11-07/README.md).
+Current monitoring intentionally rejects the older operational format; reports
+are disposable and never match/recovery authority.
+
 Required operational reports now expose failure even before the first receipt
 can reach an outbox. Actual career workers publish atomic disposable
 `<outbox>/health/status.json` every5s: authenticated SQL probe/time, journal

@@ -781,7 +781,7 @@ async function readyCheckLifecycle() {
  for(const c of accepted)c.autoHandoff=true;
  await pumpUntil('replacement ten-human roster reaches acknowledged Running',()=>accepted.every(c=>c.stage==='running')&&allocationStatus(allocation.allocation_id)?.phase==='running',45000);
  const readHealth=p=>{try{if(fs.statSync(p).size>4096)return null;return parse(fs.readFileSync(p));}catch{return null;}};
- const freshHealth=h=>h?.version===1&&h.sql_ready===true&&h.journal_ready===true&&h.staged_dodges===0&&h.legacy_floors===0&&h.unpersisted_results===0&&h.blocked_since_ms===null&&Number.isSafeInteger(h.updated_ms)&&h.updated_ms<=Date.now()+5000&&Date.now()-h.updated_ms<=60000&&Number.isSafeInteger(h.probe_checked_ms)&&Date.now()-h.probe_checked_ms<=30000;
+ const freshHealth=h=>h?.version===2&&h.sql_ready===true&&h.journal_ready===true&&h.staged_dodges===0&&h.legacy_floors===0&&h.unpersisted_results===0&&h.critical_replies===0&&h.reply_receiver_closed===false&&h.blocked_since_ms===null&&Number.isSafeInteger(h.updated_ms)&&h.updated_ms<=Date.now()+5000&&Date.now()-h.updated_ms<=60000&&Number.isSafeInteger(h.probe_checked_ms)&&Date.now()-h.probe_checked_ms<=30000;
  let lobbyHealth,workerHealth;
  await pumpUntil('fresh lobby and Ranked-worker storage health',()=>{
   lobbyHealth=readHealth(path.join(root,'lobby-outbox','health','status.json'));
@@ -789,7 +789,7 @@ async function readyCheckLifecycle() {
   const status=allocationStatus(allocation.allocation_id);
   return freshHealth(lobbyHealth)&&lobbyHealth.server_epoch===null&&freshHealth(workerHealth)&&status&&String(workerHealth.server_epoch)===String(status.server_epoch);
  },20000);
- report.storage_health={status:'PASS',lobby_sql_ready:true,worker_sql_ready:true,journals_ready:true,worker_epoch_matches:true,staged_dodges:0,legacy_floors:0,unpersisted_results:0,blocked:false,scope:'actual lobby and ten-human Ranked worker; fresh authenticated probes; no injected health report'};
+ report.storage_health={status:'PASS',lobby_sql_ready:true,worker_sql_ready:true,journals_ready:true,worker_epoch_matches:true,staged_dodges:0,legacy_floors:0,unpersisted_results:0,critical_replies:0,reply_receiver_closed:false,blocked:false,scope:'actual lobby and ten-human Ranked worker; fresh authenticated probes; no injected health report'};
  for(const c of [...roster,replacement]){c.autoQueue=false;c.close();}
  report.ready_check={status:'PASS',qualification_setup_seconds:qualificationSetupSeconds,fixture_setup_before_search:true,window_secs:15,accepted_before_timeout:9,worker_count_before_unanimity:0,fifo_age_preserved:true,late_accept_rejected:true,replacement_allocation:allocation.allocation_id,replacement_humans_running:accepted.length};
  report.scenarios.push('unanimous_15s_ready_timeout_fifo_replacement');

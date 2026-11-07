@@ -145,9 +145,10 @@ class MonitorCase(unittest.TestCase):
 
     def storage_report(self, outbox=ru_monitor.LOBBY_OUTBOX, epoch=None, **changes):
         now = int(self.host.clock * 1000)
-        report = {"version": 1, "updated_ms": now, "server_epoch": epoch,
+        report = {"version": 2, "updated_ms": now, "server_epoch": epoch,
                   "probe_checked_ms": now, "sql_ready": True, "journal_ready": True,
                   "staged_dodges": 0, "legacy_floors": 0, "unpersisted_results": 0,
+                  "critical_replies": 0, "reply_receiver_closed": False,
                   "blocked_since_ms": None, **changes}
         path = Path(self.p(outbox)) / "health/status.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,13 +180,16 @@ class StorageHealthTest(MonitorCase):
     def test_every_pre_persistence_blocker_is_visible_after_two_minutes(self):
         now = int(self.host.clock * 1000)
         for changes in ({"sql_ready": False}, {"journal_ready": False}, {"staged_dodges": 1},
-                        {"legacy_floors": 1}, {"unpersisted_results": 1}):
+                        {"legacy_floors": 1}, {"unpersisted_results": 1},
+                        {"critical_replies": 1}, {"reply_receiver_closed": True}):
             self.storage_report(**changes, blocked_since_ms=now - 119000)
             self.assertNotIn("career:storage", self.storage()[0]["codes"])
             self.storage_report(**changes, blocked_since_ms=now - 120000)
             report, facts = self.storage()
             self.assertIn("career:storage", report["codes"], changes)
             self.assertEqual(facts["persistent"], 1)
+            self.assertEqual(facts["critical_replies"], changes.get("critical_replies", 0))
+            self.assertEqual(facts["closed_reply_receivers"], int(changes.get("reply_receiver_closed", False)))
 
     def test_stale_report_or_probe_and_wrong_worker_epoch_are_actionable(self):
         now = int(self.host.clock * 1000)
@@ -218,7 +222,8 @@ class StorageHealthTest(MonitorCase):
 
     def test_corrupt_oversize_future_and_inconsistent_contracts_fail_closed(self):
         valid = json.loads(self.path.read_text())
-        for changes in ({"version": True}, {"sql_ready": 1}, {"staged_dodges": True},
+        for changes in ({"version": True}, {"version": 1}, {"sql_ready": 1}, {"staged_dodges": True},
+                        {"critical_replies": 257, "blocked_since_ms": int(self.host.clock * 1000)},
                         {"updated_ms": int((self.host.clock + 30) * 1000)},
                         {"probe_checked_ms": None}, {"blocked_since_ms": 0},
                         {"sql_ready": False}, {"private_key": "never disclose"}):

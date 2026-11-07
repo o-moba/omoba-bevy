@@ -11,18 +11,18 @@ findings). Decision record: ADR-027.
 The authoritative remaining order is now at the top of
 [the full TODO](../plans/TODO-LOBBY-2026-11-05.md). Original68 remains62 done,
 5 partial,1 open; critic/UI/physical and RU gates are additional. Current local
-verification is570 whole-server cases (14 real-PG),101 actual-PG18.6 store and116
-monitor/host-tool cases. Anonymous live-process health detects missing schema,
-permissions/primary readiness and pre-persistence queue/floor/result failures;
-separate retry clocks restore failed startup connections without restart.
-[Current availability/fault-recovery proof](../evidence/storage-health-2026-11-07/README.md).
-Schema13 retention/Resume, mandatory consent and durable restore evidence retain
-[their prior proof](../evidence/ready-retention-2026-11-07/README.md). The signed15s
-replacement journey now explicitly proves ten-human Running and fresh actual
-lobby/worker health. Full current CI, schema13 physical/WAL/off-host recovery,
-controlled backpressure/heartbeat/load, native/physical acceptance, WAN/multi-host
-capacity/trust and owner-controlled RU rollout remain open. Career13/portal11,
-protocol16; older sections preserve dated history.
+verification is575 whole-server cases (16 real-PG) and116 monitor/host-tool cases;
+unchanged store retains its101 actual-PG18.6 proof. Critical Ready/Flush completions
+are retained within256 slots, with paused intake and live SQL/lease/probe/health
+work under a full recipient. The reproduced lease stall is fixed; full-budget
+stress preserves all original sequence/generation/results and expired-consent
+admission fences. [Current proof](../evidence/critical-replies-2026-11-07/README.md).
+Health is now paired operational format v2, with critical backlog/known closure
+counts; career13/portal11/game protocol16 are unchanged. Current signed15s through
+ten-human Running/v2 health and SIGTERM durability PASS. Full current CI, schema13
+physical/WAL/off-host/rights recovery, sustained host/backpressure/cadence/load,
+native/physical UI, WAN/multi-host capacity/trust and reviewed RU rollout remain
+open. Older sections preserve dated history.
 
 ## Initial changes — 2026-11-05
 
@@ -1606,3 +1606,25 @@ separate prior full-party journeys retain their independent proof. Parentaa's
 Current full CI, schema13 physical recovery/restored rights, controlled generic
 reply/heartbeat/capacity, UI/physical, trust/WAN/multi-host and RU gates remain open.
 C2/C4 decisions unchanged; no production deployment or live alert is performed.
+
+
+## 2026-11-07 — critical reply backpressure
+
+The full receiver previously blocked Ready/Flushed sends and stopped SQL lease
+renewal; the real red fixture leaves2.987s after12s. Exact bounded completion
+retention and pre-intake budget reservation remove that stall without dropping
+live-recipient callbacks or changing flush generations/results. A seeded256-slot
+stress with Start already ACKed keeps82.964s after12s, delivers all256 sequences
+and the barrier, keeps expired unpublished consent cancelled and adds no played
+match/penalty. Three native queue cases and two actual-PG worker cases are added.
+All575 actual server cases (16 real-PG), strict native checks and116 Python cases
+PASS. Store unchanged/101-case proof retained.
+
+Health report v2 and paired monitor expose backlog/known closed recipients and
+enforce the256-slot report bound. Current15s/FIFO/ten-human Running/v2-health and
+actual SIGTERM/durable-outbox journeys PASS. Parent1e's7-job/20-stage hashed public
+artifact is inspected; current full CI remains required.
+[Exact proof and remaining gates](../evidence/critical-replies-2026-11-07/README.md).
+No host-load acceptance, physical/WAL recovery, UI/physical, trust/WAN/multi-host
+or RU rollout gate is waived. Existing C2/C4 decisions and original68 ledger
+unchanged. No live settings, credentials, grants, alerts or deployment changed.

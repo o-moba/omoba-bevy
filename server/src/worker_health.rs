@@ -20,6 +20,8 @@ pub(crate) struct Sample {
     pub staged_dodges: usize,
     pub legacy_floors: usize,
     pub unpersisted_results: usize,
+    pub critical_replies: usize,
+    pub reply_receiver_closed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,6 +36,8 @@ pub(crate) struct Report {
     pub staged_dodges: usize,
     pub legacy_floors: usize,
     pub unpersisted_results: usize,
+    pub critical_replies: usize,
+    pub reply_receiver_closed: bool,
     pub blocked_since_ms: Option<u64>,
 }
 
@@ -53,13 +57,14 @@ impl Health {
             || sample.staged_dodges != 0
             || sample.legacy_floors != 0
             || sample.unpersisted_results != 0;
+        let blocked = blocked || sample.critical_replies != 0 || sample.reply_receiver_closed;
         if blocked {
             self.blocked_since.get_or_insert(now);
         } else {
             self.blocked_since = None;
         }
         Report {
-            version: 1,
+            version: 2,
             updated_ms: now,
             server_epoch: sample.epoch,
             probe_checked_ms: sample.probe.checked_ms,
@@ -68,6 +73,8 @@ impl Health {
             staged_dodges: sample.staged_dodges,
             legacy_floors: sample.legacy_floors,
             unpersisted_results: sample.unpersisted_results,
+            critical_replies: sample.critical_replies,
+            reply_receiver_closed: sample.reply_receiver_closed,
             blocked_since_ms: self.blocked_since,
         }
     }
@@ -121,6 +128,8 @@ mod tests {
             staged_dodges: 0,
             legacy_floors: 0,
             unpersisted_results: 0,
+            critical_replies: 0,
+            reply_receiver_closed: false,
         }
     }
     #[test]
@@ -167,7 +176,7 @@ mod tests {
         write(&outbox, &h.sample(1000, healthy(1000))).unwrap();
         let path = outbox.join("health/status.json");
         let report: Report = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(report.version, 1);
+        assert_eq!(report.version, 2);
         assert!(report.sql_ready);
         assert!(!outbox.join("health/status.tmp").exists());
         #[cfg(unix)]
