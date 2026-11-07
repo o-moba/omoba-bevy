@@ -1410,7 +1410,12 @@ impl ServerRuntime {
                 if player.hero.identity.id == participant.player_id {
                     player.joined = false;
                     self.career.backend.set_playing(*addr, false);
-                    let message = if error == shared::career::error_code::DODGE_COOLDOWN {
+                    let message = if matches!(
+                        error.as_str(),
+                        shared::career::error_code::DODGE_COOLDOWN
+                            | shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION
+                            | shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED
+                    ) {
                         error.clone()
                     } else {
                         format!(
@@ -1484,9 +1489,20 @@ impl ServerRuntime {
             self.career.backend.authenticated_session(addr),
         ) {
             view.ranked_season_open = profile.ranked.as_ref().map(|s| s.active_at(utc_ms()));
-            view.match_service = self.match_service.view(&profile.profile_id, &session, now);
-            view.match_service_request_id =
-                self.match_service.request_id(&profile.profile_id, &session);
+            // A fresh shared-store refusal never entered the lobby queue. Keep
+            // its current request ID instead of replacing it with local Idle
+            // or a previous attempt's request (including after reconnect).
+            let queue_refused = self.match_service.is_lobby()
+                && view.match_service_request_id.is_some()
+                && matches!(
+                    view.match_service,
+                    Some(shared::match_service::MatchServiceView::Failed { .. })
+                );
+            if !queue_refused {
+                view.match_service = self.match_service.view(&profile.profile_id, &session, now);
+                view.match_service_request_id =
+                    self.match_service.request_id(&profile.profile_id, &session);
+            }
         } else if self.match_service.is_lobby() {
             view.match_service = Some(shared::match_service::MatchServiceView::Idle);
         }

@@ -370,6 +370,8 @@ async fn runtime_roles_can_play_and_read_but_cannot_roll_over_or_archive() {
         GRANT SELECT,INSERT,UPDATE ON career_play_penalties TO {game_role};
         GRANT SELECT,INSERT ON career_queue_dodge_events TO {game_role};
         GRANT SELECT,INSERT,UPDATE ON career_queue_penalties TO {game_role};
+        GRANT SELECT,INSERT,UPDATE ON career_ready_checks,career_ready_members TO {game_role};
+        GRANT SELECT,INSERT,DELETE ON career_ready_claims TO {game_role};
         GRANT USAGE ON ALL SEQUENCES IN SCHEMA {schema} TO {game_role};
         -- Exact new permission delta from the prepared deployment patch.
         GRANT SELECT ON career_ranked_seasons TO {game_role},{portal_role};
@@ -451,6 +453,58 @@ async fn runtime_roles_can_play_and_read_but_cannot_roll_over_or_archive() {
     game.start(starting(&completed)).await.unwrap();
     let saved = game.settle(completed).await.unwrap();
     assert!(saved.saved && saved.participants.iter().all(|p| p.rating.is_some()));
+    // The exact narrow runtime grants also support consent lifecycle writes;
+    // none of these server-only tables becomes readable to the portal role.
+    let ready_id = "c".repeat(32);
+    let roster = vec![
+        ready::Seat {
+            profile_id: a.profile_id.clone(),
+            session_id: "role-a".into(),
+        },
+        ready::Seat {
+            profile_id: b.profile_id.clone(),
+            session_id: "role-b".into(),
+        },
+    ];
+    game.ready_reserve(
+        &ready_id,
+        shared::match_service::MatchPreference::Casual,
+        roster.clone(),
+    )
+    .await
+    .unwrap();
+    game.ready_update(&ready_id, ready::Action::Publish)
+        .await
+        .unwrap();
+    game.ready_update(
+        &ready_id,
+        ready::Action::Answer {
+            profile_id: roster[0].profile_id.clone(),
+            session_id: roster[0].session_id.clone(),
+            accepted: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        game.ready_update(&ready_id, ready::Action::Cancel)
+            .await
+            .unwrap()
+            .phase,
+        ready::Phase::Cancelled
+    );
+    let refused = sqlx::query("SELECT * FROM career_ready_checks")
+        .execute(&pools[1].1)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("42501")
+    );
+
     let progress = game.profile(&a.profile_id).await.unwrap();
     assert_eq!(progress.placement_matches(), 1);
     assert!(pools[1].0.profile(&a.profile_id).await.is_ok());

@@ -23,11 +23,12 @@ use std::{
 mod fair_play;
 mod input_stats;
 mod queue_discipline;
+pub mod ready;
 mod seasons;
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+pub const SCHEMA_VERSIONS: [i32; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -338,6 +339,13 @@ impl CareerStore {
             .execute(&mut *tx)
             .await?;
         }
+        if !versions.contains(&12) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/012_ready_ownership.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
             .fetch_one(&pool)
@@ -609,6 +617,7 @@ impl CareerStore {
                 return Err(shared::career::error_code::PLAY_COOLDOWN.into());
             }
             Self::check_queue_discipline(&mut tx, &ids).await?;
+            ready::admit(&mut tx, &result.result_id, &ids).await?;
         }
         if result.rated {
             if !recover && profiles.values().any(|p| !p.ranked_unlocked()) {

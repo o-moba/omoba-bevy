@@ -1267,10 +1267,23 @@ fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
 pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
     let error = view.error.as_ref()?;
     let code = view.error_code.as_deref();
-    if code == Some(shared::career::error_code::DODGE_COOLDOWN)
-        || error == shared::career::error_code::DODGE_COOLDOWN
-    {
-        return Some(tr("queue.failed.dodge_cooldown").into());
+    for (known, key) in [
+        (
+            shared::career::error_code::DODGE_COOLDOWN,
+            "queue.failed.dodge_cooldown",
+        ),
+        (
+            shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION,
+            "queue.failed.profile_has_another_session",
+        ),
+        (
+            shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED,
+            "queue.failed.allocation_cancelled_or_expired",
+        ),
+    ] {
+        if code == Some(known) || error == known {
+            return Some(tr(key).into());
+        }
     }
     if code == Some(shared::career::error_code::PLAY_COOLDOWN)
         || error == shared::career::error_code::PLAY_COOLDOWN
@@ -2968,19 +2981,22 @@ mod tests {
         app.world_mut()
             .resource_mut::<Locale>()
             .set(LocaleId::parse("ru").unwrap());
-        for error_code in [
-            None,
-            Some(shared::career::error_code::DODGE_COOLDOWN.into()),
+        for known in [
+            shared::career::error_code::DODGE_COOLDOWN,
+            shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION,
+            shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED,
         ] {
-            let view = CareerView {
-                error: Some(shared::career::error_code::DODGE_COOLDOWN.into()),
-                error_code,
-                ..Default::default()
-            };
-            assert_eq!(
-                server_error_text(&view).unwrap(),
-                tr("queue.failed.dodge_cooldown")
-            );
+            for error_code in [None, Some(known.into())] {
+                let view = CareerView {
+                    error: Some(known.into()),
+                    error_code,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    server_error_text(&view).unwrap(),
+                    tr(&format!("queue.failed.{known}"))
+                );
+            }
         }
     }
 

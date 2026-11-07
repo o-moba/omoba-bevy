@@ -684,3 +684,64 @@ fn queue_dodge_rejected_start_retires_the_attempt_instead_of_waiting_for_penalty
     clear_queue_profile(&runtime, &pool, &profile);
     runtime.block_on(pool.close());
 }
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn ready_ownership_worker_retires_a_start_with_foreign_unconfirmed_consent() {
+    use omoba_career_store::career_store::ready::{Action, OWNED_ELSEWHERE, Seat};
+    let (url, runtime, store, pool) = database();
+    let (_, profile, _) = queue_profile(&runtime, &store);
+    let id = random_id::<16>();
+    runtime
+        .block_on(store.ready_reserve(
+            &id,
+            shared::match_service::MatchPreference::Casual,
+            vec![Seat {
+                profile_id: profile.profile_id.clone(),
+                session_id: "consent-fixture".into(),
+            }],
+        ))
+        .unwrap();
+    let initial = allocation(&profile);
+    let worker = OwnedWorker::spawn(url, false);
+    worker.send(record(RecordKind::Start, initial.clone()));
+    worker.wait_for(|reply| match reply {
+        Reply::Rejected(result_id, error) if result_id == initial.result_id => {
+            assert_eq!(error, OWNED_ELSEWHERE);
+            true
+        }
+        Reply::Started(result_id) if result_id == initial.result_id => {
+            panic!("unconfirmed roster started")
+        }
+        _ => false,
+    });
+    runtime
+        .block_on(store.ready_update(&id, Action::Cancel))
+        .unwrap();
+    worker.send(record(RecordKind::Settle, terminal(&initial)));
+    worker.send(Job::Flush(906));
+    worker.wait_for(|reply| matches!(reply, Reply::Flushed(906, true)));
+    let count: i64 = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM career_matches WHERE result_id=$1")
+                .bind(&initial.result_id)
+                .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    assert!(
+        !spool_path(&worker.outbox, &initial.result_id)
+            .unwrap()
+            .exists()
+    );
+    drop(worker);
+    runtime
+        .block_on(
+            sqlx::query("DELETE FROM career_ready_checks WHERE check_id=$1")
+                .bind(&id)
+                .execute(&pool),
+        )
+        .unwrap();
+    clear_queue_profile(&runtime, &pool, &profile);
+    runtime.block_on(pool.close());
+}

@@ -623,6 +623,8 @@ pub struct PlayCooldown {
 
 /// Stable codes of [`CareerView::error_code`].
 pub mod error_code {
+    pub const PROFILE_HAS_ANOTHER_SESSION: &str = "profile_has_another_session";
+    pub const ALLOCATION_CANCELLED_OR_EXPIRED: &str = "allocation_cancelled_or_expired";
     pub const DODGE_COOLDOWN: &str = "dodge_cooldown";
     pub const PLAY_COOLDOWN: &str = "play_cooldown";
     pub const RANKED_LOCKED: &str = "ranked_locked";

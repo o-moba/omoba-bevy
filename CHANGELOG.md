@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add schema12 durable ready ownership/seat claims with immutable membership,
+  exact15s publication, bound responses, transactional missed-answer discipline
+  and fault cancellation. All81 PG store/64 native backend cases and strict
+  native Clippy PASS. Lobby consent jobs/ACK activation and real two-host proof
+  remain open. Fix the parent CI party-leave failure's typed refusal/request-ID
+  loss; full unchanged journey rerun and engine/client verification are pending.
+
 - Enforce shared queue-dodge cooldowns on fresh searches and new durable starts
   under profile locks. Preserve ordinary access/existing allocation recovery;
   permanently retire refused starts and late terminal retries. Reuse localized

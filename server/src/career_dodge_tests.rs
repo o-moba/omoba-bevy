@@ -111,5 +111,41 @@ fn a_fresh_shared_dodge_refusal_never_dispatches_a_queue_request() {
         backend.view(addr).error_code.as_deref(),
         Some("dodge_cooldown")
     );
+    assert_eq!(backend.view(addr).match_service_request_id, Some(7));
+    assert_eq!(
+        backend.view(addr).match_service,
+        Some(shared::match_service::MatchServiceView::Failed {
+            code: "dodge_cooldown".into()
+        })
+    );
     assert!(backend.authenticated_session(addr).is_some());
+    let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
+    backend.clients.get_mut(&addr).unwrap().queue_sequence = Some(2);
+    backend.link.replies.push_back(Reply::QueueAccess {
+        request: crate::career_port::MatchRequest {
+            addr,
+            request_id: 8,
+            preference: shared::match_service::MatchPreference::Ranked,
+            also_casual: false,
+        },
+        nonce: nonce.clone(),
+        sequence: 2,
+        access: Ok(None),
+    });
+    // The old refusal arriving after this successful retry is stale.
+    backend.link.replies.push_back(Reply::QueueAccess {
+        request: crate::career_port::MatchRequest {
+            addr,
+            request_id: 7,
+            preference: shared::match_service::MatchPreference::Ranked,
+            also_casual: false,
+        },
+        nonce,
+        sequence: 1,
+        access: Err(shared::career::error_code::DODGE_COOLDOWN.into()),
+    });
+    backend.poll();
+    assert!(backend.view(addr).match_service.is_none());
+    assert!(backend.view(addr).match_service_request_id.is_none());
+    assert_eq!(backend.take_match_requests()[0].request_id, 8);
 }

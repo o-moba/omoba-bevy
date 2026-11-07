@@ -133,7 +133,7 @@ impl Fixture {
 // schema. Leaving future tables while deleting version rows is not an upgrade
 // fixture. This runs only in the test's own disposable schema.
 async fn remove_season_schema_for_upgrade(f: &Fixture) {
-    sqlx::raw_sql("DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
+    sqlx::raw_sql("DROP TABLE career_ready_claims,career_ready_members,career_ready_checks; DELETE FROM career_schema_version WHERE version=12; DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
         .execute(&f.store.pool).await.unwrap();
     sqlx::raw_sql("DROP TRIGGER career_ranked_registration ON career_profiles; DROP FUNCTION career_stamp_ranked_profile(); ALTER TABLE career_profiles DROP COLUMN ranked_season_id,DROP COLUMN ranked_started_at_ms,DROP COLUMN ranked_ends_at_ms,DROP COLUMN season_rated_matches,DROP COLUMN season_wins,DROP COLUMN season_losses,DROP COLUMN season_completed_matches,DROP COLUMN latest_ranked_badge; DROP TABLE career_ranked_closures,career_ranked_archives,career_ranked_allocations,career_ranked_seasons; DROP FUNCTION career_guard_ranked_archive(),career_guard_ranked_season(),career_require_open_ranked_season(); DELETE FROM career_schema_version WHERE version=10;")
         .execute(&f.store.pool).await.unwrap();
@@ -2979,7 +2979,7 @@ async fn queue_discipline_out_of_order_events_preserve_latest_time_and_schema_up
     let f = Fixture::new().await;
     let profile = f.profile(1).await;
     // An actual schema10 fixture has none of the new objects or version row.
-    sqlx::raw_sql("DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
+    sqlx::raw_sql("DROP TABLE career_ready_claims,career_ready_members,career_ready_checks; DELETE FROM career_schema_version WHERE version=12; DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
         .execute(&f.store.pool).await.unwrap();
     assert!(
         f.store
@@ -3273,3 +3273,6 @@ async fn queue_discipline_start_waits_for_an_inflight_other_owner_dodge_commit()
     assert_eq!(count, 0);
     f.close().await;
 }
+
+#[path = "career_store/ready_tests.rs"]
+mod ready_ownership;

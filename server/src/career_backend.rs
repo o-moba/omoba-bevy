@@ -1086,6 +1086,8 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     also_casual,
                 } = action
                 {
+                    c.view.match_service = None;
+                    c.view.match_service_request_id = None;
                     if let Some(profile) = &c.view.profile {
                         c.queue_sequence = Some(sequence);
                         let request = crate::career_port::MatchRequest {
@@ -1127,6 +1129,8 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 }
                 if matches!(action, CareerAction::CancelQueue) {
                     c.queue_sequence = None;
+                    c.view.match_service = None;
+                    c.view.match_service_request_id = None;
                     self.cancelled.push(addr);
                     return;
                 }
@@ -1182,6 +1186,8 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     c.queue_sequence = None;
                     match access {
                         Ok(access) => {
+                            c.view.match_service = None;
+                            c.view.match_service_request_id = None;
                             if let Some(access) = access {
                                 if !access.key_active {
                                     c.auth = None;
@@ -1218,9 +1224,14 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             }
                         }
                         Err(error) => {
-                            c.view.error_code = (error
-                                == shared::career::error_code::DODGE_COOLDOWN)
-                                .then(|| shared::career::error_code::DODGE_COOLDOWN.into());
+                            c.view.error_code = queue_refusal_code(&error).map(str::to_owned);
+                            if let Some(code) = queue_refusal_code(&error) {
+                                c.view.match_service =
+                                    Some(shared::match_service::MatchServiceView::Failed {
+                                        code: code.into(),
+                                    });
+                                c.view.match_service_request_id = Some(request.request_id);
+                            }
                             c.view.error = Some(error);
                         }
                     }
@@ -1977,6 +1988,17 @@ async fn answer_access_reads(store: &CareerStore, batch: Vec<Job>) -> Vec<Reply>
     replies
 }
 
+fn queue_refusal_code(error: &str) -> Option<&str> {
+    use shared::career::error_code::{
+        ALLOCATION_CANCELLED_OR_EXPIRED, DODGE_COOLDOWN, PROFILE_HAS_ANOTHER_SESSION,
+    };
+    matches!(
+        error,
+        DODGE_COOLDOWN | PROFILE_HAS_ANOTHER_SESSION | ALLOCATION_CANCELLED_OR_EXPIRED
+    )
+    .then_some(error)
+}
+
 fn persist_queue_dodges(
     journal: &mut Option<queue_dodges::Journal>,
     staged: &mut BTreeMap<String, queue_dodges::Event>,
@@ -2351,10 +2373,10 @@ fn worker(
                                 == "A conflicting career identity or active assignment already exists."
                                 || error
                                     == "Queued ratings changed. Clear the queue and try again."
-                                || error == shared::career::error_code::DODGE_COOLDOWN)
+                                || queue_refusal_code(&error).is_some())
                         {
                             let message = if error.starts_with("Queued ratings")
-                                || error == shared::career::error_code::DODGE_COOLDOWN
+                                || queue_refusal_code(&error).is_some()
                             {
                                 error.clone()
                             } else {

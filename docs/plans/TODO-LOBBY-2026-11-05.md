@@ -2304,3 +2304,37 @@ Shared ready ownership/deadlines BEFORE cross-host re-search, legacy floors and
 actual signed two-lobby/party/FIFO/Resume fault proof remain open. So do C2/C4
 approval/actual RU recovery, typed-journal health and physical/capacity gates.
 Original68 ledger stays62 done,5 partial,1 open; no acceptance criterion waived.
+
+
+### Durable ready ownership contract; correlation repair — 2026-11-07
+
+Schema12 now stores check ownership, immutable profile/session membership,
+responses and unique profile claims. Reserve precedes Publish; the stored window
+is exactly15000ms and retries cannot extend it. An expired healthy check writes
+only missed seats' stable events/penalties and releases claims in one transaction;
+failed/unpublished owners and failed handoffs free players without invented
+strikes. Sorted profile/check locks guard new admission; existing allocation
+recovery remains separate. [Exact scope/proof](../evidence/ready-ownership-2026-11-07/README.md).
+
+Nine new actual-PG scenarios and all81 store tests PASS,0 failures/ignores; all64
+native backend cases and strict store/backend Clippy PASS. Restricted game-role
+lifecycle and portal refusal are exercised. The owned fixture is career12/portal11;
+no per-test schema/role remains. Additive migration/strict runtime schema guard
+requires the matching migrated schema and binary for release; no rollout occurs.
+Older schema10/11 recovery proofs remain historical; real schema12 recovery is open.
+
+Parent1e587a39 CI42317119362 has6 successful jobs, but PG/public job128232347108
+FAILED at party-leave after store72/server534 PASS. Exact artifact13551717666,
+68440bytes SHA256a440a26df733050702b06e65001e2603ba5523e8363dc92c298b6892dba59b01
+shows nine retained survivors and a correctly denied dodger whose Failed/current
+request was overwritten with local Idle/null. Preserve the correlated store
+refusal; clear it on new search/cancel/success and ignore stale replies. Native
+regression PASS; unchanged public-journey rerun/engine/client current CI pending.
+
+This contract is NOT yet active lobby consent: wire bounded off-tick reserve,
+publish/answer/poll/cancel jobs and ACKs, expose consent only after SQL publication,
+require committed unanimity before spawn and bind worker result ID to its check.
+Use the SQL penalty snapshot without a second local event. Actual signed two-
+lobby15s/party/FIFO/restart/Resume proof, legacy floor reconciliation, ready/journal
+health/retention and every other physical/capacity/release/RU gate remain open.
+C2/C4 questions remain pending; original68 ledger stays62 done,5 partial,1 open.

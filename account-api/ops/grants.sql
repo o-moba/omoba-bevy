@@ -75,6 +75,9 @@ GRANT SELECT ON career_abandon_events,career_play_penalties TO :"portal_role";
 -- mutable cooldown state, separate from played-match/AFK discipline.
 GRANT SELECT,INSERT ON career_queue_dodge_events TO :"game_role";
 GRANT SELECT,INSERT,UPDATE ON career_queue_penalties TO :"game_role";
+-- Ready consent/ownership is server-only; portal roles cannot alter it.
+GRANT SELECT,INSERT,UPDATE ON career_ready_checks,career_ready_members TO :"game_role";
+GRANT SELECT,INSERT,DELETE ON career_ready_claims TO :"game_role";
 
 -- Ranked seasons (career schema10): metadata is readable; only the game may
 -- bind a new immutable allocation. Neither runtime may close/reset/archive.

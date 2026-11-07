@@ -1,0 +1,46 @@
+{
+  "source": "1e587a39832289dd76e3231d259300ecd174b0a1",
+  "ci_run": 42317119362,
+  "postgres_job": 128232347108,
+  "conclusion": "FAIL; all6 other jobs SUCCESS",
+  "artifact_id": 13551717666,
+  "artifact_bytes": 68440,
+  "artifact_sha256": "a440a26df733050702b06e65001e2603ba5523e8363dc92c298b6892dba59b01",
+  "actual_cases_before_journey": {
+    "store": 72,
+    "server": 534,
+    "failed": 0,
+    "ignored": 0
+  },
+  "journey": {
+    "scenario": "party-draft",
+    "status": "FAIL",
+    "passed_checks": [
+      {
+        "name": "five_stack_signed_invite_accept",
+        "status": "PASS",
+        "party_id": 1,
+        "members": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "name": "ranked_party_team_and_held_draft",
+        "status": "PASS",
+        "allocation_id": "16e7643f9ae17b94155d1f001f2f50a8",
+        "team": "green",
+        "humans": 10,
+        "bots": 0
+      }
+    ],
+    "failure": "nine retained searches and authenticated departed player timed out30s",
+    "observed": "nine survivors retained Waiting; departed authenticated player got career_error=dodge_cooldown, local match_service=Idle and request correlation=null for latest queue request2"
+  },
+  "fix": "Preserve typed Failed response/current request ID from shared-store refusal when composing lobby view; clear it on a new search/cancel/success and ignore stale replies",
+  "new_native_regression": "PASS in64-case final backend suite",
+  "full_public_rerun": "PENDING fresh CI; original party-leave predicate unchanged"
+}
