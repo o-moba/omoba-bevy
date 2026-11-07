@@ -18,6 +18,29 @@ impl OwnedWorker {
         Self::spawn_at(url, full_replies, outbox)
     }
     fn spawn_at(url: String, full_replies: bool, outbox: PathBuf) -> Self {
+        Self::spawn_with_admission(
+            url,
+            full_replies,
+            outbox,
+            RecoveryScope::Global,
+            Admission::for_test(),
+        )
+    }
+    fn spawn_public(url: String, outbox: PathBuf) -> Self {
+        let scope = RecoveryScope::Disabled;
+        let admission = Admission {
+            require_ready_consent: scope.requires_ready_consent(),
+            ..Admission::for_test()
+        };
+        Self::spawn_with_admission(url, false, outbox, scope, admission)
+    }
+    fn spawn_with_admission(
+        url: String,
+        full_replies: bool,
+        outbox: PathBuf,
+        scope: RecoveryScope,
+        admission: Admission,
+    ) -> Self {
         let (jobs, receiver) = mpsc::sync_channel(MAX_JOBS);
         let (sender, replies) = mpsc::sync_channel(MAX_JOBS * 2);
         if full_replies {
@@ -31,16 +54,8 @@ impl OwnedWorker {
             }
         }
         let path = outbox.clone();
-        let handle = std::thread::spawn(move || {
-            worker(
-                url,
-                path,
-                receiver,
-                sender,
-                RecoveryScope::Global,
-                Admission::for_test(),
-            )
-        });
+        let handle =
+            std::thread::spawn(move || worker(url, path, receiver, sender, scope, admission));
         Self {
             jobs: Some(jobs),
             replies,
@@ -102,6 +117,93 @@ fn database() -> (String, tokio::runtime::Runtime, CareerStore, sqlx::PgPool) {
     let pool = runtime.block_on(sqlx::PgPool::connect(&url)).unwrap();
     (url, runtime, store, pool)
 }
+// These new cases retain settled immutable rows, so isolate the entire real
+// schema instead of attempting forbidden per-match cleanup in the shared DB.
+fn isolated_public_database() -> (
+    String,
+    tokio::runtime::Runtime,
+    CareerStore,
+    sqlx::PgPool,
+    sqlx::PgPool,
+    String,
+) {
+    let base =
+        std::env::var("OMOBA_TEST_DATABASE_URL").expect("set isolated OMOBA_TEST_DATABASE_URL");
+    assert!(
+        !base.contains("options="),
+        "fixture owns its search_path option"
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let admin = runtime
+        .block_on(
+            sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&base),
+        )
+        .unwrap();
+    let schema = format!("career_public_consent_{}", random_id::<16>());
+    runtime
+        .block_on(sqlx::query(&format!("CREATE SCHEMA {schema}")).execute(&admin))
+        .unwrap();
+    let url = format!(
+        "{base}{}options=-csearch_path%3D{schema}",
+        if base.contains('?') { "&" } else { "?" }
+    );
+    let store = runtime.block_on(CareerStore::connect(&url)).unwrap();
+    let pool = runtime
+        .block_on(
+            sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&url),
+        )
+        .unwrap();
+    (url, runtime, store, pool, admin, schema)
+}
+fn close_public_database(
+    runtime: &tokio::runtime::Runtime,
+    store: CareerStore,
+    pool: sqlx::PgPool,
+    admin: sqlx::PgPool,
+    schema: &str,
+) {
+    assert!(
+        schema.starts_with("career_public_consent_")
+            && schema
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'_')
+    );
+    runtime.block_on(pool.close());
+    drop(store);
+    runtime
+        .block_on(sqlx::query(&format!("DROP SCHEMA {schema} CASCADE")).execute(&admin))
+        .unwrap();
+    runtime.block_on(admin.close());
+}
+fn erase_owned_restore_fixture_allocation(
+    runtime: &tokio::runtime::Runtime,
+    pool: &sqlx::PgPool,
+    schema: &str,
+    id: &str,
+) {
+    runtime.block_on(async {
+        let mut tx=pool.begin().await.unwrap();
+        let actual:String=sqlx::query_scalar("SELECT current_schema()").fetch_one(&mut *tx).await.unwrap();
+        assert_eq!(actual,schema);assert!(actual.starts_with("career_public_consent_"));
+        // Test-only partial-restore simulation inside this disposable schema.
+        // Both append-only guards are restored in the same transaction.
+        sqlx::raw_sql("ALTER TABLE career_matches DISABLE TRIGGER career_match_guard; ALTER TABLE career_participants DISABLE TRIGGER career_participant_guard;").execute(&mut *tx).await.unwrap();
+        sqlx::query("DELETE FROM career_presence WHERE result_id=$1").bind(id).execute(&mut *tx).await.unwrap();
+        sqlx::query("DELETE FROM career_active_profiles WHERE result_id=$1").bind(id).execute(&mut *tx).await.unwrap();
+        sqlx::query("DELETE FROM career_participants WHERE result_id=$1").bind(id).execute(&mut *tx).await.unwrap();
+        sqlx::query("DELETE FROM career_matches WHERE result_id=$1").bind(id).execute(&mut *tx).await.unwrap();
+        sqlx::raw_sql("ALTER TABLE career_matches ENABLE TRIGGER career_match_guard; ALTER TABLE career_participants ENABLE TRIGGER career_participant_guard;").execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+    });
+}
+
 fn allocation(profile: &ProfileSummary) -> MatchResult {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -744,4 +846,255 @@ fn ready_ownership_worker_retires_a_start_with_foreign_unconfirmed_consent() {
         .unwrap();
     clear_queue_profile(&runtime, &pool, &profile);
     runtime.block_on(pool.close());
+}
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn public_consent_worker_refuses_unknown_start_and_already_queued_terminal() {
+    let (url, runtime, store, pool, admin, schema) = isolated_public_database();
+    let (_, profile, _) = queue_profile(&runtime, &store);
+    let initial = allocation(&profile);
+    let outbox = std::env::temp_dir().join(format!("omoba-public-consent-{}", random_id::<16>()));
+    let worker = OwnedWorker::spawn_public(url, outbox);
+    worker.send(record(RecordKind::Start, initial.clone()));
+    worker.send(record(RecordKind::Settle, terminal(&initial)));
+    worker.wait_for(|reply| match reply {
+        Reply::Rejected(id, error) if id == initial.result_id => {
+            assert_eq!(error, omoba_career_store::career_store::ready::CLOSED);
+            true
+        }
+        Reply::Started(id) if id == initial.result_id => {
+            panic!("public worker admitted a roster without SQL consent")
+        }
+        Reply::Settled { result, .. } if result.result_id == initial.result_id => {
+            panic!("unconfirmed public roster got a saved result")
+        }
+        _ => false,
+    });
+    worker.send(record(RecordKind::Settle, terminal(&initial)));
+    worker.send(Job::Flush(910));
+    worker.wait_for(|r| matches!(r, Reply::Flushed(910, true)));
+    let count: i64 = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM career_matches WHERE result_id=$1")
+                .bind(&initial.result_id)
+                .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(
+        runtime
+            .block_on(store.profile(&profile.profile_id))
+            .unwrap(),
+        profile
+    );
+    assert!(
+        !spool_path(&worker.outbox, &initial.result_id)
+            .unwrap()
+            .exists()
+    );
+    drop(worker);
+    close_public_database(&runtime, store, pool, admin, &schema);
+}
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn public_consent_unknown_recovery_is_retained_until_known_sql_admission_is_restored() {
+    use omoba_career_store::career_store::ready::{Action, Seat};
+    for kind in [
+        RecordKind::Start,
+        RecordKind::Checkpoint,
+        RecordKind::Settle,
+    ] {
+        let (url, runtime, store, pool, admin, schema) = isolated_public_database();
+        let (_, profile, _) = queue_profile(&runtime, &store);
+        let initial = allocation(&profile);
+        runtime
+            .block_on(store.ready_reserve(
+                &initial.result_id,
+                shared::match_service::MatchPreference::BotPractice,
+                vec![Seat {
+                    profile_id: profile.profile_id.clone(),
+                    session_id: "restore-fixture".into(),
+                }],
+            ))
+            .unwrap();
+        runtime
+            .block_on(store.ready_update(&initial.result_id, Action::Publish))
+            .unwrap();
+        runtime
+            .block_on(store.ready_update(
+                &initial.result_id,
+                Action::Answer {
+                    profile_id: profile.profile_id.clone(),
+                    session_id: "restore-fixture".into(),
+                    accepted: true,
+                },
+            ))
+            .unwrap();
+        runtime
+            .block_on(store.start_public(initial.clone()))
+            .unwrap();
+        // Owned fixture models a restore missing the committed match row.
+        // Consumed consent alone must not recreate its admission automatically.
+        erase_owned_restore_fixture_allocation(&runtime, &pool, &schema, &initial.result_id);
+        let outbox =
+            std::env::temp_dir().join(format!("omoba-public-consent-{}", random_id::<16>()));
+        let is_terminal = matches!(kind, RecordKind::Settle);
+        let mut snapshot = if is_terminal {
+            terminal(&initial)
+        } else {
+            initial.clone()
+        };
+        snapshot.participants[0].stats.damage_to_heroes = 73.5;
+        write_record(
+            &outbox,
+            &PendingRecord {
+                kind,
+                result: snapshot.clone(),
+                recovery_allocation: is_terminal.then(|| initial.clone()),
+                recovered_live: false,
+            },
+        )
+        .unwrap();
+        let worker = OwnedWorker::spawn_public(url, outbox);
+        worker.wait_for(|reply| match reply {
+            Reply::RecordError(id, error) if id == initial.result_id => {
+                assert_eq!(error, omoba_career_store::career_store::ready::CLOSED);
+                true
+            }
+            Reply::Rejected(id, _) if id == initial.result_id => {
+                panic!("restore evidence was discarded")
+            }
+            Reply::Settled { result, .. } if result.result_id == initial.result_id => {
+                panic!("spool invented an admission missing from SQL")
+            }
+            _ => false,
+        });
+        worker.send(Job::Flush(911));
+        worker.wait_for(|r| matches!(r, Reply::Flushed(911, true)));
+        let path = spool_path(&worker.outbox, &initial.result_id).unwrap();
+        let preserved: PendingRecord = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(preserved.recovered_live, !is_terminal);
+        assert_eq!(
+            preserved.recovery_allocation.as_ref().unwrap(),
+            if is_terminal { &initial } else { &snapshot }
+        );
+        assert_eq!(
+            runtime
+                .block_on(store.profile(&profile.profile_id))
+                .unwrap(),
+            profile
+        );
+        let count: i64 = runtime
+            .block_on(
+                sqlx::query_scalar("SELECT count(*) FROM career_matches WHERE result_id=$1")
+                    .bind(&initial.result_id)
+                    .fetch_one(&pool),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        // Explicit test-only restoration of the exact previously committed
+        // immutable allocation; production public workers never call this API.
+        runtime
+            .block_on(store.ensure_allocation(initial.clone()))
+            .unwrap();
+        runtime.block_on(sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()-interval '1 second' WHERE result_id=$1")
+            .bind(&initial.result_id).execute(&pool)).unwrap();
+        worker.wait_for(|reply| match reply {
+            Reply::Settled { result, .. } if result.result_id == initial.result_id => {
+                assert_eq!(
+                    result.outcome,
+                    if is_terminal {
+                        MatchOutcome::Completed
+                    } else {
+                        MatchOutcome::Interrupted
+                    }
+                );
+                assert_eq!(result.participants[0].stats.damage_to_heroes, 73.5);
+                true
+            }
+            Reply::Rejected(id, error) if id == initial.result_id => {
+                panic!("restored admission refused: {error}")
+            }
+            _ => false,
+        });
+        wait_until(|| !path.exists());
+        let saved = runtime
+            .block_on(store.profile(&profile.profile_id))
+            .unwrap();
+        assert_eq!(saved.matches_played, profile.matches_played + 1);
+        assert_eq!(saved.rating, profile.rating);
+        assert_eq!(saved.progression_xp, profile.progression_xp);
+        drop(worker);
+        close_public_database(&runtime, store, pool, admin, &schema);
+    }
+}
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn public_consent_recovered_known_allocation_keeps_the_existing_resume_authority() {
+    use omoba_career_store::career_store::ready::{Action, Seat};
+    let (url, runtime, store, pool, admin, schema) = isolated_public_database();
+    let (_, profile, _) = queue_profile(&runtime, &store);
+    let mut initial = allocation(&profile);
+    initial.gameplay_started = false;
+    runtime
+        .block_on(store.ready_reserve(
+            &initial.result_id,
+            shared::match_service::MatchPreference::BotPractice,
+            vec![Seat {
+                profile_id: profile.profile_id.clone(),
+                session_id: "public-consent-fixture".into(),
+            }],
+        ))
+        .unwrap();
+    runtime
+        .block_on(store.ready_update(&initial.result_id, Action::Publish))
+        .unwrap();
+    runtime
+        .block_on(store.ready_update(
+            &initial.result_id,
+            Action::Answer {
+                profile_id: profile.profile_id.clone(),
+                session_id: "public-consent-fixture".into(),
+                accepted: true,
+            },
+        ))
+        .unwrap();
+    runtime
+        .block_on(store.start_public(initial.clone()))
+        .unwrap();
+    runtime.block_on(sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()-interval '1 second' WHERE result_id=$1").bind(&initial.result_id).execute(&pool)).unwrap();
+    let outbox = std::env::temp_dir().join(format!("omoba-public-consent-{}", random_id::<16>()));
+    write_record(
+        &outbox,
+        &PendingRecord {
+            kind: RecordKind::Start,
+            result: initial.clone(),
+            recovery_allocation: None,
+            recovered_live: false,
+        },
+    )
+    .unwrap();
+    let worker = OwnedWorker::spawn_public(url, outbox);
+    worker.wait_for(|reply| match reply {
+        Reply::Settled { result, .. } if result.result_id == initial.result_id => {
+            assert_eq!(result.outcome, MatchOutcome::Interrupted);
+            assert!(!result.gameplay_started);
+            true
+        }
+        Reply::Rejected(id, error) if id == initial.result_id => {
+            panic!("persisted allocation lost recovery: {error}")
+        }
+        _ => false,
+    });
+    assert_eq!(
+        runtime
+            .block_on(store.profile(&profile.profile_id))
+            .unwrap(),
+        profile
+    );
+    drop(worker);
+    close_public_database(&runtime, store, pool, admin, &schema);
 }

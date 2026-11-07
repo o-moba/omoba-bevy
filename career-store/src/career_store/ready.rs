@@ -499,6 +499,8 @@ pub(super) async fn admit(
     tx: &mut Transaction<'_, Postgres>,
     result_id: &str,
     profiles: &[String],
+    required: bool,
+    rated: bool,
 ) -> StoreResult<()> {
     let claims:Vec<String>=sqlx::query_scalar("SELECT DISTINCT check_id FROM career_ready_claims WHERE profile_id=ANY($1) ORDER BY check_id")
         .bind(profiles).fetch_all(&mut **tx).await?;
@@ -511,11 +513,13 @@ pub(super) async fn admit(
             .fetch_one(&mut **tx)
             .await?;
     if !exists {
-        return Ok(());
+        return if required { Err(CLOSED.into()) } else { Ok(()) };
     } // Standalone/legacy allocation, no shared claim.
     let c = check(tx, result_id).await?;
     let seats = ids(tx, result_id).await?;
     if c.state != "approved"
+        || (required && rated && c.queue != "humans_only")
+        || (required && c.queue == "humans_only" && (seats.len() != 10 || profiles.len() != 10))
         || now(tx).await? >= c.deadline
         || profiles.is_empty()
         || profiles.iter().any(|p| !seats.contains(p))

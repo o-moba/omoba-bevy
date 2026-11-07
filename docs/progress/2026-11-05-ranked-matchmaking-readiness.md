@@ -6,7 +6,19 @@ players. Review method and the full list of findings: [the plan](../plans/ranked
 (eight reviewers, two-lens verification, a completeness critic; 68 confirmed
 findings). Decision record: ADR-027.
 
-## Changes
+## Current checkpoint — 2026-11-07
+
+The authoritative remaining order is now at the top of
+[the full TODO](../plans/TODO-LOBBY-2026-11-05.md). Original68 remains62 done,
+5 partial,1 open; critic/UI/physical and RU gates are additional. Current local
+public-admission verification is559 whole-server/92 real-PG cases, with mandatory
+SQL consent and preserved partial-restore evidence.
+[Exact source/proof](../evidence/public-consent-admission-2026-11-07/README.md).
+Full current CI, health/retention, current-schema physical recovery, native/
+physical acceptance, WAN/multi-host capacity/trust and owner-controlled RU rollout
+remain open. Career12/portal11, protocol16; older sections preserve dated history.
+
+## Initial changes — 2026-11-05
 
 - **Lobby (server/src/match_service.rs, match_pool.rs, match_allocation.rs).**
   Parked queue entries per allocation and `requeue_parked`: an allocation that
@@ -47,14 +59,14 @@ findings). Decision record: ADR-027.
   portal copy: «Рейтинг» instead of MMR/XP, localized `unrated_reason`, newcomer
   n/20, RU landing rating section, 17-class filter, 30 s polling.
 
-## Checks
+## Initial checks — historical
 
 The required gate (results below supersede the initial handoff claims): `make check`,
 `scripts/postgres_tests.py` on a disposable PostgreSQL 18, `make
 verify-public-mvp` (lifecycle and a mixed Ranked/Casual/vs Bots load on real
 lobby + workers), portal `npm test`, typecheck and RU/global builds.
 
-## Remaining risks and next steps
+## Initial remaining risks — historical; see current checkpoint
 
 - No accept/ready-check step yet (LR-32): a no-show still costs the others up
   to 60 s of waiting before the re-queue; the dodge cooldown is in memory.
@@ -1487,3 +1499,39 @@ admission. C2 tooling approval/application and this real RU rollout gate remain
 open, as do fresh full CI, multi-host/WAN failure/Resume, ready/journal health and
 retention, schema12 recovery, trust provisioning and physical/capacity gates.
 Original68 remains62 done,5 partial,1 open; no remaining criterion is waived.
+
+### Public admission rejects missing consent; restore evidence is retained — 2026-11-07
+
+Both public roles now select mandatory consent from their server recovery scope;
+client/receipt fields cannot choose unmanaged standalone admission. Public Start
+and unknown-allocation recovery require Approved SQL consent. Rated starts need
+Ranked consent, all10 Ranked profile seats and current eligibility; fresh recovered
+admission also rechecks discipline under profile locks. Failed transactions leave
+no match/participant/consumed-consent or career credit. Existing immutable SQL
+admissions still Resume without another vote, including after ready-row removal.
+
+Fresh unacknowledged starts and queued terminal retries retire on definitive
+refusal. All records loaded from disk retain restore evidence if matching SQL
+admission is missing, including Start, Checkpoint and old terminal receipts whose
+newer flags are absent/false. The replay cannot invent an admission; restoring the
+exact previously committed SQL admission permits replay with preserved statistics.
+Explicit unmanaged standalone APIs retain their existing separate behavior.
+
+All92 actual-PG18.6 store cases and559 complete actual-server cases PASS, zero
+failures/ignores; strict store/server test+production Clippy and formatting PASS.
+Five new SQL cases, three actual worker cases and a public-scope unit cover these
+boundaries. Worker restore cases use isolated disposable schemas; partial-restore
+simulation toggles only their own guards inside one transaction. Failed fixture
+preparation attempts are rejected and documented. No production guard changes.
+[Scope, exact evidence and live journeys](../evidence/public-consent-admission-2026-11-07/README.md).
+
+An intermediate parallel native run under combined SQL/build load also failed the
+unchanged full-reply heartbeat timing assertion. Its diagnostic target and current
+complete serial run PASS with the original assertion; no threshold is relaxed.
+The full run matches scripts/postgres_tests.py's test-threads1. Controlled host/SQL
+load cadence remains part of the open capacity acceptance, not proved by serial
+regression. Safe ready-row retention is still to implement; the new mandatory
+admission guard is its prerequisite. Real schema12 PITR/receipt-restore operation,
+C2/C4 owner decisions and RU rollout, current full CI, multi-host/WAN/Resume,
+trust provisioning, typed-journal health and physical/UI/capacity gates remain
+open. Original68 remains62 done,5 partial,1 open; no criterion is waived.

@@ -546,3 +546,322 @@ async fn ready_ownership_answer_batches_are_validated_atomically_and_preserve_de
     assert_eq!(event_count(&f).await, 1);
     f.close().await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_ownership_public_start_and_unknown_recovery_require_a_receipt() {
+    let (f, a, b, _, id) = fixture().await;
+    let mut initial = starting(&result(&a, &b, 2001));
+    initial.result_id = id;
+    initial.gameplay_started = false;
+    initial.rated = false;
+    initial.unrated_reason = Some("consent fixture".into());
+    assert_eq!(
+        f.store.start_public(initial.clone()).await.unwrap_err(),
+        CLOSED
+    );
+    assert_eq!(
+        f.store
+            .ensure_public_allocation(initial.clone())
+            .await
+            .unwrap_err(),
+        CLOSED
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    assert_eq!(f.store.profile(&b.profile_id).await.unwrap(), b);
+    assert!(
+        f.store
+            .history(&a.profile_id, None)
+            .await
+            .unwrap()
+            .0
+            .is_empty()
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_ownership_public_recovery_of_known_allocation_needs_no_second_vote() {
+    let (f, a, b, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Publish).await.unwrap();
+    let mut initial = starting(&result(&a, &b, 2002));
+    initial.result_id = id.clone();
+    initial.gameplay_started = false;
+    initial.rated = false;
+    initial.unrated_reason = Some("consent fixture".into());
+    assert_eq!(
+        f.store
+            .ensure_public_allocation(initial.clone())
+            .await
+            .unwrap_err(),
+        CLOSED
+    );
+    f.store
+        .ready_update(&id, answer(&roster[0], true))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store.start_public(initial.clone()).await.unwrap_err(),
+        CLOSED
+    );
+    f.store
+        .ready_update(&id, answer(&roster[1], true))
+        .await
+        .unwrap();
+    f.store
+        .ensure_public_allocation(initial.clone())
+        .await
+        .unwrap();
+    f.store.start_public(initial.clone()).await.unwrap();
+    // Disposable schema simulates future removal of a consumed ready receipt.
+    // The committed immutable career allocation is the authority for Resume.
+    sqlx::query("DELETE FROM career_ready_checks WHERE check_id=$1")
+        .bind(&id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let at = queue_discipline_now(&f).await;
+    f.store
+        .record_queue_dodge(&"c".repeat(32), &a.profile_id, at)
+        .await
+        .unwrap();
+    f.expire(&id).await;
+    let other = f.another_owner().await;
+    other
+        .ensure_public_allocation(initial.clone())
+        .await
+        .unwrap();
+    other.start_public(initial).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_ownership_deleted_closed_receipt_never_becomes_public_standalone_admission() {
+    let (f, a, b, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster)
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Cancel).await.unwrap();
+    let mut initial = starting(&result(&a, &b, 2003));
+    initial.result_id = id.clone();
+    initial.gameplay_started = false;
+    initial.rated = false;
+    initial.unrated_reason = Some("consent fixture".into());
+    for deleted in [false, true] {
+        if deleted {
+            sqlx::query("DELETE FROM career_ready_checks WHERE check_id=$1")
+                .bind(&id)
+                .execute(&f.store.pool)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            f.store.start_public(initial.clone()).await.unwrap_err(),
+            CLOSED
+        );
+        assert_eq!(
+            f.store
+                .ensure_public_allocation(initial.clone())
+                .await
+                .unwrap_err(),
+            CLOSED
+        );
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(event_count(&f).await, 0);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_ownership_unknown_public_recovery_rechecks_new_discipline_under_locks() {
+    let (f, a, b, roster, id) = fixture().await;
+    f.store
+        .ready_reserve(&id, MatchPreference::Casual, roster.clone())
+        .await
+        .unwrap();
+    f.store.ready_update(&id, Action::Publish).await.unwrap();
+    for seat in &roster {
+        f.store.ready_update(&id, answer(seat, true)).await.unwrap();
+    }
+    let at = queue_discipline_now(&f).await;
+    f.store
+        .record_queue_dodge(&"c".repeat(32), &a.profile_id, at)
+        .await
+        .unwrap();
+    let mut initial = starting(&result(&a, &b, 2004));
+    initial.result_id = id.clone();
+    initial.gameplay_started = false;
+    initial.rated = false;
+    initial.unrated_reason = Some("consent fixture".into());
+    assert_eq!(
+        f.store.ensure_public_allocation(initial).await.unwrap_err(),
+        shared::career::error_code::DODGE_COOLDOWN
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(
+        f.store.ready_update(&id, Action::Poll).await.unwrap().phase,
+        Phase::Approved
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn ready_ownership_public_ranked_requires_ranked_consent_full_roster_and_current_eligibility()
+{
+    let f = Fixture::new().await;
+    let mut profiles = Vec::new();
+    for n in 1..=10 {
+        profiles.push(f.profile(n).await);
+    }
+    let roster: Vec<_> = profiles
+        .iter()
+        .enumerate()
+        .map(|(i, p)| Seat {
+            profile_id: p.profile_id.clone(),
+            session_id: format!("ranked-seat-{i}"),
+        })
+        .collect();
+    let casual = "c".repeat(32);
+    f.store
+        .ready_reserve(&casual, MatchPreference::Casual, roster[..2].to_vec())
+        .await
+        .unwrap();
+    f.store
+        .ready_update(&casual, Action::Publish)
+        .await
+        .unwrap();
+    f.store
+        .ready_update(
+            &casual,
+            Action::Answers(
+                roster[..2]
+                    .iter()
+                    .map(|seat| crate::career_store::ready::Answer {
+                        seat: seat.clone(),
+                        accepted: true,
+                    })
+                    .collect(),
+            ),
+        )
+        .await
+        .unwrap();
+    let mut initial = starting(&result(&profiles[0], &profiles[1], 2005));
+    initial.result_id = casual.clone();
+    initial.gameplay_started = false;
+    assert_eq!(
+        f.store.start_public(initial.clone()).await.unwrap_err(),
+        CLOSED,
+        "Casual consent cannot authorize a rated start"
+    );
+    f.store.ready_update(&casual, Action::Cancel).await.unwrap();
+    let ranked = "d".repeat(32);
+    f.store
+        .ready_reserve(&ranked, MatchPreference::Ranked, roster.clone())
+        .await
+        .unwrap();
+    f.store
+        .ready_update(&ranked, Action::Publish)
+        .await
+        .unwrap();
+    f.store
+        .ready_update(
+            &ranked,
+            Action::Answers(
+                roster
+                    .iter()
+                    .map(|seat| crate::career_store::ready::Answer {
+                        seat: seat.clone(),
+                        accepted: true,
+                    })
+                    .collect(),
+            ),
+        )
+        .await
+        .unwrap();
+    initial.result_id = ranked.clone();
+    assert_eq!(
+        f.store.start_public(initial.clone()).await.unwrap_err(),
+        CLOSED,
+        "Ranked consent cannot authorize a truncated roster"
+    );
+    initial.participants = profiles
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            participant(
+                p,
+                (i + 1) as u64,
+                if i < 5 { Team::Green } else { Team::Blue },
+            )
+        })
+        .collect();
+    sqlx::query("UPDATE career_profiles SET completed_public_matches=9 WHERE profile_id=$1")
+        .bind(&profiles[0].profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .ensure_public_allocation(initial.clone())
+            .await
+            .unwrap_err(),
+        shared::career::error_code::RANKED_LOCKED,
+        "unknown recovery is a fresh admission, not a bypass"
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(
+        f.store
+            .ready_update(&ranked, Action::Poll)
+            .await
+            .unwrap()
+            .phase,
+        Phase::Approved
+    );
+    sqlx::query("UPDATE career_profiles SET completed_public_matches=10 WHERE profile_id=$1")
+        .bind(&profiles[0].profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    f.store.ensure_public_allocation(initial).await.unwrap();
+    assert_eq!(
+        f.store
+            .ready_update(&ranked, Action::Poll)
+            .await
+            .unwrap()
+            .phase,
+        Phase::Consumed
+    );
+    f.close().await;
+}

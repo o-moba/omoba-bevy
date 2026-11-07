@@ -2,18 +2,36 @@
 
 Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sessions. Source of truth for the plan: [ranked-launch-readiness-2026-11-05.md](ranked-launch-readiness-2026-11-05.md); decisions: ADR-027 in [../architecture/decisions.md](../architecture/decisions.md); progress: [../progress/2026-11-05-ranked-matchmaking-readiness.md](../progress/2026-11-05-ranked-matchmaking-readiness.md). Raw reviewer output (JSON, local only): `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/raw/review-findings.json`.
 
-Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career11, portal11; schema11 foundation tests upgraded the owned fixture). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
+Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career12, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
+
+## Current release checkpoint — 2026-11-07
+
+Original68: **62 done,5 partial (#1,#2,#12,#20,#50),1 open (#13)**.
+Critic/physical/UI and deployment requirements remain additional acceptance gates.
+Current local admission proof: **559 actual server cases and92 actual-PG18.6 store
+cases PASS**, plus signed Ranked replacement, Casual handoff and maintenance/
+restart/Resume journeys. Full current CI remains required. Public roles require
+committed SQL consent on every new admission; old disk receipts cannot invent an
+admission after partial restore. [Exact current scope](../evidence/public-consent-admission-2026-11-07/README.md).
+
+Next: ready/journal health and safe retention; current-schema recovery/replay
+rehearsal; UI-2/UI-3 exact current pixels and physical C3; actual multi-host/WAN
+and sustained host capacity/cadence; trust packaging/provisioning; current full CI.
+C2/C4 host-tool proposals still await their existing owner decisions. Original
+review coordinates and dated checkpoints below preserve history; their older
+schema numbers, test counts and superseded limitations are not rollout commands.
+**No RU migration, season reset or deployment has been performed.**
 
 ## Method
 
-Eight independent read-only reviewers (lobby queue, allocation/start, rating/settlement, client flow, admission/scale for ~1000 players, parties, portal/Account API, tests/harness), two-lens adversarial verification of each finding (factual, material), one completeness critic. 77 raw → 68 confirmed findings (3 blocker, 23 major, 42 minor; 11 bugs, 24 gaps, 20 scale, 13 ux) plus 9 critic items. Finding coordinates retain the2026-11-05 review baseline; statuses follow verified continuation checkpoints (latest2026-11-06).
+Eight independent read-only reviewers (lobby queue, allocation/start, rating/settlement, client flow, admission/scale for ~1000 players, parties, portal/Account API, tests/harness), two-lens adversarial verification of each finding (factual, material), one completeness critic. 77 raw → 68 confirmed findings (3 blocker, 23 major, 42 minor; 11 bugs, 24 gaps, 20 scale, 13 ux) plus 9 critic items. Finding coordinates retain the2026-11-05 review baseline; statuses follow verified continuation checkpoints (latest2026-11-07).
 
-## What works and must not be rebuilt
+## Review-baseline invariants and preserved behavior
 
 - [LOBBY QUEUE AND ROSTER SELECTION] Queue policy is correct and tested: Ranked = exactly 10 humans of one rated cohort (same newcomer bracket, <=300 spread from the anchor's lowest rating), never bot-filled; Casual = every human regardless of cohort, bot fill once any member has searched Casual >= 30 s; vs Bots allocates at once (server/src/match_service.rs:869-930, tests 1146-1200, 1370-1414). Rated flag comes only from the queue (`MatchPreference::rated`, shared/src/match_service.rs:29-33), so 10 humans in Casual stay unrated.
 - [LOBBY QUEUE AND ROSTER SELECTION] The lobby and the store share one cohort policy (`fits_cohort`/`same_cohort`, career-store/src/matchmaking.rs:19-34; `validate_current_cohort`, career-store/src/career_store.rs:1199-1211), and the test `a_mixed_party_never_yields_a_rated_roster_the_store_rejects` (match_service.rs:1201-1264) proves the lobby never forms a Ranked roster the store would reject.
 - [LOBBY QUEUE AND ROSTER SELECTION] Team split is exhaustive and deterministic: parties stay together, head counts as even as possible, then minimum rating-sum difference over all 2^units masks (`split_teams`, match_service.rs:801-862). The career-store Matchmaker uses an exact subset-sum DP for the same purpose (matchmaking.rs:324-358).
-- [LOBBY QUEUE AND ROSTER SELECTION] Ordering is FIFO by a monotonic `order` and never changes compatibility; a Ranked roster is always taken before a Casual one, so a Ranked player who took the Casual offer cannot be stolen by Casual while a full Ranked roster exists (match_service.rs:877-928, test 1266-1346). The 300-spread never widens (matchmaking.rs:19-23; test `newcomer_and_huge_skill_gaps_never_widen_with_wait`, matchmaking.rs:461-494).
+- [LOBBY QUEUE AND ROSTER SELECTION] Ordering is FIFO by a monotonic `order` and never changes compatibility; a Ranked roster is always taken before a Casual one, so a Ranked player who took the Casual offer cannot be stolen by Casual while a full Ranked roster exists (match_service.rs:877-928, test 1266-1346). The original300-spread baseline is superseded by the verified300→600 age allowance/cohort merging in finding16; preserve the current shared policy.
 - [LOBBY QUEUE AND ROSTER SELECTION] Queue intent is renewed only by explicit signed FindMatch retries (client every 2 s, client/src/match_service.rs:386-399) and expires 60 s after the last one (C3 continuation; originally 15 s) (match_service.rs:668-670), so dead clients leave the queue quickly without extra heartbeat state; identical re-requests refresh `touched`/party/also_casual in place without changing the queue position (match_service.rs:386-402).
 - [LOBBY QUEUE AND ROSTER SELECTION] Re-queue races are handled: a FindMatch bound to a terminal or settled allocation is pruned and never rebinds (match_service.rs:365-384, test 1606-1668); a running match the profile left is shown as Resume instead of a fresh handoff (LR-13, view 479-537).
 - [LOBBY QUEUE AND ROSTER SELECTION] The searching view carries humans/needed, elapsed, bot-fill countdown, the whole-queue `searching` count, the Casual offer after 300 s and the arena line with ETA (`waiting_view` 683-754, shared/src/match_service.rs:52-78), all localized in Russian (client/i18n/ru/searching.json, ru/queue.json); the Ranked mixed-party dead end is reported immediately as `ranked_party_cohort` instead of waiting forever (match_service.rs:694-700).
@@ -138,13 +156,32 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 
 ## Next steps, in order
 
-1. Finish the game PR into `dev` after `make check` + `scripts/postgres_tests.py` + `make verify-public-mvp`. Use the actual continuation results in [the progress record](../progress/2026-11-05-ranked-matchmaking-readiness.md); the initial full-client-gate claim was not reproducible (a private-field test initializer failed to compile and was fixed).
-2. Deploy order on RU: `omoba-account-api migrate` (career 9 after C6, portal 11) → Account API → portal (omoba-web#33) → lobby kit (`ru_host.py ship`; the unit now has 16 arenas, KillMode=process, new limits; bootstrap appends the new `OMOBA_LIMIT_*` lines).
-3. LR-09: run `scripts/test_public_mvp.mjs` on the RU host (`--limits-from omoba-lobby-ru.service`, `--mix`), fill the README table, set capacity/cgroup from the measurement.
-4. LR-32: unanimous 15-second confirmation and persistent host-local cooldown are implemented and network-tested. Native RU ready-screen visual acceptance is verified; cross-host penalty sharing remains P7.
-5. LR-33 leaver policy (owner thresholds), LR-34 remake/surrender, LR-37 Ranked gate (owner O-3), LR-53 newcomer K / tiers.
-6. Scale beyond one host: LR-57 game directory; LR-28 snapshot egress (~250 kB/s per player today).
-7. Harness: end-to-end Ranked journey with a rating delta asserted (#14), harness bots on the signed public lobby (#40), party at process level (#43).
+1. Complete the current game/portal PR gates into `dev`: `make check`,
+   `scripts/postgres_tests.py`, full public journeys and portal checks. The owner
+   permits targeted local commits with the full gate in CI while root disk is
+   below20GB; a prior head's green job does not certify the current source.
+2. Finish ready/journal health and bounded safe retention. Missing-consent public
+   admission is now closed; retain authoritative recovery records and never turn
+   absent/removed ready rows into a standalone bypass.
+3. Rehearse current-schema recovery and receipt replay against the exact release
+   binary. C4's older schema10 physical proofs are historical. New public replay
+   preserves missing-admission evidence until matching SQL authority is restored;
+   it does not prove a physical/WAL backup, off-host storage or RU recovery.
+4. Finish UI-2 widest-name/UI-3 compatibility current-source captures and C3
+   physical keep-awake/haptics. Use the repository UI skill's locked-Mac capture
+   workflow and an exact matching native binary; preserve rejected visual evidence.
+5. Complete #1/#2/#12/#20/#50 and #13 host acceptance: actual multi-host/WAN,
+   party/Resume faults, public trust packaging/provisioning and sustained cadence,
+   latency/egress/SQL-heartbeat load. Measure the RU host or an identical approved
+   host with the existing probe and derive real capacity/cgroup/firewall limits.
+6. Refresh/integrate the concrete C2/C4 host-tool review candidates after their
+   existing owner decisions, then perform the owner-controlled RU rollout/recovery
+   checks. Match **career12/portal11 and the exact paired protocol16 binaries**;
+   do not follow historical career9/10 rollback or deployment snippets below.
+7. Audit every original finding, critic, UI/physical and release criterion against
+   current authoritative evidence, update the ledger/changelog and obtain the
+   owner's release/production action. `main`, releases and production deployment
+   remain owner-controlled.
 
 
 ## Codex continuation — 2026-11-05
@@ -2396,3 +2433,39 @@ admission. C2 tooling approval/application and this real RU rollout gate remain
 open, as do fresh full CI, multi-host/WAN failure/Resume, ready/journal health and
 retention, schema12 recovery, trust provisioning and physical/capacity gates.
 Original68 remains62 done,5 partial,1 open; no remaining criterion is waived.
+
+### Public admission rejects missing consent; restore evidence is retained — 2026-11-07
+
+Both public roles now select mandatory consent from their server recovery scope;
+client/receipt fields cannot choose unmanaged standalone admission. Public Start
+and unknown-allocation recovery require Approved SQL consent. Rated starts need
+Ranked consent, all10 Ranked profile seats and current eligibility; fresh recovered
+admission also rechecks discipline under profile locks. Failed transactions leave
+no match/participant/consumed-consent or career credit. Existing immutable SQL
+admissions still Resume without another vote, including after ready-row removal.
+
+Fresh unacknowledged starts and queued terminal retries retire on definitive
+refusal. All records loaded from disk retain restore evidence if matching SQL
+admission is missing, including Start, Checkpoint and old terminal receipts whose
+newer flags are absent/false. The replay cannot invent an admission; restoring the
+exact previously committed SQL admission permits replay with preserved statistics.
+Explicit unmanaged standalone APIs retain their existing separate behavior.
+
+All92 actual-PG18.6 store cases and559 complete actual-server cases PASS, zero
+failures/ignores; strict store/server test+production Clippy and formatting PASS.
+Five new SQL cases, three actual worker cases and a public-scope unit cover these
+boundaries. Worker restore cases use isolated disposable schemas; partial-restore
+simulation toggles only their own guards inside one transaction. Failed fixture
+preparation attempts are rejected and documented. No production guard changes.
+[Scope, exact evidence and live journeys](../evidence/public-consent-admission-2026-11-07/README.md).
+
+An intermediate parallel native run under combined SQL/build load also failed the
+unchanged full-reply heartbeat timing assertion. Its diagnostic target and current
+complete serial run PASS with the original assertion; no threshold is relaxed.
+The full run matches scripts/postgres_tests.py's test-threads1. Controlled host/SQL
+load cadence remains part of the open capacity acceptance, not proved by serial
+regression. Safe ready-row retention is still to implement; the new mandatory
+admission guard is its prerequisite. Real schema12 PITR/receipt-restore operation,
+C2/C4 owner decisions and RU rollout, current full CI, multi-host/WAN/Resume,
+trust provisioning, typed-journal health and physical/UI/capacity gates remain
+open. Original68 remains62 done,5 partial,1 open; no criterion is waived.

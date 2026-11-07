@@ -249,6 +249,11 @@ enum RecoveryScope {
     Disabled,
     Epoch(u64),
 }
+impl RecoveryScope {
+    fn requires_ready_consent(self) -> bool {
+        !matches!(self, Self::Global)
+    }
+}
 
 /// The exchange between the game-thread state machine and whatever performs
 /// the store I/O. `try_send` never blocks and returns whether the job was
@@ -637,6 +642,7 @@ impl CareerBackend {
         // Match workers are many short processes: only the lobby (and a
         // standalone server) runs the retention job.
         let admission = Admission {
+            require_ready_consent: scope.requires_ready_consent(),
             new_profiles: limits.new_profiles,
             retention_days: limits
                 .retention_days
@@ -1843,6 +1849,9 @@ fn recover_outbox(outbox: &Path) -> RecoveredOutbox {
 /// What the worker needs of the admission limits (LR-16).
 #[derive(Clone, Copy)]
 pub(crate) struct Admission {
+    /// Public lobby and match roles may never use standalone admission, even
+    /// while replaying a pre-upgrade outbox or a missing SQL allocation.
+    require_ready_consent: bool,
     new_profiles: omoba_career_store::career_store::NewProfileLimits,
     /// Retention of profiles that never played; `None` in match workers.
     retention_days: Option<u32>,
@@ -1852,6 +1861,7 @@ pub(crate) struct Admission {
 impl Admission {
     pub(crate) fn for_test() -> Self {
         Self {
+            require_ready_consent: false,
             // Live fixtures share a reusable loopback database with load
             // probes. Their synthetic identities must not exhaust the real
             // network's daily signup quota; quota behavior has store tests.
@@ -2146,6 +2156,7 @@ fn worker(
         mut pending,
         mut rejected_ids,
     } = recover_outbox(&outbox);
+    let recovered_record_ids: HashSet<_> = pending.keys().cloned().collect();
     let queue_root = outbox.join("queue-dodges");
     let mut queue_journal = queue_dodges::Journal::open(queue_root.clone()).ok();
     let mut queue_staged: BTreeMap<String, queue_dodges::Event> = BTreeMap::new();
@@ -2505,11 +2516,19 @@ fn worker(
                             }
                         }
                         if let Some(allocation) = &record.recovery_allocation {
-                            s.ensure_allocation(allocation.clone()).await?;
+                            if admission.require_ready_consent {
+                                s.ensure_public_allocation(allocation.clone()).await?;
+                            } else {
+                                s.ensure_allocation(allocation.clone()).await?;
+                            }
                         }
                         match record.kind {
                             RecordKind::Start => {
-                                s.start(record.result.clone()).await?;
+                                if admission.require_ready_consent {
+                                    s.start_public(record.result.clone()).await?;
+                                } else {
+                                    s.start(record.result.clone()).await?;
+                                }
                                 Ok(None)
                             }
                             RecordKind::Checkpoint => {
@@ -2554,7 +2573,13 @@ fn worker(
                         pending.remove(&id);
                     }
                     Err(error) => {
-                        if matches!(record.kind, RecordKind::Start)
+                        // A live unacknowledged start can be retired. Every
+                        // recovered receipt remains durable for restore review,
+                        // including old terminal records without newer flags.
+                        if (matches!(record.kind, RecordKind::Start)
+                            || (admission.require_ready_consent
+                                && record.recovery_allocation.is_some()
+                                && !recovered_record_ids.contains(&id)))
                             && (error
                                 == "A conflicting career identity or active assignment already exists."
                                 || error

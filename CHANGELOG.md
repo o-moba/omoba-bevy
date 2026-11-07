@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Require committed ready consent on every public new admission, including a
+  spool whose SQL allocation is missing. Validate Ranked queue/full roster/current
+  eligibility, preserve existing Resume and keep recovered receipt evidence until
+  matching SQL authority is restored. All92 real-PG store/559 actual server cases
+  and strict native checks PASS; fresh full CI and RU release gates remain open.
+
 - Import persisted legacy matchmaking penalty floors before new lobby admission.
   Merge exact source counter/deadline bounds without inventing historical events,
   reviving expired time or weakening shared penalties after restart. All87 real-PG

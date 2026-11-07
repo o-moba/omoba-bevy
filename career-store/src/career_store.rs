@@ -552,18 +552,35 @@ impl CareerStore {
         .await
     }
 
+    /// Unmanaged standalone allocation. Public server roles use `start_public`.
     pub async fn start(&self, result: MatchResult) -> Result<(), String> {
         retry(|| self.start_inner(result.clone())).await
     }
     async fn start_inner(&self, result: MatchResult) -> StoreResult<()> {
-        self.allocation_inner(result, false).await
+        self.allocation_inner(result, false, false).await
+    }
+    /// Public lobby/match workers must use this entry point. An absent ready
+    /// receipt is a refusal, never an implicit standalone allocation.
+    pub async fn start_public(&self, result: MatchResult) -> Result<(), String> {
+        retry(|| self.allocation_inner(result.clone(), false, true)).await
     }
     /// Reconcile durable spool metadata with an allocation, without treating its
     /// statistics as a new checkpoint. A live different owner is never adopted.
+    /// Public server roles use `ensure_public_allocation` instead.
     pub async fn ensure_allocation(&self, result: MatchResult) -> Result<(), String> {
-        retry(|| self.allocation_inner(result.clone(), true)).await
+        retry(|| self.allocation_inner(result.clone(), true, false)).await
     }
-    async fn allocation_inner(&self, result: MatchResult, recover: bool) -> StoreResult<()> {
+    /// Existing immutable SQL allocations can recover without a new vote. A
+    /// spool whose allocation never committed still needs committed consent.
+    pub async fn ensure_public_allocation(&self, result: MatchResult) -> Result<(), String> {
+        retry(|| self.allocation_inner(result.clone(), true, true)).await
+    }
+    async fn allocation_inner(
+        &self,
+        result: MatchResult,
+        recover: bool,
+        require_consent: bool,
+    ) -> StoreResult<()> {
         let result = normalize(result)?;
         let mut tx = self.pool.begin().await?;
         seasons::lock(&mut tx).await?;
@@ -607,7 +624,7 @@ impl CareerStore {
             .bind(&self.owner).bind(Json(&result)).execute(&mut *tx).await?;
         seasons::reserve(&mut tx, &result).await?;
         let profiles = append_participants(&mut tx, &result, &[]).await?;
-        if !recover {
+        if !recover || require_consent {
             // Profile locks serialize admission with settlement on every host.
             // A stale lobby cache or already accepted ready check cannot race
             // a newly committed disciplinary cooldown into another match.
@@ -618,10 +635,17 @@ impl CareerStore {
                 return Err(shared::career::error_code::PLAY_COOLDOWN.into());
             }
             Self::check_queue_discipline(&mut tx, &ids).await?;
-            ready::admit(&mut tx, &result.result_id, &ids).await?;
+            ready::admit(
+                &mut tx,
+                &result.result_id,
+                &ids,
+                require_consent,
+                result.rated,
+            )
+            .await?;
         }
         if result.rated {
-            if !recover && profiles.values().any(|p| !p.ranked_unlocked()) {
+            if (!recover || require_consent) && profiles.values().any(|p| !p.ranked_unlocked()) {
                 return Err(shared::career::error_code::RANKED_LOCKED.into());
             }
             validate_current_cohort(&profiles)?;

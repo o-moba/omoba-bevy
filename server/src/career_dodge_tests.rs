@@ -274,3 +274,10 @@ fn legacy_floor_backpressure_includes_undrained_acks_and_rejects_invalid_payload
     let mut disabled = MemoryCareer::over(9, MemoryLink::new(false, false));
     assert!(!disabled.record_queue_floor(legacy_floor()));
 }
+
+#[test]
+fn every_public_recovery_scope_requires_ready_consent_without_a_client_override() {
+    assert!(!RecoveryScope::Global.requires_ready_consent());
+    assert!(RecoveryScope::Disabled.requires_ready_consent());
+    assert!(RecoveryScope::Epoch(123).requires_ready_consent());
+}
