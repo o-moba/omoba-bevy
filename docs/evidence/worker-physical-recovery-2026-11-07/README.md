@@ -82,3 +82,9 @@ The crash path proves actual restored SQL/checkpoint recovery; terminal receipt
 spool fault/replay requires its own explicit evidence. C2/C4 integration and real
 rollout retain their existing owner-decision boundary. Do not close those gates
 from this local runner or from historical green CI.
+
+
+The separate [actual terminal-file/duplicate proof](../terminal-spool-replay-2026-11-07/README.md)
+now covers that local gap onPG16. This packet's own empty-outbox reports retain
+their narrower SQL/checkpoint scope; their historical remaining fields are not
+rewritten as if they had exercised terminal replay.

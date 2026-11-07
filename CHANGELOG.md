@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Prove real terminal-file replay through a physically restored PG16 database:
+  SIGTERM with SQL offline leaves an fsynced receipt absent from source SQL;
+  automatic recovery preserves its complete payload with only saved becoming
+  true. A second public worker redelivers identical bytes with one played credit,
+  no Elo/XP and ordinary recovery deadlines before new assignment. All22 isolated
+  stages PASS; no production binary, dependency or RU setting changes.
+
 - Verify the same raised-limit/current-worker physical restore path on PG16.15:
  22 stages PASS, same authenticated Resume/adoption and221.63s crash recovery
  with one Interrupted credit and no Elo/XP. Wait for actual writable promotion

@@ -1,0 +1,14 @@
+2026-11-07 06:42:13.328 GMT [756] LOG:  starting PostgreSQL 16.15 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-07 06:42:13.328 GMT [756] LOG:  listening on Unix socket "/tmp/pitr-runtime/native-latest-socket/.s.PGSQL.6545"
+2026-11-07 06:42:13.330 GMT [759] LOG:  database system was interrupted; last known up at 2026-11-07 06:42:04 GMT
+2026-11-07 06:42:13.407 GMT [759] LOG:  starting archive recovery
+2026-11-07 06:42:13.407 GMT [759] LOG:  starting backup recovery with redo LSN 0/D00028, checkpoint LSN 0/D00060, on timeline ID 1
+2026-11-07 06:42:13.434 GMT [759] LOG:  restored log file "00000001000000000000000D" from archive
+2026-11-07 06:42:13.440 GMT [759] LOG:  redo starts at 0/D00028
+2026-11-07 06:42:13.468 GMT [759] LOG:  restored log file "00000001000000000000000E" from archive
+2026-11-07 06:42:13.497 GMT [759] LOG:  restored log file "00000001000000000000000F" from archive
+2026-11-07 06:42:13.499 GMT [759] LOG:  completed backup recovery with redo LSN 0/D00028 and end LSN 0/D00100
+2026-11-07 06:42:13.499 GMT [759] LOG:  consistent recovery state reached at 0/D00100
+2026-11-07 06:42:13.499 GMT [756] LOG:  database system is ready to accept read-only connections
+2026-11-07 06:42:13.551 GMT [759] LOG:  redo done at 0/F02860 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.11 s
+2026-11-07 06:42:13.551 GMT [759] LOG:  last completed transaction was at log time 2026-11-07 06:42:07.783865+00

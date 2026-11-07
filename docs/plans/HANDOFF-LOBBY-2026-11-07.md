@@ -1,5 +1,12 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
+**Обновление после checkpoint a3ba5f4e:** локальный PG16 terminal-file replay
+и настоящая повторная доставка одинаковых bytes теперь проверены:22 стадии PASS.
+[Актуальные отчёты и полный verifier](../evidence/terminal-spool-replay-2026-11-07/README.md).
+Старый прототип не применять повторно. Следующие области — текущий CI, UI/physical,
+контролируемая нагрузка/WAN/trust и независимое off-host/RU восстановление с
+согласованным C2/C4 kit. Исходный scope и решения ниже сохраняются.
+
 ## Начать здесь
 
 Продолжить исходную задачу владельца: **закрыть все68 находок,9 пунктов критика
@@ -97,9 +104,13 @@ PG16/18 source limits80/12/14/4/128 выявили дефект исходног
 C2 patch после нового C4 применяется; это application check, не новое combined
 поведенческое подтверждение C2 и не согласование владельца.
 
-У обоих принятых live crash прогонов перед падением было **0 JSON в outbox**.
-Следовательно, доказано SQL/checkpoint recovery, но **не terminal-file replay**.
-Это следующий обязательный шаг. В rejected-attempts явно сохранены ошибки
+У обоих прежних live crash прогонов перед падением было **0 JSON в outbox**.
+Их собственная область — SQL/checkpoint recovery. В новом отдельном PG16 прогоне
+настоящий SIGTERM при SQL offline оставляет Settle, отсутствующий в source SQL;
+после physical restore автоматический worker и затем второй public worker ACK-ают
+те же bytes. Полный результат совпадает кроме saved, credit один, Elo/XP нет.
+Это закрывает локальную проверку terminal-file, но не independent-storage/RU readiness.
+В rejected-attempts прежних прогонов явно сохранены ошибки
 подготовки:20 против80, внутренний Docker network без published port,
 пропущенное сериализацией `true`, PG16 read-only readiness. Они не PASS.
 
@@ -125,20 +136,16 @@ C2 patch после нового C4 применяется; это application c
 
 1. Проверить текущие Git status, PR head и конкретные CI handles. Сохранить
    результаты текущего полного прогона и исправить подтверждённые ошибки.
-2. **Terminal spool через физическое восстановление**. Непроверенный прототип
-   [TERMINAL-SPOOL-PROTOTYPE](reviews/TERMINAL-SPOOL-PROTOTYPE-2026-11-07.patch)
-   не применён к scripts/test_public_mvp.mjs и не является PASS. Синтаксис проверен.
-   В нём ещё нет настоящего duplicate redelivery: повторный Profile read его
-   не заменяет. Не маркировать готовым по этому шаблону.
-3. Контроллер сценария ещё дописать: настоящий матч → physical backup/архив →
-   закрыть только свой DB proxy → SIGTERM своего worker → увидеть реальный
-   `Settle` JSON и `SHUTDOWN_METRIC terminal_outbox=durable` при недоступной SQL →
-   убедиться, что source SQL ещё running/intent отсутствует → physical restore
-   той же admission → дождаться автоматического recovery child и ACK файла.
-   Сравнить итоговые ended_at_ms/duration/stats с **реальным** terminal JSON,
-   иначе checkpoint fallback может ошибочно выглядеть как terminal replay.
-   Затем действительно повторно доставить точные bytes, доказать неизменный
-   один career credit и освобождение назначения. Ничего не подделывать в SQL.
+2. Локальный terminal spool уже принят: [22 PG16 стадии](../evidence/terminal-spool-replay-2026-11-07/README.md),
+   реальный SIGTERM/SQL offline, исходный файл не staged в SQL, physical restore
+   matching admission, точная повторная доставка вторым public worker, ACK обоих
+   файлов и один credit. Полный raw payload отличается только saved=false→true.
+   Старый [TERMINAL-SPOOL-PROTOTYPE](reviews/TERMINAL-SPOOL-PROTOTYPE-2026-11-07.patch)
+   — история; не применять его поверх уже готового scripts/test_public_mvp.mjs.
+3. Независимое off-host/RU восстановление и RPO/RTO ещё не приняты. C4/C2 пока
+   proposals, не установленные на сервер. Дождаться существующих решений на
+   интеграцию/выкладку и подготовить независимое storage/escrow/recovery испытание.
+   Это не блокирует независимые UI/physical и controlled-load/WAN/trust задачи.
 4. UI-2 widest names и UI-3 compatibility на точном текущем native build;
    C3 physical keep-awake/haptics. Для заблокированного Mac читать offscreen skill,
    не просить снова unlock. Offscreen не доказывает физические устройства.
@@ -214,10 +221,12 @@ deploy/drain/rollback tooling. Они пока review-only. Для C4 испол
   Изображения `omoba-mm-pitr-kit-rehearsal:20261107` и
   `omoba-mm-pitr-kit16-rehearsal:20261107` уже есть; не скачивать/строить заново
   без необходимости. Все временные pitr containers/networks текущих прогонов удалены.
-- Незавершённая local копия test-only terminal probe:
-  `.agent/codex-ranked-readiness/terminal-spool/probe.mjs` и socket helper.
-  Это только черновик, контроллер offline/restore и actual duplicate replay ещё
-  не дописаны/не выполнены. Проверенный вариант сохранить отдельным checkpoint.
+- `.agent/codex-ranked-readiness/terminal-spool/probe.mjs` — старый черновик,
+  не текущий сценарий. Проверенный вариант теперь в scripts/test_public_mvp.mjs,
+  контроллер в docs/evidence/terminal-spool-replay-2026-11-07/rehearse_terminal_replay.py.
+  Raw accepted local run: `.agent/codex-ranked-readiness/terminal-spool/live-v1`.
+  Проверка payload: python3 docs/evidence/terminal-spool-replay-2026-11-07/verify_payload.py.
+  Она сравнивает committed данные; не выдавать её за новый live run.
 - Не делать `git add .agent` целиком: другие fixture/state могут содержать ключи.
   Публиковать только проверенные обезличенные evidence; новые evidence dirs
   игнорируются Git, добавлять выборочно `git add -f docs/evidence/<packet>`.
@@ -227,7 +236,8 @@ deploy/drain/rollback tooling. Они пока review-only. Для C4 испол
 ## Готовая формулировка для следующего агента
 
 Продолжи OMOBA по этому HANDOFF и полному TODO. Проверь актуальные Git/CI,
-затем закончи actual terminal-file replay через физически восстановленную SQL
-с настоящей duplicate redelivery. Сохрани полный scope68+9+UI/physical/WAN/RU,
+затем бери первый оставшийся gate. Локальные actual terminal-file/duplicate PG16
+и SQL/checkpoint/Resume PG16/18 уже приняты; не повторяй их без причины.
+Сохрани полный scope68+9+UI/physical/WAN/RU,
 уже принятые решения и существующие C2/C4 согласования. Обновляй TODO/changelog,
 коммить/push отдельными пакетами. Не проси повторять уже выданные разрешения.

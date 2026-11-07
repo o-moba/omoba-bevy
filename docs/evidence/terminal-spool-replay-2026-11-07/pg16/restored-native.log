@@ -1,0 +1,20 @@
+2026-11-07 06:43:07.335 GMT [46] LOG:  starting PostgreSQL 16.15 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-07 06:43:07.335 GMT [46] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+2026-11-07 06:43:07.337 GMT [46] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-11-07 06:43:07.339 GMT [49] LOG:  database system was interrupted; last known up at 2026-11-07 06:43:00 GMT
+2026-11-07 06:43:07.412 GMT [49] LOG:  starting archive recovery
+2026-11-07 06:43:07.412 GMT [49] LOG:  starting backup recovery with redo LSN 0/2300028, checkpoint LSN 0/2300060, on timeline ID 1
+2026-11-07 06:43:07.441 GMT [49] LOG:  restored log file "000000010000000000000023" from archive
+2026-11-07 06:43:07.447 GMT [49] LOG:  redo starts at 0/2300028
+2026-11-07 06:43:07.475 GMT [49] LOG:  restored log file "000000010000000000000024" from archive
+2026-11-07 06:43:07.503 GMT [49] LOG:  completed backup recovery with redo LSN 0/2300028 and end LSN 0/233D550
+2026-11-07 06:43:07.503 GMT [49] LOG:  consistent recovery state reached at 0/233D550
+2026-11-07 06:43:07.503 GMT [46] LOG:  database system is ready to accept read-only connections
+2026-11-07 06:43:07.533 GMT [49] LOG:  redo done at 0/24002B8 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.08 s
+2026-11-07 06:43:07.533 GMT [49] LOG:  last completed transaction was at log time 2026-11-07 06:43:03.298269+00
+2026-11-07 06:43:07.561 GMT [49] LOG:  restored log file "000000010000000000000024" from archive
+2026-11-07 06:43:07.592 GMT [49] LOG:  selected new timeline ID: 2
+2026-11-07 06:43:07.620 GMT [49] LOG:  archive recovery complete
+2026-11-07 06:43:07.621 GMT [47] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-11-07 06:43:07.631 GMT [47] LOG:  checkpoint complete: wrote 44 buffers (1.1%); 0 WAL file(s) added, 0 removed, 2 recycled; write=0.003 s, sync=0.004 s, total=0.011 s; sync files=17, longest=0.001 s, average=0.001 s; distance=2048 kB, estimate=2048 kB; lsn=0/2500028, redo lsn=0/2500028
+2026-11-07 06:43:07.632 GMT [46] LOG:  database system is ready to accept connections

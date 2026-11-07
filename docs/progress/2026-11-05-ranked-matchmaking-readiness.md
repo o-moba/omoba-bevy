@@ -27,7 +27,10 @@ SQL/checkpoint crash recovery now pass22 stages with actual game-role SCRAM/gran
 [worker proof](../evidence/worker-physical-recovery-2026-11-07/README.md). C4's revised
 review-only candidate fixes hardcoded recovery dimensions;176 unit pass/1 skip.
 PG16.15 now also passes22 raised-limit/current-worker stages with221.63s crash
-recovery. Terminal-spool replay, independent off-host/RU recovery,
+recovery. Actual PG16 terminal-file and duplicate physical replay now passes22
+stages too, preserving the complete payload except saved and one career credit:
+[terminal proof](../evidence/terminal-spool-replay-2026-11-07/README.md).
+Independent off-host/RU recovery,
 full current CI and sustained host/backpressure/cadence/load,
 native/physical UI, WAN/multi-host capacity/trust and reviewed RU rollout remain
 open. Older sections preserve dated history.
@@ -1688,3 +1691,17 @@ readiness; its initially rejected read-only observation remains explicit.
 [Next-agent context and all open PRs](../plans/HANDOFF-LOBBY-2026-11-07.md).
 No terminal-file replay, independent-storage/RU, load/WAN/trust or physical
 acceptance is inferred; original68 stays62/5/1. No RU deployment occurs.
+
+
+## 2026-11-07 — actual terminal and duplicate delivery
+
+Real SIGTERM with the owned SQL proxy offline creates an fsynced terminal file
+absent from source SQL. Physically restored known admission permits automatic
+replay; a second public recovery worker redelivers exactly the same original
+bytes. Both ACKs, ordinary120s deadlines, one played credit/no Elo/XP and new
+assignment pass. Direct SQL and a full serialized-payload verifier show only
+saved changes, including all original timestamps and ten-participant stats.
+All22 PG16 stages pass; own containers/network removed.
+[Runner, raw evidence and verifier](../evidence/terminal-spool-replay-2026-11-07/README.md).
+Independent RU/storage, full current CI, UI/physical, trust/WAN/capacity and
+existing C2/C4 integration/rollout decisions remain open; original68 stays62/5/1.
