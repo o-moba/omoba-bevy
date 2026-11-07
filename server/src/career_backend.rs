@@ -25,6 +25,9 @@ use shared::moderation::{Sanction, SanctionKind};
 use crate::admission::{Limits, SourceIp};
 use crate::career_port::CareerPort;
 
+#[path = "queue_dodge_outbox.rs"]
+pub(crate) mod queue_dodges;
+
 /// Career clients one lobby keeps (its player ceiling together with
 /// `public_transport::MAX_ENDPOINTS`); a newcomer beyond it gets `server_full`.
 pub(crate) const MAX_CLIENTS: usize = 2048;
@@ -147,6 +150,7 @@ pub(crate) enum Job {
         action: CareerAction,
     },
     Record(Box<PendingRecord>),
+    QueueDodge(queue_dodges::Event),
     Flush(u64),
     Presence(Vec<(String, Option<String>)>),
 }
@@ -158,6 +162,7 @@ pub(crate) enum Reply {
         access: Result<Option<omoba_career_store::career_store::moderation::Access>, String>,
     },
     RecoveryChecked,
+    QueueDodgeCommitted(queue_dodges::Event),
     Flushed(u64, bool),
     RefreshAccess {
         profile: Option<ProfileSummary>,
@@ -403,6 +408,7 @@ impl MemoryLink {
                 }
                 RecordKind::Rejected => {}
             },
+            Job::QueueDodge(event) => self.replies.push_back(Reply::QueueDodgeCommitted(event)),
             Job::Flush(generation) => self.replies.push_back(Reply::Flushed(generation, true)),
             Job::Presence(_) => {}
         }
@@ -450,6 +456,8 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     last_access_refresh: Option<Instant>,
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
+    queue_dodges: HashMap<String, queue_dodges::Event>,
+    queue_dodge_acks: HashMap<String, queue_dodges::Event>,
     record_generation: u64,
     flush_requested: Option<u64>,
     flushed_generation: Option<u64>,
@@ -526,6 +534,8 @@ impl<L: JobLink> CareerBackend<L> {
             last_access_refresh: None,
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
+            queue_dodges: HashMap::new(),
+            queue_dodge_acks: HashMap::new(),
             record_generation: 0,
             flush_requested: None,
             flushed_generation: None,
@@ -909,6 +919,30 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn settle(&mut self, result: MatchResult) -> bool {
         self.record(RecordKind::Settle, result)
     }
+    fn record_queue_dodge(&mut self, event: queue_dodges::Event) -> bool {
+        if event.validate().is_err() || !self.enabled() {
+            return false;
+        }
+        if let Some(old) = self
+            .queue_dodges
+            .get(&event.event_id)
+            .or_else(|| self.queue_dodge_acks.get(&event.event_id))
+        {
+            return old == &event;
+        }
+        if self.queue_dodges.len() + self.queue_dodge_acks.len() >= MAX_JOBS {
+            return false;
+        }
+        if !self.link.try_send(Job::QueueDodge(event.clone())) {
+            return false;
+        }
+        self.queue_dodges.insert(event.event_id.clone(), event);
+        self.record_generation = self.record_generation.saturating_add(1);
+        true
+    }
+    fn take_queue_dodge_committed(&mut self) -> Vec<String> {
+        self.queue_dodge_acks.drain().map(|(id, _)| id).collect()
+    }
     fn flush_outbox(&mut self) -> bool {
         if !self.enabled()
             || self
@@ -1197,6 +1231,18 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 }
                 Reply::RecoveryChecked => {
                     self.recovery_checked = Some(Instant::now());
+                }
+                Reply::QueueDodgeCommitted(event) => {
+                    // A recovered receipt can share an ID with conflicting
+                    // producer state. Only the full committed payload is an ACK.
+                    if self
+                        .queue_dodges
+                        .get(&event.event_id)
+                        .is_some_and(|expected| expected == &event)
+                    {
+                        self.queue_dodges.remove(&event.event_id);
+                        self.queue_dodge_acks.insert(event.event_id.clone(), event);
+                    }
                 }
                 Reply::ChatSwitch(enabled) => self.chat_switch = Some(enabled),
                 Reply::RefreshAccess {
@@ -1927,6 +1973,25 @@ async fn answer_access_reads(store: &CareerStore, batch: Vec<Job>) -> Vec<Reply>
     replies
 }
 
+fn persist_queue_dodges(
+    journal: &mut Option<queue_dodges::Journal>,
+    staged: &mut BTreeMap<String, queue_dodges::Event>,
+) -> bool {
+    let Some(journal) = journal else {
+        return false;
+    };
+    let events: Vec<_> = staged.values().cloned().collect();
+    for event in events {
+        match journal.record(event.clone()) {
+            Ok(()) => {
+                staged.remove(&event.event_id);
+            }
+            Err(error) => eprintln!("Cannot persist queue-dodge journal: {error:?}"),
+        }
+    }
+    staged.is_empty()
+}
+
 fn worker(
     url: String,
     outbox: PathBuf,
@@ -1944,6 +2009,11 @@ fn worker(
         mut pending,
         mut rejected_ids,
     } = recover_outbox(&outbox);
+    let queue_root = outbox.join("queue-dodges");
+    let mut queue_journal = queue_dodges::Journal::open(queue_root.clone()).ok();
+    let mut queue_staged: BTreeMap<String, queue_dodges::Event> = BTreeMap::new();
+    let mut last_queue_open = Instant::now();
+    let mut queue_retry_at = Instant::now();
     let mut last_retry = Instant::now() - Duration::from_secs(10);
     let mut heartbeat = Instant::now();
     let mut connected = true;
@@ -1956,7 +2026,18 @@ fn worker(
     let mut next_retention = Instant::now() + Duration::from_secs(300);
     let mut last_chat_poll: Option<Instant> = None;
     let mut deferred_job: Option<Job> = None;
-    while connected || !pending.is_empty() {
+    while connected
+        || !pending.is_empty()
+        || !queue_staged.is_empty()
+        || queue_journal.as_ref().is_some_and(|j| !j.is_empty())
+    {
+        if queue_journal.is_none() && last_queue_open.elapsed() >= Duration::from_secs(2) {
+            last_queue_open = Instant::now();
+            queue_journal = queue_dodges::Journal::open(queue_root.clone()).ok();
+            if queue_journal.is_none() {
+                eprintln!("Queue-dodge journal unavailable; new queue access remains fail-closed.");
+            }
+        }
         if store.is_none() && last_retry.elapsed() >= Duration::from_secs(2) {
             last_retry = Instant::now();
             store = rt.block_on(CareerStore::connect_runtime(&url)).ok();
@@ -1983,17 +2064,47 @@ fn worker(
         match next {
             Ok(job @ (Job::QueueAccess { .. } | Job::RefreshAccess { .. })) if store.is_some() => {
                 let batch = collect_access_reads(job, &jobs, &mut deferred_job);
-                for reply in rt.block_on(answer_access_reads(store.as_ref().unwrap(), batch)) {
+                let ready =
+                    queue_staged.is_empty() && queue_journal.as_ref().is_some_and(|j| j.is_empty());
+                let mut allowed = Vec::new();
+                for job in batch {
+                    if matches!(job, Job::QueueAccess { .. }) && !ready {
+                        if let Some(reply) = unavailable(job) {
+                            let _ = replies.try_send(reply);
+                        }
+                    } else {
+                        allowed.push(job);
+                    }
+                }
+                for reply in rt.block_on(answer_access_reads(store.as_ref().unwrap(), allowed)) {
                     let _ = replies.try_send(reply);
                 }
             }
             Ok(Job::Flush(generation)) => {
-                let flushed = pending
+                let matches_flushed = pending
                     .values()
                     .all(|record| write_record(&outbox, record).is_ok());
+                let queue_flushed = persist_queue_dodges(&mut queue_journal, &mut queue_staged)
+                    && queue_journal.as_ref().is_some_and(|j| j.flush().is_ok());
+                let flushed = matches_flushed && queue_flushed;
                 // Shutdown keeps polling the receiver; unlike an optional view,
                 // this durability acknowledgement must not be dropped on a full channel.
                 let _ = replies.send(Reply::Flushed(generation, flushed));
+            }
+            Ok(Job::QueueDodge(event)) => {
+                if queue_staged.len() >= MAX_JOBS && !queue_staged.contains_key(&event.event_id) {
+                    deferred_job = Some(Job::QueueDodge(event));
+                } else {
+                    match queue_staged.get(&event.event_id) {
+                        Some(old) if old != &event => {
+                            eprintln!("Conflicting queue-dodge event identity; original retained.")
+                        }
+                        _ => {
+                            queue_staged.insert(event.event_id.clone(), event);
+                        }
+                    }
+                    persist_queue_dodges(&mut queue_journal, &mut queue_staged);
+                }
             }
             Ok(Job::Record(record)) => {
                 let mut record = *record;
@@ -2081,9 +2192,15 @@ fn worker(
         while let Some((at, _)) = parked.front() {
             let waited = at.elapsed() >= STORE_WAIT;
             let reply = match &store {
-                Some(s) => parked
-                    .pop_front()
-                    .and_then(|(_, job)| answer(&rt, s, job, &admission)),
+                Some(s) => parked.pop_front().and_then(|(_, job)| {
+                    let ready = queue_staged.is_empty()
+                        && queue_journal.as_ref().is_some_and(|j| j.is_empty());
+                    if matches!(job, Job::QueueAccess { .. }) && !ready {
+                        unavailable(job)
+                    } else {
+                        answer(&rt, s, job, &admission)
+                    }
+                }),
                 None if waited => parked.pop_front().and_then(|(_, job)| unavailable(job)),
                 None => break,
             };
@@ -2110,6 +2227,41 @@ fn worker(
                 ),
                 Err(error) => eprintln!("Profile retention failed: {error}"),
             }
+        }
+        if Instant::now() >= queue_retry_at || !connected {
+            persist_queue_dodges(&mut queue_journal, &mut queue_staged);
+            let mut failed = false;
+            if let (Some(journal), Some(s)) = (&mut queue_journal, &store) {
+                let events: Vec<_> = journal.pending().take(16).cloned().collect();
+                for event in events {
+                    match rt.block_on(s.record_queue_dodge(
+                        &event.event_id,
+                        &event.profile_id,
+                        event.observed_at_ms,
+                    )) {
+                        Ok(_) => {
+                            if replies
+                                .try_send(Reply::QueueDodgeCommitted(event.clone()))
+                                .is_ok()
+                                && let Err(error) = journal.complete(&event.event_id)
+                            {
+                                failed = true;
+                                eprintln!("Cannot retire committed queue-dodge receipt: {error:?}");
+                            }
+                        }
+                        Err(error) => {
+                            failed = true;
+                            eprintln!("Queue-dodge SQL delivery pending: {error}");
+                        }
+                    }
+                }
+            }
+            queue_retry_at = Instant::now()
+                + if failed || store.is_none() {
+                    Duration::from_secs(2)
+                } else {
+                    Duration::from_millis(100)
+                };
         }
         if last_retry.elapsed() >= Duration::from_secs(2) || !connected {
             last_retry = Instant::now();
@@ -3343,3 +3495,7 @@ mod resilience_tests;
 #[cfg(test)]
 #[path = "career_refresh_tests.rs"]
 mod refresh_tests;
+
+#[cfg(test)]
+#[path = "career_dodge_tests.rs"]
+mod dodge_tests;

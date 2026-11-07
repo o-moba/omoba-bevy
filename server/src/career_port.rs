@@ -76,6 +76,10 @@ pub(crate) trait CareerPort {
     fn start(&mut self, result: MatchResult) -> bool;
     fn checkpoint(&mut self, result: MatchResult) -> bool;
     fn settle(&mut self, result: MatchResult) -> bool;
+    /// Channel acceptance is not a SQL/durability acknowledgement. The producer
+    /// retains its stable event until take_queue_dodge_committed returns its ID.
+    fn record_queue_dodge(&mut self, event: crate::career_backend::queue_dodges::Event) -> bool;
+    fn take_queue_dodge_committed(&mut self) -> Vec<String>;
     /// Non-blocking barrier: all previously accepted records are fsynced in
     /// the local outbox (or already settled). Does not require a live database.
     fn flush_outbox(&mut self) -> bool;

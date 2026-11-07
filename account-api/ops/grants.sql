@@ -71,6 +71,11 @@ GRANT SELECT,INSERT ON career_abandon_events TO :"game_role";
 GRANT SELECT,INSERT,UPDATE ON career_play_penalties TO :"game_role";
 GRANT SELECT ON career_abandon_events,career_play_penalties TO :"portal_role";
 
+-- Shared queue discipline (career schema11): append-only event identity plus
+-- mutable cooldown state, separate from played-match/AFK discipline.
+GRANT SELECT,INSERT ON career_queue_dodge_events TO :"game_role";
+GRANT SELECT,INSERT,UPDATE ON career_queue_penalties TO :"game_role";
+
 -- Ranked seasons (career schema10): metadata is readable; only the game may
 -- bind a new immutable allocation. Neither runtime may close/reset/archive.
 GRANT SELECT ON career_ranked_seasons TO :"portal_role", :"game_role";

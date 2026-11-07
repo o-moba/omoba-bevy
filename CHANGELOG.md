@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Wire stable queue-dodge events through a separate durable journal to shared SQL,
+  retaining producer state until exact commit ACK. Corrupt penalty state closes
+  new search; storage failure preserves ready players and FIFO. All60 native
+  backend tests (7 actual PG), strict native Clippy and source-grant ACL proof
+  PASS. Engine integration/current full CI, global access/start/ready fences,
+  legacy floors and two-host/RU acceptance remain required.
+
 - Add schema11 shared queue-dodge storage with idempotent receipts, profile
   locking and observation-anchored existing cooldown escalation. Six new real
   PG18.6 cases/all69 store tests, strict test-target clippy and formatting PASS.

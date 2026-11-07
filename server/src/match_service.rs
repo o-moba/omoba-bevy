@@ -149,12 +149,7 @@ struct ReadyRoster {
     deadline: Instant,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct DodgePenalty {
-    strikes: u32,
-    until_ms: u64,
-    last_ms: u64,
-}
+use crate::career_backend::queue_dodges::Penalty as DodgePenalty;
 
 pub(crate) struct Lobby {
     pool: crate::match_pool::Pool,
@@ -162,6 +157,7 @@ pub(crate) struct Lobby {
     ready: HashMap<String, ReadyRoster>,
     ready_profiles: HashMap<String, String>,
     penalties: HashMap<String, DodgePenalty>,
+    penalty_store_failed: bool,
     assignments: HashMap<String, String>,
     errors: HashMap<String, String>,
     requests: HashMap<String, (String, u64, Instant)>,
@@ -208,14 +204,19 @@ pub(crate) struct Lobby {
 
 impl Lobby {
     fn new(pool: crate::match_pool::Pool, limits: Limits) -> Self {
-        let penalties: HashMap<String, DodgePenalty> =
-            std::fs::read(pool.root().join("dodge-penalties.json"))
-                .ok()
-                .and_then(|b| serde_json::from_slice::<HashMap<String, DodgePenalty>>(&b).ok())
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|(_, p)| unix_ms().saturating_sub(p.last_ms) < 86_400_000)
-                .collect();
+        let (penalties, penalty_store_failed) =
+            match crate::career_backend::queue_dodges::load_penalties(
+                &pool.root().join("dodge-penalties.json"),
+                unix_ms(),
+            ) {
+                Ok(penalties) => (penalties, false),
+                Err(error) => {
+                    eprintln!(
+                        "Cannot recover matchmaking cooldown state: {error:?}; new searches remain closed."
+                    );
+                    (HashMap::new(), true)
+                }
+            };
         let now = Instant::now();
         let wall = unix_ms();
         let refusals = penalties
@@ -237,6 +238,7 @@ impl Lobby {
             ready: HashMap::new(),
             ready_profiles: HashMap::new(),
             penalties,
+            penalty_store_failed,
             waiting: Vec::new(),
             assignments: HashMap::new(),
             errors: HashMap::new(),
@@ -363,14 +365,27 @@ impl Lobby {
             }
         }
     }
-    fn penalize_dodge(&mut self, profile: &str, now: Instant) {
+    fn penalize_dodge(&mut self, profile: &str, now: Instant) -> bool {
+        if self.penalty_store_failed {
+            return false;
+        }
         let wall = unix_ms();
-        self.penalties
-            .retain(|_, p| wall.saturating_sub(p.last_ms) < 86_400_000);
+        self.penalties.retain(|_, p| {
+            wall.saturating_sub(p.last_ms) < 86_400_000 || !p.pending_events.is_empty()
+        });
         let strikes = self
             .penalties
             .get(profile)
+            .filter(|p| wall.saturating_sub(p.last_ms) < 86_400_000)
             .map_or(1, |p| p.strikes.saturating_add(1));
+        let mut pending_events = self
+            .penalties
+            .get(profile)
+            .map_or_else(Vec::new, |p| p.pending_events.clone());
+        pending_events.push(
+            crate::career_backend::queue_dodges::Event::new(profile, wall)
+                .expect("authenticated profile and OS randomness required for dodge receipts"),
+        );
         let secs = match strikes {
             1 => DODGE_COOLDOWN.as_secs(),
             2 => 300,
@@ -383,6 +398,7 @@ impl Lobby {
                 strikes,
                 until_ms: wall + secs * 1000,
                 last_ms: wall,
+                pending_events,
             },
         );
         self.refusals.insert(
@@ -393,8 +409,10 @@ impl Lobby {
             &self.pool.root().join("dodge-penalties.json"),
             &self.penalties,
         ) {
+            self.penalty_store_failed = true;
             eprintln!("Cannot persist matchmaking cooldown: {error}");
         }
+        true
     }
     /// A decline returns everybody else; a timeout returns only accepted humans.
     fn expire_ranked_season(&mut self, now_ms: u64) {
@@ -456,9 +474,13 @@ impl Lobby {
                         .or_default()
                         .insert(entry.profile.profile_id.clone(), now);
                 }
-                self.penalize_dodge(&entry.profile.profile_id, now);
+                let code = if self.penalize_dodge(&entry.profile.profile_id, now) {
+                    DODGE_COOLDOWN_CODE
+                } else {
+                    WORKER_SPAWN_FAILED
+                };
                 self.errors
-                    .insert(entry.profile.profile_id.clone(), DODGE_COOLDOWN_CODE.into());
+                    .insert(entry.profile.profile_id.clone(), code.into());
             }
         }
         let mut removed_by_party: HashMap<u64, usize> = HashMap::new();
@@ -483,6 +505,13 @@ impl Lobby {
         }
         self.waiting.sort_by_key(|w| w.order);
     }
+    fn pause_ready_for_failed_storage(&mut self, now: Instant) {
+        self.pause_ready_for_drain(now);
+        for entry in &self.waiting {
+            self.errors
+                .insert(entry.profile.profile_id.clone(), WORKER_SPAWN_FAILED.into());
+        }
+    }
     fn tick_ready(&mut self, now: Instant) {
         let expired: Vec<_> = self
             .ready
@@ -492,6 +521,10 @@ impl Lobby {
             .collect();
         for id in expired {
             self.cancel_ready(&id, None, now);
+            if self.penalty_store_failed {
+                self.pause_ready_for_failed_storage(now);
+                return;
+            }
         }
         let mut approved: Vec<_> = self
             .ready
@@ -934,6 +967,12 @@ impl MatchService {
         if lobby.assignments.contains_key(&profile.profile_id) {
             return;
         }
+        if lobby.penalty_store_failed {
+            lobby
+                .errors
+                .insert(profile.profile_id, WORKER_SPAWN_FAILED.into());
+            return;
+        }
         if preference.rated()
             && profile
                 .ranked
@@ -1055,6 +1094,10 @@ impl MatchService {
             .get(profile)
             .is_none_or(|(s, id, _)| s != session || *id != request_id)
         {
+            return;
+        }
+        if lobby.penalty_store_failed {
+            lobby.pause_ready_for_failed_storage(now);
             return;
         }
         let Some(check) = lobby.ready.get_mut(check_id) else {
@@ -1453,7 +1496,9 @@ impl MatchService {
                 .get(id)
                 .is_some_and(|slot| !slot.terminal())
         });
-        if lobby.drain.active() {
+        if lobby.penalty_store_failed {
+            lobby.pause_ready_for_failed_storage(now);
+        } else if lobby.drain.active() {
             lobby.pause_ready_for_drain(now);
         } else {
             lobby.expire_ranked_season(unix_ms());
@@ -1493,7 +1538,7 @@ impl MatchService {
             .retain(|id, _| queued_parties.contains(id));
         // At most four OS process launches per scheduling pass.
         for _ in 0..4 {
-            if lobby.drain.active() {
+            if lobby.penalty_store_failed || lobby.drain.active() {
                 break;
             }
             if lobby.pool.occupied() + lobby.ready.len() >= lobby.pool.capacity() {
@@ -2006,6 +2051,45 @@ impl ServerRuntime {
         // Only explicit FindMatch retries renew queue intent. An authenticated
         // Home heartbeat must not keep an abandoned queue alive after packet loss.
         self.match_service.tick(now);
+        if let MatchService::Lobby(lobby) = &mut self.match_service {
+            let committed: HashSet<_> = self
+                .career
+                .backend
+                .take_queue_dodge_committed()
+                .into_iter()
+                .collect();
+            let mut changed = false;
+            for penalty in lobby.penalties.values_mut() {
+                let before = penalty.pending_events.len();
+                penalty
+                    .pending_events
+                    .retain(|event| !committed.contains(&event.event_id));
+                changed |= before != penalty.pending_events.len();
+            }
+            if changed
+                && !lobby.penalty_store_failed
+                && crate::match_allocation::atomic_json(
+                    &lobby.pool.root().join("dodge-penalties.json"),
+                    &lobby.penalties,
+                )
+                .is_err()
+            {
+                // SQL is already committed; a stale producer copy only replays
+                // the same IDs, never a second strike after a restart.
+                lobby.penalty_store_failed = true;
+                eprintln!("Cannot persist committed matchmaking receipt acknowledgements.");
+            }
+            for event in lobby
+                .penalties
+                .values()
+                .flat_map(|p| &p.pending_events)
+                .take(16)
+            {
+                if !self.career.backend.record_queue_dodge(event.clone()) {
+                    break;
+                }
+            }
+        }
         let mut joined_sessions: Vec<String> = self
             .world
             .players
@@ -4512,13 +4596,52 @@ mod tests {
             Duration::from_secs(300)
         );
         assert!(lobby.pool.slots.is_empty());
+        let pending = lobby.penalties[&first.profile.profile_id]
+            .pending_events
+            .clone();
+        assert_eq!(
+            pending.len(),
+            2,
+            "a duplicate answer creates no new receipt"
+        );
         let mut restored = lobby_with(lobby.pool, &[]);
+        if let MatchService::Lobby(lobby) = &restored {
+            assert_eq!(
+                lobby.penalties[&first.profile.profile_id].pending_events, pending,
+                "producer recovery retains original event IDs and observation times"
+            );
+        }
         enqueue_all(&mut restored, std::slice::from_ref(first), 8, now);
         assert!(waiting_orders(&restored).is_empty());
         assert!(
             matches!(restored.view(&first.profile.profile_id, &first.session, now), Some(MatchServiceView::Failed {code}) if code == DODGE_COOLDOWN_CODE)
         );
         drop(restored);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+    #[test]
+    fn failed_penalty_storage_pauses_expiring_ready_checks_without_blaming_players() {
+        let now = Instant::now();
+        let (mut service, entries, directory, check_id) = ready_fixture(now);
+        if let MatchService::Lobby(lobby) = &mut service {
+            lobby.penalty_store_failed = true;
+        }
+        service.respond_ready(
+            &entries[0].profile.profile_id,
+            &entries[0].session,
+            7,
+            &check_id,
+            false,
+            now,
+        );
+        service.tick(now + READY_WINDOW + Duration::from_secs(1));
+        if let MatchService::Lobby(lobby) = &service {
+            assert!(lobby.ready.is_empty() && lobby.ready_profiles.is_empty());
+            assert_eq!(lobby.waiting.len(), 10);
+            assert!(lobby.penalties.is_empty() && lobby.refusals.is_empty());
+            assert!(lobby.pool.slots.is_empty());
+        }
+        drop(service);
         let _ = std::fs::remove_dir_all(directory);
     }
     #[test]

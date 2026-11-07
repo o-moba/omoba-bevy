@@ -506,3 +506,26 @@ The owned test fixture is now career11/portal11. Older C4/schema10 proofs are
 historical; repeat actual recovery with schema11 before acceptance. The C2/C4
 review patches remain unchanged/unapplied pending owner answers. No production
 secret, service, key or host configuration is changed here.
+
+
+## Durable dodge delivery verified; global admission still open — 2026-11-07
+
+Wire stable local dodge events through a separate typed, bounded, locked durable
+journal into schema11 SQL. Retain producer copies until exact payload commit ACK;
+include this journal in shutdown flush without creating Interrupted match history.
+Corrupt local penalty state now closes new search and stays preserved; storage
+failure pauses ready checks and preserves other players/parties/FIFO.
+
+All60 renderer-free native backend tests PASS,0 failed/ignored, including all7
+actual PG cases. New coverage:16 journal units,5 backend ACK units and3 actual PG
+worker outage/restart/full-channel/corruption cases. Strict native Clippy,
+formatting and diff checks PASS. Source DML grants pass a rolled-back temporary
+NOLOGIN ACL proof, with zero role/profile/event leftovers. [Scope and evidence](../evidence/queue-dodge-delivery-2026-11-07/README.md).
+
+MatchService/engine tests and full current CI remain required. Parent1d1deb79
+CI42309434476 now reports all7 jobs SUCCESS, including the public-journey job;
+that earlier result does not certify this newer implementation. No fresh journey
+artifact inspection is claimed here. Shared cooldown reads/final durable-start,
+ready ownership/deadlines, legacy floor reconciliation, signed two-lobby fault
+proof, schema11 recovery and typed-journal health remain open. Original68 ledger
+stays62 done,5 partial,1 open. C2/C4 questions remain pending; no RU rollout.

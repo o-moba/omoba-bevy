@@ -15,6 +15,9 @@ struct OwnedWorker {
 impl OwnedWorker {
     fn spawn(url: String, full_replies: bool) -> Self {
         let outbox = std::env::temp_dir().join(format!("omoba-resilience-{}", random_id::<16>()));
+        Self::spawn_at(url, full_replies, outbox)
+    }
+    fn spawn_at(url: String, full_replies: bool, outbox: PathBuf) -> Self {
         let (jobs, receiver) = mpsc::sync_channel(MAX_JOBS);
         let (sender, replies) = mpsc::sync_channel(MAX_JOBS * 2);
         if full_replies {
@@ -314,5 +317,235 @@ fn postgres_worker_rejected_start_discards_already_queued_terminal_without_resur
     );
     runtime.block_on(store.settle(terminal(&holding))).unwrap();
     drop(fixture);
+    runtime.block_on(pool.close());
+}
+
+fn queue_profile(
+    runtime: &tokio::runtime::Runtime,
+    store: &CareerStore,
+) -> (String, ProfileSummary, queue_dodges::Event) {
+    let key = random_id::<32>();
+    let profile = runtime
+        .block_on(store.authenticate(&key, &format!("Queue{}", &key[..8])))
+        .unwrap();
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let event = queue_dodges::Event::new(&profile.profile_id, at).unwrap();
+    (key, profile, event)
+}
+fn clear_queue_profile(
+    runtime: &tokio::runtime::Runtime,
+    pool: &sqlx::PgPool,
+    profile: &ProfileSummary,
+) {
+    runtime.block_on(async {
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("DELETE FROM career_keys WHERE profile_id=$1")
+            .bind(&profile.profile_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM career_profiles WHERE profile_id=$1")
+            .bind(&profile.profile_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    });
+}
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn queue_dodge_offline_flush_restart_and_duplicate_delivery_are_exactly_once() {
+    let (url, runtime, store, pool) = database();
+    let (_, profile, event) = queue_profile(&runtime, &store);
+    let mut offline =
+        OwnedWorker::spawn("postgres://unused:unused@127.0.0.1:9/missing".into(), false);
+    offline.send(Job::QueueDodge(event.clone()));
+    offline.send(Job::Flush(901));
+    offline.wait_for(|reply| matches!(reply, Reply::Flushed(901, true)));
+    let file = offline
+        .outbox
+        .join("queue-dodges")
+        .join(format!("{}.json", event.event_id));
+    assert!(file.is_file());
+    assert!(
+        !offline
+            .outbox
+            .join(format!("{}.json", event.event_id))
+            .exists()
+    );
+    assert!(
+        runtime
+            .block_on(store.queue_dodge_cooldown(&profile.profile_id))
+            .unwrap()
+            .is_none()
+    );
+    offline.jobs.take();
+    offline.handle.take().unwrap().join().unwrap();
+    let restarted = OwnedWorker::spawn_at(url, false, offline.outbox.clone());
+    restarted.wait_for(
+        |reply| matches!(reply, Reply::QueueDodgeCommitted(committed) if committed==event),
+    );
+    let first = runtime
+        .block_on(store.queue_dodge_cooldown(&profile.profile_id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.strikes, 1);
+    restarted.send(Job::QueueDodge(event.clone()));
+    restarted.wait_for(
+        |reply| matches!(reply, Reply::QueueDodgeCommitted(committed) if committed==event),
+    );
+    restarted.send(Job::Flush(902));
+    restarted.wait_for(|reply| matches!(reply, Reply::Flushed(902, true)));
+    assert!(!file.exists());
+    assert_eq!(
+        runtime
+            .block_on(store.queue_dodge_cooldown(&profile.profile_id))
+            .unwrap(),
+        Some(first)
+    );
+    assert_eq!(
+        runtime
+            .block_on(store.profile(&profile.profile_id))
+            .unwrap(),
+        profile
+    );
+    let count: i64 = runtime
+        .block_on(
+            sqlx::query_scalar(
+                "SELECT count(*) FROM career_queue_dodge_events WHERE profile_id=$1",
+            )
+            .bind(&profile.profile_id)
+            .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    let matches: i64 = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM career_participants WHERE profile_id=$1")
+                .bind(&profile.profile_id)
+                .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(
+        matches, 0,
+        "a queue receipt must never become an Interrupted match"
+    );
+    drop(restarted);
+    drop(offline);
+    clear_queue_profile(&runtime, &pool, &profile);
+    runtime.block_on(pool.close());
+}
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn queue_dodge_full_reply_channel_retains_receipt_and_retries_the_commit_ack() {
+    let (url, runtime, store, pool) = database();
+    let (_, profile, event) = queue_profile(&runtime, &store);
+    let worker = OwnedWorker::spawn(url, true);
+    worker.send(Job::QueueDodge(event.clone()));
+    worker.send(Job::Flush(903));
+    let file = worker
+        .outbox
+        .join("queue-dodges")
+        .join(format!("{}.json", event.event_id));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !file.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        file.is_file(),
+        "receipt must reach disk before a blocked flush reply"
+    );
+    let mut committed = false;
+    let mut flushed = false;
+    worker.wait_for(|reply| {
+        match reply {
+            Reply::QueueDodgeCommitted(receipt) if receipt == event => committed = true,
+            Reply::Flushed(903, true) => flushed = true,
+            _ => {}
+        }
+        committed && flushed
+    });
+    worker.send(Job::Flush(904));
+    worker.wait_for(|reply| matches!(reply, Reply::Flushed(904, true)));
+    let count: i64 = runtime
+        .block_on(
+            sqlx::query_scalar(
+                "SELECT count(*) FROM career_queue_dodge_events WHERE profile_id=$1",
+            )
+            .bind(&profile.profile_id)
+            .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(
+        runtime
+            .block_on(store.queue_dodge_cooldown(&profile.profile_id))
+            .unwrap()
+            .unwrap()
+            .strikes,
+        1
+    );
+    assert!(!file.exists());
+    drop(worker);
+    clear_queue_profile(&runtime, &pool, &profile);
+    runtime.block_on(pool.close());
+}
+
+#[test]
+#[ignore = "requires real isolated PostgreSQL"]
+fn corrupt_queue_dodge_journal_refuses_search_and_flush_but_keeps_access_refresh() {
+    let (url, runtime, store, pool) = database();
+    let (public_key, profile, event) = queue_profile(&runtime, &store);
+    let outbox = std::env::temp_dir().join(format!("omoba-resilience-{}", random_id::<16>()));
+    let root = outbox.join("queue-dodges");
+    fs::create_dir_all(&root).unwrap();
+    let corrupt = root.join(format!("{}.json", event.event_id));
+    fs::write(&corrupt, b"{broken").unwrap();
+    let worker = OwnedWorker::spawn_at(url, false, outbox);
+    worker.send(Job::QueueAccess {
+        request: crate::career_port::MatchRequest {
+            addr: "127.0.0.1:39001".parse().unwrap(),
+            request_id: 1,
+            preference: shared::match_service::MatchPreference::Casual,
+            also_casual: false,
+        },
+        nonce: "queue-fixture".into(),
+        sequence: 1,
+        public_key: public_key.clone(),
+        profile_id: profile.profile_id.clone(),
+    });
+    worker.send(Job::RefreshAccess {
+        addr: "127.0.0.1:39001".parse().unwrap(),
+        nonce: "refresh-fixture".into(),
+        public_key,
+        profile_id: profile.profile_id.clone(),
+    });
+    worker.send(Job::Flush(905));
+    let mut denied = false;
+    let mut refreshed = false;
+    let mut flush_failed = false;
+    worker.wait_for(|reply| {
+        match reply {
+            Reply::QueueAccess { access, .. } => {
+                assert!(access.is_err());
+                denied = true;
+            }
+            Reply::RefreshAccess {
+                key_active: Some(true),
+                ..
+            } => refreshed = true,
+            Reply::Flushed(905, false) => flush_failed = true,
+            _ => {}
+        }
+        denied && refreshed && flush_failed
+    });
+    assert_eq!(fs::read(corrupt).unwrap(), b"{broken");
+    drop(worker);
+    clear_queue_profile(&runtime, &pool, &profile);
     runtime.block_on(pool.close());
 }
