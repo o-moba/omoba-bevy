@@ -43,6 +43,15 @@ spools or discipline deduplication receipts. Monitor pre-persistence and SQL-rea
 availability separately. No RU migration or grant application is implied by these
 repository changes; current-schema recovery and the reviewed rollout stay gates.
 
+`matchmaking_available` is a read-only authenticated preflight of the current
+schema, writable primary and runtime privileges on the ready/discipline/admission
+tables and prune function. It returns an anonymous boolean, not database error
+details. Actual game-role/portal-role, read-only connection and lost-version cases
+are tested. This does not replace transaction ACKs, validate every business rule,
+or certify performance under load. The career worker samples it asynchronously
+and publishes operational health alongside pre-persistence backlog counts; see
+the RU kit's monitoring contract. No schema or permission addition beyond13.
+
 ## Accounts, profiles and friends
 
 The trusted worker must verify device signatures before calling `authenticate`

@@ -47,8 +47,10 @@ acceptance requirement.
 - [Signed15s ready journey](ready-check.json) PASS using actual current schema13
   lobby/workers. Nine accepted players retain FIFO age, no worker starts before
   unanimity, late acceptance cannot revive the expired check, and a replacement
-  roster reaches Running. Synthetic prior eligibility receipts and AI controllers
-  are disclosed; these are not physical testers or ten real qualification games.
+  roster is Assigned to one worker. This historical check stopped before that
+  roster's handoff; [the strengthened current proof](../storage-health-2026-11-07/README.md)
+  explicitly verifies ten-human Running. Synthetic prior eligibility receipts
+  and AI controllers are disclosed, not physical testers or ten real prior games.
 - [Actual production scheduler](background.json) PASS with the unmodified300s
   warmup: a real API-created closed receipt in an isolated PG18.6 schema is pruned
   after304.71s. [Lobby output](background-lobby.log) reports one prune and durable

@@ -11,18 +11,18 @@ findings). Decision record: ADR-027.
 The authoritative remaining order is now at the top of
 [the full TODO](../plans/TODO-LOBBY-2026-11-05.md). Original68 remains62 done,
 5 partial,1 open; critic/UI/physical and RU gates are additional. Current local
-verification is564 whole-server cases (13 real-PG) and100 actual-PG18.6 store
-cases, plus108 prior unchanged monitor/host-tool cases. Schema13 bounded ready
-maintenance preserves claims, unfinished games, Resume and discipline identity.
-[Current retention proof](../evidence/ready-retention-2026-11-07/README.md). Pending-result age survives retries;
-typed penalty delivery is monitored without player identifiers. An explicit
-journal lock guard fixes the deterministic duplicated-descriptor reopen failure.
-[Current health/reopen proof](../evidence/outbox-health-2026-11-07/README.md).
-Mandatory SQL consent and preserved partial-restore evidence remain verified in
-[the admission proof](../evidence/public-consent-admission-2026-11-07/README.md).
-Full current CI, ready/storage availability health, schema13 physical recovery, native/
-physical acceptance, WAN/multi-host capacity/trust and owner-controlled RU rollout
-remain open. Career13/portal11, protocol16; older sections preserve dated history.
+verification is570 whole-server cases (14 real-PG),101 actual-PG18.6 store and116
+monitor/host-tool cases. Anonymous live-process health detects missing schema,
+permissions/primary readiness and pre-persistence queue/floor/result failures;
+separate retry clocks restore failed startup connections without restart.
+[Current availability/fault-recovery proof](../evidence/storage-health-2026-11-07/README.md).
+Schema13 retention/Resume, mandatory consent and durable restore evidence retain
+[their prior proof](../evidence/ready-retention-2026-11-07/README.md). The signed15s
+replacement journey now explicitly proves ten-human Running and fresh actual
+lobby/worker health. Full current CI, schema13 physical/WAL/off-host recovery,
+controlled backpressure/heartbeat/load, native/physical acceptance, WAN/multi-host
+capacity/trust and owner-controlled RU rollout remain open. Career13/portal11,
+protocol16; older sections preserve dated history.
 
 ## Initial changes — 2026-11-05
 
@@ -1585,3 +1585,24 @@ Actual production scheduler proof also PASS without a timing override: after
 304.71s it prunes the API-created closed receipt, preserves the zero-played profile
 and creates no match/penalty. The owned server exits and its isolated schema is
 removed. This is idle scheduler wiring, not multiplayer capacity/WAN proof.
+
+
+## 2026-11-07 — authenticated storage health and reconnect fix
+
+Add required anonymous live-process reports with bounded freshness/contract/epoch
+validation and startup grace. Actual authenticated schema13/primary/role preflight
+plus staged queue/floor/failed-result counts expose failures before any durable
+receipt. The real worker failure test reproduces startup reconnect starvation;
+independent connection/delivery timers recover without restart and retain exact
+one-event discipline through IO/schema recovery. All101 actual-PG store,570 whole
+server (14 real-PG),42 monitor/74 host-tool cases and strict native checks PASS.
+
+Strengthen ready-check from replacement Assigned to actual ten-human Running plus
+fresh live lobby/worker health; use the lossless u64 parser. The accepted rerun
+PASS. Previous broader Running claims for that individual check are corrected;
+separate prior full-party journeys retain their independent proof. Parentaa's
+7-job green CI and hashed20-stage artifact are inspected, not current acceptance.
+[Current evidence/limits](../evidence/storage-health-2026-11-07/README.md).
+Current full CI, schema13 physical recovery/restored rights, controlled generic
+reply/heartbeat/capacity, UI/physical, trust/WAN/multi-host and RU gates remain open.
+C2/C4 decisions unchanged; no production deployment or live alert is performed.

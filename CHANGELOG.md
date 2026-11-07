@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Publish anonymous live career-worker health before any durable receipt:
+  authenticated schema/primary/runtime-permission preflight, staged queue/floor
+  work and failed result writes. Monitor missing/stale/corrupt reports and
+  persistent blockers, binding live worker epochs and preserving startup grace.
+  Separate startup connection and result-delivery retry clocks so restored SQL
+  becomes available without restart. All101 real-PG store/570 complete server
+  cases and116 monitor/host-tool cases PASS. Strengthen ready-check proof through
+  ten-human Running and fresh actual lobby/worker health. New full CI remains open.
+
 - Add schema13 bounded ready-receipt maintenance. Reconcile expired ownership
   with the existing exact dodge policy, and prune only closed receipts older
   than7 days without claims/unfinished matches. Preserve Resume, history and

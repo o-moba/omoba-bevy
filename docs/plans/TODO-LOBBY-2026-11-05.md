@@ -8,24 +8,20 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 Original68: **62 done,5 partial (#1,#2,#12,#20,#50),1 open (#13)**.
 Critic/physical/UI and deployment requirements remain additional acceptance gates.
-Current local proof: **564 actual server cases (13 real-PG) and100 actual-PG18.6
-store cases PASS**. Unchanged monitor/host-tool source retains its108-case proof.
-Schema13 adds bounded ready-receipt maintenance: expired ownership reconciles
-under the existing locks/dodge policy; only closed7-day-old unclaimed receipts
-without unfinished SQL matches are pruned. Resume, history and discipline event
-identity remain intact. [Current retention proof](../evidence/ready-retention-2026-11-07/README.md).
-The actual default300s scheduler prunes its isolated API-created receipt after
-304.71s, with no played match/penalty and complete fixture cleanup. Pending result
-retries preserve their age, terminal alerts use source time, and bounded
-typed queue-journal checks detect stale/corrupt/over-capacity delivery. Journal
-ownership explicitly unlocks when retired, including inherited-descriptor cases.
-[Current health/reopen proof](../evidence/outbox-health-2026-11-07/README.md).
-Signed Ranked replacement, Casual handoff and maintenance/restart/Resume journeys
-are retained. Full current CI remains required. Public roles require
-committed SQL consent on every new admission; old disk receipts cannot invent an
-admission after partial restore. [Exact current scope](../evidence/public-consent-admission-2026-11-07/README.md).
+Current local proof: **570 actual whole-server cases (14 real-PG),101 actual-PG18.6
+store cases and116 monitor/host-tool cases PASS**. Required anonymous process
+reports expose authenticated SQL/schema/role/primary health, staged dodges/floors
+and unpersisted result writes. A reproduced startup reconnect starvation is fixed
+with separate connection/delivery timers; real schema/IO failure and recovery
+passes without restart. [Current availability proof](../evidence/storage-health-2026-11-07/README.md).
 
-Next: ready/storage availability health; current-schema13 recovery/replay
+Schema13 bounded retention, mandatory SQL consent/restore evidence and persisted
+receipt age/typed-journal monitoring remain verified. The strengthened signed15s
+journey now explicitly continues the replacement roster through ten-human Running
+and fresh actual lobby/worker health. Older ready-check reports proved replacement
+Assigned, not that final Running condition; separate earlier full-party journeys
+retain their own scope. Full current CI remains required.
+Next: current-schema13 recovery/replay
 rehearsal; UI-2/UI-3 exact current pixels and physical C3; actual multi-host/WAN
 and sustained host capacity/cadence; trust packaging/provisioning; current full CI.
 C2/C4 host-tool proposals still await their existing owner decisions. Original
@@ -163,7 +159,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 - [major/gap/S] **Ranked has no eligibility gate** — original finding at `server/src/match_service.rs:892`. Owner decision2026-11-06: ten completed public matches, including Casual/vs Bots; no mandatory VK. Separate authoritative `completed_public_matches` excludes interruptions, remakes, custom/offline practice and own proved leaves/AFK. Fresh search and locked allocation admission; Home progress; existing seats still resume. — **done in software — ten-public-match/noVK gate passes locked admission and real tenth-completion proofs, including current5aa all7-job/18-stage CI42132894282. Fresh protocol16 native RU852×393 Home0 shows disabled Ranked/progress; Home10 shows enabled Ranked/rating. Initial clipped caption was corrected and both actual pixel captures rechecked. Production rollout remains separate.**
 - [minor/ux/S] **Draft allows two players on one team to lock the same hero class; no per-team uniqueness or 'taken' feedback** — `server/src/prematch.rs:235`. Fix: In `handle_prematch` refuse `Select`/`Lock` whose `hero_class` is already locked by a joined teammate, setting `player.draft.error = Some("draft.error.hero_taken")` resolved client-side to 'Этого героя уже выбрал союзник'; grey the class card in the client draft when a teammate has locked it (draft snapshot already carries teammates' picks). — **done in software — authoritative Select/Lock/async/timeout enforcement, signed ten-human draft-to-play,13 native regressions and full CI are verified. Native f2214c66 RU852×393 now visibly shows Warrior Taken/disabled90×44 and available132×44 lock-in; exact PNG/hash/readback preserved in ../evidence/fair-play-2026-11-06. Class feedback only; roster loading/physical devices and other findings remain separate.**
 - [minor/scale/S] **nftables lobby rule is 400 pkt/s per source IP: ~250 players behind one carrier-grade NAT saturate it and the kernel drops FindMatch/presence for all of them** — `ops/vps/ru/nftables-omoba.conf:56`. Fix: Raise the lobby limit to e.g. 4000/s burst 8000 (it is a flood guard, not a fairness tool) or key the dynamic set by `ip saddr . udp sport` so each NAT'd client gets its own bucket; document the new figure in README 'Admission limits'. — **done — nftables lobby rule 4000/s burst 8000**
-- [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold anchored to original result time; identical retries preserve file age. Typed queue-dodge journal checks cover stale/corrupt/capacity-limited delivery with no player IDs. All34 monitor cases and actual native receipt interoperability PASS. Ready/SQL availability remains separate; RU installation remains part of deployment.**
+- [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold anchored to original result time; identical retries preserve file age. Typed queue-dodge journal checks cover stale/corrupt/capacity-limited delivery with no player IDs. All42 monitor cases, actual native report interoperability and real-PG schema/IO failure/recovery PASS. Required anonymous process health covers pre-persistence SQL/role/journal/floor/result blockers. Controlled-load latency and RU installation remain release gates.**
 
 ## Next steps, in order
 
@@ -171,11 +167,11 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
    `scripts/postgres_tests.py`, full public journeys and portal checks. The owner
    permits targeted local commits with the full gate in CI while root disk is
    below20GB; a prior head's green job does not certify the current source.
-2. Finish ready/storage availability health. Schema13 bounded ready retention
-   preserves active claims/unfinished matches and existing Resume. Persisted
-   result/journal alerting has actual native/monitor interoperability proof;
-   pre-persistence failures and SQL ready/floor availability remain separate.
-   Missing-consent public
+2. Remove remaining blocking Ready/Flush reply sends with bounded retained ACKs;
+   prove full-buffer lease/health liveness. Verify paired rollout of the health
+   producer/monitor and controlled SQL/heartbeat/backpressure latency. Schema13
+   ready retention and pre-persistence/schema/role/storage fault/recovery checks
+   now have actual native/PG/monitor proof. Missing-consent public
    admission is now closed; retain authoritative recovery records and never turn
    absent/removed ready rows into a standalone bypass.
 3. Rehearse current-schema recovery and receipt replay against the exact release
@@ -2542,3 +2538,42 @@ older schema10/12 evidence is historical. Ready/floor SQL availability health,
 pre-persistence failures, controlled heartbeat/load cadence, trust/WAN/multi-host,
 UI/physical/RU and existing C2/C4 decisions remain open. Original68 remains
 62 done,5 partial,1 open. No RU migration, grant application or deployment.
+
+
+## 2026-11-07 — pre-persistence health and startup reconnect recovery
+
+Career workers publish atomic disposable health/status.json every5s, outside the
+receipt format, with anonymous authenticated SQL preflight/freshness, journal
+availability and staged-dodge/legacy-floor/unpersisted-result counts. Schema13,
+writable primary and actual required table/function privileges are checked by a
+10s background probe with2s deadline. No profile/event IDs, DSNs or raw errors.
+The monitor requires live reports after startup grace, matches worker epochs,
+alerts on sustained120s blockers, stale/missing/corrupt data or bounded-scan limits,
+and uses existing repeat/resolution state. Finished/failed workers are skipped.
+Ship producer/monitor through the reviewed drained rollout; old live workers need
+to finish before required reports become mandatory. No new unit or recipient.
+
+A real startup/schema/IO failure test exposed shared connection/result retry-clock
+starvation: delivery ticks kept postponing reconnect after schema restoration.
+Separate clocks fix it. Actual worker now recovers schema, persists and ACKs its
+previously in-memory dodge once, then detects/reverses a second connected schema
+failure. The two rejected fixture schemas are verified/removed; no other schema
+is changed. All101 real-PG18.6 store,570 actual server (14 real-PG),42 monitor/74
+host-tool cases and strict native checks PASS.
+[Evidence and exact limits](../evidence/storage-health-2026-11-07/README.md).
+
+The ready-check harness now requires the replacement ten-human roster actually
+Running, then fresh authenticated health from both real processes with exactu64
+epoch matching. The accepted rerun PASS uses the lossless native packet parser;
+a rejected initial harness used lossy JSON Number parsing and is not acceptance.
+Prior reports only proved Assigned for that replacement; current proof closes that
+validation gap without changing the15s consent/FIFO rule.
+
+Parentaa2e4cb4 CI42334461242 is fully green in7 jobs. Downloaded artifact13559679363
+matches SHA256/size and safe ZIP/CRC checks; all20 public stages PASS with private
+fixture removed. This historical schema12 source is not current acceptance. New
+full CI, schema13 real PITR/off-host/permissions/replay, generic blocking-reply and
+controlled heartbeat/cadence/load, public trust, WAN/multi-host, UI/physical and RU
+gates remain open. C2/C4 decisions remain pending; C4's patch still applies cleanly.
+Career13/portal11/protocol16 unchanged; original68 stays62 done,5 partial,1 open.
+No RU migration, grant/settings/credential change, alert send or deployment.

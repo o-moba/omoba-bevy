@@ -264,6 +264,33 @@ async fn reconcile(tx: &mut Transaction<'_, Postgres>, id: &str, at: i64) -> Sto
 }
 
 impl CareerStore {
+    /// Authenticated, read-only preflight of the actual matchmaking SQL contract.
+    /// Unlike a listening-port check this detects schema/role/replica failures
+    /// before any player's first ready or discipline write. Never returns IDs.
+    pub async fn matchmaking_available(&self) -> Result<bool, String> {
+        sqlx::query_scalar(
+            "SELECT NOT pg_is_in_recovery() AND current_setting('transaction_read_only')='off' \
+             AND (SELECT array_agg(version ORDER BY version) FROM career_schema_version)=$1 \
+             AND (SELECT bool_and(has_table_privilege(t,p)) FROM (VALUES \
+             ('career_profiles','SELECT'),('career_profiles','UPDATE'), \
+             ('career_matches','SELECT'),('career_matches','INSERT'),('career_matches','UPDATE'), \
+             ('career_participants','SELECT'),('career_participants','INSERT'), \
+             ('career_active_profiles','SELECT'),('career_active_profiles','INSERT'),('career_active_profiles','DELETE'), \
+             ('career_ready_checks','SELECT'),('career_ready_checks','INSERT'),('career_ready_checks','UPDATE'), \
+             ('career_ready_members','SELECT'),('career_ready_members','INSERT'),('career_ready_members','UPDATE'), \
+             ('career_ready_claims','SELECT'),('career_ready_claims','INSERT'),('career_ready_claims','DELETE'), \
+             ('career_queue_dodge_events','SELECT'),('career_queue_dodge_events','INSERT'), \
+             ('career_queue_penalties','SELECT'),('career_queue_penalties','INSERT'),('career_queue_penalties','UPDATE'), \
+             ('career_play_penalties','SELECT'),('career_ranked_seasons','SELECT'), \
+             ('career_ranked_allocations','SELECT'),('career_ranked_allocations','INSERT')) AS required(t,p)) \
+             AND has_function_privilege('career_prune_closed_ready(integer)','EXECUTE')",
+        )
+        .bind(SCHEMA_VERSIONS.as_slice())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|_| "Matchmaking storage preflight is unavailable.".into())
+    }
+
     /// Reconcile at most128 expired checks, then remove at most that many closed
     /// receipts older than7 days. Existing admissions remain the Resume authority.
     /// Queue-dodge identities/history are never removed by this operation.

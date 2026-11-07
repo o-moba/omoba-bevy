@@ -9,6 +9,53 @@ async fn backdate_closed(f: &Fixture, id: &str) {
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires real isolated PostgreSQL"]
+async fn storage_preflight_detects_schema_loss_and_read_only_before_player_requests() {
+    let f = Fixture::new().await;
+    assert!(f.store.matchmaking_available().await.unwrap());
+    sqlx::query("DELETE FROM career_schema_version WHERE version=13")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert!(!f.store.matchmaking_available().await.unwrap());
+    sqlx::query("INSERT INTO career_schema_version VALUES(13)")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert!(f.store.matchmaking_available().await.unwrap());
+    let schema = f.schema.clone();
+    let readonly = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO {schema}"))
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("SET default_transaction_read_only=on")
+                    .execute(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&std::env::var("OMOBA_TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let runtime = CareerStore::runtime_from_pool(readonly.clone())
+        .await
+        .unwrap();
+    assert!(!runtime.matchmaking_available().await.unwrap());
+    readonly.close().await;
+    assert_eq!(event_count(&f).await, 0);
+    let profiles: i64 = sqlx::query_scalar("SELECT count(*) FROM career_profiles")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(profiles, 0);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
 async fn ready_retention_is_bounded_keeps_recent_receipts_and_refuses_late_admission() {
     let (f, a, b, roster, _) = fixture().await;
     for n in 1..=3 {

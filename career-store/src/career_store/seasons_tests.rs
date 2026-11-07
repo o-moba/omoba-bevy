@@ -420,6 +420,10 @@ async fn runtime_roles_can_play_and_read_but_cannot_roll_over_or_archive() {
             .unwrap();
         let runtime = CareerStore::runtime_from_pool(pool.clone()).await.unwrap();
         assert_eq!(runtime.ranked_season().await.unwrap().season_id, 1);
+        assert_eq!(
+            runtime.matchmaking_available().await.unwrap(),
+            role == &game_role
+        );
         if role == &game_role {
             assert_eq!(
                 runtime.maintain_ready(1).await.unwrap(),

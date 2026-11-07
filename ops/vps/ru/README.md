@@ -363,14 +363,36 @@ alerts stay in the journal.
 | Free disk below 15% on a filesystem the host writes to (`/`, PostgreSQL, `/var/lib/omoba-ru`, `/var/backups/omoba-ru`, `/var/log`, `/opt/omoba-ru`) | the same check | at the next check | hourly |
 | A live match worker has written no heartbeat (`<match root>/<allocation>/status.json`) for 5 minutes while the lobby has run that long (the lobby relaunches a stale worker after 100 s) | the same check | at the next check | hourly |
 | Players have waited for a free arena for 2 minutes: every arena busy while a ready roster waits, from the lobby's `<match root>/capacity.json` (LR-09, [Arena capacity](#arena-capacity-lr-09)) | the same check | at the next check | hourly |
+| Career storage blocked for2 minutes, missing/stale/corrupt live-process health, or an incomplete scan; includes failures before the first durable receipt | `<outbox>/health/status.json` from the actual career worker, plus the same check | at the next check, after startup grace | hourly |
 | No backup for 26 h, a failed backup or drill, no drill for 35 days, a stale escrow | `ru_backup.py check --alert`, hourly (LR-03) | at once | every 6 h |
 | The lobby's UDP compatibility check, `/health/ready` or the portal fails from outside | the external probe, every minute | after 2 failed rounds in a row | hourly |
 
 Each alert says once when its problem is gone: "resolved" after 15 minutes without it,
 or "answers again" from the probe. Messages carry unit names, paths, numbers and
-allocation ids, never a log line, an address or a secret. Not watched yet, because they
-need the lobby's own metrics (LR-17, server part): failed
-allocations and the database connection state.
+allocation ids, never a log line, an address or a secret. Aggregate allocation-failure
+rates and sustained SQL/game-loop latency still need their controlled-load gates.
+
+Career workers publish anonymous operational state every5s under each outbox's
+`health/status.json`: authenticated SQL preflight/time, journal availability and
+counts of staged dodges, legacy floors and failed result writes. The preflight
+checks required schema13, a writable primary and actual runtime permissions before
+player requests; a listening port is not sufficient. Its10s background probe has
+a2s deadline. Missing/stale reports also reveal failure to write operational state
+or a stalled worker. The report is atomic, disposable and does not add an fsync
+to the gameplay durability path. It is never a match/consent/recovery authority.
+
+After120s lobby startup grace, the monitor requires the lobby report and reports
+from live workers, bound to the exact worker epoch. A worker with no report gets
+its join deadline plus120s startup grace. Finished/failed workers are skipped.
+Reports older than60s, probes older than30s, corrupt/oversized/linked files and
+incomplete bounded scans are actionable. Persistent blockers alert after120s;
+brief initial reconnect/import work is not paged. Reports and this alert expose
+counts/booleans, no profile/event IDs, credentials or raw database errors.
+
+Ship the producer and monitor together through the reviewed drained rollout:
+old live workers without this contract must finish before the required-report
+monitor is enabled. No new systemd unit, timer, alert recipient or credential is
+needed. This repository change does not apply any live RU setting or deployment.
 
 **Set up once (owner).**
 

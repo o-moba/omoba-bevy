@@ -27,6 +27,8 @@ use crate::career_port::CareerPort;
 
 #[path = "ready_consent.rs"]
 pub(crate) mod consent;
+#[path = "worker_health.rs"]
+mod health;
 #[path = "queue_dodge_outbox.rs"]
 pub(crate) mod queue_dodges;
 
@@ -2145,10 +2147,13 @@ fn queue_refusal_code(error: &str) -> Option<&str> {
 fn persist_queue_dodges(
     journal: &mut Option<queue_dodges::Journal>,
     staged: &mut BTreeMap<String, queue_dodges::Event>,
+    storage_ready: &mut bool,
 ) -> bool {
     let Some(journal) = journal else {
+        *storage_ready = false;
         return false;
     };
+    let attempted = !staged.is_empty();
     let events: Vec<_> = staged.values().cloned().collect();
     for event in events {
         match journal.record(event.clone()) {
@@ -2158,7 +2163,24 @@ fn persist_queue_dodges(
             Err(error) => eprintln!("Cannot persist queue-dodge journal: {error:?}"),
         }
     }
+    if attempted {
+        *storage_ready = staged.is_empty();
+    }
     staged.is_empty()
+}
+
+fn persist_match_record(
+    outbox: &Path,
+    record: &PendingRecord,
+    unpersisted: &mut HashSet<String>,
+) -> Result<(), String> {
+    let result = write_record(outbox, record);
+    if result.is_ok() {
+        unpersisted.remove(&record.result.result_id);
+    } else {
+        unpersisted.insert(record.result.result_id.clone());
+    }
+    result
 }
 
 fn worker(
@@ -2181,14 +2203,22 @@ fn worker(
     let recovered_record_ids: HashSet<_> = pending.keys().cloned().collect();
     let queue_root = outbox.join("queue-dodges");
     let mut queue_journal = queue_dodges::Journal::open(queue_root.clone()).ok();
+    let mut queue_storage_ready = queue_journal.is_some();
+    let mut unpersisted_records = HashSet::new();
+    let mut worker_health = health::Health::default();
+    let health_probe = std::sync::Arc::new(Mutex::new(health::Probe::default()));
     let mut queue_staged: BTreeMap<String, queue_dodges::Event> = BTreeMap::new();
     let mut last_queue_open = Instant::now();
     let mut queue_retry_at = Instant::now();
     let mut last_retry = Instant::now() - Duration::from_secs(10);
+    // Result delivery retries must not continually postpone a failed startup
+    // connection. These schedules have independent lifetimes.
+    let mut last_connect = Instant::now() - Duration::from_secs(10);
     let mut heartbeat = Instant::now();
     let mut connected = true;
     let mut _heartbeat_task = None;
     let mut _ready_maintenance_task = None;
+    let mut _health_probe_task = None;
     // Sign-ins and account actions that arrived while the database was not
     // connected (after a host reboot): answered once it is, or "unavailable"
     // after STORE_WAIT, instead of failing at once.
@@ -2204,17 +2234,56 @@ fn worker(
         || !queue_floors.is_empty()
         || queue_journal.as_ref().is_some_and(|j| !j.is_empty())
     {
+        worker_health.publish(
+            &outbox,
+            crate::match_allocation::unix_ms(),
+            health::Sample {
+                epoch: match scope {
+                    RecoveryScope::Epoch(epoch) => Some(epoch),
+                    _ => None,
+                },
+                probe: health_probe.lock().map(|probe| *probe).unwrap_or_default(),
+                journal_ready: queue_journal.is_some() && queue_storage_ready,
+                staged_dodges: queue_staged.len(),
+                legacy_floors: queue_floors.len(),
+                unpersisted_results: unpersisted_records.len(),
+            },
+        );
         if queue_journal.is_none() && last_queue_open.elapsed() >= Duration::from_secs(2) {
             last_queue_open = Instant::now();
             queue_journal = queue_dodges::Journal::open(queue_root.clone()).ok();
+            queue_storage_ready = queue_journal.is_some();
             if queue_journal.is_none() {
                 eprintln!("Queue-dodge journal unavailable; new queue access remains fail-closed.");
             }
         }
-        if store.is_none() && last_retry.elapsed() >= Duration::from_secs(2) {
-            last_retry = Instant::now();
+        if store.is_none() && last_connect.elapsed() >= Duration::from_secs(2) {
+            last_connect = Instant::now();
             store = rt.block_on(CareerStore::connect_runtime(&url)).ok();
             if let Some(s) = &store {
+                let probe_store = s.clone();
+                let probe = health_probe.clone();
+                _health_probe_task = Some(rt.spawn(async move {
+                    let mut timer = tokio::time::interval(Duration::from_secs(10));
+                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    loop {
+                        timer.tick().await;
+                        let ok = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            probe_store.matchmaking_available(),
+                        )
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                        .unwrap_or(false);
+                        if let Ok(mut probe) = probe.lock() {
+                            *probe = health::Probe {
+                                checked_ms: Some(crate::match_allocation::unix_ms()),
+                                ok,
+                            };
+                        }
+                    }
+                }));
                 // One bounded async background task per lobby/standalone. Never
                 // serialize maintenance SQL ahead of15-second consent jobs.
                 if !matches!(scope, RecoveryScope::Epoch(_)) {
@@ -2321,11 +2390,15 @@ fn worker(
                 }
             }
             Ok(Job::Flush(generation)) => {
-                let matches_flushed = pending
-                    .values()
-                    .all(|record| write_record(&outbox, record).is_ok());
-                let queue_flushed = persist_queue_dodges(&mut queue_journal, &mut queue_staged)
-                    && queue_journal.as_ref().is_some_and(|j| j.flush().is_ok());
+                let matches_flushed = pending.values().all(|record| {
+                    persist_match_record(&outbox, record, &mut unpersisted_records).is_ok()
+                });
+                let queue_flushed = persist_queue_dodges(
+                    &mut queue_journal,
+                    &mut queue_staged,
+                    &mut queue_storage_ready,
+                ) && queue_journal.as_ref().is_some_and(|j| j.flush().is_ok());
+                queue_storage_ready = queue_flushed;
                 let flushed = matches_flushed && queue_flushed;
                 // Shutdown keeps polling the receiver; unlike an optional view,
                 // this durability acknowledgement must not be dropped on a full channel.
@@ -2357,7 +2430,11 @@ fn worker(
                             queue_staged.insert(event.event_id.clone(), event);
                         }
                     }
-                    persist_queue_dodges(&mut queue_journal, &mut queue_staged);
+                    persist_queue_dodges(
+                        &mut queue_journal,
+                        &mut queue_staged,
+                        &mut queue_storage_ready,
+                    );
                 }
             }
             Ok(Job::Record(record)) => {
@@ -2484,7 +2561,11 @@ fn worker(
             }
         }
         if Instant::now() >= queue_retry_at || !connected {
-            persist_queue_dodges(&mut queue_journal, &mut queue_staged);
+            persist_queue_dodges(
+                &mut queue_journal,
+                &mut queue_staged,
+                &mut queue_storage_ready,
+            );
             let mut failed = false;
             if let (Some(journal), Some(s)) = (&mut queue_journal, &store) {
                 let events: Vec<_> = journal.pending().take(16).cloned().collect();
@@ -2556,45 +2637,47 @@ fn worker(
                     }
                     continue;
                 }
-                let result = write_record(&outbox, record).and_then(|_| match &store {
-                    None => Err("Match result is pending: PostgreSQL is unavailable.".into()),
-                    Some(s) => rt.block_on(async {
-                        if record.recovered_live {
-                            if let Some(result) = s.settled_result(&record.result.result_id).await?
-                            {
-                                let profiles = settled_profiles(s, &result).await?;
-                                return Ok(Some((result, profiles)));
-                            }
-                        }
-                        if let Some(allocation) = &record.recovery_allocation {
-                            if admission.require_ready_consent {
-                                s.ensure_public_allocation(allocation.clone()).await?;
-                            } else {
-                                s.ensure_allocation(allocation.clone()).await?;
-                            }
-                        }
-                        match record.kind {
-                            RecordKind::Start => {
-                                if admission.require_ready_consent {
-                                    s.start_public(record.result.clone()).await?;
-                                } else {
-                                    s.start(record.result.clone()).await?;
+                let result = persist_match_record(&outbox, record, &mut unpersisted_records)
+                    .and_then(|_| match &store {
+                        None => Err("Match result is pending: PostgreSQL is unavailable.".into()),
+                        Some(s) => rt.block_on(async {
+                            if record.recovered_live {
+                                if let Some(result) =
+                                    s.settled_result(&record.result.result_id).await?
+                                {
+                                    let profiles = settled_profiles(s, &result).await?;
+                                    return Ok(Some((result, profiles)));
                                 }
-                                Ok(None)
                             }
-                            RecordKind::Checkpoint => {
-                                s.checkpoint(record.result.clone()).await?;
-                                Ok(None)
+                            if let Some(allocation) = &record.recovery_allocation {
+                                if admission.require_ready_consent {
+                                    s.ensure_public_allocation(allocation.clone()).await?;
+                                } else {
+                                    s.ensure_allocation(allocation.clone()).await?;
+                                }
                             }
-                            RecordKind::Rejected => Ok(None),
-                            RecordKind::Settle => {
-                                let result = s.settle(record.result.clone()).await?;
-                                let profiles = settled_profiles(s, &result).await?;
-                                Ok(Some((result, profiles)))
+                            match record.kind {
+                                RecordKind::Start => {
+                                    if admission.require_ready_consent {
+                                        s.start_public(record.result.clone()).await?;
+                                    } else {
+                                        s.start(record.result.clone()).await?;
+                                    }
+                                    Ok(None)
+                                }
+                                RecordKind::Checkpoint => {
+                                    s.checkpoint(record.result.clone()).await?;
+                                    Ok(None)
+                                }
+                                RecordKind::Rejected => Ok(None),
+                                RecordKind::Settle => {
+                                    let result = s.settle(record.result.clone()).await?;
+                                    let profiles = settled_profiles(s, &result).await?;
+                                    Ok(Some((result, profiles)))
+                                }
                             }
-                        }
-                    }),
-                });
+                        }),
+                    });
                 match result {
                     Ok(result) => {
                         if matches!(record.kind, RecordKind::Start) {
@@ -2653,7 +2736,9 @@ fn worker(
                             rejected.result.unrated_reason = Some(message.clone());
                             // A durable tombstone must precede rejection: an undeletable
                             // old Start must never allocate a canceled roster on restart.
-                            if write_record(&outbox, &rejected).is_ok() {
+                            if persist_match_record(&outbox, &rejected, &mut unpersisted_records)
+                                .is_ok()
+                            {
                                 rejected_ids.push_back(id.clone());
                                 if rejected_ids.len() > MAX_JOBS * 2 {
                                     rejected_ids.pop_front();
@@ -3333,6 +3418,31 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("omoba-outbox-unit-{}", random_id::<16>()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn failed_result_persistence_is_reported_until_the_exact_record_is_durable() {
+        let dir = outbox_dir();
+        let root = dir.join("blocked-outbox");
+        fs::write(&root, b"owned fixture blocks outbox directory creation").unwrap();
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result: outbox_result("pre-persistence-health", MatchOutcome::Completed),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        let mut unpersisted = HashSet::new();
+        assert!(persist_match_record(&root, &record, &mut unpersisted).is_err());
+        assert_eq!(unpersisted.len(), 1);
+        fs::remove_file(&root).unwrap();
+        persist_match_record(&root, &record, &mut unpersisted).unwrap();
+        assert!(unpersisted.is_empty());
+        let saved: PendingRecord = serde_json::from_slice(
+            &fs::read(spool_path(&root, &record.result.result_id).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved.result, record.result);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

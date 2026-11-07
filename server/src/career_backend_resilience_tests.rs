@@ -104,6 +104,93 @@ impl Drop for OwnedWorker {
     }
 }
 
+#[test]
+#[ignore = "requires isolated PostgreSQL; real pre-persistence health and recovery"]
+fn storage_health_reports_schema_and_unpersisted_dodges_before_any_durable_event() {
+    let (url, runtime, store, pool, admin, schema) = isolated_public_database();
+    eprintln!("HEALTH_TEST_SCHEMA={schema}");
+    let profile = runtime
+        .block_on(store.authenticate(&random_id::<32>(), "Storage tester"))
+        .unwrap();
+    runtime
+        .block_on(sqlx::query("DELETE FROM career_schema_version WHERE version=13").execute(&pool))
+        .unwrap();
+    let outbox = std::env::temp_dir().join(format!("omoba-resilience-{}", random_id::<16>()));
+    fs::create_dir(&outbox).unwrap();
+    let blocker = outbox.join("queue-dodges");
+    fs::write(&blocker, b"owned fixture blocks journal directory creation").unwrap();
+    let fixture = OwnedWorker::spawn_public(url, outbox);
+    let report = || -> Option<health::Report> {
+        serde_json::from_slice(&fs::read(fixture.outbox.join("health/status.json")).ok()?).ok()
+    };
+    let wait_health = |stage: &str, accepts: fn(&health::Report) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(25);
+        let mut last = None;
+        while Instant::now() < deadline {
+            last = report();
+            if last.as_ref().is_some_and(accepts) {
+                eprintln!("HEALTH_TEST_STAGE={stage}");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("health stage {stage} timed out: {last:?}");
+    };
+    wait_health("startup-unavailable", |r| {
+        !r.sql_ready && !r.journal_ready && r.blocked_since_ms.is_some()
+    });
+    let event =
+        queue_dodges::Event::new(&profile.profile_id, crate::match_allocation::unix_ms()).unwrap();
+    fixture.send(Job::QueueDodge(event.clone()));
+    wait_health("unpersisted-dodge", |r| r.staged_dodges == 1);
+    let raw = fs::read_to_string(fixture.outbox.join("health/status.json")).unwrap();
+    assert!(!raw.contains(&profile.profile_id));
+    assert!(!raw.contains(&event.event_id));
+    let count: i64 = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events").fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(
+        count, 0,
+        "health exposes the failure before a durable event exists"
+    );
+    runtime
+        .block_on(sqlx::query("INSERT INTO career_schema_version VALUES(13)").execute(&pool))
+        .unwrap();
+    wait_health("schema-restored", |r| {
+        r.sql_ready && !r.journal_ready && r.staged_dodges == 1
+    });
+    fs::remove_file(&blocker).unwrap();
+    fixture.wait_for(
+        |reply| matches!(reply, Reply::QueueDodgeCommitted(ref committed) if committed == &event),
+    );
+    wait_health("journal-restored", |r| {
+        r.sql_ready && r.journal_ready && r.staged_dodges == 0 && r.blocked_since_ms.is_none()
+    });
+    // A connected pool alone does not keep certifying a lost SQL contract.
+    runtime
+        .block_on(sqlx::query("DELETE FROM career_schema_version WHERE version=13").execute(&pool))
+        .unwrap();
+    wait_health("connected-schema-lost", |r| {
+        !r.sql_ready && r.probe_checked_ms.is_some()
+    });
+    runtime
+        .block_on(sqlx::query("INSERT INTO career_schema_version VALUES(13)").execute(&pool))
+        .unwrap();
+    wait_health("connected-schema-restored", |r| {
+        r.sql_ready && r.blocked_since_ms.is_none()
+    });
+    let count: i64 = runtime
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events").fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    drop(fixture);
+    close_public_database(&runtime, store, pool, admin, &schema);
+}
+
 fn database() -> (String, tokio::runtime::Runtime, CareerStore, sqlx::PgPool) {
     let url =
         std::env::var("OMOBA_TEST_DATABASE_URL").expect("set isolated OMOBA_TEST_DATABASE_URL");
