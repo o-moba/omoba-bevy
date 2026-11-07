@@ -22,7 +22,11 @@ counts; career13/portal11/game protocol16 are unchanged. Current signed15s throu
 ten-human Running/v2 health and SIGTERM durability PASS. Current13 physical/WAL
 and restored actual runtime grants now pass20 checks each on PG16.15/18.6:
 [isolated recovery proof](../evidence/schema13-recovery-2026-11-07/README.md).
-Actual worker replay/Resume after restoration, independent off-host/RU recovery,
+PG18 current public-worker physical restoration/Resume/adoption and223.47s real
+SQL/checkpoint crash recovery now pass22 stages with actual game-role SCRAM/grants:
+[worker proof](../evidence/worker-physical-recovery-2026-11-07/README.md). C4's revised
+review-only candidate fixes hardcoded recovery dimensions;176 unit pass/1 skip.
+PG16 raised-limit/native, terminal-spool replay, independent off-host/RU recovery,
 full current CI and sustained host/backpressure/cadence/load,
 native/physical UI, WAN/multi-host capacity/trust and reviewed RU rollout remain
 open. Older sections preserve dated history.
@@ -1649,3 +1653,24 @@ replay/Resume or independent production recovery. Those gates and current full
 CI/load/UI/physical/trust/WAN/C2/C4 decisions remain required. Parentbc08 seven-job
 CI and its20-stage public artifact are now completely green/hash-inspected; this
 is historical source and does not certify a654 critical replies/v2.
+
+
+## 2026-11-07 — live worker after physical SQL restoration
+
+Current PG18 source80/12/14/4/128 raised limits expose and then verify correction
+of the proposed C4 hardcoded20-connection restore. The revised review-only patch
+uses five validated numeric primary/base-control dimensions; current composed
+unit suite176 pass/1 optional skip. The real combined helper drill and all backup
+fault checks pass. The exact current public binary then creates a real bot-
+practice match through game-role SCRAM/grants, survives physical SQL replacement,
+resumes the same human/worker/epoch and is adopted by restarted lobby. SIGKILL
+recovery takes223.47s under ordinary timers; original Interrupted history/profile
+credit appears once without Elo/XP, and a new assignment succeeds. Final SQL
+agrees; all22 stages pass and own containers/network are removed.
+[Accepted/rejected evidence and exact scope](../evidence/worker-physical-recovery-2026-11-07/README.md).
+
+The before-crash outbox has0 JSON receipts, so this is SQL/checkpoint recovery,
+not terminal-spool replay. PG16 raised-limit/current-worker acceptance, independent
+storage/RU RPO/RTO, current CI, UI/physical, trust/WAN/capacity and existing C2/C4
+integration/rollout decisions remain required. Historical20-connection/schema10
+evidence remains unchanged. Original68 ledger stays62/5/1; no RU change occurs.

@@ -165,6 +165,10 @@ const lobbyPort = Number(opts.port || 45500);
 const workerPort = Number(opts['worker-port'] || 45600);
 const root = path.resolve(opts.output || `.agent/tasks/TASK-PUBLIC-MVP-2026-09-22/raw/live-${Date.now()}`);
 fs.mkdirSync(root, {recursive:true});
+// An isolated physical-backup runner owns the DB fault/replacement. The probe
+// exchanges only correlated receipts, never runs a supplied command or SQL.
+const databaseRestoreControl=opts['database-restore-control']?fs.realpathSync(opts['database-restore-control']):null;
+if(databaseRestoreControl)assert(scenario==='recovery'&&clientsCount===1&&preference==='bot_practice'&&isolatedQueueDatabase(process.env.OMOBA_TEST_DATABASE_URL)&&databaseRestoreControl.startsWith(fs.realpathSync(root)+path.sep),'database restore requires the one-roster loopback recovery fixture and a control directory inside its output');
 assert(process.env.OMOBA_TEST_DATABASE_URL, 'Use a disposable OMOBA_TEST_DATABASE_URL');
 assert(process.env.HARNESS_SERVER_BIN, 'Build server and set HARNESS_SERVER_BIN');
 assert(clientsCount >= 1 && clientsCount <= (allowLarge ? 1000 : 100), allowLarge ? 'clients must be 1-1000' : 'clients must be 1-100 (--allow-large lifts the cap to 1000)');
@@ -1262,6 +1266,40 @@ async function recoverRoster(originals, early) {
  report.recovery={status:'PASS',reassignment_ms:reassignmentMs,same_port_reused:observers.every(c=>c.allocation.endpoint===allocation.endpoint),queue:original.preference,participants:originals.length,crashed_after_running_seconds:playingFor,early_before_first_checkpoint:early,result_id:before.result_id,server_epoch:before.server_epoch,outcome:saved.outcome,all_profiles_checked:true,all_histories_checked:true,no_elo_or_xp:true,elapsed_seconds:(performance.now()-crashedAt)/1000};
  report.scenarios.push('full_roster_crash_recovers_played_history_without_elo_or_xp');
 }
+async function physicalDatabaseRestore(original) {
+ const allocation=original.allocation,epoch=original.epoch,worker=ownedWorkerPid(original.port);
+ const nonce=crypto.randomBytes(16).toString('hex');
+ const status=allocationStatus(allocation.allocation_id);
+ assert(status?.phase==='running'&&status.result_id,'physical backup requires an acknowledged running match');
+ fs.writeFileSync(path.join(databaseRestoreControl,'request.json'),wire({nonce,allocation_id:allocation.allocation_id,result_id:status.result_id,server_epoch:epoch}),{flag:'wx'});
+ let receipt;
+ await pumpUntil('isolated physical database replacement',()=>{
+  const file=path.join(databaseRestoreControl,'response.json');if(!fs.existsSync(file))return false;
+  assert(fs.statSync(file).size<=4096,'oversized physical restore receipt');
+  receipt=JSON.parse(fs.readFileSync(file,'utf8'));
+  assert.equal(receipt.nonce,nonce);assert.equal(receipt.status,'PASS');
+  assert.equal(receipt.physical_restored,true);assert.equal(receipt.system_identifier_matched,true);
+  assert.equal(receipt.career_schema,13);return true;
+ },180000);
+ const restoredAt=Date.now();
+ assert.equal(ownedWorkerPid(original.port),worker,'database replacement changed the live worker');
+ const lastTick=original.snapshot.snapshot_tick;
+ original.close();
+ const resumed=new Client(original.index,original.port,original,{autoQueue:false});
+ resumed.allocation=allocation;all.push(resumed);
+ await pumpUntil('same authenticated human resumes after physical restoration',()=>resumed.stage==='running'&&resumed.snapshot.snapshot_tick>lastTick,30000);
+ assert.equal(resumed.epoch,epoch);assert.equal(resumed.profile.profile_id,original.profile.profile_id);
+ assert.equal(ownedWorkerPid(resumed.port),worker);
+ const readHealth=p=>{try{return parse(fs.readFileSync(p));}catch{return null;}};
+ let postRestoreHealth;
+ await pumpUntil('restored database authenticated worker health',()=>{
+  const h=readHealth(path.join(root,'matches',allocation.allocation_id,'outbox','health','status.json'));
+  if(h?.version===2&&h.sql_ready===true&&h.journal_ready===true&&h.server_epoch===epoch&&h.critical_replies===0&&h.reply_receiver_closed===false&&h.probe_checked_ms>=restoredAt&&h.updated_ms>=restoredAt){postRestoreHealth=h;return true;}return false;
+ },30000);
+ report.database_restore={status:'PASS',result_id:status.result_id,allocation_id:allocation.allocation_id,worker_pid:worker,server_epoch:epoch,same_worker:true,same_profile:true,resumed_running:true,authenticated_sql_ready:true,restore_observed_ms:restoredAt,probe_checked_ms:postRestoreHealth.probe_checked_ms,health_updated_ms:postRestoreHealth.updated_ms,receipt};
+ report.scenarios.push('physical_database_restore_preserves_live_worker_and_authenticated_resume');
+ return resumed;
+}
 async function restartAndRecover(original, crashWorker) {
  const allocation=original.allocation, baseline=ids(original.snapshot), progress=careerProgress(original), workerEpoch=original.epoch;
  const workerPid=ownedWorkerPid(original.port);
@@ -1433,7 +1471,7 @@ try {
  if(scenario==='capacity-wait')await capacityWait();
  if(scenario==='drain')await maintenanceDrain(all[0]);
  if(scenario==='early-recovery'||(scenario==='recovery'&&preference!=='bot_practice'))await recoverRoster(all.filter(c=>c.stage==='running'),scenario==='early-recovery');
- else if(scenario==='lobby-restart'||scenario==='recovery')await restartAndRecover(all[0],scenario==='recovery');
+ else if(scenario==='lobby-restart'||scenario==='recovery')await restartAndRecover(databaseRestoreControl?await physicalDatabaseRestore(all[0]):all[0],scenario==='recovery');
  report.total_transforms_sent=all.reduce((n,c)=>n+c.transforms,0);
  report.total_sent_datagrams=all.reduce((n,c)=>n+c.sentPackets,0);
  report.total_sent_bytes=all.reduce((n,c)=>n+c.sentBytes,0);

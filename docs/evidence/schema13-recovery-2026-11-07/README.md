@@ -1,5 +1,10 @@
 # Current-schema13 isolated recovery rehearsal
 
+This checkpoint used20 connections on both source and restored clusters. A later
+raised-limit run exposed the original candidate's hardcoded recovery dimensions;
+see the [revised proposal and follow-up proof](../pitr-recovery-limits-2026-11-07/README.md).
+The original passing results below do not certify arbitrary source limits.
+
 Current career13/portal11 migrations and actual runtime grants are exercised by
 [the runner](rehearse_schema13.py), based on the earlier
 [full-kit runner](../pitr-kit-2026-11-07/rehearse_full_kit.py). The reviewed C4

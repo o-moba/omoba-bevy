@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify the current public worker against a physically restored schema13 on
+  PG18.6: same authenticated human/worker/epoch Resume, lobby adoption, then real
+  SIGKILL/recovery with one Interrupted history entry and no Elo/XP. Twenty-two
+  isolated stages PASS. Raised source limits exposed a C4 candidate defect; its
+  revised review-only patch preserves five numeric recovery dimensions instead
+  of hardcoding20 connections. Current composed unit suite:176 pass/1 optional
+  skip. PG16 raised-limit/native, terminal-spool replay and real-RU gates remain.
+
 - Verify current career13/portal11 physical/WAL recovery with actual runtime
   grants on PostgreSQL16.15 and18.6:20 isolated checks each PASS. Named/latest
   restoration preserves exact ready ownership, queue discipline and rating/history;

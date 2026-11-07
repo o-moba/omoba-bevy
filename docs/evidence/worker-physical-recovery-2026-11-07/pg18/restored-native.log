@@ -1,0 +1,20 @@
+2026-11-07 06:11:44.068 GMT [46] LOG:  starting PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-07 06:11:44.068 GMT [46] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+2026-11-07 06:11:44.070 GMT [46] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-11-07 06:11:44.072 GMT [52] LOG:  database system was interrupted; last known up at 2026-11-07 06:11:37 GMT
+2026-11-07 06:11:44.166 GMT [52] LOG:  starting backup recovery with redo LSN 0/2800028, checkpoint LSN 0/2800080, on timeline ID 1
+2026-11-07 06:11:44.204 GMT [52] LOG:  restored log file "000000010000000000000028" from archive
+2026-11-07 06:11:44.207 GMT [52] LOG:  starting archive recovery
+2026-11-07 06:11:44.208 GMT [52] LOG:  redo starts at 0/2800028
+2026-11-07 06:11:44.244 GMT [52] LOG:  restored log file "000000010000000000000029" from archive
+2026-11-07 06:11:44.277 GMT [52] LOG:  completed backup recovery with redo LSN 0/2800028 and end LSN 0/28017C0
+2026-11-07 06:11:44.277 GMT [52] LOG:  consistent recovery state reached at 0/28017C0
+2026-11-07 06:11:44.277 GMT [46] LOG:  database system is ready to accept read-only connections
+2026-11-07 06:11:44.311 GMT [52] LOG:  redo done at 0/2900090 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.10 s
+2026-11-07 06:11:44.312 GMT [52] LOG:  last completed transaction was at log time 2026-11-07 06:11:39.873546+00
+2026-11-07 06:11:44.346 GMT [52] LOG:  restored log file "000000010000000000000029" from archive
+2026-11-07 06:11:44.382 GMT [52] LOG:  selected new timeline ID: 2
+2026-11-07 06:11:44.420 GMT [52] LOG:  archive recovery complete
+2026-11-07 06:11:44.426 GMT [50] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-11-07 06:11:44.430 GMT [50] LOG:  checkpoint complete: wrote 6 buffers (0.1%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 2 recycled; write=0.001 s, sync=0.001 s, total=0.010 s; sync files=8, longest=0.001 s, average=0.001 s; distance=2048 kB, estimate=2048 kB; lsn=0/2A00028, redo lsn=0/2A00028
+2026-11-07 06:11:44.431 GMT [46] LOG:  database system is ready to accept connections
