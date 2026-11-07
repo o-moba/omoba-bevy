@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Import persisted legacy matchmaking penalty floors before new lobby admission.
+  Merge exact source counter/deadline bounds without inventing historical events,
+  reviving expired time or weakening shared penalties after restart. All87 real-PG
+  store/555 actual server cases and strict native checks PASS. Add signed two-lobby
+  legacy/restart regression to the existing PostgreSQL harness. Full current CI
+  and the coordinated RU snapshot-import rollout remain required.
+
 - Activate SQL-acknowledged ready consent in the actual lobby: bounded batched
   answers, committed unanimity, exact15s timeout and shared cross-lobby discipline.
   Release a failed draft reservation only after the dodge commits, preserving the

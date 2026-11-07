@@ -17,7 +17,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{Duration, Instant};
 
 use ed25519_dalek::{Signature, VerifyingKey};
-use omoba_career_store::career_store::CareerStore;
+use omoba_career_store::career_store::{CareerStore, QueuePenaltyFloor};
 use serde::{Deserialize, Serialize};
 use shared::career::*;
 use shared::moderation::{Sanction, SanctionKind};
@@ -153,6 +153,7 @@ pub(crate) enum Job {
     },
     Record(Box<PendingRecord>),
     QueueDodge(queue_dodges::Event),
+    QueueFloor(QueuePenaltyFloor),
     Ready(consent::Work),
     Flush(u64),
     Presence(Vec<(String, Option<String>)>),
@@ -166,6 +167,7 @@ pub(crate) enum Reply {
     },
     RecoveryChecked,
     QueueDodgeCommitted(queue_dodges::Event),
+    QueueFloorCommitted(QueuePenaltyFloor),
     Ready(consent::Completion),
     Flushed(u64, bool),
     RefreshAccess {
@@ -416,6 +418,7 @@ impl MemoryLink {
                 RecordKind::Rejected => {}
             },
             Job::QueueDodge(event) => self.replies.push_back(Reply::QueueDodgeCommitted(event)),
+            Job::QueueFloor(floor) => self.replies.push_back(Reply::QueueFloorCommitted(floor)),
             Job::Ready(work) => self.replies.push_back(Reply::Ready(consent::Completion {
                 work,
                 result: Err(STORE_UNAVAILABLE.into()),
@@ -472,6 +475,8 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     pending_ids: HashSet<String>,
     queue_dodges: HashMap<String, queue_dodges::Event>,
     queue_dodge_acks: HashMap<String, queue_dodges::Event>,
+    queue_floors: HashMap<String, QueuePenaltyFloor>,
+    queue_floor_acks: HashMap<String, QueuePenaltyFloor>,
     ready_jobs: HashMap<(String, u64), consent::Work>,
     ready_completions: Vec<consent::Completion>,
     match_refusals: Vec<(crate::career_port::MatchRequest, String)>,
@@ -553,6 +558,8 @@ impl<L: JobLink> CareerBackend<L> {
             pending_ids: HashSet::new(),
             queue_dodges: HashMap::new(),
             queue_dodge_acks: HashMap::new(),
+            queue_floors: HashMap::new(),
+            queue_floor_acks: HashMap::new(),
             ready_jobs: HashMap::new(),
             ready_completions: Vec::new(),
             match_refusals: Vec::new(),
@@ -1001,6 +1008,32 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         self.record_generation = self.record_generation.saturating_add(1);
         true
     }
+    fn record_queue_floor(&mut self, floor: QueuePenaltyFloor) -> bool {
+        if !self.enabled() || floor.validate().is_err() {
+            return false;
+        }
+        if let Some(old) = self
+            .queue_floors
+            .get(&floor.profile_id)
+            .or_else(|| self.queue_floor_acks.get(&floor.profile_id))
+        {
+            return old == &floor;
+        }
+        if self.queue_floors.len() + self.queue_floor_acks.len() >= MAX_JOBS
+            || !self.link.try_send(Job::QueueFloor(floor.clone()))
+        {
+            return false;
+        }
+        self.queue_floors.insert(floor.profile_id.clone(), floor);
+        self.record_generation = self.record_generation.saturating_add(1);
+        true
+    }
+    fn take_queue_floor_committed(&mut self) -> Vec<QueuePenaltyFloor> {
+        self.queue_floor_acks
+            .drain()
+            .map(|(_, floor)| floor)
+            .collect()
+    }
     fn take_queue_dodge_committed(&mut self) -> Vec<String> {
         self.queue_dodge_acks.drain().map(|(id, _)| id).collect()
     }
@@ -1328,6 +1361,13 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     {
                         self.queue_dodges.remove(&event.event_id);
                         self.queue_dodge_acks.insert(event.event_id.clone(), event);
+                    }
+                }
+                Reply::QueueFloorCommitted(floor) => {
+                    if self.queue_floors.get(&floor.profile_id) == Some(&floor) {
+                        self.queue_floors.remove(&floor.profile_id);
+                        self.queue_floor_acks
+                            .insert(floor.profile_id.clone(), floor);
                     }
                 }
                 Reply::ChatSwitch(enabled) => self.chat_switch = Some(enabled),
@@ -2121,11 +2161,13 @@ fn worker(
     let mut parked: VecDeque<(Instant, Job)> = VecDeque::new();
     // The first retention run waits out a restart's reconnect storm.
     let mut next_retention = Instant::now() + Duration::from_secs(300);
+    let mut queue_floors: BTreeMap<String, QueuePenaltyFloor> = BTreeMap::new();
     let mut last_chat_poll: Option<Instant> = None;
     let mut deferred_job: Option<Job> = None;
     while connected
         || !pending.is_empty()
         || !queue_staged.is_empty()
+        || !queue_floors.is_empty()
         || queue_journal.as_ref().is_some_and(|j| !j.is_empty())
     {
         if queue_journal.is_none() && last_queue_open.elapsed() >= Duration::from_secs(2) {
@@ -2161,8 +2203,9 @@ fn worker(
         match next {
             Ok(job @ (Job::QueueAccess { .. } | Job::RefreshAccess { .. })) if store.is_some() => {
                 let batch = collect_access_reads(job, &jobs, &mut deferred_job);
-                let ready =
-                    queue_staged.is_empty() && queue_journal.as_ref().is_some_and(|j| j.is_empty());
+                let ready = queue_staged.is_empty()
+                    && queue_floors.is_empty()
+                    && queue_journal.as_ref().is_some_and(|j| j.is_empty());
                 let mut allowed = Vec::new();
                 for job in batch {
                     if matches!(job, Job::QueueAccess { .. }) && !ready {
@@ -2225,6 +2268,20 @@ fn worker(
                 // Shutdown keeps polling the receiver; unlike an optional view,
                 // this durability acknowledgement must not be dropped on a full channel.
                 let _ = replies.send(Reply::Flushed(generation, flushed));
+            }
+            Ok(Job::QueueFloor(floor)) => {
+                if queue_floors.len() >= MAX_JOBS && !queue_floors.contains_key(&floor.profile_id) {
+                    deferred_job = Some(Job::QueueFloor(floor));
+                } else {
+                    match queue_floors.get(&floor.profile_id) {
+                        Some(old) if old != &floor => {
+                            eprintln!("Conflicting legacy matchmaking floor; original retained.")
+                        }
+                        _ => {
+                            queue_floors.insert(floor.profile_id.clone(), floor);
+                        }
+                    }
+                }
             }
             Ok(Job::QueueDodge(event)) => {
                 if queue_staged.len() >= MAX_JOBS && !queue_staged.contains_key(&event.event_id) {
@@ -2329,6 +2386,7 @@ fn worker(
             let reply = match &store {
                 Some(s) => parked.pop_front().and_then(|(_, job)| {
                     let ready = queue_staged.is_empty()
+                        && queue_floors.is_empty()
                         && queue_journal.as_ref().is_some_and(|j| j.is_empty());
                     if matches!(job, Job::QueueAccess { .. }) && !ready {
                         unavailable(job)
@@ -2387,6 +2445,25 @@ fn worker(
                         Err(error) => {
                             failed = true;
                             eprintln!("Queue-dodge SQL delivery pending: {error}");
+                        }
+                    }
+                }
+            }
+            if let Some(s) = &store {
+                let floors: Vec<_> = queue_floors.values().take(16).cloned().collect();
+                for floor in floors {
+                    match rt.block_on(s.import_queue_penalty_floor(&floor)) {
+                        Ok(_) => {
+                            if replies
+                                .try_send(Reply::QueueFloorCommitted(floor.clone()))
+                                .is_ok()
+                            {
+                                queue_floors.remove(&floor.profile_id);
+                            }
+                        }
+                        Err(error) => {
+                            failed = true;
+                            eprintln!("Legacy matchmaking floor SQL delivery pending: {error}");
                         }
                     }
                 }

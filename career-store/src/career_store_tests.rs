@@ -3276,3 +3276,272 @@ async fn queue_discipline_start_waits_for_an_inflight_other_owner_dodge_commit()
 
 #[path = "career_store/ready_tests.rs"]
 mod ready_ownership;
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_is_idempotent_shared_and_not_an_invented_event() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let floor = QueuePenaltyFloor {
+        profile_id: profile.profile_id.clone(),
+        strikes: 3,
+        last_ms: at - 30_000,
+        until_ms: at + 870_000,
+    };
+    for _ in 0..3 {
+        let active = f
+            .store
+            .import_queue_penalty_floor(&floor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(active.strikes, 3);
+        assert_eq!(active.until, (floor.until_ms as i64 + 999) / 1000);
+    }
+    assert_eq!(
+        other
+            .queue_access(&format!("{:064x}", 1), &profile.profile_id)
+            .await
+            .unwrap_err(),
+        shared::career::error_code::DODGE_COOLDOWN
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "an aggregate is not a fabricated list of events");
+    let next = other
+        .record_queue_dodge(&"a".repeat(32), &profile.profile_id, at)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.strikes, 4);
+    let preserved = f
+        .store
+        .import_queue_penalty_floor(&floor)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        preserved, next,
+        "a restart's older floor cannot weaken the shared counter or time"
+    );
+    let after = f.store.profile(&profile.profile_id).await.unwrap();
+    assert_eq!(after.matches_played, profile.matches_played);
+    assert_eq!(after.rating, profile.rating);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_does_not_rearm_expired_time_or_revive_old_strikes() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let at = queue_discipline_now(&f).await;
+    let recent = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 2,
+        last_ms: at - 400_000,
+        until_ms: at - 100_000,
+    };
+    let stale = QueuePenaltyFloor {
+        profile_id: b.profile_id.clone(),
+        strikes: 3,
+        last_ms: at - 86_500_000,
+        until_ms: at - 85_600_000,
+    };
+    for floor in [&recent, &stale] {
+        for _ in 0..2 {
+            assert!(
+                f.store
+                    .import_queue_penalty_floor(floor)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM career_queue_penalties WHERE profile_id=$1")
+            .bind(&b.profile_id)
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(
+        f.store
+            .record_queue_dodge(&"a".repeat(32), &a.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        3
+    );
+    assert_eq!(
+        f.store
+            .record_queue_dodge(&"b".repeat(32), &b.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_refuses_invalid_future_and_missing_profile_without_effects() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let good = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 1,
+        last_ms: at,
+        until_ms: at + 60_000,
+    };
+    let mut cases = Vec::new();
+    let mut bad = good.clone();
+    bad.strikes = 0;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.strikes = u32::MAX;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.until_ms = at - 1;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.until_ms = at + 3_606_000;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.last_ms = at + 60_000;
+    bad.until_ms = at + 120_000;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.profile_id = "f".repeat(64);
+    cases.push(bad);
+    for floor in cases {
+        assert!(f.store.import_queue_penalty_floor(&floor).await.is_err());
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_penalties")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_merges_overlapping_owners_by_max_after_known_receipt_replay() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let event = "a".repeat(32);
+    for _ in 0..2 {
+        f.store
+            .record_queue_dodge(&event, &a.profile_id, at - 60_000)
+            .await
+            .unwrap();
+    }
+    let high = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 5,
+        last_ms: at - 60_000,
+        until_ms: at + 3_540_000,
+    };
+    let low = QueuePenaltyFloor {
+        strikes: 3,
+        until_ms: at + 840_000,
+        ..high.clone()
+    };
+    let (one, two) = tokio::join!(
+        f.store.import_queue_penalty_floor(&high),
+        other.import_queue_penalty_floor(&low)
+    );
+    one.unwrap();
+    two.unwrap();
+    assert_eq!(
+        f.store
+            .queue_dodge_cooldown(&a.profile_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        5
+    );
+    f.store
+        .record_queue_dodge(&event, &a.profile_id, at - 60_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        other
+            .record_queue_dodge(&"b".repeat(32), &a.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        6
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_cache_roundtrip_preserves_clock_skew_and_second_rounding() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let source = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 4,
+        last_ms: at + 4000,
+        until_ms: at + 3_604_000,
+    };
+    let active = f
+        .store
+        .import_queue_penalty_floor(&source)
+        .await
+        .unwrap()
+        .unwrap();
+    let stored_last: i64 = sqlx::query_scalar(
+        "SELECT last_observed_ms FROM career_queue_penalties WHERE profile_id=$1",
+    )
+    .bind(&a.profile_id)
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    let cached = QueuePenaltyFloor {
+        last_ms: stored_last as u64,
+        until_ms: active.until as u64 * 1000,
+        ..source
+    };
+    cached.validate().unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            f.store
+                .import_queue_penalty_floor(&cached)
+                .await
+                .unwrap()
+                .unwrap(),
+            active,
+            "cache retries must not keep adding clock or rounding grace"
+        );
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    f.close().await;
+}

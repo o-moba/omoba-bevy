@@ -230,3 +230,12 @@ this foundation. The cross-host loophole therefore remains open. Shared ready
 ownership/deadline fences, legacy local-floor reconciliation, signed two-lobby
 fault scenarios, standard full CI/PG16 and schema11 backup/recovery remain
 release requirements. [Proof and limits](../../../docs/evidence/queue-discipline-store-2026-11-07/README.md).
+
+Legacy matchmaking penalty rollout: schema12's existing queue-penalty tables also
+accept trusted aggregate lower bounds; no new schema or grant is needed. New
+lobbies retain their persisted `dodge-penalties.json` sources and wait for known
+event delivery plus exact aggregate SQL ACKs before new admission. Import every
+old host's authoritative snapshot before opening global queue traffic. Do not
+translate old counters into invented event IDs or add overlapping counters;
+maximum floors preserve the known minimum while typed event IDs remain exact.
+See [the verified runtime/import scope](../../../docs/evidence/legacy-penalty-floors-2026-11-07/README.md).

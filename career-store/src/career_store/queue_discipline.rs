@@ -7,6 +7,34 @@ const WINDOW_MS: i64 = 86_400_000;
 const CLOCK_SKEW_MS: i64 = 5_000;
 const ACTIVE_SQL: &str = "SELECT ceil(extract(epoch FROM cooldown_until))::bigint AS until, strikes FROM career_queue_penalties WHERE profile_id=$1 AND cooldown_until>clock_timestamp()";
 
+/// A trusted persisted aggregate from an older lobby, not an invented series of
+/// dodge events. Merge by lower bounds; never add this counter to shared history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuePenaltyFloor {
+    pub profile_id: String,
+    pub strikes: u32,
+    pub last_ms: u64,
+    pub until_ms: u64,
+}
+impl QueuePenaltyFloor {
+    pub fn validate(&self) -> Result<(), String> {
+        if !valid_profile_id(&self.profile_id)
+            || self.strikes == 0
+            || self.strikes > i32::MAX as u32
+            || self.last_ms > i64::MAX as u64
+            || self.until_ms > i64::MAX as u64
+            || self.until_ms < self.last_ms
+            // Shared views round up seconds and source observations allow5s
+            // clock skew. A persisted cache may contain both adjustments.
+            || self.until_ms.saturating_sub(self.last_ms)
+                > 3_600_000 + CLOCK_SKEW_MS as u64 + 999
+        {
+            return Err("Invalid legacy matchmaking penalty floor.".into());
+        }
+        Ok(())
+    }
+}
+
 fn cooldown(row: Option<PgRow>) -> StoreResult<Option<PlayCooldown>> {
     row.map(|row| {
         Ok(PlayCooldown {
@@ -19,6 +47,50 @@ fn cooldown(row: Option<PgRow>) -> StoreResult<Option<PlayCooldown>> {
 }
 
 impl CareerStore {
+    /// Caller drains known pending event IDs first. The immutable producer
+    /// snapshot remains durable until this transaction's exact ACK. Repeating a
+    /// floor after a restart cannot double-count already delivered events or
+    /// resurrect a cooldown by anchoring its time to delivery.
+    pub async fn import_queue_penalty_floor(
+        &self,
+        floor: &QueuePenaltyFloor,
+    ) -> Result<Option<PlayCooldown>, String> {
+        retry(|| async {
+            floor.validate()?;
+            let mut tx = self.pool.begin().await?;
+            let found: Option<String> = sqlx::query_scalar(
+                "SELECT profile_id FROM career_profiles WHERE profile_id=$1 FOR UPDATE",
+            ).bind(&floor.profile_id).fetch_optional(&mut *tx).await?;
+            if found.is_none() {
+                return Err("Legacy matchmaking penalty has no stored profile.".into());
+            }
+            let now: i64 = sqlx::query_scalar("SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint")
+                .fetch_one(&mut *tx).await?;
+            let observed = floor.last_ms as i64;
+            if observed > now.saturating_add(CLOCK_SKEW_MS) {
+                return Err("Legacy matchmaking penalty is ahead of the database clock.".into());
+            }
+            if now.saturating_sub(observed) < WINDOW_MS {
+                let prior = sqlx::query("SELECT last_observed_ms,strikes FROM career_queue_penalties WHERE profile_id=$1")
+                    .bind(&floor.profile_id).fetch_optional(&mut *tx).await?;
+                let mut strikes = floor.strikes as i32;
+                let mut last = observed.min(now);
+                if let Some(prior) = prior {
+                    let prior_last: i64 = prior.try_get("last_observed_ms")?;
+                    if now.saturating_sub(prior_last) < WINDOW_MS {
+                        strikes = strikes.max(prior.try_get("strikes")?);
+                        last = last.max(prior_last);
+                    }
+                }
+                sqlx::query("INSERT INTO career_queue_penalties(profile_id,last_observed_ms,cooldown_until,strikes) VALUES($1,$2,to_timestamp($3::double precision/1000),$4) ON CONFLICT(profile_id) DO UPDATE SET last_observed_ms=EXCLUDED.last_observed_ms,cooldown_until=GREATEST(career_queue_penalties.cooldown_until,EXCLUDED.cooldown_until),strikes=EXCLUDED.strikes")
+                    .bind(&floor.profile_id).bind(last).bind(floor.until_ms as i64).bind(strikes).execute(&mut *tx).await?;
+            }
+            let result = cooldown(sqlx::query(ACTIVE_SQL).bind(&floor.profile_id).fetch_optional(&mut *tx).await?)?;
+            tx.commit().await?;
+            Ok(result)
+        }).await
+    }
+
     /// Fresh new-search authorization. Ordinary access/Resume must remain
     /// usable while a queue penalty is active. The final allocation transaction
     /// rechecks discipline under profile locks; this read alone is no start lease.

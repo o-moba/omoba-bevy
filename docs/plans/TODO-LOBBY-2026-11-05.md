@@ -2369,3 +2369,30 @@ Actual multi-host/WAN failure/Resume, legacy floors, ready/journal retention/hea
 schema12 recovery, trust packaging/provisioning, physical/capacity/RU gates and
 existing C2/C4 owner decisions remain open. Original68 stays62 done,5 partial,
 1 open; this checkpoint waives no acceptance criterion and performs no RU rollout.
+
+### Legacy penalty floors now import before new search — 2026-11-07
+
+Capture each persisted local aggregate at lobby startup; drain its known typed
+pending events before importing the immutable snapshot through a bounded worker.
+New admissions/selections wait for exact SQL ACKs; existing allocations keep their
+Resume path. An adopted draft's newer snapshot cannot be cleared by an old ACK.
+The store merges strikes/deadlines by maximum under the shared profile lock,
+never creates fictional event history and never reanchors an expired cooldown.
+A subsequent real dodge escalates normally. Allow the existing5s source-clock
+skew and cooldown-view second rounding without accumulating grace on replay.
+
+All87 real-PG18.6 store cases and555 actual whole-server cases PASS, zero
+failures/ignores; strict store/full-server test+production Clippy and targeted
+script checks PASS. Five new SQL and four native behavioral cases cover the
+migration/retry/error/concurrency paths. The live signed two-lobby regression
+covers active+expired versionless snapshots, a new decline and restart, and is
+included in the existing full PostgreSQL harness.
+[Exact scope and reports](../evidence/legacy-penalty-floors-2026-11-07/README.md).
+
+Aggregate floors are lower bounds, not a reconstruction of unknown historical
+events: merge overlapping old sources by maximum, never invented sums. Actual
+rollout must import every authoritative old host snapshot before opening global
+admission. C2 tooling approval/application and this real RU rollout gate remain
+open, as do fresh full CI, multi-host/WAN failure/Resume, ready/journal health and
+retention, schema12 recovery, trust provisioning and physical/capacity gates.
+Original68 remains62 done,5 partial,1 open; no remaining criterion is waived.

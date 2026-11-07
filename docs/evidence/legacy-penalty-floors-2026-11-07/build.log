@@ -1,0 +1,7 @@
+PASS current store rlib
+PASS current store test
+PASS: actual current common source library
+PASS: actual current omoba_passport source library
+PASS: actual current server source test target metadata
+PASS: actual current headless server tests linked from existing read-only third-party libraries; no Cargo cache writes
+PASS: actual current headless server server linked from existing read-only third-party libraries; no Cargo cache writes

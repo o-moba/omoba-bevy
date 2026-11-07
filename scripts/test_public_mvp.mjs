@@ -131,7 +131,7 @@ const scenario = opts.scenario || 'load';
 const draftExit=opts['draft-exit']||'leave';
 const exerciseStaleHandoff='exercise-stale-handoff' in opts;
 assert(['leave','disconnect'].includes(draftExit)&&(!opts['draft-exit']||scenario==='party-draft'), '--draft-exit=leave|disconnect is a party-draft option');
-assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','cross-lobby-ready','termination','early-recovery','party-draft','unique-draft','handoff-release','remake','surrender','drain'].includes(scenario), 'unknown scenario');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned','capacity-wait','ready-check','cross-lobby-ready','legacy-penalty','termination','early-recovery','party-draft','unique-draft','handoff-release','remake','surrender','drain'].includes(scenario), 'unknown scenario');
 if(['remake','surrender','unique-draft'].includes(scenario)) assert(!mix&&preference==='humans_only'&&clientsCount===10, `${scenario} uses --clients=10 --preference=humans_only`);
 else if(scenario==='party-draft') assert(!mix&&preference==='humans_only'&&clientsCount===10, 'party-draft uses --clients=10 --preference=humans_only');
 else if(scenario==='handoff-release') assert(!mix&&preference==='quick'&&clientsCount===10&&isolatedQueueDatabase(process.env.OMOBA_TEST_DATABASE_URL), 'handoff-release requires10 Casual humans and the isolated loopback omoba_test database');
@@ -264,7 +264,7 @@ function cleanup() {if(stopping)return;stopping=true;for(const child of qualific
 process.on('SIGINT',()=>{cleanup();process.exit(130)});
 process.on('SIGTERM',()=>{cleanup();process.exit(143)});
 function isLobbyPort(port) {
- return port===lobbyPort || (scenario==='cross-lobby-ready' && port===lobbyPort+1);
+ return port===lobbyPort || (['cross-lobby-ready','legacy-penalty'].includes(scenario) && port===lobbyPort+1);
 }
 class Client {
  constructor(index, target=lobbyPort, identity=null, mode={}) {
@@ -278,7 +278,7 @@ class Client {
   this.socketReady=false;this.bindError=null;
   this.nonce=crypto.randomBytes(16).toString('hex');this.epoch=0n;this.match=0;this.path=null;this.auth=null;this.authChallenge=null;this.lastProbe=0;this.accountSequence=0;this.sequence=0;this.prematchSequence=0;this.lastSend=0;this.lastQueue=0;this.next=0;
   bindLoopbackPeer({
-   isReserved:port=>port===lobbyPort||(port>=workerPort&&port<workerPort+capacity)||(scenario==='cross-lobby-ready'&&(port===lobbyPort+1||(port>=workerPort+100&&port<workerPort+100+capacity))),
+   isReserved:port=>port===lobbyPort||(port>=workerPort&&port<workerPort+capacity)||(['cross-lobby-ready','legacy-penalty'].includes(scenario)&&(port===lobbyPort+1||(port>=workerPort+100&&port<workerPort+100+capacity))),
    active:()=>this.active&&!stopping,
    onSocket:socket=>{this.socket=socket;
     listenForLoopbackPeer(socket,()=>this.port,b=>{if(this.active&&this.socket===socket)this.receive(b);},()=>{this.foreignDatagrams=(this.foreignDatagrams||0)+1;});
@@ -668,6 +668,49 @@ async function gracefulTermination(original) {
 }
 // Two real lobby processes with independent outboxes/match roots and the
 // same disposable PostgreSQL. No directory/signing-key provisioning is implied.
+async function legacyPenaltyLifecycle() {
+ const secondPort=lobbyPort+1,secondRoot=path.join(root,'matches-b');
+ const first=Array.from({length:2},(_,i)=>new Client(12400+i,lobbyPort,null,{preference:'bot_practice',autoQueue:false,autoReady:false,autoHandoff:false}));all.push(...first);
+ await pumpUntil('legacy profiles exist before another lobby imports their snapshots',()=>first.every(c=>c.auth&&c.profile),20000);
+ const before=first.map(c=>({...c.profile})),at=Date.now(),active=first[0],expired=first[1];
+ const floors={
+  [active.profile.profile_id]:{strikes:3,last_ms:at-30000,until_ms:at+870000},
+  [expired.profile.profile_id]:{strikes:2,last_ms:at-400000,until_ms:at-100000},
+ };
+ fs.mkdirSync(secondRoot);fs.writeFileSync(path.join(secondRoot,'dodge-penalties.json'),JSON.stringify(floors),{flag:'wx'});
+ const overrides={SERVER_ADDR:`127.0.0.1:${secondPort}`,OMOBA_MATCH_ROOT:secondRoot,OMOBA_CAREER_OUTBOX:path.join(root,'lobby-outbox-b'),OMOBA_MATCH_FIRST_PORT:String(workerPort+100)};
+ let secondLobby=launchLobby(overrides);
+ const completions=()=>fs.readFileSync(path.join(root,'lobby.log'),'utf8').split('QUEUE_FLOOR_SYNC pending=0').length-1;
+ await pumpUntil('startup confirms both legacy aggregates committed',()=>completions()===1,20000);
+ let second=first.map((c,i)=>new Client(12500+i,secondPort,c,{preference:'bot_practice',autoQueue:false,autoReady:false,autoHandoff:false}));all.push(...second);
+ await pumpUntil('both imported profiles authenticate on the second lobby',()=>second.every(c=>c.auth&&c.profile),20000);
+ active.autoQueue=true;second[0].autoQueue=true;
+ await pumpUntil('old active cooldown is enforced on both independent lobbies',()=>[active,second[0]].every(c=>c.career?.match_service?.state==='failed'&&c.career.match_service.code==='dodge_cooldown'&&c.career.match_service_request_id===c.queueId),10000);
+ expired.autoQueue=true;
+ await pumpUntil('expired legacy cooldown permits fresh consent',()=>expired.career?.match_service?.state==='ready_check',15000);
+ const declineCheck=expired.career.match_service.check_id;let nextDecline=0;
+ await pumpUntil('new real decline advances the imported strike floor',()=>{
+  try{const p=JSON.parse(fs.readFileSync(path.join(root,'matches','dodge-penalties.json'),'utf8'))[expired.profile.profile_id];return p?.strikes===3&&(p.pending_events||[]).length===0&&expired.career?.match_service?.code==='dodge_cooldown';}catch{return false;}
+ },10000,now=>{if(now>=nextDecline&&expired.career?.match_service?.state==='ready_check'){nextDecline=now+500;expired.account({action:'ready_match',request_id:expired.queueId,check_id:declineCheck,accepted:false});}});
+ second[1].autoQueue=true;
+ await pumpUntil('another lobby sees the new decline without copying local counters',()=>second[1].career?.match_service?.code==='dodge_cooldown'&&second[1].career.match_service_request_id===second[1].queueId,10000);
+ for(const c of second)c.close();secondLobby.kill('SIGTERM');
+ await pumpUntil('only the owned second lobby exits',()=>secondLobby.exitCode!==null,10000);
+ secondLobby=launchLobby(overrides);
+ await pumpUntil('restart reimports unchanged persisted floors',()=>completions()===2,20000);
+ second=first.map((c,i)=>new Client(12600+i,secondPort,c,{preference:'bot_practice',autoReady:false,autoHandoff:false}));all.push(...second);
+ await pumpUntil('restart cannot pardon either shared cooldown',()=>second.every(c=>c.career?.match_service?.code==='dodge_cooldown'&&c.career.match_service_request_id===c.queueId),15000);
+ assert.deepEqual(JSON.parse(fs.readFileSync(path.join(secondRoot,'dodge-penalties.json'),'utf8')),floors,'import must not manufacture producer events or rewrite source times');
+ for(let i=0;i<first.length;i++){
+  const c=first[i],request=950000+i;c.autoQueue=false;let nextRead=0;
+  await pumpUntil(`legacy import/ready decline gives no career credit for ${c.index}`,()=>c.profileResponses.has(String(request)),10000,now=>{if(now>=nextRead){nextRead=now+1000;c.account({action:'profile',request_id:request,profile_id:c.profile.profile_id});}});
+  const saved=c.profileResponses.get(String(request));for(const key of ['rating','matches_played','rated_matches','progression_xp','wins','losses'])assert.equal(saved[key],before[i][key],`legacy migration changed ${key}`);
+ }
+ assert.equal(fs.readdirSync(secondRoot,{withFileTypes:true}).filter(e=>e.isDirectory()&&fs.existsSync(path.join(secondRoot,e.name,'manifest.json'))).length,0);
+ report.legacy_penalty={status:'PASS',lobby_ports:[lobbyPort,secondPort],versionless_snapshots:2,active_floor_strikes:3,expired_floor_strikes:2,new_decline_strikes:3,expired_cooldown_not_rearmed:true,shared_refusals:true,source_snapshot_unchanged:true,restart_preserves_shared_penalties:true,career_unchanged:true,new_workers:0,transport:'real UDP; signed account requests; separate lobby epochs/outboxes'};
+ report.scenarios.push('legacy_floor_shared_without_duplicate_events_or_expired_time_revival');for(const c of [...first,...second]){c.autoQueue=false;c.close();}
+}
+
 async function crossLobbyReadyLifecycle() {
  const secondPort=lobbyPort+1,secondRoot=path.join(root,'matches-b');
  launchLobby({SERVER_ADDR:`127.0.0.1:${secondPort}`,OMOBA_MATCH_ROOT:secondRoot,
@@ -1372,6 +1415,7 @@ try {
  if(scenario==='termination')await gracefulTermination(all[0]);
  if(scenario==='ready-check')await readyCheckLifecycle();
  if(scenario==='cross-lobby-ready')await crossLobbyReadyLifecycle();
+ if(scenario==='legacy-penalty')await legacyPenaltyLifecycle();
  if(scenario==='lifecycle')await lifecycle(all[0]);
  if(scenario==='abandoned')await abandoned(all[0]);
  if(scenario==='capacity-wait')await capacityWait();

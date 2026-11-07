@@ -163,6 +163,7 @@ pub(crate) struct Lobby {
     handoff_consent: HashMap<String, (crate::career_backend::consent::Consent, Vec<String>)>,
     ready_retry_at: Option<Instant>,
     penalties: HashMap<String, DodgePenalty>,
+    legacy_floors: HashMap<String, omoba_career_store::career_store::QueuePenaltyFloor>,
     penalty_store_failed: bool,
     assignments: HashMap<String, String>,
     errors: HashMap<String, String>,
@@ -225,6 +226,23 @@ impl Lobby {
             };
         let now = Instant::now();
         let wall = unix_ms();
+        let legacy_floors: HashMap<_, _> = penalties
+            .iter()
+            .map(|(profile, p)| {
+                (
+                    profile.clone(),
+                    omoba_career_store::career_store::QueuePenaltyFloor {
+                        profile_id: profile.clone(),
+                        strikes: p.strikes,
+                        last_ms: p.last_ms,
+                        until_ms: p.until_ms,
+                    },
+                )
+            })
+            .collect();
+        if !legacy_floors.is_empty() {
+            println!("QUEUE_FLOOR_SYNC pending={}", legacy_floors.len());
+        }
         let refusals = penalties
             .iter()
             .filter(|(_, p)| p.until_ms > wall)
@@ -247,6 +265,7 @@ impl Lobby {
             handoff_consent: HashMap::new(),
             ready_retry_at: None,
             penalties,
+            legacy_floors,
             penalty_store_failed,
             waiting: Vec::new(),
             assignments: HashMap::new(),
@@ -374,6 +393,33 @@ impl Lobby {
             }
         }
     }
+    fn sync_legacy_floors(&mut self, backend: &mut dyn crate::career_port::CareerPort) {
+        let was_pending = !self.legacy_floors.is_empty();
+        for floor in backend.take_queue_floor_committed() {
+            if self.legacy_floors.get(&floor.profile_id) == Some(&floor) {
+                self.legacy_floors.remove(&floor.profile_id);
+            }
+        }
+        if was_pending && self.legacy_floors.is_empty() {
+            println!("QUEUE_FLOOR_SYNC pending=0");
+        }
+        if self.shared_ready && !self.penalty_store_failed {
+            for floor in self
+                .legacy_floors
+                .values()
+                .filter(|floor| {
+                    self.penalties
+                        .get(&floor.profile_id)
+                        .is_some_and(|p| p.pending_events.is_empty())
+                })
+                .take(16)
+            {
+                if !backend.record_queue_floor(floor.clone()) {
+                    break;
+                }
+            }
+        }
+    }
     fn penalize_dodge(&mut self, profile: &str, now: Instant) -> bool {
         if self.penalty_store_failed {
             return false;
@@ -410,6 +456,13 @@ impl Lobby {
                 pending_events,
             },
         );
+        if let Some(floor) = self.legacy_floors.get_mut(profile) {
+            // An adopted old draft can finish while startup import is pending.
+            // An ACK of the older snapshot must not release the newer floor.
+            floor.strikes = strikes;
+            floor.last_ms = wall;
+            floor.until_ms = wall + secs * 1000;
+        }
         self.refusals.insert(
             profile.to_owned(),
             (DODGE_COOLDOWN_CODE, now + Duration::from_secs(secs)),
@@ -1119,6 +1172,10 @@ impl MatchService {
                 .insert(profile.profile_id, WORKER_SPAWN_FAILED.into());
             return;
         }
+        if lobby.shared_ready && !lobby.legacy_floors.is_empty() {
+            lobby.errors.insert(profile.profile_id, LOBBY_BUSY.into());
+            return;
+        }
         if preference.rated()
             && profile
                 .ranked
@@ -1817,6 +1874,9 @@ impl MatchService {
             .retain(|id, _| queued_parties.contains(id));
         // At most four OS process launches per scheduling pass.
         for _ in 0..4 {
+            if lobby.shared_ready && !lobby.legacy_floors.is_empty() {
+                break;
+            }
             if lobby.ready_retry_at.is_some_and(|at| now < at) {
                 break;
             }
@@ -2387,6 +2447,7 @@ impl ServerRuntime {
                 lobby.penalty_store_failed = true;
                 eprintln!("Cannot persist committed matchmaking receipt acknowledgements.");
             }
+            lobby.sync_legacy_floors(self.career.backend.as_mut());
             for event in lobby
                 .penalties
                 .values()

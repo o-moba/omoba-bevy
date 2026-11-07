@@ -84,6 +84,15 @@ pub(crate) trait CareerPort {
     /// retains its stable event until take_queue_dodge_committed returns its ID.
     fn record_queue_dodge(&mut self, event: crate::career_backend::queue_dodges::Event) -> bool;
     fn take_queue_dodge_committed(&mut self) -> Vec<String>;
+    /// Startup-only aggregate import. The lobby retains its persisted snapshot
+    /// and blocks new admission until all exact SQL acknowledgements arrive.
+    fn record_queue_floor(
+        &mut self,
+        floor: omoba_career_store::career_store::QueuePenaltyFloor,
+    ) -> bool;
+    fn take_queue_floor_committed(
+        &mut self,
+    ) -> Vec<omoba_career_store::career_store::QueuePenaltyFloor>;
     /// Non-blocking barrier: all previously accepted records are fsynced in
     /// the local outbox (or already settled). Does not require a live database.
     fn flush_outbox(&mut self) -> bool;

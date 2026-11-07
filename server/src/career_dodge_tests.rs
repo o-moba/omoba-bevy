@@ -218,3 +218,59 @@ fn undrained_consent_completions_apply_backpressure_instead_of_losing_an_ack() {
     backend.link.jobs.clear();
     assert!(backend.submit_ready(ready_work(999)));
 }
+
+fn legacy_floor() -> QueuePenaltyFloor {
+    QueuePenaltyFloor {
+        profile_id: "a".repeat(64),
+        strikes: 2,
+        last_ms: 1000,
+        until_ms: 301000,
+    }
+}
+#[test]
+fn legacy_floor_submission_requires_the_full_exact_sql_acknowledgement() {
+    let mut backend = MemoryCareer::test_backend(9);
+    let floor = legacy_floor();
+    assert!(backend.record_queue_floor(floor.clone()));
+    let generation = backend.record_generation;
+    assert!(backend.record_queue_floor(floor.clone()));
+    assert_eq!(generation, backend.record_generation);
+    assert_eq!(backend.link.jobs.len(), 1);
+    assert!(backend.take_queue_floor_committed().is_empty());
+    let mut wrong = floor.clone();
+    wrong.strikes += 1;
+    backend
+        .link
+        .replies
+        .push_back(Reply::QueueFloorCommitted(wrong.clone()));
+    backend.poll();
+    assert!(backend.take_queue_floor_committed().is_empty());
+    assert!(!backend.record_queue_floor(wrong));
+    backend
+        .link
+        .replies
+        .push_back(Reply::QueueFloorCommitted(floor.clone()));
+    backend.poll();
+    assert_eq!(backend.take_queue_floor_committed(), vec![floor]);
+}
+#[test]
+fn legacy_floor_backpressure_includes_undrained_acks_and_rejects_invalid_payloads() {
+    let mut backend = MemoryCareer::immediate(9);
+    for index in 0..MAX_JOBS {
+        let mut floor = legacy_floor();
+        floor.profile_id = format!("{index:064x}");
+        assert!(backend.record_queue_floor(floor));
+    }
+    let mut next = legacy_floor();
+    next.profile_id = "f".repeat(64);
+    assert!(!backend.record_queue_floor(next.clone()));
+    backend.poll();
+    assert!(!backend.record_queue_floor(next.clone()));
+    assert_eq!(backend.take_queue_floor_committed().len(), MAX_JOBS);
+    assert!(backend.record_queue_floor(next));
+    let mut invalid = legacy_floor();
+    invalid.strikes = 0;
+    assert!(!backend.record_queue_floor(invalid));
+    let mut disabled = MemoryCareer::over(9, MemoryLink::new(false, false));
+    assert!(!disabled.record_queue_floor(legacy_floor()));
+}
