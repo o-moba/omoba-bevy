@@ -145,20 +145,39 @@ def read_events(stream):
 
 
 def stop_owned(children):
-    for child in reversed(children):
+    errors = []
+    def signal_child(child, sig):
         try:
-            os.killpg(child.pid, signal.SIGTERM)
+            os.killpg(child.pid, sig)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            errors.append(f"pid {child.pid}: group signal denied; group cleanup unverified")
+            # A reaped leader's old group may no longer be ours. Do not let
+            # that stop cleanup of unrelated owned groups. A still-live Popen
+            # child can be signalled individually without targeting that group.
+            try:
+                if child.poll() is None:
+                    if sig == signal.SIGTERM:
+                        child.terminate()
+                    else:
+                        child.kill()
+            except OSError as error:
+                errors.append(f"pid {child.pid}: {error}")
+
+    for child in reversed(children):
+        signal_child(child, signal.SIGTERM)
     for child in reversed(children):
         try:
             child.wait(timeout=20)
         except subprocess.TimeoutExpired:
+            signal_child(child, signal.SIGKILL)
             try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            child.wait()
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                errors.append(f"pid {child.pid}: did not exit after cleanup")
+    if errors:
+        raise RuntimeError("Owned process cleanup incomplete: " + "; ".join(errors))
 
 
 def main(argv=None):

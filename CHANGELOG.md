@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add per-peer producer-tick diagnostics to signed native load probes, retain
+  soak baselines and pre-cleanup owned-process exit codes. Current10/100-client
+  controls pass; a new1000-client attempt fails before all-Running acceptance,
+  so capacity remains open. Preserve exact compressed reports and rejection;
+  no production gameplay, authority, dependency or RU configuration changes.
+  Fix test cleanup so a denied group signal cannot skip other owned children;
+  preserve an explicit incomplete-cleanup error after bounded cleanup attempts.
+
 - Prove real terminal-file replay through a physically restored PG16 database:
   SIGTERM with SQL offline leaves an fsynced receipt absent from source SQL;
   automatic recovery preserves its complete payload with only saved becoming

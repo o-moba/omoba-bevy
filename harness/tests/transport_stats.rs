@@ -13,6 +13,7 @@ fn wire_counters_cover_raw_blocking_drained_and_rejected_packets_once() {
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
     let mut bot = Bot::connect(fixture.local_addr().unwrap());
+    assert_eq!(bot.snapshot_meta(), None);
     bot.send_raw(b"fixture");
     let mut buffer = [0; 64];
     let (_, peer) = fixture.recv_from(&mut buffer).unwrap();
@@ -61,6 +62,7 @@ fn wire_counters_cover_raw_blocking_drained_and_rejected_packets_once() {
         (3 + 4 + 1 + packets.iter().map(Vec::len).sum::<usize>()) as u64
     );
     assert_eq!(stats.accepted_snapshots, 2);
+    assert_eq!(bot.snapshot_meta(), Some(latest.meta()));
 
     fixture.send_to(&packets[1], peer).unwrap();
     assert!(
@@ -74,4 +76,19 @@ fn wire_counters_cover_raw_blocking_drained_and_rejected_packets_once() {
         stats.received_bytes + packets[1].len() as u64
     );
     assert_eq!(after_replay.accepted_snapshots, 2);
+    assert_eq!(bot.snapshot_meta(), Some(latest.meta()));
+
+    // A missed broadcast advances producer ticks without inventing an accepted
+    // snapshot. The diagnostic must retain that gap, rather than count polls.
+    let gap = serde_json::to_vec(&serde_json::json!({
+        "type":"snapshot", "players":[], "your_id":3,
+        "protocol_version":shared::protocol::PROTOCOL_VERSION,
+        "server_epoch":7, "match_id":8, "snapshot_tick":5,
+    }))
+    .unwrap();
+    fixture.send_to(&gap, peer).unwrap();
+    bot.recv_snapshot(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(bot.transport_stats().accepted_snapshots, 3);
+    assert_eq!(bot.snapshot_meta().unwrap().snapshot_tick, 5);
 }

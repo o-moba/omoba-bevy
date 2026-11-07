@@ -1,11 +1,54 @@
 import copy
 import io
+import os
+import subprocess
+import sys
 import unittest
+from unittest import mock
 
 import public_bots_rehearsal as rehearsal
 
 
 class PublicBotsRehearsalTests(unittest.TestCase):
+    def test_group_signal_denial_stops_live_children_before_reporting_incomplete_cleanup(self):
+        children = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                     start_new_session=True) for _ in range(2)]
+        real_killpg = os.killpg
+        def deny_one(group, sig):
+            if group == children[-1].pid:
+                raise PermissionError("fixture denial")
+            return real_killpg(group, sig)
+        try:
+            with mock.patch.object(rehearsal.os, "killpg", side_effect=deny_one):
+                with self.assertRaisesRegex(RuntimeError, "group cleanup unverified"):
+                    rehearsal.stop_owned(children)
+            self.assertTrue(all(child.poll() is not None for child in children))
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+
+    def test_denial_for_reaped_group_does_not_skip_remaining_live_child(self):
+        reaped = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+        reaped.wait(timeout=5)
+        live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                start_new_session=True)
+        real_killpg = os.killpg
+        def deny_reaped(group, sig):
+            if group == reaped.pid:
+                raise PermissionError("fixture denied old group")
+            return real_killpg(group, sig)
+        try:
+            with mock.patch.object(rehearsal.os, "killpg", side_effect=deny_reaped):
+                with self.assertRaisesRegex(RuntimeError, "group cleanup unverified"):
+                    rehearsal.stop_owned([live, reaped])
+            self.assertIsNotNone(live.poll())
+        finally:
+            if live.poll() is None:
+                live.kill()
+            live.wait(timeout=5)
+
     def test_auth_progress_is_independent_of_world_frames_and_partial_lines_are_retained(self):
         stream = io.StringIO('BOT_AUTH {"peers":[')
         self.assertEqual(list(rehearsal.read_events(stream)), [])

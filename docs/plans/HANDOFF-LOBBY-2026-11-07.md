@@ -1,5 +1,21 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
+**Следующее обновление после efe32101:** текущий1000-client прогон **FAIL до
+начала soak**, а не очередной capacity PASS.10/100 контроль PASS; добавлены
+per-peer producer ticks, сохранение baseline и first-owned-exit diagnostics.
+Также исправлен stop_owned: PermissionError на одной группе не прерывает очистку
+остальных; непроверенная очистка группы остаётся явной ошибкой.14 дополнительных
+Python cases PASS, в том числе два real-child lifecycle regression.86 оставшихся
+своих процессов остановлены после проверки UID/пути/группы, финальный inventory
+групп пуст. Это отдельный cleanup bug, не установленная причина admission failure.
+[Полный пакет, границы и следующий шаг](../evidence/load-cadence-2026-11-07/README.md).
+Следующим повтором определить первый сбой до teardown; это новая актуальная
+проверка прежних frozen нагрузочных выводов. Существующий native server —
+direct-rustc/root opt0, не release benchmark; для performance нужен явно
+зафиксированный optimized build. Не менять gameplay/таймеры ради зелёного теста.
+UI-2/UI-3 всё ещё ждут current pixels: готовый e70b6657 binary старше кандидата,
+root13GiB ниже20GiB, поэтому новую тяжёлую сборку не запускали. Mac unlock не нужен.
+
 **Обновление после checkpoint a3ba5f4e:** локальный PG16 terminal-file replay
 и настоящая повторная доставка одинаковых bytes теперь проверены:22 стадии PASS.
 [Актуальные отчёты и полный verifier](../evidence/terminal-spool-replay-2026-11-07/README.md).

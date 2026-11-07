@@ -51,6 +51,7 @@ pub struct Bot {
     framed: bool,
     dash_sequence: u64,
     transport_stats: TransportStats,
+    last_snapshot_meta: Option<shared::protocol::SnapshotMeta>,
 }
 
 impl Bot {
@@ -78,6 +79,7 @@ impl Bot {
             framed: false,
             dash_sequence: 0,
             transport_stats: TransportStats::default(),
+            last_snapshot_meta: None,
         }
     }
 
@@ -138,6 +140,13 @@ impl Bot {
         self.transport_stats
     }
 
+    /// Latest fully decoded, ordered and authorized snapshot. Observing the
+    /// producer tick separately from accepted counts distinguishes slow server
+    /// broadcasts from missing complete snapshots at the load generator.
+    pub fn snapshot_meta(&self) -> Option<shared::protocol::SnapshotMeta> {
+        self.last_snapshot_meta
+    }
+
     fn record_receive(&mut self, len: usize) {
         self.transport_stats.received_datagrams =
             self.transport_stats.received_datagrams.saturating_add(1);
@@ -191,6 +200,7 @@ impl Bot {
                 self.assembler = Default::default();
                 self.order = Default::default();
                 self.my_id = None;
+                self.last_snapshot_meta = None;
                 self.dash_sequence = 0;
             }
             return None;
@@ -221,6 +231,7 @@ impl Bot {
             .map_or(0, |p| p.utility.dash_sequence);
         self.transport_stats.accepted_snapshots =
             self.transport_stats.accepted_snapshots.saturating_add(1);
+        self.last_snapshot_meta = Some(packet.meta());
         Some(packet)
     }
 

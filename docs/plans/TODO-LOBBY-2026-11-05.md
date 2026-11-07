@@ -2755,3 +2755,51 @@ was completed in the actual probe, not reinterpreted as a passing Profile reread
 C4/C2 remain unapplied proposals. Current full CI, independent off-host/RU RPO/RTO,
 current UI/physical, public trust/WAN/Ranked parties and sustained host capacity
 retain their gates. Original68 stays62 done/5 partial/1 open. Handoff updated.
+
+
+### Current-source load diagnostic and rejected1000 acceptance — 2026-11-07
+
+[Exact reports and reproduction](../evidence/load-cadence-2026-11-07/README.md).
+Current production source/binary are unchanged from efe32101 (263 hashes checked).
+Native AI10/100 controls pass30s with received medians17.96/18.01Hz. A new
+restricted-runtime PG18.6/current13/11 fixture passes10-client30s:17.7648 accepted
+snapshots/s versus18.7442 producer-tick span/s (fraction0.94775). This is local
+unoptimized direct-rustc source, not Cargo dev/release performance qualification.
+
+The same fixture's1000-client120s request FAILS before a full Running population:
+ordinary sign-in9.47s, stable Search release14.53s, owned process exit109.69s.
+No soak/cadence result exists. Mixed cached phases and busy/auth/cooldown/pending
+errors are retained. Native Connection-refused panics were read after teardown;
+the original runner did not record the first exiting PID, so neither these
+secondary observations nor their last sample times identify the first cause.
+This rejection supersedes any assumption that frozen78070b27 acceptance proves
+current1000 operation. It does not retrospectively falsify that old exact scope.
+
+Expose last accepted producer metadata per native peer and require unchanged
+protocol/epoch/match plus consistent tick/count deltas. Retain initial samples
+and first observed owned-process exit codes before cleanup. Seven Python cases,
+one real UDP transport regression including a deliberately missed tick, three
+strict native Clippy targets, formatting/diff checks and archived-data verifier
+PASS. Final early-validation/baseline/first-exit edits postdate the live run;
+no fresh live acceptance is claimed for them. Both owned DB containers/volumes
+were removed; no existing DB settings, production code or RU infrastructure changed.
+
+Next reproduce with pre-cleanup exit/worker health/status observations, identify
+admission/auth/SQL/timer versus generator failure, then measure an explicitly
+optimized current binary. Sustained1000/cadence/latency and RU uplink/host remain
+open. Original68 stays62 done,5 partial,1 open; critic/UI/physical/WAN/RU retain
+full scope. Existing e70b6657 native UI build predates UI-2/UI-3; no matching
+current pixels or heavy build on root13GiB. Full CI for efe32101 remains live;
+this source packet requires its own subsequent CI.
+
+
+Follow-up in the same packet: the original rejection's finally block itself
+failed with PermissionError on killpg, leaving owned processes alive after DB
+cleanup. Exact traceback and manual-cleanup inventory are now archived. Revalidate
+UID/executable/owned groups, signal86 actual owned processes individually, and
+verify the final owned-group inventory is empty. No foreign process was touched.
+Fix stop_owned so one group denial cannot skip other children; individually stop
+its live Popen child, bound final waiting and explicitly report unverified group
+cleanup after all cleanup attempts.14 rehearsal cases PASS, including two real
+child lifecycle regressions with injected group-signal denial. This is a separate
+cleanup defect; it does not establish the first1000-client admission failure.

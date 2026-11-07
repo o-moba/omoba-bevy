@@ -15,6 +15,8 @@ import public_playing_capacity as probe
 def sample(shard=0, elapsed=0, increment=0):
     return {"phase": "running", "elapsed_secs": elapsed, "peers": [
         {"id": i + 1, "snapshot_age_ms": 20,
+         "snapshot_meta": {"protocol_version": 16, "server_epoch": shard + 1,
+                           "match_id": 1, "snapshot_tick": 10 + increment},
          "transport": {"received_datagrams": 100 + increment,
                        "received_bytes": 1000 + increment * 100,
                        "accepted_snapshots": 10 + increment,
@@ -71,6 +73,8 @@ class PopulationEvidenceTests(unittest.TestCase):
             ("transport.received_bytes", None), ("transport.received_bytes", True),
             ("transport.accepted_snapshots", 0), ("transport.framing_errors", 1),
             ("transport.decode_errors", 1),
+            ("snapshot_meta", None), ("snapshot_meta.snapshot_tick", 0),
+            ("snapshot_meta.server_epoch", True),
         ]
         for path, value in cases:
             with self.subTest(path=path, value=value):
@@ -102,9 +106,30 @@ class PopulationEvidenceTests(unittest.TestCase):
         result = probe.summarize_wire(before, after)
         self.assertEqual(result["bytes_per_second_per_player"]["p50"], 200)
         self.assertEqual(result["accepted_snapshots_per_second_per_player"]["p50"], 2)
+        self.assertEqual(result["observed_broadcast_tick_span_per_second_per_player"]["p50"], 2)
+        self.assertEqual(result["accepted_fraction_of_observed_tick_span"]["p05"], 1)
         for bad in ([sample()], [sample(elapsed=10)], [sample(elapsed=10, increment=-1)]):
             with self.assertRaises(AssertionError):
                 probe.summarize_wire(before, bad)
+
+    def test_producer_ticks_expose_missing_snapshots_and_reject_mixed_authority(self):
+        before, after = [sample()], [sample(elapsed=10, increment=20)]
+        for peer in after[0]["peers"]:
+            peer["snapshot_meta"]["snapshot_tick"] += 20
+        result = probe.summarize_wire(before, after)
+        self.assertEqual(result["accepted_fraction_of_observed_tick_span"]["p50"], .5)
+        self.assertEqual(result["observed_broadcast_tick_span_per_second_per_player"]["p50"], 4)
+        for field, value in (("server_epoch", 2), ("match_id", 2),
+                             ("protocol_version", 17), ("snapshot_tick", 29),
+                             ("snapshot_tick", True), ("snapshot_tick", None)):
+            bad = copy.deepcopy(after)
+            bad[0]["peers"][0]["snapshot_meta"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(AssertionError):
+                probe.summarize_wire(before, bad)
+        bad = copy.deepcopy(after)
+        del bad[0]["peers"][0]["snapshot_meta"]
+        with self.assertRaises(AssertionError):
+            probe.summarize_wire(before, bad)
 
     def test_receipts_must_match_every_profile_session_endpoint_and_fresh_running_worker(self):
         current = sample()

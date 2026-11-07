@@ -18,6 +18,12 @@ import time
 from public_bots_rehearsal import isolated_database, read_events, stop_owned
 
 
+def valid_snapshot_meta(meta):
+    return (isinstance(meta, dict)
+            and all(type(meta.get(key)) is int and meta[key] > 0
+                    for key in ("protocol_version", "server_epoch", "match_id", "snapshot_tick")))
+
+
 def validate_sample(sample, size=10):
     peers = sample.get("peers", [])
     if sample.get("phase") != "running" or len(peers) != size:
@@ -28,6 +34,7 @@ def validate_sample(sample, size=10):
         allocation = status.get("allocation") or {}
         if (peer.get("id") is None or peer.get("snapshot_age_ms") is None
                 or not 0 <= peer["snapshot_age_ms"] < 2000
+                or not valid_snapshot_meta(peer.get("snapshot_meta"))
                 or status.get("phase") != "running" or not status.get("profile_id")
                 or status.get("error") is not None
                 or allocation.get("human_count") != 10 or allocation.get("bot_count") != 0
@@ -120,23 +127,36 @@ def verify_manifests(root, samples, count):
 
 def summarize_wire(before, after):
     assert before and len(before) == len(after), "missing native shard telemetry"
-    rates, snapshots = [], []
+    rates, snapshots, tick_rates, delivery = [], [], [], []
     for initial, final in zip(before, after):
         seconds = final["elapsed_secs"] - initial["elapsed_secs"]
         assert seconds > 0, "no new native telemetry during soak"
-        old = {p["public"]["profile_id"]: p["transport"] for p in initial["peers"]}
+        old = {p["public"]["profile_id"]: p for p in initial["peers"]}
         for peer in final["peers"]:
-            a, b = old[peer["public"]["profile_id"]], peer["transport"]
+            previous = old[peer["public"]["profile_id"]]
+            a, b = previous["transport"], peer["transport"]
             assert all(b[k] >= a[k] for k in a), "transport counters moved backwards"
             assert b["accepted_snapshots"] > a["accepted_snapshots"], "peer stopped receiving snapshots"
             rates.append((b["received_bytes"] - a["received_bytes"]) / seconds)
             snapshots.append((b["accepted_snapshots"] - a["accepted_snapshots"]) / seconds)
+            first, last = previous.get("snapshot_meta"), peer.get("snapshot_meta")
+            assert valid_snapshot_meta(first) and valid_snapshot_meta(last), "missing/invalid per-peer producer ticks"
+            assert all(first[k] == last[k] for k in ("protocol_version", "server_epoch", "match_id")), "snapshot authority changed during soak"
+            ticks = last["snapshot_tick"] - first["snapshot_tick"]
+            accepted = b["accepted_snapshots"] - a["accepted_snapshots"]
+            assert ticks >= accepted > 0, "producer ticks contradict accepted snapshots"
+            tick_rates.append(ticks / seconds)
+            delivery.append(accepted / ticks)
     return {"bytes_per_second_per_player": {
                 "p50": percentile(rates, .5), "p95": percentile(rates, .95),
                 "p99": percentile(rates, .99), "max": max(rates)},
             "accepted_snapshots_per_second_per_player": {
                 "p50": percentile(snapshots, .5), "p05": percentile(snapshots, .05)},
-            "scope": "received wire including account traffic; native driver drains to freshest snapshot"}
+            "observed_broadcast_tick_span_per_second_per_player": {
+                "p50": percentile(tick_rates, .5), "p05": percentile(tick_rates, .05)},
+            "accepted_fraction_of_observed_tick_span": {
+                "p50": percentile(delivery, .5), "p05": percentile(delivery, .05)},
+            "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"}
 
 
 def process_sample(lobby, shards):
@@ -264,7 +284,12 @@ def main(argv=None):
         next_resources = 0
         while time.monotonic() - started < args.timeout:
             now = time.monotonic()
-            assert all(p.poll() is None for p in children), "owned server/generator exited unexpectedly"
+            exited = [{"pid": p.pid, "returncode": code,
+                       "role": "lobby" if p is lobby else "generator"}
+                      for p in children if (code := p.poll()) is not None]
+            if exited:
+                report["exited_before_cleanup"] = exited
+                raise AssertionError("owned server/generator exited unexpectedly")
             for index, reader in enumerate(readers):
                 for kind, sample in read_events(reader):
                     if kind == "BOT_SAMPLE":
@@ -290,6 +315,7 @@ def main(argv=None):
             if running_at is None and valid:
                 running_at, baseline = now, current
                 report["all_running_after_seconds"] = now - started
+                report["initial_shards"] = {str(i): sample for i, sample in enumerate(current)}
             if running_at is not None:
                 assert valid, "population lost Running/freshness/identity/roster/error acceptance during soak"
                 if now >= next_resources:
