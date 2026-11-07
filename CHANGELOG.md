@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fix native AI probe receive deadlines: an idle20ms poll no longer blocks for
+  the fixed200ms socket timeout. Fence public Career replies by current epoch
+  and sequence, matching the native game client; retain genuine auth-loss
+  recovery and anonymous stale/reset counters. Two subsequent1000-client runs
+  remain rejected before soak; preserve pre-teardown worker/exit observations
+  and keep capacity open. No production gameplay/auth/schema/timer changes.
+
 - Add per-peer producer-tick diagnostics to signed native load probes, retain
   soak baselines and pre-cleanup owned-process exit codes. Current10/100-client
   controls pass; a new1000-client attempt fails before all-Running acceptance,

@@ -40,6 +40,8 @@ pub struct PublicBotStatus {
     pub error: Option<String>,
     pub ranked_denied_counts: Vec<u32>,
     pub ranked_accepted_count: Option<u32>,
+    pub stale_career_packets: u64,
+    pub authority_resets: u64,
 }
 
 pub(crate) struct PublicSession {
@@ -57,6 +59,7 @@ pub(crate) struct PublicSession {
     account_sequence: u64,
     sequence: u64,
     prematch_sequence: u64,
+    career_packet_sequence: u64,
     lobby: bool,
     preference: MatchPreference,
     class: HeroClass,
@@ -126,6 +129,7 @@ impl PublicSession {
             account_sequence: 0,
             sequence: 0,
             prematch_sequence: 0,
+            career_packet_sequence: 0,
             lobby: true,
             preference,
             class,
@@ -153,6 +157,8 @@ impl PublicSession {
                 error: None,
                 ranked_denied_counts: Vec::new(),
                 ranked_accepted_count: None,
+                stale_career_packets: 0,
+                authority_resets: 0,
             },
         }
     }
@@ -198,6 +204,7 @@ impl PublicSession {
         self.account_sequence = 0;
         self.sequence = 0;
         self.prematch_sequence = 0;
+        self.career_packet_sequence = 0;
         self.view = None;
         self.match_vote = None;
         self.joined = false;
@@ -283,6 +290,7 @@ impl PublicSession {
                     self.challenge = None;
                     self.sequence = 0;
                     self.account_sequence = 0;
+                    self.career_packet_sequence = 0;
                     self.joined = false;
                 }
                 self.epoch = server_epoch;
@@ -314,8 +322,27 @@ impl PublicSession {
             && challenge.nickname == self.nickname
     }
 
+    pub fn career_packet(
+        &mut self,
+        epoch: u64,
+        sequence: u64,
+        view: CareerView,
+    ) -> Option<SocketAddr> {
+        // Mirror native net/ingest: an old auth error or assignment must never
+        // roll a newer career view back, even within the same worker epoch.
+        if epoch == 0 || epoch != self.epoch || self.path.is_none() {
+            return None;
+        }
+        if sequence <= self.career_packet_sequence {
+            self.status.stale_career_packets = self.status.stale_career_packets.saturating_add(1);
+            return None;
+        }
+        self.career_packet_sequence = sequence;
+        self.career(epoch, view)
+    }
+
     /// Returns a worker endpoint only for this search's authenticated handoff.
-    pub fn career(&mut self, epoch: u64, view: CareerView) -> Option<SocketAddr> {
+    fn career(&mut self, epoch: u64, view: CareerView) -> Option<SocketAddr> {
         if self.path.is_none() || epoch != self.epoch {
             return None;
         }
@@ -331,6 +358,7 @@ impl PublicSession {
             {
                 // Match the native client's explicit authority-loss recovery.
                 // A new path also resets signed-command replay scope safely.
+                self.status.authority_resets = self.status.authority_resets.saturating_add(1);
                 self.reset_transport(self.lobby);
                 self.status.error = view.error_code.or(view.error);
                 return None;
@@ -750,6 +778,86 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
     use shared::public_transport::decode_hex;
+
+    #[test]
+    fn late_career_authority_error_cannot_revoke_newer_authenticated_state() {
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Warden, "Fixture".into());
+        session.epoch = 19;
+        session.path = Some("path".into());
+        session.auth = Some("auth".into());
+        session.status.phase = "running";
+        let lost = CareerView {
+            storage_enabled: true,
+            error: Some("Sign in before using your profile.".into()),
+            ..Default::default()
+        };
+        session.career_packet(19, 10, CareerView::default());
+        session.career_packet(18, 1000, lost.clone());
+        session.career_packet(19, 9, lost.clone());
+        session.career_packet(19, 10, lost.clone());
+        assert_eq!(session.auth.as_deref(), Some("auth"));
+        assert_eq!(session.path.as_deref(), Some("path"));
+        assert_eq!(session.status.phase, "running");
+        assert_eq!(session.status.stale_career_packets, 2);
+        assert_eq!(session.status.authority_resets, 0);
+        // A genuinely newer loss of authority must still force reauthentication.
+        session.career_packet(19, 11, lost);
+        assert!(session.auth.is_none() && session.path.is_none());
+        assert_eq!(session.status.authority_resets, 1);
+    }
+
+    #[test]
+    fn career_sequence_is_scoped_to_transport_and_foreign_epochs_cannot_poison_it() {
+        let (socket, peer) = sockets();
+        let mut session =
+            PublicSession::new(MatchPreference::Casual, HeroClass::Warden, "Fixture".into());
+        session.epoch = 19;
+        session.path = Some("path".into());
+        session.career_packet(19, 0, CareerView::default());
+        session.career_packet(20, 1000, CareerView::default());
+        assert_eq!(session.career_packet_sequence, 0);
+        session.career_packet(19, 10, CareerView::default());
+        assert_eq!(session.career_packet_sequence, 10);
+        session.reset_transport(false);
+        assert_eq!(session.career_packet_sequence, 0);
+        session.career_packet(19, 1000, CareerView::default());
+        assert_eq!(session.career_packet_sequence, 0);
+        session.transport(
+            &socket,
+            PublicServerDatagram::TransportChallenge {
+                client_nonce: session.client_nonce.clone(),
+                server_epoch: 20,
+                path_nonce: "new-path".into(),
+                lobby: false,
+            },
+        );
+        assert!(matches!(
+            receive(&peer),
+            PublicClientDatagram::TransportProof {
+                server_epoch: 20,
+                ..
+            }
+        ));
+        session.career_packet(20, 1, CareerView::default());
+        session.career_packet(19, 2000, CareerView::default());
+        assert_eq!(session.career_packet_sequence, 1);
+        // Repeated challenges within one scope preserve the high-water mark.
+        session.transport(
+            &socket,
+            PublicServerDatagram::TransportChallenge {
+                client_nonce: session.client_nonce.clone(),
+                server_epoch: 20,
+                path_nonce: "new-path".into(),
+                lobby: false,
+            },
+        );
+        assert!(matches!(
+            receive(&peer),
+            PublicClientDatagram::TransportProof { .. }
+        ));
+        assert_eq!(session.career_packet_sequence, 1);
+    }
 
     #[test]
     fn draft_planning_honors_human_locks_and_assigns_five_distinct_classes() {

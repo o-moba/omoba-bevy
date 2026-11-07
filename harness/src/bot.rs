@@ -189,11 +189,15 @@ impl Bot {
         if let Some(session) = &self.public
             && let ServerPacket::Career {
                 server_epoch,
+                sequence,
                 career,
-                ..
             } = packet
         {
-            if let Some(endpoint) = session.borrow_mut().career(server_epoch, career) {
+            if let Some(endpoint) =
+                session
+                    .borrow_mut()
+                    .career_packet(server_epoch, sequence, career)
+            {
                 self.socket
                     .connect(endpoint)
                     .expect("connect allocated worker");
@@ -394,11 +398,24 @@ impl Bot {
 
     // --- Inbound snapshot helpers ------------------------------------------
 
+    fn prepare_read(&self, deadline: Instant) -> bool {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        // One idle lobby peer must not consume the fixed200ms socket timeout
+        // when the multi-peer driver only gave it a20ms polling budget.
+        self.socket
+            .set_read_timeout(Some(remaining.min(RECV_TIMEOUT)))
+            .expect("bot failed to apply remaining receive deadline");
+        true
+    }
+
     /// Receives one complete raw datagram for transport-level assertions.
     /// Invalid JSON is returned unchanged and is never treated as a snapshot.
     pub fn recv_raw_datagram(&mut self, deadline: Instant) -> Option<Vec<u8>> {
         loop {
-            if Instant::now() >= deadline {
+            if !self.prepare_read(deadline) {
                 return None;
             }
             match self.socket.recv(&mut self.recv_buf) {
@@ -438,8 +455,8 @@ impl Bot {
                 Err(error) => panic!("bot socket recv failed while draining: {error}"),
             }
         }
-        // Restore blocking-with-timeout mode (the SO_RCVTIMEO set in `connect`
-        // is independent of the non-blocking flag and is still in effect).
+        // Restore blocking mode. The next blocking receive derives its timeout
+        // from that call's deadline, independently of the non-blocking flag.
         self.socket
             .set_nonblocking(false)
             .expect("bot failed to restore blocking socket mode after draining");
@@ -452,7 +469,7 @@ impl Bot {
     /// unparsable datagrams are skipped.
     fn recv_one_blocking(&mut self, deadline: Instant) -> Option<ServerPacket> {
         loop {
-            if Instant::now() >= deadline {
+            if !self.prepare_read(deadline) {
                 return None;
             }
             match self.socket.recv(&mut self.recv_buf) {

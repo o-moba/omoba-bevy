@@ -3,8 +3,64 @@
 use harness::{Bot, SnapshotView};
 use std::{
     net::UdpSocket,
+    thread,
     time::{Duration, Instant},
 };
+
+fn late_datagram_does_not_extend_poll_deadline(raw: bool) {
+    let fixture = UdpSocket::bind("127.0.0.1:0").unwrap();
+    fixture
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut bot = Bot::connect(fixture.local_addr().unwrap());
+    bot.send_raw(b"fixture");
+    let (_, peer) = fixture.recv_from(&mut [0; 64]).unwrap();
+    let packet = if raw {
+        b"late".to_vec()
+    } else {
+        serde_json::to_vec(&serde_json::json!({
+            "type":"snapshot", "players":[], "your_id":3,
+            "protocol_version":shared::protocol::PROTOCOL_VERSION,
+            "server_epoch":7, "match_id":8, "snapshot_tick":1,
+        }))
+        .unwrap()
+    };
+    let deadline = Instant::now() + Duration::from_millis(20);
+    let sender = thread::spawn(move || {
+        thread::sleep(
+            (deadline + Duration::from_millis(80)).saturating_duration_since(Instant::now()),
+        );
+        fixture.send_to(&packet, peer).unwrap();
+    });
+    let missed_deadline = if raw {
+        bot.recv_raw_datagram(deadline).is_some()
+    } else {
+        bot.recv_snapshot(deadline).is_some()
+    };
+    sender.join().unwrap();
+    assert!(
+        !missed_deadline,
+        "20ms poll consumed a datagram sent80ms after its deadline"
+    );
+    // The late packet remains available for a subsequent poll; limiting one
+    // idle peer must neither starve other peers nor throw away future input.
+    let next = Instant::now() + Duration::from_secs(2);
+    if raw {
+        assert_eq!(bot.recv_raw_datagram(next), Some(b"late".to_vec()));
+    } else {
+        assert_eq!(bot.recv_snapshot(next).unwrap().meta().snapshot_tick, 1);
+    }
+}
+
+#[test]
+fn raw_idle_poll_honors_short_deadline() {
+    late_datagram_does_not_extend_poll_deadline(true);
+}
+
+#[test]
+fn snapshot_idle_poll_honors_short_deadline() {
+    late_datagram_does_not_extend_poll_deadline(false);
+}
 
 #[test]
 fn wire_counters_cover_raw_blocking_drained_and_rejected_packets_once() {

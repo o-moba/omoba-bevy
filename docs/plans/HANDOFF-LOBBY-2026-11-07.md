@@ -1,5 +1,24 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
+**Обновление после865e27be:** исправлены две подтверждённые ошибки native AI
+probe:20ms receive deadline фактически блокировался до200ms; Career envelopes
+не имели native epoch/sequence fence. Отрицательные UDP/authority tests
+воспроизводят ошибки,35 library +3 UDP +22 Python и4 strict Clippy PASS.
+[Новый пакет и полные границы](../evidence/load-probe-deadlines-2026-11-07/README.md).
+Два последующих1000-прогона **FAIL до soak** (106.26/108.35s);10-client controls
+PASS. Последний срез даёт0 stale Career packets и209 реальных authority resets:
+не объявлять reordered Career причиной этого отказа. Изучать auth refresh/expiry
+и transport transitions под нагрузкой; для performance нужен явно optimized
+current-source/coherent graph. Не увеличивать auth TTL и не ослаблять проверки.
+Latest bots SHA40006f16…, server7a736997…/263 production sources неизменны.
+Raw `.agent/codex-ranked-readiness/load-deadline` и `load-career-order`; helpers
+и negative tests в `load-cadence`. Оба DB/volume удалены, групп процессов нет.
+Контроллеры сохранены как история: при cleanup кратко увидели непроверяемое
+имя `(server)`/stateS и отказались сигналить. Перед повтором исправить ожидание
+стабильного inventory/обязательное сохранение cleanup audit, использовать новые
+имена/output. Это не доказанная причина admission failure. Полный scope ниже
+сохраняется, исходные68 всё ещё62/5/1. UI/physical/RU gates не закрыты.
+
 **Следующее обновление после efe32101:** текущий1000-client прогон **FAIL до
 начала soak**, а не очередной capacity PASS.10/100 контроль PASS; добавлены
 per-peer producer ticks, сохранение baseline и first-owned-exit diagnostics.

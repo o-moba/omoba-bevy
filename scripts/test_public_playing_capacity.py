@@ -30,6 +30,29 @@ def sample(shard=0, elapsed=0, increment=0):
 
 
 class PopulationEvidenceTests(unittest.TestCase):
+    def test_pre_cleanup_diagnostics_include_archived_workers_without_auth_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for parent in (root / "matches/active", root / "matches/archive/retired"):
+                (parent / "outbox/health").mkdir(parents=True)
+                (parent / "status.json").write_text(json.dumps({
+                    "phase": "failed", "server_epoch": 7, "auth_nonce": "secret-nonce",
+                    "released_sessions": ["private-session"],
+                }))
+                (parent / "outbox/health/status.json").write_text(json.dumps({
+                    "version": 2, "sql_ready": True, "password": "secret-password",
+                }))
+                (parent / "worker.log").write_text("x" * 3000 + " postgres://test:fixture@localhost/omoba_test\nend")
+            result = probe.worker_diagnostics(root, 4)
+            self.assertFalse(result["scan_limited"])
+            self.assertEqual(len(result["workers"]), 2)
+            self.assertEqual(sum(row["archived"] for row in result["workers"]), 1)
+            published = json.dumps(result)
+            for private in ("secret-nonce", "private-session", "secret-password", "postgres://"):
+                self.assertNotIn(private, published)
+            self.assertTrue(all(len(row["log_tail"]) <= 2048 for row in result["workers"]))
+            self.assertTrue(probe.worker_diagnostics(root, 1)["scan_limited"])
+
     def test_search_release_requires_every_distinct_authenticated_unallocated_profile(self):
         samples = [sample(0), sample(1)]
         for index, peer in enumerate(p for s in samples for p in s["peers"]):

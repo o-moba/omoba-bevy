@@ -560,7 +560,7 @@ fn main() {
                     "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis()),
                     "transport":r.bot.transport_stats(),
                     "snapshot_meta":r.bot.snapshot_meta(),
-                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count}))
+                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count,"stale_career_packets":s.stale_career_packets,"authority_resets":s.authority_resets}))
                 })).collect();
                 println!(
                     "BOT_SAMPLE {}",

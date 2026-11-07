@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -22,6 +23,35 @@ def valid_snapshot_meta(meta):
     return (isinstance(meta, dict)
             and all(type(meta.get(key)) is int and meta[key] > 0
                     for key in ("protocol_version", "server_epoch", "match_id", "snapshot_tick")))
+
+
+def worker_diagnostics(root, limit):
+    """Disposable pre-teardown observations, never match/health authority."""
+    paths = sorted((root / "matches").glob("*/status.json"))
+    paths += sorted((root / "matches/archive").glob("*/status.json"))
+    rows = []
+    for path in paths[:limit]:
+        row = {"allocation_id": path.parent.name,
+               "archived": path.parent.parent.name == "archive"}
+        for name, fields in (("status.json", ("allocation_id", "server_epoch", "heartbeat_ms", "phase", "result_id")),
+                             ("outbox/health/status.json", ("version", "updated_ms", "server_epoch", "probe_checked_ms", "sql_ready", "journal_ready", "staged_dodges", "legacy_floors", "unpersisted_results", "critical_replies", "reply_receiver_closed", "blocked_since_ms"))):
+            try:
+                value = json.loads((path.parent / name).read_text())
+                row["status" if name == "status.json" else "health"] = {key: value.get(key) for key in fields}
+            except (OSError, ValueError, AttributeError) as error:
+                row["read_error_" + name] = type(error).__name__
+        try:
+            with (path.parent / "worker.log").open("rb") as log:
+                log.seek(0, 2)
+                row["log_bytes"] = log.tell()
+                log.seek(max(0, log.tell() - 2048))
+                tail = log.read().decode("utf-8", errors="replace")
+            row["log_tail"] = re.sub(r"postgres(?:ql)?://[^\s\"<>]+", "[fixture-database-url]", tail)
+        except OSError as error:
+            row["log_read_error"] = type(error).__name__
+        rows.append(row)
+    return {"observed_unix_ms": int(time.time() * 1000), "scan_limited": len(paths) > limit,
+            "workers": rows}
 
 
 def validate_sample(sample, size=10):
@@ -285,7 +315,8 @@ def main(argv=None):
         while time.monotonic() - started < args.timeout:
             now = time.monotonic()
             exited = [{"pid": p.pid, "returncode": code,
-                       "role": "lobby" if p is lobby else "generator"}
+                       "role": "lobby" if p is lobby else "generator",
+                       "generator_index": None if p is lobby else shards.index(p)}
                       for p in children if (code := p.poll()) is not None]
             if exited:
                 report["exited_before_cleanup"] = exited
@@ -333,6 +364,7 @@ def main(argv=None):
         raise
     finally:
         report["elapsed_seconds"] = time.monotonic() - started
+        report["before_cleanup"] = worker_diagnostics(root, rooms * 4)
         report["latest_shards"] = {str(i): sample for i, (_, sample) in latest.items()}
         report["latest_auth_shards"] = {str(i): sample for i, (_, sample) in auth_latest.items()}
         (root / "report.json").write_text(json.dumps(report, indent=2) + "\n")

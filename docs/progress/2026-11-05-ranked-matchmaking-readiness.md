@@ -1753,3 +1753,42 @@ its live Popen child, bound final waiting and explicitly report unverified group
 cleanup after all cleanup attempts.14 rehearsal cases PASS, including two real
 child lifecycle regressions with injected group-signal denial. This is a separate
 cleanup defect; it does not establish the first1000-client admission failure.
+
+
+### Native probe deadline/order corrections and fresh1000 rejections — 2026-11-07
+
+[Exact evidence and archived-data verifier](../evidence/load-probe-deadlines-2026-11-07/README.md).
+Two actual UDP negative tests show a20ms idle receive accepting a packet sent
+80ms after the deadline because SO_RCVTIMEO stayed200ms. Bound every blocking
+receive by the remaining deadline, preserving late packets for the next poll.
+Both tests plus original wire/drain/replay case PASS. A separate negative test
+against the unfiltered Career handler shows a late authority-loss view revoking
+newer authenticated state. Match native epoch/sequence fencing, reset its scope
+on transport reset/new epoch, preserve genuine new authority loss and anonymous
+stale/reset counters. Complete35 harness-library cases,3 UDP cases,8 capacity
+and14 rehearsal Python cases,4 strict Clippy targets, fmt/diff and data verifier
+PASS. Production server/gameplay/authority/schema/timers are unchanged;263 source
+hashes/native7a736997 match the previous full proof. No heavy graphics build.
+
+Deadline-only10-client control PASS30s (all Running19.83s, received18.026Hz),
+then1000 FAIL106.26s before all-Running/soak, first observed generator49/101.
+Pre-teardown receipts:69 Running,6 Forming,5 Ready,1 Failed. With both fixes,
+10 control PASS30s (Running21.07s,18.052Hz), then1000 FAIL108.35s with four
+exited generators83/89/93/95 in the same poll;44 Running,20 Forming,10 Ready,
+2 Failed worker receipts. Latest peer observations sum0 stale Career packets
+and209 genuine authority resets, not a simultaneous final state/exhaustive count.
+The fence bug is therefore not the established cause of this local load failure.
+No1000 soak/cadence/latency result exists. Existing root crates are unoptimized,
+so this is not Cargo dev opt1 or release performance qualification.
+
+The disposable controller's strict post-cleanup identity inventory briefly
+encountered `(server)` with stateS and refused signalling, aborting its audit/DB
+cleanup. Subsequent fresh group inventories were empty; both owned DBs/volumes
+were explicitly removed. No foreign/unverified process was signalled. Preserve
+that rejected-controller history; before another run wait for stable inventory
+and persist cleanup audit even on refusal. Next distinguish genuine auth refresh/
+expiry/transport loss using an explicitly optimized current coherent graph.
+Never extend TTL, bypass SQL/consent or alter actual timers to turn this green.
+Original68 remains62 done,5 partial,1 open; UI/physical/WAN/RU/critic/release scope
+is unchanged. Parent865e27be CI42351039365 has6/7 jobs PASS and its PostgreSQL
+job remains live as last observed; this next source checkpoint needs its own CI.
