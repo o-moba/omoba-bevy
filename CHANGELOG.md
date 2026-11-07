@@ -5,6 +5,13 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify the same raised-limit/current-worker physical restore path on PG16.15:
+ 22 stages PASS, same authenticated Resume/adoption and221.63s crash recovery
+ with one Interrupted credit and no Elo/XP. Wait for actual writable promotion
+ after connection readiness. Preserve a complete next-agent handoff and open-PR
+ inventory; terminal-spool, independent-storage/RU and remaining release gates
+ stay open.
+
 - Verify the current public worker against a physically restored schema13 on
   PG18.6: same authenticated human/worker/epoch Resume, lobby adoption, then real
   SIGKILL/recovery with one Interrupted history entry and no Elo/XP. Twenty-two

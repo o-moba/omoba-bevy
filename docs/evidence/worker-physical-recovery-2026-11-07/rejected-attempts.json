@@ -24,6 +24,14 @@
       "error": "'gameplay_started'",
       "scope": "All20 backup checks and actual Running reached; fixture wrongly required an explicit true gameplay field, which canonical serialization omits; no physical/native acceptance.",
       "cleanup_complete": true
+    },
+    {
+      "attempt": "worker-restore-pg16-v1",
+      "status": "FAIL",
+      "checks_before_failure": 20,
+      "error": "Immediate writable-primary assertion ran while the restored server still accepted read-only recovery connections",
+      "scope": "setup/readiness race; no completed native acceptance; replacement waits for actual promotion with deadline and preserves all assertions",
+      "cleanup_complete": true
     }
   ]
 }

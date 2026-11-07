@@ -1,9 +1,18 @@
 # Current worker against physically restored schema13
 
-Accepted PG18.6 run:22 stages PASS. [Summary and hashes](summary.json),
-[full physical report](pg18/summary.json), [signed native journey](pg18/runtime/report.json),
-[rejected setups](rejected-attempts.json). Real crash recovery takes223.47s.
-PG16 raised-limit/native acceptance is still required.
+Accepted PG18.6 andPG16.15 runs:22 stages each PASS. [Summary and hashes](summary.json),
+[PG18 physical report](pg18/summary.json), [PG18 signed journey](pg18/runtime/report.json),
+[PG16 physical report](pg16/summary.json), [PG16 signed journey](pg16/runtime/report.json),
+[rejected setups](rejected-attempts.json). Real crash recovery takes223.47s onPG18
+and221.63s onPG16. Both preserve the same signed human/worker/epoch through restore.
+
+The PG16 runner now waits for archive promotion after connection readiness.
+A server may accept read-only queries while still recovering; game traffic
+remains isolated until pg_is_in_recovery() is false. The earlier immediate
+assertion failed and is rejected, without weakening the writable-primary gate.
+See [PostgreSQL startup semantics](https://www.postgresql.org/docs/16/app-pg-ctl.html).
+PG18 runner provenance remains pinned to9ed77bd8 in summary.json; the current
+runner adds this bounded readiness observation.
 
 [Runner](rehearse_worker_restore.py) extends the earlier isolated schema13
 rehearsal with a real signed public bot-practice game, using the exact previously
@@ -52,7 +61,8 @@ version-verified kit image and accepted native server; no graphics/Cargo rebuild
 is needed. Choose a fresh output directory and free loopback game ports:
 
 ```sh
-python3 docs/evidence/worker-physical-recovery-2026-11-07/rehearse_worker_restore.py --native-server .agent/codex-ranked-readiness/ready-runtime/server --output .agent/worker-restore-fresh
+python3 docs/evidence/worker-physical-recovery-2026-11-07/rehearse_worker_restore.py --native-server .agent/codex-ranked-readiness/ready-runtime/server --output .agent/worker-restore-fresh18
+python3 docs/evidence/worker-physical-recovery-2026-11-07/rehearse_worker_restore.py --image omoba-mm-pitr-kit16-rehearsal:20261107 --native-server .agent/codex-ranked-readiness/ready-runtime/server --output .agent/worker-restore-fresh16
 ```
 
 The report's status is authoritative. Failed/rejected attempts are retained

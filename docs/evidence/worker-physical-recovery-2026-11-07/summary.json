@@ -1,20 +1,14 @@
 {
-  "status": "LOCAL_PG18_CURRENT_WORKER_PHYSICAL_RECOVERY_PASS",
+  "status": "LOCAL_PG16_PG18_CURRENT_WORKER_PHYSICAL_RECOVERY_PASS",
   "source_commit": "f8510b57146745a2d0707d0eb16767b46e52aee7",
-  "postgres": "postgres (PostgreSQL) 18.6",
-  "pgbackrest": "pgBackRest 2.58.0",
   "schema": {
     "career": 13,
     "portal": 11
   },
-  "checks": 22,
-  "report": "pg18/summary.json",
-  "protocol_report": "pg18/runtime/report.json",
   "real_game": "one signed human protocol client and nine normal server bots; public bot_practice",
   "runtime_role": "pitr_game with actual grants and local SCRAM login",
   "native_server_sha256": "7a73699731633f1a4d0831ec41715e789d91479649fadd0cb343c5dce2dea1a9",
   "public_probe_sha256": "6d14890b5067af80039880163d3ef2e313565db52c92b70a49ba1ea3b5f36a15",
-  "runner_sha256": "434bfcaf735b6ebb8910259613071edff3128774e1b85c5bece6d0377a55d517",
   "production_source_sha256": {
     "career-store/migrations/README.md": "867cd35a89e3daf2fc252b8a39e8d5e8ff58ec53edd5d519cdb11e47d8dc0281",
     "career-store/migrations/postgres/001_career.sql": "013ea70d69c747dbb86a62c0c949e61bc69999b2b148c73e041ebc2c956d5649",
@@ -288,17 +282,45 @@
     "max_locks_per_transaction": 128
   },
   "restored_identity": "same worker/profile/epoch, advancing snapshots, SQL probe after physical switch",
-  "crash_recovery_seconds": 223.47048929200002,
   "career_result": "Interrupted; exactly one played match, unchanged rating/wins/losses/rated_matches/XP",
-  "before_crash_outbox_json_count": 0,
   "terminal_spool_replay": "not proved by this SQL/checkpoint crash path",
   "cleanup": true,
   "remaining": [
-    "raised-limit/current-worker PG16 acceptance",
     "actual terminal-receipt spool replay across physical restore",
     "independent off-host/RU RPO/RTO and approved C2/C4 integration/rollout",
     "current complete CI",
     "current UI/physical Android",
     "public trust packaging/provisioning, actual multi-host/WAN party/Ranked/Resume faults and sustained host capacity/cadence"
-  ]
+  ],
+  "runs": {
+    "pg18": {
+      "status": "PASS",
+      "postgres": "postgres (PostgreSQL) 18.6",
+      "checks": 22,
+      "report": "pg18/summary.json",
+      "protocol_report": "pg18/runtime/report.json",
+      "crash_recovery_seconds": 223.47048929200002,
+      "cleanup_complete": true,
+      "source_commit": "f8510b57146745a2d0707d0eb16767b46e52aee7",
+      "before_crash_outbox_json_count": 0
+    },
+    "pg16": {
+      "status": "PASS",
+      "postgres": "postgres (PostgreSQL) 16.15",
+      "checks": 22,
+      "report": "pg16/summary.json",
+      "protocol_report": "pg16/runtime/report.json",
+      "crash_recovery_seconds": 221.631390709,
+      "cleanup_complete": true,
+      "source_commit": "9ed77bd819084ebfbb214753490f6b9b23d692c5",
+      "before_crash_outbox_json_count": 0
+    }
+  },
+  "runner_ref_pg18": "git:9ed77bd819084ebfbb214753490f6b9b23d692c5:docs/evidence/worker-physical-recovery-2026-11-07/rehearse_worker_restore.py",
+  "runner_sha256_pg18": "434bfcaf735b6ebb8910259613071edff3128774e1b85c5bece6d0377a55d517",
+  "runner_sha256_pg16": "b9cbde804db7276c2bc70895f81e1ece47c59ed881e6c532671ff40ac64463a9",
+  "runner_change": "Wait for archive promotion after pg_ctl reports connection readiness; no writable traffic before pg_is_in_recovery becomes false.",
+  "checks_per_run": 22,
+  "runner_ref_pg16": "rehearse_worker_restore.py",
+  "parent_ci": "parent-ci.json"
 }

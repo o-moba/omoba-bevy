@@ -457,7 +457,14 @@ INSERT INTO career_queue_penalties(profile_id,last_observed_ms,cooldown_until,st
         execute(restored,'pg_ctl','-D','/tmp/recovered-data','-l','/tmp/restored-native.log','-w','-t','30','start',user='postgres',timeout=40)
         def restored_sql(query,database='omoba_test'):
             return execute(restored,'psql','-X','-qAt','-v','ON_ERROR_STOP=1','-U','postgres','-d',database,data=query,user='postgres').stdout.strip()
-        assert restored_sql('SELECT NOT pg_is_in_recovery()',database='postgres')=='t'
+        # pg_ctl accepts a consistent read-only hot standby as ready. Wait for
+        # archive recovery to promote before routing writable game traffic.
+        promotion_deadline=time.monotonic()+40
+        while restored_sql('SELECT NOT pg_is_in_recovery()',database='postgres')!='t':
+            assert time.monotonic()<promotion_deadline,'Physical restore did not promote to a writable primary'
+            assert native.poll() is None,'Native probe exited while waiting for physical promotion'
+            time.sleep(.1)
+        report['native_restore_promoted']=True
         assert restored_sql('SELECT system_identifier FROM pg_control_system()',database='postgres')==report['system_identifier']
         assert restored_sql('SELECT max(version) FROM career_schema_version')=='13'
         assert restored_sql("SELECT status FROM career_matches WHERE result_id='"+req['result_id']+"'")=='running'

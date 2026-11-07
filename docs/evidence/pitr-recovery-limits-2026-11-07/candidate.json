@@ -82,7 +82,7 @@
   ],
   "supersedes": "C4-PITR-2026-11-07.patch for proposed integration only; old evidence retained",
   "source": "https://www.postgresql.org/docs/18/hot-standby.html#HOT-STANDBY-ADMIN",
-  "remaining": "PG16 raised-limit/native rehearsal; actual terminal-spool replay; current CI; existing owner integration/real-RU rollout decisions",
+  "remaining": "actual terminal-spool replay; current CI; existing owner integration/real-RU rollout decisions",
   "applied_source_parent": "f8510b57146745a2d0707d0eb16767b46e52aee7",
   "applied_current_files": [
     {
@@ -154,7 +154,9 @@
     "real_pg18_checks": 22,
     "real_pg18_report": "../worker-physical-recovery-2026-11-07/pg18/summary.json",
     "candidate_applies_current": true,
-    "C2_patch_application_after_revised_C4": "PASS; no combined behavior claim"
+    "C2_patch_application_after_revised_C4": "PASS; no combined behavior claim",
+    "real_pg16_checks": 22,
+    "real_pg16_report": "../worker-physical-recovery-2026-11-07/pg16/summary.json"
   },
   "rejected_unit_attempt": {
     "log": "rejected-unit.log",

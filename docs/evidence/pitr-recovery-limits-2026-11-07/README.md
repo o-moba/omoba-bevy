@@ -30,4 +30,6 @@ Current-source [unit log](unit-tests.log):176 pass,1 expected optional skip,0 fa
 Actual PG18 combined helper/physical/current-worker run passes22 stages with all
 five elevated dimensions; its drill report records80/12/14/4/128.
 [Before fatal recovery log](before.log) preserves the rejected20-versus80 case.
-PG16 raised-limit/native and terminal-spool acceptance remain open.
+PG16.15 also passes22 stages with the same raised limits, actual worker restore/Resume
+and221.63s crash recovery. Terminal-spool and independent-storage/RU acceptance
+remain open.

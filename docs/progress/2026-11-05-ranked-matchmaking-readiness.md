@@ -26,7 +26,8 @@ PG18 current public-worker physical restoration/Resume/adoption and223.47s real
 SQL/checkpoint crash recovery now pass22 stages with actual game-role SCRAM/grants:
 [worker proof](../evidence/worker-physical-recovery-2026-11-07/README.md). C4's revised
 review-only candidate fixes hardcoded recovery dimensions;176 unit pass/1 skip.
-PG16 raised-limit/native, terminal-spool replay, independent off-host/RU recovery,
+PG16.15 now also passes22 raised-limit/current-worker stages with221.63s crash
+recovery. Terminal-spool replay, independent off-host/RU recovery,
 full current CI and sustained host/backpressure/cadence/load,
 native/physical UI, WAN/multi-host capacity/trust and reviewed RU rollout remain
 open. Older sections preserve dated history.
@@ -1674,3 +1675,16 @@ not terminal-spool replay. PG16 raised-limit/current-worker acceptance, independ
 storage/RU RPO/RTO, current CI, UI/physical, trust/WAN/capacity and existing C2/C4
 integration/rollout decisions remain required. Historical20-connection/schema10
 evidence remains unchanged. Original68 ledger stays62/5/1; no RU change occurs.
+
+
+## 2026-11-07 — PG16 and handoff
+
+PG16.15 actual worker physical restoration/Resume/adoption/recovery passes22
+stages with the same raised limits and current game role asPG18. Recovered
+Interrupted credit occurs once without Elo/XP; crash recovery takes221.63s.
+The runner now observes actual archive promotion after pg_ctl connection
+readiness; its initially rejected read-only observation remains explicit.
+[Exact dual-version proof](../evidence/worker-physical-recovery-2026-11-07/README.md).
+[Next-agent context and all open PRs](../plans/HANDOFF-LOBBY-2026-11-07.md).
+No terminal-file replay, independent-storage/RU, load/WAN/trust or physical
+acceptance is inferred; original68 stays62/5/1. No RU deployment occurs.
