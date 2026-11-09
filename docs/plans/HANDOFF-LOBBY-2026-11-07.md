@@ -1,63 +1,67 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальный checkpoint — server-load metrics, 2026-11-09
+## Актуальный checkpoint — native Linux capacity boundary, 2026-11-09
 
-Новый HEAD этого коммита содержит opt-in серверные метрики и самопроверяемый
-evidence packet. Прежний pushed head `c97225e5`: buffered input20/evidence,
-актуальный `origin/dev` и Release runner `macos-15`. Release42592591932 полностью
-SUCCESS, включая macOS; основной CI42592591947 на момент пакета имеет6/7 SUCCESS,
-PostgreSQL journey ещё in_progress. Эти runs относятся только к `c97225e5`.
-Для нового pushed HEAD обязателен собственный полный CI; parent conclusions не
-переносить. Draft release на PR не создаётся.
+[Новый evidence packet и verifier](../evidence/linux-capacity-2026-11-09/README.md)
+фиксирует ступенчатый instrumented loopback прогон на общем dev VPS (2 vCPU,
+3480344KiB RAM), release server и независимые native Rust ten-client shards.
+Source parent `97b119f15cf5d4cb4d44a5a02946bc61d0a3fb0b`; Release42603752686
+полностью SUCCESS. Основной CI42603752525 того же SHA на момент пакета имеет6/7
+SUCCESS, PostgreSQL journey ещё in_progress. Новый documentation/evidence HEAD
+обязан получить собственный полный CI; parent conclusions не переносить.
+Draft release на PR не создаётся.
+
+- Control10/1arena/30s PASS20.0276 sends/s. **40 clients/4 Casual arenas/120s
+  PASS**19.9890–19.9933 sends/s, accepted snapshots p50/p0519.2026/19.1382Hz,
+  server CPU50.64%, peak RSS213.70MiB,0 sequence gaps/restarts.
+- **60 clients/6 arenas/120s PASS**19.7334–19.8022 sends/s, accepted snapshots
+  p50/p0518.5699/18.4987Hz,wire p50/p9582557/84928B/player/s.172409 application
+  dispatches,147586 transforms,140566 snapshots,0 gaps/restarts. Broadcast mean
+  53.896ms,p95/p99<75ms;latest-transform age mean25.785ms,p95<55/p99<150ms.
+  Server CPU72.77%,RSS297.70MiB;generator65.80%/44.36MiB.
+- **80 clients/8 arenas/120s FAIL** неизменного19.5–20.5Hz input gate:
+  15.9626–16.5988 sends/s,accepted snapshots p50/p0517.6672/17.5833Hz.195800
+  dispatches,163838 transforms,180700 snapshots,**7 sequence gaps/0 restarts**.
+  Server CPU95.20%,RSS382.23MiB;generator85.81%/59.25MiB. FAIL сохранён,не
+  переписан как server-only или production вывод.
+- Histograms cumulative process-lifetime,mean/exclusive upper bounds,не exact
+  percentiles/per-command ACK/coordinate-change proof. Принятые runs имеют точные
+  rosters/final health-v2; все owned processes/DB/roles удалены,dev lobby/API
+  остались active. Verifier пересчитывает всё из43 selected hashed files и exact
+  15-source archive,включая7-gap rejection. AppleDouble sidecars исключены.
+- Node A/B40 clients/4arenas/180s отклоняет старый snapshot-gap p95<100ms gate:
+  instrumented578.944ms,uninstrumented587.583ms. При server broadcast mean
+  53.043ms/zero gaps и native PASS той же ступени это подтверждённый bottleneck
+  одного Node generator process,не доказанный server-capacity отказ. Для
+  multi-arena capacity использовать native generator.
+
+`ops/vps/ru/README.md` теперь явно считает старую16MiB/arena формулу
+неподтверждённой для Linux. Peak summed RSS/arena≈53.43MiB на4 и49.62MiB на6,
+включая lobby,не pure marginal cost. **Unit,16-arena setting,nftables иproduction
+formula не изменены.** Это не длительный soak,WAN,vs Bots/mixed,реальный или
+идентичный RU-host/uplink и не SLA; #13 остаётся open.
 
 Портал `37e705c`: typecheck,260 unit (257 PASS/3 expected skips),RU/global
 production builds PASS. Ranked-seasons6 и ranked-notices7 Next+Chrome RU checks
 PASS без page errors/unexpected API; локальные серверы остановлены. GitHub checks
 у PR33 не настроены; leaderboard/game-directory требуют своих loopback binaries/
 fixtures. В обоих репозиториях GitHub показывает только автора `wotori` как
-collaborator, поэтому формально запросить независимого reviewer через PR нельзя;
-нужно человеческое ревью владельца/приглашённого reviewer, не self-review.
+collaborator,поэтому нужно человеческое ревью владельца/приглашённого reviewer,
+не self-review.
 
-[Новый proof/verifier](../evidence/server-load-metrics-2026-11-09/README.md):
-`OMOBA_LOAD_METRICS=1` добавляет cumulative per-second JSON о verified signed
-application dispatch, ordinary gameplay Transform handler entry, complete
-snapshot kernel sends и actual world-broadcast starts. Wire protocol, gameplay
-таймеры/правила не меняются; без opt-in endpoint state не хранится. Runner
-отклоняет missing/malformed metrics и любые sequence gaps/restarts.
+Прежние [server-load1000 proof](../evidence/server-load-metrics-2026-11-09/README.md),
+[buffered telemetry/input20 proof](../evidence/input20-buffered-2026-11-07/README.md)
+и rejected diagnostics сохранены без перезаписи. Тяжёлый Cargo/Bevy/SDK build не
+запускался,третий cargo cache не создавался.
 
-- Control10/30s PASS20.026Hz; **instrumented1000/120s PASS**, каждый
-  19.834–20.000 sends/s при неизменном19.5–20.5Hz gate.100 арен/1000 unique
-  signed AI peers,0 server bots,точные rosters,0 observed auth resets,100 final
-  healthy-v2 workers SQL/journal ready,0 backlog/closed/blocked.
-- Server totals:3166007 signed application dispatches,2712856 gameplay
-  transforms,0 sequence gaps/restarts,1858997 complete snapshot sends.
-  Latest-transform age at snapshot:1854112 observations,mean34.868ms,
-  p95/p99 exclusive upper250/500ms. Broadcast gaps188105,mean73.596ms,
-  p95/p99 exclusive upper250/500ms. Это process-lifetime histograms,mean и
-  bucket bounds, не exact percentiles/per-command ACK/coordinate-change proof.
-- Received snapshots median13.025Hz/p0512.018. Сумма per-peer average receive
-  rates62.458MB/s=499.660Mbit/s application/framing без IP/UDP/NIC. p95 per-peer
-  75215B/s;1000*p95≈601.723Mbit/s — расчёт масштабирования,не aggregate p95.
-- Per-second JSON instrumentation,opt1/debug assertions и macOS loopback влияют
-  на интерпретацию cadence; это не uninstrumented release benchmark и не RU SLA.
-  Длительность/Linux/RU host/uplink остаются следующим capacity gate.
-- Полный server suite562 PASS/0 FAIL/16 ignored,12 Python PASS. Verifier
-  пересчитывает input/wire/producer/server aggregates,rosters/health/cleanup из
-  compressed reports и observation-time LOAD_METRICS lines. Полные worker logs
-  могут дописаться после metric summary; их final hashes не обязаны совпадать
-  с observation-time hashes. Raw/helpers/binaries:`.agent/codex-ranked-readiness/load-server-metrics/`.
-  Свой PG18.6/schema13/11 container/volume удалён,final process inventory пуст.
-- Прежнее [buffered telemetry/input20 proof](../evidence/input20-buffered-2026-11-07/README.md)
-  и все rejected diagnostics сохранены без перезаписи. Тяжёлый Cargo/Bevy/SDK
-  build не запускался,третий cargo cache не создавался.
-
-**Следующие реальные gates:** длительный soak на реальном или идентичном
-Linux/RU host,uplink/traffic budget; WAN/multi-host/party/Ranked/Resume/fault,
-directory/trust provisioning; current UI-2/UI-3 иphysical C3; independent
-off-host/RU RPO/RTO иC2/C4 после существующих решений владельца;
-legal/provider/signing/catalog/device/release. Не выдавать новый loopback PASS
-за production capacity. Сохранять полный scope68+9+UI/physical/off-host/WAN/
-trust/RU,исходные68=62/5/1.
+**Следующий capacity gate:** отдельно проверенный более длительный native soak на
+принятых6 аренах с uninstrumented comparison; затем реальный/идентичный изолированный
+RU-host,vs Bots/mixed и measured uplink/network budget. Runner сейчас ограничен120s;
+увеличение длительности — отдельное проверенное изменение,не скрытая remote правка.
+Далее WAN/multi-host/party/Ranked/Resume/fault,directory/trust provisioning;
+current UI-2/UI-3 иphysical C3; independent off-host/RU RPO/RTO иC2/C4 после
+существующих решений владельца; legal/provider/signing/catalog/device/release.
+Сохранять полный scope68+9+UI/physical/off-host/WAN/trust/RU,исходные68=62/5/1.
 
 Основная работа по-прежнему в feature branches `feat/ranked-matchmaking-readiness`:
 игра mm-game/PR148 и портал mm-web/PR33 →dev, оба open/not merged. Ни dev/main

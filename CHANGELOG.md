@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Measure native Linux capacity in independent signed20Hz Casual shards on the
+  shared2-vCPU dev VPS.40/4arenas and60/6arenas pass120s;60 clients send
+  19.733–19.802/s with0 sequence gaps,72.77% server CPU and297.70MiB peak RSS.
+  Retain80/8arenas FAIL at15.963–16.599/s with7 gaps. Identify the older
+  single-process Node receive gate as a generator artifact through A/B and native
+  controls. Archive43 selected files with exact source/binary binding and a
+  recomputing verifier. Mark the old16MiB/arena RU formula unvalidated; do not
+  change the16-arena unit,nftables or production settings. Long soak,real/
+  identical RU host,vs Bots/mixed,uplink,WAN and SLA acceptance remain open.
+
 - Add opt-in per-worker signed-dispatch, gameplay Transform, complete snapshot
   send and world-broadcast histograms. The capacity runner now rejects missing/
   malformed metrics and sequence gaps/restarts. Instrumented loopback1000/120s

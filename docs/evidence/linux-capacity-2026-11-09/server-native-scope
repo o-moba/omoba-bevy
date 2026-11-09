@@ -1,0 +1,5 @@
+#!/bin/sh
+exec systemd-run --scope --quiet --collect \
+  --property=MemoryHigh=450M --property=MemoryMax=500M \
+  --property=CPUQuota=190% --property=TasksMax=96 \
+  /root/omoba-capacity-0fd5c465/omoba-server "$@"

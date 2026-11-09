@@ -1,0 +1,974 @@
+{
+  "source_parent": "97b119f15cf5d4cb4d44a5a02946bc61d0a3fb0b",
+  "release_run": 42603752686,
+  "server_sha256": "ecb7648e761f62d31d2c523d2076dd0cff64bbbedaf21853856d1d38e4a6f5ca",
+  "server_cgroup_wrapper_sha256": "379d0e52ecec617a874247df2271e4fed2af7113406e3d4bac5b0dbe7f97967f",
+  "bots_sha256": "89660bc17cf77999aec89c3f2ec78052f9a7fdfd4ccc2c436a1398a3eda45c6d",
+  "native_source_tar_gz_sha256": "a32fd7bc46f3deb935d608d06f6b35785c8f2fe321b8a30a850cf91199b54b9e",
+  "scope": "instrumented native loopback Casual AI on shared 2-vCPU dev VPS; not WAN, production, RU-host or SLA acceptance",
+  "cases": {
+    "native-control-10": {
+      "clients": 10,
+      "seconds": 30,
+      "status": "PASS",
+      "error": null,
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 20.027552863777654,
+          "p05": 20.027552863777654,
+          "p50": 20.027552863777654,
+          "p95": 20.027552863777654,
+          "max": 20.027552863777654
+        },
+        "cached_snapshot_transforms": {
+          "total": 187,
+          "min_per_peer": 15
+        },
+        "all_peers_within_2_5_percent": true,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 72155.13281860728,
+          "p95": 72575.71142874661,
+          "p99": 72575.71142874661,
+          "max": 72575.71142874661
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 19.488996820381953,
+          "p05": 19.488996820381953
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 20.498789401748894,
+          "p05": 20.498789401748894
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9507389162561576,
+          "p05": 0.9507389162561576
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 7897,
+          "gameplay_transforms": 6781,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 6734
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 700,
+        "broadcast_gaps": {
+          "count": 699,
+          "total_us": 35842121,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            664,
+            35,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 51276.28183118741,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 6676,
+          "total_us": 154490142,
+          "buckets": [
+            586,
+            236,
+            871,
+            1904,
+            2968,
+            46,
+            8,
+            29,
+            10,
+            18,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 23141.123726782505,
+          "p95_exclusive_upper_us": 45000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      },
+      "resources": {
+        "samples": 15,
+        "observed_seconds": 28.374680049018934,
+        "server": {
+          "cpu_percent_mean_of_intervals": 14.086059256176114,
+          "rss_mib_peak": 84.7578125,
+          "processes_peak": 2
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 10.550423773575625,
+          "rss_mib_peak": 7.32421875,
+          "processes_peak": 1
+        }
+      }
+    },
+    "native-capacity-4-120": {
+      "clients": 40,
+      "seconds": 120,
+      "status": "PASS",
+      "error": null,
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 19.988977280533895,
+          "p05": 19.988977280533895,
+          "p50": 19.99045461826832,
+          "p95": 19.993335993682894,
+          "max": 19.993335993682894
+        },
+        "cached_snapshot_transforms": {
+          "total": 5315,
+          "min_per_peer": 101
+        },
+        "all_peers_within_2_5_percent": true,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 86437.37630893372,
+          "p95": 88372.19325855012,
+          "p99": 88387.13442596214,
+          "max": 88387.13442596214
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 19.20257087230722,
+          "p05": 19.13815616690968
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 20.19999816772606,
+          "p05": 20.131370551498538
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9506224066390041,
+          "p05": 0.950389503895039
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 116008,
+          "gameplay_transforms": 99328,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 96119
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 9719,
+        "broadcast_gaps": {
+          "count": 9715,
+          "total_us": 506477268,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            8658,
+            1048,
+            9,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 52133.53247555327,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 95904,
+          "total_us": 2190479349,
+          "buckets": [
+            12999,
+            3324,
+            9919,
+            29122,
+            38193,
+            1306,
+            465,
+            157,
+            75,
+            82,
+            185,
+            77,
+            0
+          ],
+          "mean_us": 22840.3335523023,
+          "p95_exclusive_upper_us": 45000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      },
+      "resources": {
+        "samples": 59,
+        "observed_seconds": 118.65396506013349,
+        "server": {
+          "cpu_percent_mean_of_intervals": 50.637249264219214,
+          "rss_mib_peak": 213.703125,
+          "processes_peak": 5
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 43.81426415921154,
+          "rss_mib_peak": 29.5625,
+          "processes_peak": 4
+        }
+      }
+    },
+    "native-capacity-6-120": {
+      "clients": 60,
+      "seconds": 120,
+      "status": "PASS",
+      "error": null,
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 19.73343076806954,
+          "p05": 19.73343076806954,
+          "p50": 19.77338830401015,
+          "p95": 19.802166588715167,
+          "max": 19.802166588715167
+        },
+        "cached_snapshot_transforms": {
+          "total": 13595,
+          "min_per_peer": 184
+        },
+        "all_peers_within_2_5_percent": true,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 82557.39112675488,
+          "p95": 84928.44944288148,
+          "p99": 85122.48081969323,
+          "max": 85122.48081969323
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 18.56993609953954,
+          "p05": 18.49873283857189
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 19.56445562962289,
+          "p05": 19.49301884028375
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9490800171159607,
+          "p05": 0.9488172043010753
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 172409,
+          "gameplay_transforms": 147586,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 140566
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 14209,
+        "broadcast_gaps": {
+          "count": 14203,
+          "total_us": 765480547,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            10799,
+            3323,
+            70,
+            9,
+            2,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 53895.6943603464,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 140256,
+          "total_us": 3616552899,
+          "buckets": [
+            22457,
+            6893,
+            12206,
+            44023,
+            45437,
+            3597,
+            2540,
+            1043,
+            775,
+            418,
+            323,
+            472,
+            72
+          ],
+          "mean_us": 25785.37031570842,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 150000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      },
+      "resources": {
+        "samples": 59,
+        "observed_seconds": 119.5084921468515,
+        "server": {
+          "cpu_percent_mean_of_intervals": 72.76927609990067,
+          "rss_mib_peak": 297.6953125,
+          "processes_peak": 7
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 65.79623976707327,
+          "rss_mib_peak": 44.36328125,
+          "processes_peak": 6
+        }
+      }
+    },
+    "native-capacity-8-120": {
+      "clients": 80,
+      "seconds": 120,
+      "status": "FAIL",
+      "error": "AssertionError: actual per-peer input cadence outside requested profile",
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 15.96264002873797,
+          "p05": 15.96264002873797,
+          "p50": 16.380759392754296,
+          "p95": 16.598844565910635,
+          "max": 16.598844565910635
+        },
+        "cached_snapshot_transforms": {
+          "total": 21811,
+          "min_per_peer": 193
+        },
+        "all_peers_within_2_5_percent": false,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 78503.53318384817,
+          "p95": 80436.46635849397,
+          "p99": 80944.64517421373,
+          "max": 80944.64517421373
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 17.667173383465048,
+          "p05": 17.58328787412387
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 18.67052323335715,
+          "p05": 18.57730747365866
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9468275245755139,
+          "p05": 0.944692239072257
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 195800,
+          "gameplay_transforms": 163838,
+          "sequence_gaps": 7,
+          "sequence_restarts": 0,
+          "snapshots": 180700
+        },
+        "all_endpoints_without_sequence_gaps": false,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 18323,
+        "broadcast_gaps": {
+          "count": 18315,
+          "total_us": 1033257601,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            9805,
+            8039,
+            355,
+            103,
+            12,
+            1,
+            0,
+            0
+          ],
+          "mean_us": 56415.921430521434,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 100000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 180124,
+          "total_us": 7674564101,
+          "buckets": [
+            29274,
+            7444,
+            8623,
+            51399,
+            38507,
+            8398,
+            13349,
+            7921,
+            7163,
+            4758,
+            2224,
+            765,
+            299
+          ],
+          "mean_us": 42607.11565921254,
+          "p95_exclusive_upper_us": 150000,
+          "p99_exclusive_upper_us": 500000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      },
+      "resources": {
+        "samples": 59,
+        "observed_seconds": 119.79697489808314,
+        "server": {
+          "cpu_percent_mean_of_intervals": 95.20226273801184,
+          "rss_mib_peak": 382.2265625,
+          "processes_peak": 9
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 85.81223114153286,
+          "rss_mib_peak": 59.25390625,
+          "processes_peak": 8
+        }
+      }
+    }
+  },
+  "node_ab": {
+    "capacity-4-180": {
+      "clients": 40,
+      "seconds": 180,
+      "server_metrics": true,
+      "capacity_gate_pass": false,
+      "snapshot_gap_ms": {
+        "p50": 1.6867529999872204,
+        "p95": 578.9441600000137,
+        "p99": 669.9369889999944,
+        "max": 888.2572789999977
+      },
+      "snapshot_bytes_per_second_per_player": {
+        "p50": 55948.69463960694,
+        "p95": 56486.93765201574,
+        "p99": 56582.59854979887,
+        "max": 56582.59854979887
+      },
+      "soak_resources": {
+        "samples": 37,
+        "processes": 5,
+        "cpu_percent_mean": 42.7,
+        "cpu_percent_peak": 56.5,
+        "rss_mib_mean": 215.7,
+        "rss_mib_peak": 217.4,
+        "per_arena": {
+          "cpu_percent": 10.68,
+          "rss_mib": 54.4
+        }
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 25546,
+          "gameplay_transforms": 5923,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 143059
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 14454,
+        "broadcast_gaps": {
+          "count": 14450,
+          "total_us": 766473242,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            12060,
+            2324,
+            53,
+            9,
+            4,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 53043.130934256056,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 136650,
+          "total_us": 3304824070575,
+          "buckets": [
+            362,
+            577,
+            737,
+            1791,
+            2224,
+            508,
+            3048,
+            2340,
+            5791,
+            11560,
+            27943,
+            10459,
+            69310
+          ],
+          "mean_us": 24184588.88090011,
+          "p95_exclusive_upper_us": null,
+          "p99_exclusive_upper_us": null
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      }
+    },
+    "capacity-4-180-uninstrumented": {
+      "clients": 40,
+      "seconds": 180,
+      "server_metrics": false,
+      "capacity_gate_pass": false,
+      "snapshot_gap_ms": {
+        "p50": 1.69744200000423,
+        "p95": 587.5825209999748,
+        "p99": 688.7777889999998,
+        "max": 998.1257909999986
+      },
+      "snapshot_bytes_per_second_per_player": {
+        "p50": 55084.9873207524,
+        "p95": 55285.66059746555,
+        "p99": 55480.414458917105,
+        "max": 55480.414458917105
+      },
+      "soak_resources": {
+        "samples": 36,
+        "processes": 5,
+        "cpu_percent_mean": 44.3,
+        "cpu_percent_peak": 54.7,
+        "rss_mib_mean": 215.8,
+        "rss_mib_peak": 217.3,
+        "per_arena": {
+          "cpu_percent": 11.08,
+          "rss_mib": 54.3
+        }
+      }
+    }
+  },
+  "files": {
+    "native-control-10/report.json.gz": {
+      "source_path": "native-control-10/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 128480,
+      "raw_sha256": "1cc78649083f7a2534752bf58debd31d824cac2859e715eed3ed0e2050612abc",
+      "archive_sha256": "647e8349975309170a8f7a2d1d3d0ca6ef3988a53c783eb420e80d379ed6a31c"
+    },
+    "native-control-10-summary.json.gz": {
+      "source_path": "native-control-10-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 10821,
+      "raw_sha256": "932e5cbfc571aa77cabfe8192ea111c8c7fd8507715e7f2a8044f369d19b322f",
+      "archive_sha256": "4d61d0af32e9f831757f9f8e6850d7b8b427c4478139fe1c0c1f3abe2668760f"
+    },
+    "native-control-10/matches/800249c8f24f766104c382510d52aee0/worker.log.gz": {
+      "source_path": "native-control-10/matches/800249c8f24f766104c382510d52aee0/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 104880,
+      "raw_sha256": "c93cffc2a6ec22eca597831ad0a0cdad771b3530c3553c3fb4e14b4305bf45a9",
+      "archive_sha256": "bdd487f9115f54f096c654cb7898bdeb09a473bc4c132db158f78493ed01d3cc"
+    },
+    "native-capacity-4-120/report.json.gz": {
+      "source_path": "native-capacity-4-120/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 493523,
+      "raw_sha256": "bb4f4874ab05a27fa954100436d437291ee945884624fcd4bc86db04e6b1865b",
+      "archive_sha256": "45068690322c30d6f0723f14d38f056593cbf5a6c7a041a68e6bae77e4c394ff"
+    },
+    "native-capacity-4-120-summary.json.gz": {
+      "source_path": "native-capacity-4-120-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 22712,
+      "raw_sha256": "978c3daea340bc813c031a2c051661e63cc73e66287cd387c14bd320fe975686",
+      "archive_sha256": "dab9ae840256ca96aed24c42a552d8dbcfa2882be2c9e7483899df3777838c8b"
+    },
+    "native-capacity-4-120/matches/886f2c1fe721a3d0653844c74c28744b/worker.log.gz": {
+      "source_path": "native-capacity-4-120/matches/886f2c1fe721a3d0653844c74c28744b/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 378685,
+      "raw_sha256": "dea5a1da224c907f7286bf52031420d96f539dc3637eb1ce9c52e039771e3317",
+      "archive_sha256": "adb1e2bb8266b9a348d32fc1ce9177e4054a48ae4293f8b3e66485eab16256a6"
+    },
+    "native-capacity-4-120/matches/8cd333e5a178a091e501389a811bc4c4/worker.log.gz": {
+      "source_path": "native-capacity-4-120/matches/8cd333e5a178a091e501389a811bc4c4/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 378519,
+      "raw_sha256": "d71cf95ce44a3cd4889b115f8cf1731ffb3c3f40b6098cd443ed6d7c225bd710",
+      "archive_sha256": "39e49fbefc4f192b64727db2f0ffe8188783e844b7471fad5c4e825dd01244db"
+    },
+    "native-capacity-4-120/matches/b1443ea146f0b35a26c01f6a23c48d21/worker.log.gz": {
+      "source_path": "native-capacity-4-120/matches/b1443ea146f0b35a26c01f6a23c48d21/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 377949,
+      "raw_sha256": "779637e71a00bb9837e020b0732ee23f9cb367b32714bf4b8ed8e164dfd68e5d",
+      "archive_sha256": "a91221d682da01ba33687a8c8f77937ea67bdd3dfcc3e14b479481d341f41eb7"
+    },
+    "native-capacity-4-120/matches/e15eb3b2836fd3f1bae53f10b308e66d/worker.log.gz": {
+      "source_path": "native-capacity-4-120/matches/e15eb3b2836fd3f1bae53f10b308e66d/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 377909,
+      "raw_sha256": "dbf44fa9d41d536719d6dd8e11d26e285b5beb6d70d4a42193c7bb9ae5b5fe1d",
+      "archive_sha256": "f76f66686b7a038a2449f0c1438fbff95f214bfbd0f201a663806cade16fd9b7"
+    },
+    "native-capacity-6-120/report.json.gz": {
+      "source_path": "native-capacity-6-120/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 728611,
+      "raw_sha256": "24d5d35ae6c32c7204d73a2a433556f6958595f5b23a9e952575a0396922e3b9",
+      "archive_sha256": "24baf6c388435bed1257682b10af27e3bbd5dc8e09a3e30a700bf28e3e73eae8"
+    },
+    "native-capacity-6-120-summary.json.gz": {
+      "source_path": "native-capacity-6-120-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 22749,
+      "raw_sha256": "74a8cfd35d0f6d4744192a32f5f93104ac44083b3e1b01444aa6f967113b10ef",
+      "archive_sha256": "1c510059baf901cda4d889a9294809ae27b7f56d5e79f095dfdd69d52fc4d0db"
+    },
+    "native-capacity-6-120/matches/0c110738efea1f739ac54a29a050a8e0/worker.log.gz": {
+      "source_path": "native-capacity-6-120/matches/0c110738efea1f739ac54a29a050a8e0/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 386912,
+      "raw_sha256": "1cf7b9cbd7a22de7e26a0d0d5e0a2b6d7b9055189675c7cdf757b693a45109be",
+      "archive_sha256": "1576027efe1f66d8728829d1459cce1768acb7ee5a234aad938235f8987f7e89"
+    },
+    "native-capacity-6-120/matches/1784c965e528c0a60bb447a77006d2ce/worker.log.gz": {
+      "source_path": "native-capacity-6-120/matches/1784c965e528c0a60bb447a77006d2ce/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 385916,
+      "raw_sha256": "adafe71994ebc21212504be51d3ce437925ca704554b65ea0de5cfab52f30b0f",
+      "archive_sha256": "b8c2ed9d18978d42b83ccd21bae44dd4df65c86ae4ca0d8c8969f32c4636639a"
+    },
+    "native-capacity-6-120/matches/38c15d7238e1d3726125dabef852f5c7/worker.log.gz": {
+      "source_path": "native-capacity-6-120/matches/38c15d7238e1d3726125dabef852f5c7/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 384695,
+      "raw_sha256": "568b7dc641929d6a66268b1a828ff050eb592be4653b7cc8d12df6bd737c615a",
+      "archive_sha256": "93caf87e88c57cff3059c4482670037d4038addb7b9deb333ec78dbc1e92b4c5"
+    },
+    "native-capacity-6-120/matches/92ff00f317f9624d3a2edd9719513e57/worker.log.gz": {
+      "source_path": "native-capacity-6-120/matches/92ff00f317f9624d3a2edd9719513e57/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 382658,
+      "raw_sha256": "fa0c3670d479cc1b0a7896c62ebfa711646f71834a5ab284c526f716cef6bea3",
+      "archive_sha256": "b4a0dbf8a76d2b89f9818d10be6c2bc4fa411307869d4f40c7eff3443c790319"
+    },
+    "native-capacity-6-120/matches/c8786ee85dbd2348487c9f160c9923e4/worker.log.gz": {
+      "source_path": "native-capacity-6-120/matches/c8786ee85dbd2348487c9f160c9923e4/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 387268,
+      "raw_sha256": "2593eef6666028948c1fa3fc72cad8d74aef091bab90795dc03f92018e634564",
+      "archive_sha256": "53cd43986d4ec48bbf8835cf05cfedafda2090c4731af9d594762dce2f17e38f"
+    },
+    "native-capacity-6-120/matches/df6a588025fce2b943eae2205f6f65bd/worker.log.gz": {
+      "source_path": "native-capacity-6-120/matches/df6a588025fce2b943eae2205f6f65bd/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 385148,
+      "raw_sha256": "de11eb86b2033ffb57514a932f3bfb36e972d80e8ffed42970ad5b41c6a17703",
+      "archive_sha256": "e456c53e3cadf2269863ad31744e4aa97d8955c2dbf2022f699857d4ba296da2"
+    },
+    "native-capacity-8-120/report.json.gz": {
+      "source_path": "native-capacity-8-120/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 873466,
+      "raw_sha256": "47b2bdf90a206da02ebf9f4fc5f11f23afa1e9641c51e3011bfcacd05d8dbaaf",
+      "archive_sha256": "d20f45391965d6641ae2c55ccb02e0c445a978e443e6e46f01e1cf8d745000f4"
+    },
+    "native-capacity-8-120-summary.json.gz": {
+      "source_path": "native-capacity-8-120-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 3822,
+      "raw_sha256": "57451d1e73d3ebbc029a1b0bd6529127f05f0942a9bd5baf2f02f8a710009664",
+      "archive_sha256": "3ac49f5032d0c16018d2de89aa6c788e478b0512685f81d1e0dea8cee307f738"
+    },
+    "native-capacity-8-120/matches/1c0bf1a74b9a1efa1e89631b2362b382/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/1c0bf1a74b9a1efa1e89631b2362b382/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 388079,
+      "raw_sha256": "3c8b0b9f19ba7fb329fd9bddf318d4c5a55d605df8c336dfb20f206aec0741c3",
+      "archive_sha256": "8ee029725743e4dc3e53f5d7e35a658debea078fb497c486c1d84f2ea8fb91d1"
+    },
+    "native-capacity-8-120/matches/278d652dfddc7a7a6e4682a7d8a9554e/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/278d652dfddc7a7a6e4682a7d8a9554e/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 391377,
+      "raw_sha256": "30a303c03e11a34e8f8038786364088e8b793217de4a8e38c9fc20c8ee2f0e30",
+      "archive_sha256": "fe19385a84b8bf7c935e1f71d75b14cb0ea4c1f5a01eb82eb71bbfe12ac0c60d"
+    },
+    "native-capacity-8-120/matches/45edd0eb20b7f09f3aec2af436832ec3/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/45edd0eb20b7f09f3aec2af436832ec3/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 388141,
+      "raw_sha256": "87368f1efd2804f8f9ba2bf25be46d99155f4a2f3fd058a9922b0b3afeb39501",
+      "archive_sha256": "ee31941cb2c4ef5a1db76f8e6d95dc1616c9fce0547c2733571b58e83258086d"
+    },
+    "native-capacity-8-120/matches/49ec06ff5c70cf78694252143f54f029/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/49ec06ff5c70cf78694252143f54f029/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 393875,
+      "raw_sha256": "224886a2abebec60e1f882419401cf18e1ff69278b23038aeb0187ce82240f1c",
+      "archive_sha256": "3a3b4566d39a23314528af130dab6245aa134adc96eb85c38011ca697b1a5ba6"
+    },
+    "native-capacity-8-120/matches/cd2bd7944fa42362a24e7bdf48d10fb5/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/cd2bd7944fa42362a24e7bdf48d10fb5/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 393328,
+      "raw_sha256": "4ec47e91440e21478bf7449e1ccf4f61af3c2a21102890a7fe8214138fd496ed",
+      "archive_sha256": "ad1e72f75d7f216a6f9b4520b164337355cf0d486630c455f3295113a6e0e78c"
+    },
+    "native-capacity-8-120/matches/d906ba57363e9558aa925d358aa62309/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/d906ba57363e9558aa925d358aa62309/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 386582,
+      "raw_sha256": "6871df5865b775b50314c9bb2fc7260cb91b9d73bc4b8571f2df61d5683995a2",
+      "archive_sha256": "821578733842766076926d207e099aad6802e73e0947bd3b9c592ffc4445ff22"
+    },
+    "native-capacity-8-120/matches/e6fff9077d3dae69326fcb1e9da1ee59/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/e6fff9077d3dae69326fcb1e9da1ee59/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 389236,
+      "raw_sha256": "e527f99af6d044fcc9c3662b22e49fc31640a3a5c555b59845edcb432c1d872a",
+      "archive_sha256": "02e639762f28cd12b5b6f8ab69465457e4c89f1fa3e04d209b100cbf53180ba8"
+    },
+    "native-capacity-8-120/matches/f95a6f1e1ef06cc124f3833ff650e68b/worker.log.gz": {
+      "source_path": "native-capacity-8-120/matches/f95a6f1e1ef06cc124f3833ff650e68b/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 390664,
+      "raw_sha256": "39d81337f3a6162c9b28d040b5c22e2df2efe3e2ed7d149012ea247db3b0c591",
+      "archive_sha256": "2a8273018736c5a8e81e175df1623327ac8765e8414e401eef5e1a418da8eff4"
+    },
+    "capacity-4-180/report.json.gz": {
+      "source_path": "capacity-4-180/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 8853,
+      "raw_sha256": "265eb79ab5fe4e5b8b53e9806fe0665a9f39c70a22c022d7a5e1c091cf450622",
+      "archive_sha256": "c5b74a9a3335b51910f6737b3ab52011249a8c73033186fc72e1054e2f4a2fed"
+    },
+    "capacity-4-180-summary.json.gz": {
+      "source_path": "capacity-4-180-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 9564,
+      "raw_sha256": "ec27d1197fa70dd94c6fdd4556a306648615f5eb620e0bf907115c22914b7655",
+      "archive_sha256": "0a8efea73d1f97f7122970dcd4625746a97cc85ddb323c122f383c93d40206e8"
+    },
+    "capacity-4-180/matches/0935b5ccb61c898eee1177dbad74893f/worker.log.gz": {
+      "source_path": "capacity-4-180/matches/0935b5ccb61c898eee1177dbad74893f/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 584051,
+      "raw_sha256": "95a3339dd3f089a50a2d57146276ac4ce15ad9762df976e92182ff1ed0c24f83",
+      "archive_sha256": "4bf77669953c6ed4a20f2c33c4a5eca799b3f641cfbc7f8896d0a02211166020"
+    },
+    "capacity-4-180/matches/4637ce2fa70d6ec2beb8be867bc22ae7/worker.log.gz": {
+      "source_path": "capacity-4-180/matches/4637ce2fa70d6ec2beb8be867bc22ae7/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 581489,
+      "raw_sha256": "62f0dcbc53671ccf6c41249c9e85e918d36bade0dd0f96a13f531b44f824a6f8",
+      "archive_sha256": "dfe7ef05708a6cb3c7d58cd37f8ca047a0ececca2349ec47c38e6ff97cb7a1c1"
+    },
+    "capacity-4-180/matches/48d377be22ba0ab29aa69e556d676300/worker.log.gz": {
+      "source_path": "capacity-4-180/matches/48d377be22ba0ab29aa69e556d676300/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 577164,
+      "raw_sha256": "8b167eadf42a721637e26d72df275b025ce028f5012754ae1529d79f45353056",
+      "archive_sha256": "d08791971b4eb54fd087cffe2f06d93fe5618b029954b57a30719a9976f32e3c"
+    },
+    "capacity-4-180/matches/bb57e5ffcbc2e5c3e08fb678d362e98a/worker.log.gz": {
+      "source_path": "capacity-4-180/matches/bb57e5ffcbc2e5c3e08fb678d362e98a/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 579791,
+      "raw_sha256": "cdb8551c74c7dc958e824b7b615a9374fd0b069e258053825d029e66dd341ed3",
+      "archive_sha256": "41f8fa0bd033543fe05291e1298e8da5c65162fa1b0fbd824a731a8ab5e5c426"
+    },
+    "capacity-4-180-uninstrumented/report.json.gz": {
+      "source_path": "capacity-4-180-uninstrumented/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 8705,
+      "raw_sha256": "436d2abf95f352d43cbe854b46face9718ab77d139cef5d03015c95e12d57f3a",
+      "archive_sha256": "e5a956d1fd9a9a428a1a95652e88bca6a8878cfd001429801dc2fac99f646f53"
+    },
+    "capacity-4-180-uninstrumented-summary.json.gz": {
+      "source_path": "capacity-4-180-uninstrumented-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 9797,
+      "raw_sha256": "7fe01e336f5226d559611aa2b7e85a7aa14b1f305b8bf8bc78b78188140b408a",
+      "archive_sha256": "da8de96fea3eda7e2dc109576be5702ade8e5b3d1212a2f0c24b28dc1dfc8fc1"
+    },
+    "capacity-4-180-uninstrumented/matches/0e7ffdd6dc67f8c4a94362e5ca1e94c2/worker.log.gz": {
+      "source_path": "capacity-4-180-uninstrumented/matches/0e7ffdd6dc67f8c4a94362e5ca1e94c2/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 14669,
+      "raw_sha256": "eb610c5258885d0fb67607512518fbf37f43fa7ab9aa93791eda9b9512c8d1be",
+      "archive_sha256": "0eed39cc66c7e7803db37a6f64c162ee133f6fd4e4375cfa59d49c3dd08d6c60"
+    },
+    "capacity-4-180-uninstrumented/matches/3226e423e9b30fc4f9609abf608553f5/worker.log.gz": {
+      "source_path": "capacity-4-180-uninstrumented/matches/3226e423e9b30fc4f9609abf608553f5/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 14768,
+      "raw_sha256": "e7db2575c0da4e1827bc1e5a7cb41d37ea2bbe0f2b605e8d119a3796b1981140",
+      "archive_sha256": "9c30ba6693b08fd488e3c836b9132d68c40b32576520d39fe5c67d5514496016"
+    },
+    "capacity-4-180-uninstrumented/matches/473ce3966f62d392c8ba26868db2c583/worker.log.gz": {
+      "source_path": "capacity-4-180-uninstrumented/matches/473ce3966f62d392c8ba26868db2c583/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 13262,
+      "raw_sha256": "73f12eacadddb5f0ce1fc07daa36b32c95975109ff75b1806cb75bee1356c0dd",
+      "archive_sha256": "f3dea3f60eec4bd1ba62e0ce3ee1182d52335f8f284c4db6f22baf456f24f103"
+    },
+    "capacity-4-180-uninstrumented/matches/c96b8e667232a8777032c65c4e3ce595/worker.log.gz": {
+      "source_path": "capacity-4-180-uninstrumented/matches/c96b8e667232a8777032c65c4e3ce595/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 14423,
+      "raw_sha256": "fbaf7df005fc47f4383988e70dcc0dfa5027041195a44806287331765f0ee4b6",
+      "archive_sha256": "86a64fe1e246097c61d68fe8a8ae34adf99f33b59f5efd980d3e3e72904d8ded"
+    },
+    "native-source.tar.gz": {
+      "source_path": "native-source.tar.gz",
+      "encoding": "stored",
+      "raw_bytes": 117571,
+      "raw_sha256": "a32fd7bc46f3deb935d608d06f6b35785c8f2fe321b8a30a850cf91199b54b9e",
+      "archive_sha256": "a32fd7bc46f3deb935d608d06f6b35785c8f2fe321b8a30a850cf91199b54b9e"
+    },
+    "remote_native_control.py": {
+      "source_path": "remote_native_control.py",
+      "encoding": "stored",
+      "raw_bytes": 8233,
+      "raw_sha256": "b9e713664ea24bfa0250b1522a6b239c82026d4dff0858ca223cb87c48c198d8",
+      "archive_sha256": "b9e713664ea24bfa0250b1522a6b239c82026d4dff0858ca223cb87c48c198d8"
+    },
+    "server-native-scope": {
+      "source_path": "server-native-scope",
+      "encoding": "stored",
+      "raw_bytes": 214,
+      "raw_sha256": "379d0e52ecec617a874247df2271e4fed2af7113406e3d4bac5b0dbe7f97967f",
+      "archive_sha256": "379d0e52ecec617a874247df2271e4fed2af7113406e3d4bac5b0dbe7f97967f"
+    },
+    "final-host.json": {
+      "source_path": "final-host.json",
+      "encoding": "stored",
+      "raw_bytes": 398,
+      "raw_sha256": "9083db0e3860aefd52b2f92e38f5f0d1842a3338256622df031d8254f8d1acb7",
+      "archive_sha256": "9083db0e3860aefd52b2f92e38f5f0d1842a3338256622df031d8254f8d1acb7"
+    }
+  }
+}

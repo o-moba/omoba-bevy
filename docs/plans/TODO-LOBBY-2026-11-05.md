@@ -6,30 +6,41 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 ## Current release checkpoint — 2026-11-09
 
-Previous game head `c97225e5` contains buffered telemetry/evidence, current `dev`
-and the supported Release `macos-15` runner. Release42592591932 is fully green,
-including macOS; main CI42592591947 still has its PostgreSQL journey running at
-this checkpoint. The new server-metrics package requires and must receive its
-own CI at the pushed HEAD; do not transfer the parent conclusions to it.
-Portal head `37e705c`: typecheck,257 unit PASS/3 expected skips,RU/global builds,
-ranked-seasons6 and ranked-notices7 Next+Chrome checks PASS. No portal GitHub
-checks are configured; richer loopback browser journeys and independent review
-remain. Neither PR is merged; no production/RU/release action has occurred.
+Latest measured continuation: [native Linux capacity boundary and recomputing verifier](../evidence/linux-capacity-2026-11-09/README.md).
+On the shared2-vCPU dev VPS, independent native20Hz Casual shards pass10/30s,
+40/4arenas/120s and60/6arenas/120s. The accepted60-client step has19.7334–19.8022
+sends/s,18.5699Hz median accepted snapshots,172409 application dispatches,
+147586 transforms,140566 snapshots and0 sequence gaps/restarts. Server CPU72.77%,
+peak RSS297.70MiB; generator65.80%/44.36MiB. The next80/8arenas/120s step FAILS:
+15.9626–16.5988 sends/s and7 signed sequence gaps/0 restarts; server95.20%/382.23MiB.
+The exact rejection is retained, not converted into a server-only or RU conclusion.
 
-Latest measured continuation: [server dispatch, latest-transform age and cadence](../evidence/server-load-metrics-2026-11-09/README.md).
-Instrumented1000/120s PASS with1000 signed native AI peers/100 Casual arenas:
-each19.834–20.000 actual sends/s,2712856 gameplay Transform handler entries,
-0 signed sequence gaps/restarts,1858997 complete snapshot sends. Latest-transform
-age at snapshot mean34.868ms; world-broadcast gap mean73.596ms; both p95/p99
-exclusive upper bounds250/500ms. This is not per-command ACK latency or proof
-that coordinates changed. Final100 healthy workers, exact rosters,0 observed
-authority resets and complete owned cleanup pass.562 server and12 Python tests
-pass; verifier recomputes archived observation-time LOAD_METRICS. Accepted
-snapshots median13.025Hz/p0512.018 and aggregate received traffic499.660Mbit/s
-without network headers keep sustained Linux/RU/uplink/WAN capacity open.
-Previous [buffered-input proof](../evidence/input20-buffered-2026-11-07/README.md)
-and rejected diagnostics remain immutable. Original68 stays62 done/5 partial/1
-open; all critic/UI/physical/off-host/trust/release gates remain additional.
+Node A/B40/4arenas/180s rejects its old receive-gap gate at p95578.944ms
+instrumented and587.583ms uninstrumented. Native passes the same step while server
+broadcast stays53.043ms mean with zero gaps, identifying the single Node process
+as the multi-arena measurement bottleneck. Use native shards for capacity gates.
+All native fixture processes/DB/roles are removed; ordinary dev services stayed
+active. The43-file selected evidence verifier checks hashes/source maps and
+recomputes input/wire/population/resources/server metrics,including7 gaps.
+
+The RU README now marks its old16MiB/arena formula unvalidated for Linux:
+native peak summed RSS/arena is53.43MiB at4 and49.62MiB at6 including lobby.
+The16-arena setting,500MiB unit,nftables and production configuration were NOT
+changed. This is instrumented loopback Casual on a shared dev host,not long soak,
+vs Bots/mixed,WAN,real/identical RU host,uplink or production SLA. #13 stays open.
+Next is a separately reviewed longer6-arena native soak/uninstrumented comparison,
+then actual/identical isolated RU-host and measured network budget.
+
+Game source/artifact parent `97b119f1`: Release42603752686 fully SUCCESS;
+main CI42603752525 has6/7 SUCCESS with PostgreSQL journey running at this checkpoint.
+The new documentation/evidence HEAD requires its own CI. Portal `37e705c`:
+typecheck,257 unit PASS/3 expected skips,RU/global builds,ranked-seasons6 and
+ranked-notices7 Next+Chrome checks PASS. No portal GitHub checks are configured;
+richer loopback browser journeys and independent human review remain. Neither PR
+is merged; no production/RU/release action occurred. Previous [server-load1000](../evidence/server-load-metrics-2026-11-09/README.md)
+and [buffered-input](../evidence/input20-buffered-2026-11-07/README.md) proofs
+remain immutable. Original68 stays62 done/5 partial/1 open; all critic/UI/
+physical/off-host/trust/release gates remain additional.
 [All decisions, open PRs and next commands](HANDOFF-LOBBY-2026-11-07.md).
 
 
@@ -147,7 +158,7 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 | 10 | major | bug | Launching or accepting an invite while a member is already Searching another queue deadlocks the party | `server/src/match_service.rs:395` | In party_tag (party.rs:627-632) or enqueue, exclude from the party tag a member whose existing Waiting preference differs from the party's launch preference (treat it as solo), or refuse Launch/Accept with a PartyError when a member is currently queued and surface it. Add a match_service test: party {Casual-queued, Ranked-queued} still seats each as before. | done — member in another queue is seated alone |
 | 11 | major | gap | No 'Match found / Accept' step: the client jumps straight from Searching to the worker | `client/src/match_service.rs:528` | Add MatchServiceView::ReadyCheck{deadline_secs, accepted, needed} on the lobby before spawning a worker; client searching screen shows 'Матч найден' with a countdown and Принять/Отклонить; declines/timeouts leave the queue, the rest keep their queue age. Keys: searching.ready.title/accept/decline/waiting in ru+en. (LR-32) | done — explicit signed unanimous 15-second check before worker spawn; native RU 852×393 capture verified with countdown and both controls (product-ready-ui-db-confirmed). Mobile feedback is tracked separately in C3. |
 | 12 | major | gap | No horizontal path: one baked lobby address, workers only on the lobby's host, directory plan unscheduled | `docs/plans/game-directory.md:3` | M-L minimum viable path: (1) D0 bake a DNS name (play.omoba.ru) instead of the IP; (2) D1 signed directory JSON on the portal listing N lobbies (host, port, weight, status) that all point OMOBA_DATABASE_URL at the same RU PostgreSQL (the career store settles rating per result, so ratings stay consistent); client picks one at start and falls back to the baked name. Each lobby keeps its own match root and coordinator l | partial — P7 scheduled; bounded signed D1 contract, concrete IP targets, compatibility/maintenance/weight policy and offline signer/verifier implemented.197 shared/2 operator and9 independent process/Node checks PASS. Opt-in fixed-scope Account API/portal HTTP delivery also implemented:4 API and7 actual-stack checks PASS; portal257 PASS/3 expected skips. Native anonymous transport/trust/cache also verified:4 HTTP/9 native/9 endpoint cases. Admission coordinator9 new cases and full dev-client1601/0/1, strict clippy/Android checks PASS. Native startup/queue/policy-UI/network binding and compiled trust/fallback configuration are implemented; all11 runtime regressions/full7-job715a8117 CI pass. Explicit public package input, live publishing/key provisioning, shared cross-host discipline, actual cross-host party/Resume and real second-host proof remain open. |
-| 13 | major | gap | Arena capacity never measured on the RU host; probe cannot simulate more than 100 clients | `ops/vps/ru/README.md:533` | M: run the probe on the RU host (or an identical VPS) with --limits-from omoba-lobby-ru.service for --preference=bot_practice and a --mix, fill README:545-548, set capacity/cgroup/nftables from it. S: lift the 100-client assert to 1000 and allow --capacity up to 100 with `--mix` so a 100-arena run is possible on a bigger box. | open — LR-09 measurement on the RU host; probe now allows --allow-large up to 1000 clients |
+| 13 | major | gap | Arena capacity never measured on the RU host; probe cannot simulate more than 100 clients | `ops/vps/ru/README.md:533` | M: run the probe on the RU host (or an identical VPS) with --limits-from omoba-lobby-ru.service for --preference=bot_practice and a --mix, fill README:545-548, set capacity/cgroup/nftables from it. S: lift the 100-client assert to 1000 and allow --capacity up to 100 with `--mix` so a 100-arena run is possible on a bigger box. | open — native dev-VPS Casual boundary now measured:60/6arenas/120s PASS,80/8 FAIL with7 gaps; old Node multi-arena gate identified as generator-bound. Real/identical RU host,long soak,vs Bots/mixed and uplink remain; no16-arena/production setting changed. [Proof](../evidence/linux-capacity-2026-11-09/README.md). |
 | 14 | major | gap | No end-to-end Ranked match: terminal → settle → rating → history is never exercised on the real lobby+worker binary with PostgreSQL | `scripts/test_public_mvp.mjs:544` | Add `harness/tests/ranked_journey.rs` (#[ignore], OMOBA_HARNESS_DATABASE_URL): (1) migrate with `harness::server::prebuilt("migrate-career")` (admission.rs:238-249); (2) `ServerProcess::spawn_with_env` with the lobby env from registration_journey.rs:221-235 (OMOBA_SERVER_ROLE=lobby, OMOBA_MATCH_MODE=release, OMOBA_MATCH_CAPACITY=1, OMOBA_MATCH_FIRST_PORT, OMOBA_MATCH_BIND_IP/PUBLIC_HOST=127.0.0.1, raised OMOBA_LIMIT_ | done — real ten-client signed AI match completed in 406.115 s on canonical rules; all ten saved results, fresh profiles, ±16 rating, 150/100 XP and exactly one history row verified. Reusable `public_bots_rehearsal.py --require-victory`; no map/clock/damage override. |
 | 15 | major | gap | One player's cancel during handoff/draft aborts the whole 10-player match; the other 9 get a raw code and lose their queue place | `server/src/match_service.rs:459` | On cancel of an assigned profile, remove only that human from the manifest (bot-fill the seat for Casual/vs Bots); for Ranked abort the allocation but re-insert the other nine into `waiting` with their original `queued`/`order` and `casual_since`, give the leaver a short requeue cooldown, and add the ru/en/zh `queue.failed.allocation_cancelled_or_expired` text ('Один из игроков покинул матч, ищем снова…'). | done — exact durable lobby release intent and owning-worker ACK preserve other Casual/vs-Bots seats without rewriting the manifest; frozen/running roster keeps admission and Resume. Ranked FIFO/dodge behavior retains full baseline CI.4 new regressions,502 server tests/strict clippy and real10-human loopback handoff→9 humans+1 bot Running pass. Fresh branch-wide release CI remains required. |
 | 16 | major | gap | Ranked cohorts never merge or widen: 10 Ranked humans across cohorts never form a match (LR-35) | `server/src/match_service.rs:884` | Add a time-based allowance to the policy: `fits_cohort_with(low, candidate, spread, merge_newcomers)` where spread grows e.g. 300→600 over 3 min and the newcomer bracket merges after 5 min; carry the allowance in the Manifest so the store's validate_current_cohort accepts exactly that roster; and show 'в вашем диапазоне рейтинга: {humans}' on the searching screen. | done — CohortAllowance::after_wait, store accepts the max window; parties stay one base cohort |
@@ -241,11 +252,13 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
    workflow and an exact matching native binary; preserve rejected visual evidence.
 5. Complete #1/#2/#12/#20/#50 and #13 host acceptance: actual multi-host/WAN,
    party/Resume faults, public trust packaging/provisioning and sustained cadence,
-   latency/egress/SQL-heartbeat load. Measure the RU host or an identical approved
-   host with the existing probe and derive real capacity/cgroup/firewall limits.
+   latency/egress/SQL-heartbeat load. Extend the accepted six-arena native dev
+   step to a longer/uninstrumented soak, then measure the RU host or an identical
+   approved host with independent native shards, vs Bots/mixed coverage and real
+   uplink before deriving capacity/cgroup/firewall limits.
 6. Refresh/integrate the concrete C2/C4 host-tool review candidates after their
    existing owner decisions, then perform the owner-controlled RU rollout/recovery
-   checks. Match **career12/portal11 and the exact paired protocol16 binaries**;
+   checks. Match **career13/portal11 and the exact paired protocol16 binaries**;
    do not follow historical career9/10 rollback or deployment snippets below.
 7. Audit every original finding, critic, UI/physical and release criterion against
    current authoritative evidence, update the ledger/changelog and obtain the

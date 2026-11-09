@@ -1883,3 +1883,64 @@ server-side per-command acceptance, input-to-snapshot latency иserver cadence,
 остаются62 done/5 partial/1 open. UI-2/UI-3/current pixels, physical C3,
 independent off-host/RU recovery, C2/C4 owner decisions, trust/release и merges
 не закрыты и не подменяются локальными проверками. Production/RU не изменялись.
+
+
+## 2026-11-09 — native Linux capacity boundary
+
+Release42603752686 для `97b119f1` полностью SUCCESS и публикует отдельный CI
+artifact `linux-capacity-bots`; generator не входит в игровые пакеты. Actual server
+SHA256 `ecb7648e…f5ca`, bots `89660bc1…c6d`, cgroup wrapper `379d0e52…67f`.
+Ступенчатый instrumented loopback прогон выполнен на существующем общем dev VPS
+(2 vCPU,3480344KiB RAM) с server limits450M/500M/190%/96 и одноразовой restricted
+career13/portal11 fixture. Рабочая `omoba_dev`,ordinary dev lobby/API и production
+не менялись. После каждого прогона owned processes/DB/roles удалены; финальная
+проверка подтверждает0 capacity executables,0 `omoba_test`,оба dev services active.
+
+Native control10/1arena/30s PASS20.0276 sends/s.40/4arenas/120s PASS:
+19.9890–19.9933 sends/s,accepted snapshots p50/p0519.2026/19.1382Hz,116008
+application dispatches,99328 gameplay transforms,96119 snapshots,0 gaps/restarts.
+Server CPU50.64%,peak RSS213.70MiB;generator43.81%/29.56MiB.60/6arenas/120s PASS:
+19.7334–19.8022 sends/s,snapshots18.5699/18.4987Hz,wire p50/p9582557/84928B/s,
+172409 dispatches,147586 transforms,140566 snapshots,0 gaps/restarts. Broadcast
+mean53.896ms,p95/p99<75ms;latest-transform age mean25.785ms,p95<55/p99<150ms.
+Server72.77%/297.70MiB;generator65.80%/44.36MiB. Все принятые runs имеют exact
+rosters,final health-v2 SQL/journal ready и полный cleanup.
+
+Следующая ступень80/8arenas/120s **FAIL** неизменного19.5–20.5Hz input gate:
+15.9626–16.5988 sends/s,snapshots p50/p0517.6672/17.5833Hz.195800 dispatches,
+163838 transforms,180700 snapshots,**7 signed sequence gaps/0 restarts**.
+Broadcast mean56.416ms,p95<75/p99<100ms;latest-transform age mean42.607ms,
+p95<150/p99<500ms. Server95.20%/382.23MiB;generator85.81%/59.25MiB.
+Это отказ всей shared-host fixture при высокой загрузке и server,и generator;
+не server-only diagnosis и не production/RU SLA вывод. FAIL и7 gaps сохранены.
+
+Node A/B40/4arenas/180s дважды отклоняет старый snapshot-gap p95<100ms gate:
+instrumented p50/p95/p991.687/578.944/669.937ms,uninstrumented
+1.697/587.583/688.778ms. При broadcast mean53.043ms,p95/p99<75ms,zero gaps и
+native PASS той же4-arena ступени подтверждён bottleneck одного Node process
+(около1.71 sends/s),а не доказанный server-capacity отказ. Для следующих
+multi-arena gates используются independent native shards. Старый Node probe
+остаётся lifecycle/small diagnostic,не capacity oracle для20Hz profile.
+
+[Полный selected packet и verifier](../evidence/linux-capacity-2026-11-09/README.md)
+содержит43 hashed evidence/helper files. Verifier проверяет exact15-source archive
+(AppleDouble sidecars исключены),source/binary hashes,population/input/wire/
+producer metrics,server aggregates из worker logs,resources,rosters/health/cleanup
+и обязательные7 gaps на8 аренах; `python3 …/verify.py` PASS. Raw bot logs,private
+keys,DSNs,binaries и непроверенные целые output dirs не архивируются.
+
+RU README обновлён: старая developer-Mac16MiB/arena константа не переносится на
+Linux. Peak summed server RSS/arena≈53.43MiB на4 и49.62MiB на6 включая lobby,
+не pure marginal cost. **16-arena setting,MemoryHigh/Max,TasksMax,nftables и
+production configuration не изменены.** #13 остаётся open: это120s instrumented
+Casual loopback на shared dev VPS,не длительный soak,uninstrumented comparison,
+vs Bots/mixed,real/identical RU host,uplink/WAN или production SLA.
+
+Следующий gate — отдельно проверенный более длительный native soak на принятых6
+аренах с uninstrumented comparison; runner пока ограничен120s. Затем изолированный
+реальный/идентичный RU-host,vs Bots/mixed и measured uplink/network budget. CI
+42603752525 для `97b119f1` на момент записи6/7 SUCCESS,PostgreSQL journey live;
+новый docs/evidence HEAD получает собственный CI. Портал и оба PR остаются в их
+проверенном/open состоянии; human review,WAN/multi-host/fault/trust,UI-2/UI-3,
+physical C3,C2/C4 owner decisions,independent RPO/RTO и final release не закрыты.
+Исходные68=62done/5partial/1open. Никакого merge/release/deploy/keys/grants.
