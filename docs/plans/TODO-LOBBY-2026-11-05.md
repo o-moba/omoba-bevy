@@ -2,15 +2,14 @@
 
 Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sessions. Source of truth for the plan: [ranked-launch-readiness-2026-11-05.md](ranked-launch-readiness-2026-11-05.md); decisions: ADR-027 in [../architecture/decisions.md](../architecture/decisions.md); progress: [../progress/2026-11-05-ranked-matchmaking-readiness.md](../progress/2026-11-05-ranked-matchmaking-readiness.md). Raw reviewer output (JSON, local only): `.agent/tasks/RANKED-LAUNCH-READINESS-20261105/raw/review-findings.json`.
 
-Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career13, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
+Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career13, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Users/wotori/git/ekza/omoba-bevy/target-b`.
 
 ## Current release checkpoint — 2026-11-10
 
-Verified game code/evidence HEAD `3c00011c0b67d3b21587754b45281887987a7fdc`,
-PR148 open into `dev`: CI42662261577 passes all7 jobs and Release42662261628
-passes macOS,Windows,Linux and Android;draft release skipped. Previous `73651bc6`
-also has fully successful CI42657406867 and Release42657406745. This documentation
-checkpoint requires its own CI/Release after commit.
+Game code/evidence HEAD `5cd10d83f4b1016060830b58f5b763e19e3f96ea`,PR148 open into
+`dev`,contains only the synthetic portal eligibility fixture repair. Parent `a7ef3492`
+has fully successful CI42671008602 (7/7) and Release42671009078 (4/4);the current
+code+documentation checkpoint requires its own CI/Release after commit.
 [Exact-Release workload evidence](../evidence/linux-capacity-workloads-2026-11-10/README.md)
 uses the server and generators from fully successful Release42657406745 at
 `73651bc6`. On the shared2-vCPU dev VPS,instrumented30s controls PASS for
@@ -28,11 +27,15 @@ replace isolated-host stepped+sustained acceptance. The previous instrumented300
 Casual FAIL(19.4589–19.5355/s),uninstrumented PASS and80/8 FAIL with7 gaps remain
 immutable. #13 stays open;original68 stays62 done/5 partial/1 open.
 
-Portal `37e705c04acb59816710584c414619b80f687f35`,PR33 open into`dev`,merge state
-CLEAN: typecheck,257 unit PASS/3 expected skips,RU/global builds,ranked-seasons6
-and ranked-notices7 Next+Chrome checks PASS. No portal GitHub checks are configured;
-these are not PostgreSQL/physical-device proof. Both PRs have zero formal human
-reviews/requests;self-review is not acceptance.
+Portal `ff8f50165bdce761425e27369d6fff7d8fd250ea`,PR33 open into`dev`:typecheck and
+257 unit PASS/3 expected skips. [Current portal loopback evidence](../evidence/portal-loopback-2026-11-10/README.md)
+binds7 signed-directory and5 leaderboard/privacy PASS groups on RU production Next+
+real RU Account API/PostgreSQL,including seasonal placement `Калибровка 3/20`. Previous
+RU/global builds and13 Ranked checks on`37e705c` remain valid for unchanged production
+code. Only stale test fixtures changed:Ranked maturity setup and seasonal leaderboard
+expectations. No portal GitHub checks are configured;these are not physical-device,
+WAN or RU-host proof. Both PRs have zero formal human reviews/requests;self-review
+is not acceptance.
 
 **Current RU decision is NO SHIP.** The dated S1–S12/P1–P9 matrix in
 [the RU release checklist](../../../ops/vps/ru/release-checklist.md) separates CI

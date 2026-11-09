@@ -18,9 +18,9 @@ they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 
 ## Current pre-release snapshot — 2026-11-10
 
-This is a readiness snapshot for game candidate
-`3c00011c0b67d3b21587754b45281887987a7fdc` and portal candidate
-`37e705c04acb59816710584c414619b80f687f35`, **not a release result**. No RU version
+This is a readiness snapshot for game code candidate
+`5cd10d83f4b1016060830b58f5b763e19e3f96ea` and portal candidate
+`ff8f50165bdce761425e27369d6fff7d8fd250ea`, **not a release result**. No RU version
 has been selected and no S3/S4/S10 deployment or publication has been authorized.
 The current decision is **NO SHIP**. `OPEN` means no acceptable evidence for this
 exact RU release; it does not mean a check failed. Replace this snapshot with the
@@ -28,7 +28,7 @@ filled result template only when executing an authorized release.
 
 | Rows | State | What is already known / what is still required |
 | --- | --- | --- |
-| S1 | OPEN | CI 42662261577 for `3c00011c` passed all 7 jobs and Release 42662261628 passed all four platforms. The owner-required local `make check` on the final release commit is not recorded |
+| S1 | OPEN | Parent `a7ef3492` passed CI 42671008602 (7/7) and Release 42671009078 (4/4). Current `5cd10d83` plus the documentation checkpoint needs its own CI/Release. The owner-required local `make check` on the final release commit is not recorded |
 | S2 | OPEN | Four-platform PR packaging is evidence of buildability, not `make release-ru` output in `dist/v<version>-ru/` with its contract and hashes |
 | S3–S4 | OPEN | Exact server/portal bundles have not been shipped or accepted on the RU host; owner-controlled action |
 | S5–S9 | OPEN | No current RU host status, external preflight, lobby/worker compatibility or reboot result for this candidate |
@@ -43,7 +43,8 @@ provisioning; independent off-host recovery with measured RPO/RTO; owner decisio
 for C2/C4; legal/provider/signing/catalog gates. The shared-dev mixed30s control
 reached 549.64 MiB summed process RSS (not PSS/cgroup usage), so the historical
 500 MiB lobby limit and 16-arena setting remain unvalidated. See
-[exact workload evidence](../../../docs/evidence/linux-capacity-workloads-2026-11-10/README.md)
+[exact workload evidence](../../../docs/evidence/linux-capacity-workloads-2026-11-10/README.md),
+[current portal loopback evidence](../../../docs/evidence/portal-loopback-2026-11-10/README.md)
 and [current handoff](../../../docs/plans/HANDOFF-LOBBY-2026-11-07.md).
 
 ## 1. Server and build gate (once per release)

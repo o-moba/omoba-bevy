@@ -1,13 +1,13 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальный checkpoint — exact-Release workloads и RU no-ship gates, 2026-11-10
+## Актуальный checkpoint — portal loopback, exact-Release workloads и RU no-ship gates, 2026-11-10
 
-Проверенный code/evidence HEAD игры `3c00011c0b67d3b21587754b45281887987a7fdc`,
-PR148 open в `dev`. Release42662261628 полностью SUCCESS:macOS,Windows,Linux,
-Android;draft release skipped. Основной CI42662261577 тоже полностью SUCCESS,
-все7 jobs включая PostgreSQL-backed journeys. Прежний `73651bc6` имеет полностью
-успешные Release42657406745 и CI42657406867. Этот documentation checkpoint
-сохраняется следующим коммитом и обязан получить собственный CI/Release.
+Игра PR148 open в `dev`; code/evidence HEAD `5cd10d83f4b1016060830b58f5b763e19e3f96ea`
+исправляет только synthetic portal fixture. Родительский documentation HEAD `a7ef3492`
+имеет полностью SUCCESS CI42671008602 (7/7) и Release42671009078 (4/4). Текущий
+code+documentation пакет обязан получить собственный CI/Release. Прежний проверенный
+code/evidence HEAD `3c00011c0b67d3b21587754b45281887987a7fdc` имеет Release42662261628
+и CI42662261577 полностью SUCCESS; `73651bc6` — Release42657406745 и CI42657406867.
 [Exact-Release workload evidence](../evidence/linux-capacity-workloads-2026-11-10/README.md)
 проверяет сервер и generators из полностью успешного Release42657406745 для
 `73651bc6` на общем2-vCPU dev VPS. Три instrumented30s Running-soak контроля PASS:
@@ -25,11 +25,15 @@ A/B не являются isolated-host sustained capacity. Instrumented300s FAI
 (19.4589–19.5355/s) сохранён;uninstrumented PASS не отменяет его. Старый80/8 FAIL
 с7 gaps тоже сохранён. #13=open,исходные68=62done/5partial/1open.
 
-Портал `37e705c04acb59816710584c414619b80f687f35`,PR33 open в`dev`,merge state
-CLEAN: typecheck,257 unit PASS/3 expected skips,RU/global builds и13 Next+Chrome
-Ranked checks PASS. GitHub checks не настроены;это не PostgreSQL/physical-device
-proof. В обоих PR новых человеческих reviews/requests нет. Нужен независимый
-human review;self-review не является приёмкой.
+Портал `ff8f50165bdce761425e27369d6fff7d8fd250ea`,PR33 open в`dev`. На текущем
+дереве typecheck и257 unit PASS/3 expected skips. [Current portal loopback evidence](../evidence/portal-loopback-2026-11-10/README.md)
+фиксирует7 signed-directory checks и5 leaderboard/privacy groups PASS на RU production
+Next+real RU Account API/PostgreSQL,включая seasonal `Калибровка 3/20`. Прежние RU/global
+builds и13 Ranked checks на`37e705c` остаются valid для неизменного production-кода.
+Исправлены только stale test fixtures: maturity для Ranked admission и сезонный счётчик/
+copy в leaderboard test. GitHub checks не настроены;это не physical-device/WAN/host proof.
+В обоих PR новых человеческих reviews/requests нет. Нужен независимый human review;
+self-review не является приёмкой.
 
 ### Текущее решение по RU — NO SHIP до внешних gates
 
@@ -251,7 +255,7 @@ root13GiB ниже20GiB, поэтому новую тяжёлую сборку �
 | Назначение | Worktree / ветка | PR / состояние на момент передачи |
 |---|---|---|
 | Игра, сервер, Account API, ops | `_workspace/worktrees/mm-game`, `feat/ranked-matchmaking-readiness` | [omoba-bevy#148](https://github.com/o-moba/omoba-bevy/pull/148), open, в `dev`; сюда сохраняется этот checkpoint |
-| Портал | `_workspace/worktrees/mm-web`, та же ветка; HEAD `37e705c04acb59816710584c414619b80f687f35` | [omoba-web#33](https://github.com/o-moba/omoba-web/pull/33), open, в `dev` |
+| Портал | `_workspace/worktrees/mm-web`, та же ветка; HEAD `ff8f50165bdce761425e27369d6fff7d8fd250ea` | [omoba-web#33](https://github.com/o-moba/omoba-web/pull/33), open, в `dev` |
 | Выпуск игры | `dev` → `main` | [omoba-bevy#101](https://github.com/o-moba/omoba-bevy/pull/101), **Draft**, решение владельца |
 | Выпуск портала | `dev` → `main` | [omoba-web#10](https://github.com/o-moba/omoba-web/pull/10), **Draft**, решение владельца |
 | Документация RU offer | `docs/lr-67c-built` → `dev` | [omoba-bevy#146](https://github.com/o-moba/omoba-bevy/pull/146), open, отдельная более ранняя работа |

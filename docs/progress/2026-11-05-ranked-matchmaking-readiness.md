@@ -6,7 +6,27 @@ players. Review method and the full list of findings: [the plan](../plans/ranked
 (eight reviewers, two-lens verification, a completeness critic; 68 confirmed
 findings). Decision record: ADR-027.
 
-## Current checkpoint — 2026-11-09
+## Current portal loopback checkpoint — 2026-11-10
+
+[Current portal evidence](../evidence/portal-loopback-2026-11-10/README.md) binds game
+code `5cd10d83f4b1016060830b58f5b763e19e3f96ea` and portal
+`ff8f50165bdce761425e27369d6fff7d8fd250ea`. RU production Next with the real RU-market
+Account API and loopback PostgreSQL passes all7 signed-directory checks and all5
+leaderboard/privacy groups. The latter include ordering/own row,no MMR/raw codes,390px
+overflow,settings opt-out and visible current-season `Калибровка 3/20`. Unit tests
+pass257 with3 expected skips;typecheck PASS. Production portal code did not change.
+
+Two stale fixtures were repaired rather than bypassing production checks. The portal
+seed now applies the established synthetic ten-public-completion maturity fixture
+before real Ranked allocation/settlement; its previous fresh profiles were correctly
+rejected with `ranked_locked`. The leaderboard test now uses seasonal placement counts
+and current `Калибровка` copy instead of the obsolete pre-season lifetime/newcomer
+expectation. Exact source and binary hashes, synthetic threshold setup and limits are
+in the evidence packet. This is not physical-device,organic matchmaking,WAN,RU-host,
+live-key provisioning or deployment proof; original findings stay62/5/1 and RU stays
+NO SHIP. The new game HEAD requires its own CI/Release.
+
+## Historical Linux checkpoint — 2026-11-09
 
 Latest measured continuation: [300-second native Linux soak and metrics A/B](../evidence/linux-capacity-soak-2026-11-09/README.md).
 The60-client/six-Casual-arena uninstrumented run passes300s at19.5349–19.6209

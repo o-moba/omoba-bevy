@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Repair the current portal fixtures: synthetic browser profiles now satisfy the
+  existing ten-public-completion Ranked admission fixture before real settlement,
+  and the leaderboard browser test checks current-season placement counts/copy.
+  On game `5cd10d83` and portal `ff8f501`, RU production Next plus real loopback
+  Account API/PostgreSQL passes7 signed-directory checks and5 leaderboard/privacy
+  groups;257 unit tests and typecheck also pass. Archive exact source/binary hashes
+  and limits. Physical-device,WAN,RU-host,trust provisioning and release gates stay open.
+
 - Record the current RU release decision as NO SHIP with a dated S1–S12/P1–P9
   readiness matrix. Separate successful PR packaging and loopback evidence from
   versioned RU packages,host/publication/device acceptance,human review,isolated
