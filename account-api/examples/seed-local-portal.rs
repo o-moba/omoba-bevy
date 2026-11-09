@@ -37,6 +37,17 @@ async fn main() {
         app.career.rename(&p.profile_id, name).await.unwrap();
         profiles.push(p);
     }
+    // Ranked admission requires ten completed public games. This maturity
+    // fixture mirrors the PostgreSQL tests; the ranked match below still uses
+    // the real allocation and settlement path.
+    for p in &profiles {
+        sqlx::query("UPDATE career_profiles SET completed_public_matches=$1 WHERE profile_id=$2")
+            .bind(i64::from(RANKED_REQUIRED_PUBLIC_MATCHES))
+            .bind(&p.profile_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+    }
     let result_id = format!("browser-fixture-{}", crypto::random::<8>());
     let participants = profiles
         .iter()
