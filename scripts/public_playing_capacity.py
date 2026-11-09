@@ -470,10 +470,10 @@ def main(argv=None):
     if not isolated_database(database):
         parser.error("set OMOBA_TEST_DATABASE_URL to a loopback /omoba_test URI without options")
     if (not 10 <= args.clients <= (1000 if args.allow_large else 100)
-            or args.clients % 10 or not 15 <= args.seconds <= 120
+            or args.clients % 10 or not 15 <= args.seconds <= 300
             or not 0 <= args.input_hz <= 60
             or not args.seconds + 30 <= args.timeout <= 600):
-        parser.error("require multiples of10 clients (large opt-in above100),15..120s soak,0..60 input Hz and bounded timeout")
+        parser.error("require multiples of10 clients (large opt-in above100),15..300s soak,0..60 input Hz and bounded timeout")
     rooms = args.clients // 10
     if not (1024 <= args.port <= 65535 and 1024 <= args.worker_port <= 65536 - rooms
             and args.port not in range(args.worker_port, args.worker_port + rooms)):

@@ -224,6 +224,9 @@ class PopulationEvidenceTests(unittest.TestCase):
             ("postgres://localhost/omoba_test", ["--clients", "1000"]),
             ("postgres://localhost/omoba_test", ["--clients", "1001", "--allow-large"]),
             ("postgres://localhost/omoba_test", ["--seconds", "14"]),
+            ("postgres://localhost/omoba_test", ["--seconds", "301", "--timeout", "450"]),
+            ("postgres://localhost/omoba_test", ["--seconds", "300", "--timeout", "329"]),
+            ("postgres://localhost/omoba_test", ["--seconds", "300", "--timeout", "601"]),
             ("postgres://localhost/omoba_test", ["--port", "47700", "--worker-port", "47700"]),
         ]:
             with self.subTest(uri=uri, extra=extra), \
@@ -232,6 +235,18 @@ class PopulationEvidenceTests(unittest.TestCase):
                     mock.patch.object(probe.socket, "socket", side_effect=AssertionError("unexpected socket")), \
                     contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 probe.main(required + extra)
+
+    def test_cli_accepts_five_minute_soak_with_bounded_timeout(self):
+        error = io.StringIO()
+        with mock.patch.dict(os.environ, {"OMOBA_TEST_DATABASE_URL": "postgres://localhost/omoba_test"}), \
+                mock.patch.object(probe.subprocess, "run", side_effect=AssertionError("unexpected process")), \
+                mock.patch.object(probe.socket, "socket", side_effect=AssertionError("unexpected socket")), \
+                contextlib.redirect_stderr(error), self.assertRaises(SystemExit) as exited:
+            probe.main(["--server-bin", "/not-used", "--bots-bin", "/not-used",
+                        "--output", "/not-created", "--seconds", "300", "--timeout", "420"])
+        self.assertEqual(exited.exception.code, 2)
+        self.assertIn("not an executable: /not-used", error.getvalue())
+        self.assertNotIn("15..300s soak", error.getvalue())
 
     def test_every_current_peer_and_its_wire_evidence_is_required(self):
         good = sample()
