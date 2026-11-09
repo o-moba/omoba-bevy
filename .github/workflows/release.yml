@@ -95,6 +95,17 @@ jobs:
           if [ -n "$RELEASE_SERVER" ]; then args+=(--server "$RELEASE_SERVER"); fi
           if [ -n "$RELEASE_REGISTRY" ]; then args+=(--registry "$RELEASE_REGISTRY"); fi
           python scripts/release.py "${args[@]}"
+      - name: Build the native Linux capacity generator
+        if: matrix.platform == 'linux' && github.event_name == 'pull_request'
+        run: cargo build --release --locked -p harness --bin bots
+      - name: Upload the native Linux capacity generator
+        if: matrix.platform == 'linux' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-capacity-bots
+          path: target/release/bots
+          if-no-files-found: error
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         with:
           name: omoba-${{ matrix.platform }}
