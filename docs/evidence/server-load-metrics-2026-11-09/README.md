@@ -87,16 +87,18 @@ empty.
 - `python3 docs/evidence/server-load-metrics-2026-11-09/verify.py` checks every
   compressed hash, binary/source binding, population, input/wire/producer summary,
   roster, health receipt and cleanup result. It loads the packet's own archived
-  `public_playing_capacity.py` for both the historical source hash and all summary
-  functions, so later runner changes neither break verification nor alter its
-  recomputation. It reconstructs the observation-time metric logs from archived
-  `LOAD_METRICS` lines and recomputes every server aggregate; it starts no live
-  game. A sandbox check replaces the current runner with an import-time failure
-  and confirms that the archived verifier still passes.
+  `public_playing_capacity.py` and imports its helper from the packet's `sources/`
+  snapshot. All 15 source hashes, including `public_bots_rehearsal.py`, resolve
+  only to archived copies: the current checkout is neither imported nor used as
+  a fallback. The verifier reconstructs the observation-time metric logs from
+  archived `LOAD_METRICS` lines and recomputes every server aggregate; it starts
+  no live game. Both normal verification and a sandbox with every current source
+  replaced and both current Python helpers raising on import pass.
 
 The packet contains complete compressed controller reports and isolated-fixture
-summary, observation-time server metric records, build manifests, test logs and
-copies of the controller/build/test helpers. Raw outputs and retained binaries
+summary, observation-time server metric records, build manifests, test logs,
+copies of the controller/build/test helpers and the complete 15-file historical
+source snapshot. Raw outputs and retained binaries
 remain under `.agent/codex-ranked-readiness/load-server-metrics/`; no private
 keys, complete signed bot logs or fixture DSN are archived. Full worker logs can
 gain ordinary lines after the metric summary and before teardown, so their final

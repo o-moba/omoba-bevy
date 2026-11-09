@@ -7,11 +7,12 @@ import json
 import sys
 import tempfile
 
+sys.dont_write_bytecode = True
 here = Path(__file__).resolve().parent
-root = here.parents[2]
-# The archived runner is part of the evidence: later runner changes must not
-# change either the source binding or the summarizers used for recomputation.
-sys.path.insert(0, str(root / "scripts"))  # its public_bots_rehearsal import
+archived_sources = here / "sources"
+# The archived runner and every helper it imports are part of the evidence:
+# later checkout changes must not affect imports, source binding or summaries.
+sys.path.insert(0, str(archived_sources / "scripts"))
 runner_spec = importlib.util.spec_from_file_location(
     "archived_public_playing_capacity", here / "public_playing_capacity.py"
 )
@@ -59,9 +60,9 @@ for clients in (10, 1000):
     assert all(peer["public"]["authority_resets"] == 0 for sample in after for peer in sample["peers"])
     assert report["server_sha256"] == server_hash and report["bots_sha256"] == bots_hash
     for name, digest in report["source_sha256"].items():
-        archived_source = (here / "public_playing_capacity.py"
-                           if name == "scripts/public_playing_capacity.py" else here / name)
-        source = archived_source if archived_source.is_file() else root / name
+        source = (here / "public_playing_capacity.py"
+                  if name == "scripts/public_playing_capacity.py" else archived_sources / name)
+        assert source.is_file(), f"missing archived source: {name}"
         assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
     with tempfile.TemporaryDirectory() as temporary:
         metric_root = Path(temporary)

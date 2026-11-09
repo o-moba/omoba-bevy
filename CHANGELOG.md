@@ -5,11 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-- Make the archived1000-client server-load verifier independent of later runner
-  changes: load its bundled historical runner for source hashes and every summary
-  recomputation instead of importing the current script. Verify both normal
-  execution and a sandbox where the current runner raises on import; the complete
-  10/30s and1000/120s evidence still passes.
+- Pin the archived 1000-client server-load verifier to a complete 15-file
+  historical source snapshot, including `public_bots_rehearsal.py`; remove every
+  current-checkout import and source-hash fallback. Normal recomputation and a
+  sandbox with every current source replaced and both Python helpers raising on
+  import pass for the complete 10/30 s and 1000/120 s evidence.
 
 - Extend the native capacity runner to15–300s with13/13 Python tests PASS and
   archive two300-second60-client/six-arena Linux runs. Uninstrumented PASS sustains
