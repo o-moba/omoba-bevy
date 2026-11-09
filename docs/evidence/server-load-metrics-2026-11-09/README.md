@@ -86,9 +86,13 @@ empty.
   its tests without a heavy Cargo/Bevy/SDK build or another Cargo cache.
 - `python3 docs/evidence/server-load-metrics-2026-11-09/verify.py` checks every
   compressed hash, binary/source binding, population, input/wire/producer summary,
-  roster, health receipt and cleanup result. It reconstructs the observation-time
-  metric logs from archived `LOAD_METRICS` lines and recomputes every server
-  aggregate; it starts no live game.
+  roster, health receipt and cleanup result. It loads the packet's own archived
+  `public_playing_capacity.py` for both the historical source hash and all summary
+  functions, so later runner changes neither break verification nor alter its
+  recomputation. It reconstructs the observation-time metric logs from archived
+  `LOAD_METRICS` lines and recomputes every server aggregate; it starts no live
+  game. A sandbox check replaces the current runner with an import-time failure
+  and confirms that the archived verifier still passes.
 
 The packet contains complete compressed controller reports and isolated-fixture
 summary, observation-time server metric records, build manifests, test logs and

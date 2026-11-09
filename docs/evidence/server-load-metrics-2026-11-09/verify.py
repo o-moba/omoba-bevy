@@ -2,17 +2,26 @@
 from pathlib import Path
 import gzip
 import hashlib
+import importlib.util
 import json
 import sys
 import tempfile
 
 here = Path(__file__).resolve().parent
 root = here.parents[2]
-sys.path.insert(0, str(root / "scripts"))
-from public_playing_capacity import (
-    summarize_input, summarize_producer_timing, summarize_server_load,
-    summarize_wire, validate_population,
+# The archived runner is part of the evidence: later runner changes must not
+# change either the source binding or the summarizers used for recomputation.
+sys.path.insert(0, str(root / "scripts"))  # its public_bots_rehearsal import
+runner_spec = importlib.util.spec_from_file_location(
+    "archived_public_playing_capacity", here / "public_playing_capacity.py"
 )
+archived_capacity = importlib.util.module_from_spec(runner_spec)
+runner_spec.loader.exec_module(archived_capacity)
+summarize_input = archived_capacity.summarize_input
+summarize_producer_timing = archived_capacity.summarize_producer_timing
+summarize_server_load = archived_capacity.summarize_server_load
+summarize_wire = archived_capacity.summarize_wire
+validate_population = archived_capacity.validate_population
 
 summary = json.loads((here / "summary.json").read_text())
 data = {}
@@ -50,7 +59,10 @@ for clients in (10, 1000):
     assert all(peer["public"]["authority_resets"] == 0 for sample in after for peer in sample["peers"])
     assert report["server_sha256"] == server_hash and report["bots_sha256"] == bots_hash
     for name, digest in report["source_sha256"].items():
-        assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
+        archived_source = (here / "public_playing_capacity.py"
+                           if name == "scripts/public_playing_capacity.py" else here / name)
+        source = archived_source if archived_source.is_file() else root / name
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
     with tempfile.TemporaryDirectory() as temporary:
         metric_root = Path(temporary)
         for worker in metric_workers:

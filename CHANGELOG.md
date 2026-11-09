@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Make the archived1000-client server-load verifier independent of later runner
+  changes: load its bundled historical runner for source hashes and every summary
+  recomputation instead of importing the current script. Verify both normal
+  execution and a sandbox where the current runner raises on import; the complete
+  10/30s and1000/120s evidence still passes.
+
 - Extend the native capacity runner to15–300s with13/13 Python tests PASS and
   archive two300-second60-client/six-arena Linux runs. Uninstrumented PASS sustains
   19.5349–19.6209 sends/s; instrumented FAIL is retained at19.4589–19.5355/s.
