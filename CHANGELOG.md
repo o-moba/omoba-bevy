@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Extend the native capacity runner to15–300s with13/13 Python tests PASS and
+  archive two300-second60-client/six-arena Linux runs. Uninstrumented PASS sustains
+  19.5349–19.6209 sends/s; instrumented FAIL is retained at19.4589–19.5355/s.
+  Reconstruct356001 gameplay transforms and0 sequence gaps/restarts from the
+  rejected run's worker logs. One A/B does not identify metrics as the cause:
+  server CPU is72.27% versus72.46% without them. Verify20 selected files,exact
+  sources/artifacts,population,input/wire/resources and metric absence. Keep
+  actual/identical RU host,vs Bots/mixed,uplink,WAN and SLA acceptance open;
+  production configuration is unchanged.
+
 - Measure native Linux capacity in independent signed20Hz Casual shards on the
   shared2-vCPU dev VPS.40/4arenas and60/6arenas pass120s;60 clients send
   19.733–19.802/s with0 sequence gaps,72.77% server CPU and297.70MiB peak RSS.

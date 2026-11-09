@@ -638,8 +638,25 @@ Peak summed RSS divided by arena count is about 53.43 MiB at four and 49.62 MiB
 at six arenas, including the lobby; it is not a pure marginal per-arena cost.
 The eight-arena run also recorded seven signed sequence gaps. The generator
 consumed substantial additional host CPU outside the server cgroup. These are
-instrumented loopback Casual observations on a shared host, not a long soak,
-vs Bots/mixed result, WAN measurement, RU uplink test or production SLA.
+instrumented loopback Casual observations on a shared host, not vs Bots/mixed,
+WAN, RU uplink or production-SLA evidence.
+
+A separate [300-second six-arena A/B packet](../../../docs/evidence/linux-capacity-soak-2026-11-09/README.md)
+retains a mixed result on the same dev host and exact binaries:
+
+| Server metrics | Verdict | Input min–max /s | Accepted snapshots p50 /s | Server CPU mean | Server RSS peak |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Enabled | **FAIL** | 19.4589–19.5355 | 18.3411 | 72.27% | 300.60 MiB |
+| Disabled | PASS | 19.5349–19.6209 | 18.4171 | 72.46% | 299.86 MiB |
+
+The instrumented rejection must not be hidden by the later pass. Its worker logs
+still reconstruct 356001 gameplay transforms with zero signed sequence gaps or
+restarts. A single A/B does not identify metrics as the cause: server CPU was
+0.19 percentage points higher without them and generator CPU was 2.13 points
+higher. Median wire rates imply about 41.711/42.136 Mbit/s aggregate application
+traffic at 60 players, excluding network headers; this is loopback, not uplink
+acceptance. Six arenas therefore remain a borderline dev fixture, not an RU
+capacity setting.
 
 For historical scale only (not this host, no cgroup limits): on the developer Mac
 (Apple M4 Pro, dev build, 2026-10-25) 20 vs Bots arenas took 26% of one core and
@@ -687,8 +704,9 @@ four-arena receive gate and is not a multi-arena 20 Hz capacity oracle.
    the running RU services, `omoba_ru`, public ports or firewall. Loopback-only
    admission allowances must be explicit in the report.
 3. Run a 10-client/30 s control, then independent native 40/60/… client steps,
-   one at a time. The current runner accepts 15–120 s soak intervals; a longer
-   soak requires a separately reviewed runner change. A typical Casual command is:
+   one at a time. The current runner accepts 15–300 s soak intervals; a longer
+   interval requires a separately reviewed runner change. A typical stepped
+   Casual command is:
    ```sh
    OMOBA_TEST_DATABASE_URL=<loopback-omoba_test-uri> \
    python3 scripts/public_playing_capacity.py \
@@ -701,8 +719,9 @@ four-arena receive gate and is not a multi-arena 20 Hz capacity oracle.
    investigate every sequence gap. Record accepted snapshots, wire bytes,
    latest-transform-age and broadcast histograms as their documented bucket-bound
    scopes, not per-command ACK/SLA claims. Stop at the first rejected step; do not
-   overwrite its report. Repeat the accepted step uninstrumented and for a longer
-   duration before deriving host capacity.
+   overwrite its report. Repeat the accepted step uninstrumented and for 300 s
+   before deriving host capacity. Retain any instrumented rejection even when
+   the uninstrumented comparison passes; one A/B is not a root-cause proof.
 4. Add equivalent native vs Bots and mixed Casual/Ranked coverage; the current
    native runner above is Casual-only and does not close those rows. Measure the
    real uplink and include IP/UDP/NIC overhead. Only then set and record

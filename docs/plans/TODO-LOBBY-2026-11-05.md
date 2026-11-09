@@ -6,33 +6,39 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 ## Current release checkpoint — 2026-11-09
 
-Latest measured continuation: [native Linux capacity boundary and recomputing verifier](../evidence/linux-capacity-2026-11-09/README.md).
-On the shared2-vCPU dev VPS, independent native20Hz Casual shards pass10/30s,
-40/4arenas/120s and60/6arenas/120s. The accepted60-client step has19.7334–19.8022
-sends/s,18.5699Hz median accepted snapshots,172409 application dispatches,
-147586 transforms,140566 snapshots and0 sequence gaps/restarts. Server CPU72.77%,
-peak RSS297.70MiB; generator65.80%/44.36MiB. The next80/8arenas/120s step FAILS:
-15.9626–16.5988 sends/s and7 signed sequence gaps/0 restarts; server95.20%/382.23MiB.
-The exact rejection is retained, not converted into a server-only or RU conclusion.
+Latest measured continuation: [five-minute native soak and metrics A/B with recomputing verifier](../evidence/linux-capacity-soak-2026-11-09/README.md).
+On the shared2-vCPU dev VPS, the60-client/six-Casual-arena uninstrumented run
+passes300s at19.5349–19.6209 sends/s,18.4171Hz median accepted snapshots,
+72.46% server CPU and299.86MiB peak RSS. The corresponding instrumented run
+retains its complete population but **FAILS** the unchanged input gate at
+19.4589–19.5355 sends/s. Its archived worker logs independently reconstruct
+416943 application dispatches,356001 gameplay transforms,337456 complete
+snapshots and0 signed sequence gaps/restarts. The20-file verifier preserves
+this FAIL/PASS distinction and checks that the second run has no server metrics.
 
-Node A/B40/4arenas/180s rejects its old receive-gap gate at p95578.944ms
-instrumented and587.583ms uninstrumented. Native passes the same step while server
-broadcast stays53.043ms mean with zero gaps, identifying the single Node process
-as the multi-arena measurement bottleneck. Use native shards for capacity gates.
-All native fixture processes/DB/roles are removed; ordinary dev services stayed
-active. The43-file selected evidence verifier checks hashes/source maps and
-recomputes input/wire/population/resources/server metrics,including7 gaps.
+The single A/B does not prove that instrumentation caused the rejection:
+server CPU was72.27% instrumented versus72.46% without metrics; generator CPU
+was66.98% versus69.11%. Minimum input moved only0.0760/s. Median wire rates
+correspond to41.711/42.136Mbit/s aggregate application traffic at60 players,
+excluding IP/UDP/NIC overhead and without measuring uplink/WAN. Six arenas are
+therefore a borderline shared-dev fixture, not an unconditional or RU capacity
+acceptance. All fixture processes/DB/roles were removed; dev services stayed active.
 
-The RU README now marks its old16MiB/arena formula unvalidated for Linux:
-native peak summed RSS/arena is53.43MiB at4 and49.62MiB at6 including lobby.
-The16-arena setting,500MiB unit,nftables and production configuration were NOT
-changed. This is instrumented loopback Casual on a shared dev host,not long soak,
-vs Bots/mixed,WAN,real/identical RU host,uplink or production SLA. #13 stays open.
-Next is a separately reviewed longer6-arena native soak/uninstrumented comparison,
-then actual/identical isolated RU-host and measured network budget.
+The preceding [stepped native Linux boundary](../evidence/linux-capacity-2026-11-09/README.md)
+remains immutable:40/4arenas/120s and60/6arenas/120s PASS,80/8arenas/120s FAILS
+at15.9626–16.5988 sends/s with7 sequence gaps. Its43-file verifier and Node A/B
+retain the evidence that the old single Node generator distorted multi-arena
+receive timing. Use independent native Rust shards for capacity gates.
 
-Game source/artifact parent `97b119f1`: Release42603752686 fully SUCCESS;
-main CI42603752525 has6/7 SUCCESS with PostgreSQL journey running at this checkpoint.
+The RU README marks the old16MiB/arena formula unvalidated for Linux. The16-arena
+setting,500MiB unit,nftables and production configuration were NOT changed.
+Actual/identical isolated RU-host,vs Bots/mixed,measured uplink/network budget,
+WAN and production SLA remain open; #13 stays open. Next is host-specific
+acceptance that does not hide the instrumented300s rejection, not another local
+repetition presented as production proof.
+
+Source parent `4a0f2ca6`: Release42611040419 is fully SUCCESS,including macOS;
+main CI42611040463 has6/7 SUCCESS with PostgreSQL journey running at this checkpoint.
 The new documentation/evidence HEAD requires its own CI. Portal `37e705c`:
 typecheck,257 unit PASS/3 expected skips,RU/global builds,ranked-seasons6 and
 ranked-notices7 Next+Chrome checks PASS. No portal GitHub checks are configured;

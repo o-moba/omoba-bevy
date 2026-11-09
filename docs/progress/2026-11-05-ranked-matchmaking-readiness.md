@@ -8,28 +8,35 @@ findings). Decision record: ADR-027.
 
 ## Current checkpoint — 2026-11-09
 
-Latest measured continuation: [server dispatch, latest-transform age and cadence](../evidence/server-load-metrics-2026-11-09/README.md).
-Opt-in per-worker cumulative metrics now bind verified signed application
-dispatch, ordinary gameplay Transform handler entry, complete snapshot kernel
-sends and actual world-broadcast intervals to the capacity report. Missing or
-malformed records and any sequence gap/restart reject the run. Control10/30s
-and full1000/120s PASS: every peer sends19.834–20.000 transforms/s in the full
-profile;100 workers report2712856 gameplay transforms,0 gaps/restarts and
-1858997 complete snapshot sends. Latest-transform age at snapshot has34.868ms
-mean and250/500ms p95/p99 exclusive upper bounds; broadcast gap mean73.596ms
-with the same bounds. These are process-lifetime instrumented loopback
-histograms, not per-command ACK latency or proof of coordinate changes.
+Latest measured continuation: [300-second native Linux soak and metrics A/B](../evidence/linux-capacity-soak-2026-11-09/README.md).
+The60-client/six-Casual-arena uninstrumented run passes300s at19.5349–19.6209
+sends/s,18.4171Hz median accepted snapshots,72.46% server CPU and299.86MiB peak
+RSS. The corresponding instrumented run retains every peer and exact roster but
+**FAILS** the unchanged input gate at19.4589–19.5355 sends/s. Archived worker
+logs reconstruct416943 application dispatches,356001 gameplay transforms,
+337456 complete snapshots and0 signed sequence gaps/restarts. Broadcast gap mean
+is54.497ms with75/100ms p95/p99 exclusive upper bounds; latest-transform age is
+26.038ms with55/150ms bounds. These are process-lifetime loopback histograms,
+not per-command ACK latency,coordinate-change proof,WAN or SLA.
 
-Final rosters/health/authority/cleanup all pass;562 server and12 Python tests
-pass, and the evidence verifier recomputes every aggregate from archived
-observation-time LOAD_METRICS lines. Client accepted snapshots median13.025Hz/
-p0512.018; aggregate received application/framing traffic499.660Mbit/s,
-excluding network headers. Per-second JSON instrumentation, macOS scheduling
-and opt1/debug assertions prevent an uninstrumented-release interpretation.
-Longer Linux/RU/uplink,WAN/multi-host,party/Ranked/Resume/fault,trust/directory,
-UI/physical/off-host recovery and owner-controlled release remain open.
-Original68 stays62 done/5 partial/1 open. Previous buffered-input proof and
-all rejected diagnostics remain immutable. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
+A single A/B does not establish instrumentation as the cause: server CPU was
+72.27% with metrics versus72.46% without; generator CPU was66.98% versus69.11%.
+Minimum input moved only0.0760/s. Median aggregate application wire traffic is
+41.711/42.136Mbit/s at60 players,excluding IP/UDP/NIC overhead and without an
+uplink measurement. Both runs cleaned all owned processes/DB/roles;ordinary dev
+services remained active. The20-file verifier checks exact sources/artifacts,
+population,input/wire/resources/server metrics,the FAIL/PASS distinction and
+absence of server metrics in the second run.
+
+The preceding [stepped Linux capacity proof](../evidence/linux-capacity-2026-11-09/README.md)
+and [1000-client server-load proof](../evidence/server-load-metrics-2026-11-09/README.md)
+remain immutable. Runner duration is now15–300s with13/13 Python tests PASS.
+Release42611040419 on source parent4a0f2ca6 is fully SUCCESS,including macOS;
+CI42611040463 has6/7 SUCCESS with PostgreSQL journey running at this checkpoint.
+The new evidence HEAD needs its own CI. Actual/identical RU host,vs Bots/mixed,
+uplink,WAN/multi-host,party/Ranked/Resume/fault,trust/directory,UI/physical/
+off-host recovery and owner-controlled release remain open. Original68 stays
+62 done/5 partial/1 open. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
 
 
 The authoritative remaining order is now at the top of

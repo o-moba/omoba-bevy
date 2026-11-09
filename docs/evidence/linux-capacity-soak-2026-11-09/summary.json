@@ -1,0 +1,908 @@
+{
+  "source_parent": "4a0f2ca616a678371bd4d6f2798e117e03357f57",
+  "release_run": 42603752686,
+  "server_sha256": "ecb7648e761f62d31d2c523d2076dd0cff64bbbedaf21853856d1d38e4a6f5ca",
+  "server_cgroup_wrapper_sha256": "379d0e52ecec617a874247df2271e4fed2af7113406e3d4bac5b0dbe7f97967f",
+  "bots_sha256": "89660bc17cf77999aec89c3f2ec78052f9a7fdfd4ccc2c436a1398a3eda45c6d",
+  "native_source_tar_gz_sha256": "10b812ba55db0d9d3c9d335ea335cadcadf819ba711c835058aadf163788494b",
+  "scope": "two 300-second native loopback Casual AI runs with and without server metrics on shared 2-vCPU dev VPS; not WAN, production, RU-host or SLA acceptance",
+  "cases": {
+    "native-soak-6-300": {
+      "clients": 60,
+      "seconds": 300,
+      "status": "FAIL",
+      "error": "AssertionError: actual per-peer input cadence outside requested profile",
+      "server_metrics": true,
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 19.458920003038397,
+          "p05": 19.458920003038397,
+          "p50": 19.504213960906394,
+          "p95": 19.535542053003187,
+          "max": 19.535542053003187
+        },
+        "cached_snapshot_transforms": {
+          "total": 34368,
+          "min_per_peer": 450
+        },
+        "all_peers_within_2_5_percent": false,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 86897.68786035478,
+          "p95": 89040.41381220876,
+          "p99": 89694.19147622441,
+          "max": 89694.19147622441
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 18.341054596986936,
+          "p05": 18.31152796459696
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 19.335348624620575,
+          "p05": 19.303778248392852
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9486603284356093,
+          "p05": 0.948549723756906
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "producer_timing": {
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "loop_work": {
+          "count": 35067,
+          "total_us": 457417594,
+          "buckets": [
+            137,
+            4761,
+            17701,
+            9315,
+            1696,
+            352,
+            442,
+            277,
+            272,
+            108,
+            5,
+            1,
+            0
+          ],
+          "mean_us": 13044.1039723957,
+          "p95_exclusive_upper_us": 45000,
+          "p99_exclusive_upper_us": 150000
+        },
+        "receive_work": {
+          "count": 350670,
+          "total_us": 362500072,
+          "buckets": [
+            291042,
+            47659,
+            6966,
+            4313,
+            626,
+            37,
+            22,
+            4,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 1033.7356260872045,
+          "p95_exclusive_upper_us": 5000,
+          "p99_exclusive_upper_us": 25000
+        },
+        "wake_lateness": {
+          "count": 35067,
+          "total_us": 49792423,
+          "buckets": [
+            26580,
+            6616,
+            916,
+            592,
+            307,
+            55,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 1419.922519747911,
+          "p95_exclusive_upper_us": 10000,
+          "p99_exclusive_upper_us": 45000
+        },
+        "session_work": {
+          "count": 350670,
+          "total_us": 9682533,
+          "buckets": [
+            349273,
+            1116,
+            171,
+            91,
+            18,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 27.611523654718113,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "telemetry_prepare_work": {
+          "count": 1746,
+          "total_us": 2258994,
+          "buckets": [
+            1391,
+            284,
+            38,
+            29,
+            3,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 1293.8109965635738,
+          "p95_exclusive_upper_us": 5000,
+          "p99_exclusive_upper_us": 25000
+        },
+        "telemetry_format_write_work": {
+          "count": 1746,
+          "total_us": 1034737,
+          "buckets": [
+            1599,
+            107,
+            22,
+            15,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 592.6328751431844,
+          "p95_exclusive_upper_us": 5000,
+          "p99_exclusive_upper_us": 25000
+        },
+        "transform_gaps": {
+          "count": 350670,
+          "total_us": 17985366511,
+          "buckets": [
+            28,
+            321,
+            632,
+            3970,
+            37379,
+            261246,
+            36539,
+            5703,
+            3569,
+            1225,
+            50,
+            8,
+            0
+          ],
+          "mean_us": 51288.58046311347,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 150000
+        },
+        "navigation_work": {
+          "count": 159728,
+          "total_us": 7672308,
+          "buckets": [
+            159096,
+            467,
+            60,
+            24,
+            36,
+            22,
+            9,
+            8,
+            4,
+            0,
+            2,
+            0,
+            0
+          ],
+          "mean_us": 48.03358208955224,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "command_prepare": {
+          "count": 410282,
+          "total_us": 1770644,
+          "buckets": [
+            410028,
+            206,
+            30,
+            15,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 4.315675559736961,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "command_sign": {
+          "count": 410282,
+          "total_us": 41340472,
+          "buckets": [
+            404425,
+            4829,
+            620,
+            364,
+            38,
+            5,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 100.7611155254191,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 5000
+        },
+        "command_encode": {
+          "count": 410282,
+          "total_us": 2466125,
+          "buckets": [
+            409901,
+            317,
+            44,
+            16,
+            4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 6.010804763552874,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "command_send": {
+          "count": 410282,
+          "total_us": 21022914,
+          "buckets": [
+            407041,
+            2646,
+            371,
+            204,
+            19,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 51.24015677022146,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "overrun_rebases": 505,
+        "scope": "soak-only cumulative histogram differences; wall time includes OS descheduling; quantiles are bucket bounds, not exact percentiles; overflow has no finite upper bound"
+      },
+      "resources": {
+        "samples": 146,
+        "observed_seconds": 299.36796945985407,
+        "server": {
+          "cpu_percent_mean_of_intervals": 72.26904871644251,
+          "rss_mib_peak": 300.6015625,
+          "processes_peak": 7
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 66.98470160301584,
+          "rss_mib_peak": 44.6953125,
+          "processes_peak": 6
+        }
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 416943,
+          "gameplay_transforms": 356001,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 337456
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 33897,
+        "broadcast_gaps": {
+          "count": 33891,
+          "total_us": 1846963425,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            24208,
+            9288,
+            292,
+            99,
+            4,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 54497.165176595554,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 100000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 337156,
+          "total_us": 8778838921,
+          "buckets": [
+            58176,
+            15560,
+            27348,
+            110084,
+            102557,
+            8749,
+            6521,
+            2949,
+            2185,
+            1230,
+            620,
+            574,
+            603
+          ],
+          "mean_us": 26037.913965642016,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 150000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      }
+    },
+    "native-soak-6-300-uninstrumented": {
+      "clients": 60,
+      "seconds": 300,
+      "status": "PASS",
+      "error": null,
+      "server_metrics": false,
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 19.53493092407472,
+          "p05": 19.53493092407472,
+          "p50": 19.584297249239288,
+          "p95": 19.620857352349013,
+          "max": 19.620857352349013
+        },
+        "cached_snapshot_transforms": {
+          "total": 35069,
+          "min_per_peer": 471
+        },
+        "all_peers_within_2_5_percent": true,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 87783.00072527993,
+          "p95": 89274.55133814659,
+          "p99": 89396.20911725385,
+          "max": 89396.20911725385
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 18.417128337138564,
+          "p05": 18.39268154861419
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 19.410866824007602,
+          "p05": 19.3845416827957
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9488412017167382,
+          "p05": 0.9487796493640426
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "producer_timing": {
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "loop_work": {
+          "count": 35261,
+          "total_us": 479376854,
+          "buckets": [
+            199,
+            4388,
+            16533,
+            10600,
+            1882,
+            464,
+            537,
+            363,
+            227,
+            58,
+            10,
+            0,
+            0
+          ],
+          "mean_us": 13595.100933042171,
+          "p95_exclusive_upper_us": 45000,
+          "p99_exclusive_upper_us": 100000
+        },
+        "receive_work": {
+          "count": 352610,
+          "total_us": 375456904,
+          "buckets": [
+            288177,
+            51186,
+            8100,
+            4753,
+            355,
+            21,
+            17,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 1064.7936927483622,
+          "p95_exclusive_upper_us": 5000,
+          "p99_exclusive_upper_us": 25000
+        },
+        "wake_lateness": {
+          "count": 35261,
+          "total_us": 57592160,
+          "buckets": [
+            25642,
+            7411,
+            1051,
+            683,
+            403,
+            71,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 1633.3104563115057,
+          "p95_exclusive_upper_us": 10000,
+          "p99_exclusive_upper_us": 45000
+        },
+        "session_work": {
+          "count": 352610,
+          "total_us": 10351525,
+          "buckets": [
+            351066,
+            1215,
+            205,
+            116,
+            8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 29.356867360539972,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "telemetry_prepare_work": {
+          "count": 1747,
+          "total_us": 2323450,
+          "buckets": [
+            1349,
+            313,
+            55,
+            27,
+            2,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 1329.965655409273,
+          "p95_exclusive_upper_us": 5000,
+          "p99_exclusive_upper_us": 25000
+        },
+        "telemetry_format_write_work": {
+          "count": 1747,
+          "total_us": 1060879,
+          "buckets": [
+            1576,
+            130,
+            27,
+            13,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 607.2575844304522,
+          "p95_exclusive_upper_us": 5000,
+          "p99_exclusive_upper_us": 10000
+        },
+        "transform_gaps": {
+          "count": 352610,
+          "total_us": 18012041139,
+          "buckets": [
+            33,
+            315,
+            759,
+            4406,
+            41600,
+            253366,
+            41422,
+            6780,
+            3143,
+            689,
+            95,
+            2,
+            0
+          ],
+          "mean_us": 51082.04854938884,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 150000
+        },
+        "navigation_work": {
+          "count": 148960,
+          "total_us": 12054708,
+          "buckets": [
+            148211,
+            523,
+            68,
+            39,
+            38,
+            32,
+            18,
+            9,
+            12,
+            8,
+            2,
+            0,
+            0
+          ],
+          "mean_us": 80.92580558539206,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "command_prepare": {
+          "count": 412812,
+          "total_us": 1785298,
+          "buckets": [
+            412534,
+            230,
+            29,
+            17,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 4.324724087478077,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "command_sign": {
+          "count": 412812,
+          "total_us": 44135680,
+          "buckets": [
+            406165,
+            5435,
+            807,
+            373,
+            30,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 106.91472147127506,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 5000
+        },
+        "command_encode": {
+          "count": 412812,
+          "total_us": 2763277,
+          "buckets": [
+            412396,
+            338,
+            40,
+            35,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 6.693790393690106,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "command_send": {
+          "count": 412812,
+          "total_us": 22021024,
+          "buckets": [
+            409314,
+            2831,
+            447,
+            202,
+            18,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 53.34395317965563,
+          "p95_exclusive_upper_us": 1000,
+          "p99_exclusive_upper_us": 1000
+        },
+        "overrun_rebases": 456,
+        "scope": "soak-only cumulative histogram differences; wall time includes OS descheduling; quantiles are bucket bounds, not exact percentiles; overflow has no finite upper bound"
+      },
+      "resources": {
+        "samples": 146,
+        "observed_seconds": 298.90172660094686,
+        "server": {
+          "cpu_percent_mean_of_intervals": 72.46277223016116,
+          "rss_mib_peak": 299.859375,
+          "processes_peak": 7
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 69.11122969513374,
+          "rss_mib_peak": 44.65625,
+          "processes_peak": 6
+        }
+      },
+      "server_load": null
+    }
+  },
+  "files": {
+    "native-soak-6-300/report.json.gz": {
+      "source_path": "native-soak-6-300/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 688205,
+      "raw_sha256": "49e0805a257b3a2f7aff5b1e1978b13168b2926236eee15c10f9b045fd9bcc04",
+      "archive_sha256": "ffe0654b5cf5dd719bb872d201fa981337c4887e5a64a50ccd0a4edf66e06009"
+    },
+    "native-soak-6-300-summary.json.gz": {
+      "source_path": "native-soak-6-300-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 3794,
+      "raw_sha256": "c36bb4d1407d6e88d29182935b954d18de85876a4d914150dbf176976a14bd9b",
+      "archive_sha256": "a2f28325e4a35c341945ad04d0811c7b26ccdfa1a118c4914ccf6d203f85a99e"
+    },
+    "native-soak-6-300/matches/0758ebe04a7db32999d5c04c93d59a81/worker.log.gz": {
+      "source_path": "native-soak-6-300/matches/0758ebe04a7db32999d5c04c93d59a81/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 943549,
+      "raw_sha256": "647f89c8dfcb9fac52f037c102b5fa4b15a834bbc49582be92aaba3bda3dd4aa",
+      "archive_sha256": "b7845c53b8a08ec757b41919293b2384bc92b13839d532cc6bf1858ce5f2e1ad"
+    },
+    "native-soak-6-300/matches/1f1dd522c90d4db3a6b87988cc0c18e0/worker.log.gz": {
+      "source_path": "native-soak-6-300/matches/1f1dd522c90d4db3a6b87988cc0c18e0/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 953273,
+      "raw_sha256": "6485d68413ade93c0ffd6aea5c46b2eeaad2f80b3c5bdc0ad2dd459c18068b74",
+      "archive_sha256": "b2970d92e0e8a0c6877741c766aff63583c7084ffb79a1de9ce1e7686e8106b9"
+    },
+    "native-soak-6-300/matches/28b5e2cb6ee11c60d2da47bf0a1ea797/worker.log.gz": {
+      "source_path": "native-soak-6-300/matches/28b5e2cb6ee11c60d2da47bf0a1ea797/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 943274,
+      "raw_sha256": "3d9aed98751737e18a361830bbd397cda7fc81834434d6709d235e7be5adee44",
+      "archive_sha256": "6eb17193636bf14a84b81b585debb678081c5bd8603085c1596e3e9fae95f016"
+    },
+    "native-soak-6-300/matches/c7a439e147a149c55c0841c188d43a7f/worker.log.gz": {
+      "source_path": "native-soak-6-300/matches/c7a439e147a149c55c0841c188d43a7f/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 953200,
+      "raw_sha256": "2537691cfa6ed0c2a84957c6cbfa713b97d5e086a4693d065f588d08545a9465",
+      "archive_sha256": "8d53675247a5d5266a7f729feba5d307a4526756aa5f30a99f9a553246d64dff"
+    },
+    "native-soak-6-300/matches/d2a7e090e9a139ed1d357038bbfbcd59/worker.log.gz": {
+      "source_path": "native-soak-6-300/matches/d2a7e090e9a139ed1d357038bbfbcd59/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 945723,
+      "raw_sha256": "4f47db4901bcf89f64da5320e5e0f54516b366a235a3da75d531b3d44f851beb",
+      "archive_sha256": "a014b88dd1ab42b05e9297a5c288238a7fabd9159acd75364c4bb4ab053da6be"
+    },
+    "native-soak-6-300/matches/d33e6038150ee91734c0463460d812d7/worker.log.gz": {
+      "source_path": "native-soak-6-300/matches/d33e6038150ee91734c0463460d812d7/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 944007,
+      "raw_sha256": "51f601f364aaa506c7d4ccb858d57588b782b0808f5693db8a58f24afef5a19a",
+      "archive_sha256": "80d9f1bd3f71e54474140902c54657fa140dda76c40af10e03cb7300a1f6e2b6"
+    },
+    "native-soak-6-300-uninstrumented/report.json.gz": {
+      "source_path": "native-soak-6-300-uninstrumented/report.json",
+      "encoding": "gzip",
+      "raw_bytes": 688332,
+      "raw_sha256": "3c97e9dc3601524d3254911f74552425915bf8a1f6048c343a0daa6f2fd71f5b",
+      "archive_sha256": "da5bf23f534913831bc816840357b9d80304c2871df293c7e05da5a37354c57d"
+    },
+    "native-soak-6-300-uninstrumented-summary.json.gz": {
+      "source_path": "native-soak-6-300-uninstrumented-summary.json",
+      "encoding": "gzip",
+      "raw_bytes": 44200,
+      "raw_sha256": "f8a40c9e1b7b14f29bc0bf5805ba824717780deeab2e6c672b14317136e64f14",
+      "archive_sha256": "4ed7b21162f019a641b371e19150439b3e4ced001f76c0b5f110355990ec4aef"
+    },
+    "native-soak-6-300-uninstrumented/matches/51843e69caac9117fae12888e802f906/worker.log.gz": {
+      "source_path": "native-soak-6-300-uninstrumented/matches/51843e69caac9117fae12888e802f906/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 19944,
+      "raw_sha256": "f6ef0ff66ff2e853e49b65bb115e788bdc3960b8fb73eb181477d9d198fc4949",
+      "archive_sha256": "4f36c7ff41867d376088aa943401dc9b95f7cb52d9f720617b9d08304b587da0"
+    },
+    "native-soak-6-300-uninstrumented/matches/5ed1a6b83d7b4bb2d92649ce626511b5/worker.log.gz": {
+      "source_path": "native-soak-6-300-uninstrumented/matches/5ed1a6b83d7b4bb2d92649ce626511b5/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 18241,
+      "raw_sha256": "54457285375e8e1306e49b64c7672e33542f68e89795ff5a9314650f4226c404",
+      "archive_sha256": "4c19a2c280be5e8ad7f85f4afa5270f91535b878f3c751d74639b4d477f2578f"
+    },
+    "native-soak-6-300-uninstrumented/matches/6b25454bf33b76c7df52808f3c811569/worker.log.gz": {
+      "source_path": "native-soak-6-300-uninstrumented/matches/6b25454bf33b76c7df52808f3c811569/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 21173,
+      "raw_sha256": "83b2a3caf511bb9144e7539277b264483d077abe7cc4ca2bfe0f2e95c82b7121",
+      "archive_sha256": "9041c9f2a5e957c0f91240f50629140e59f61590cbae3f8840f255feda08e1fa"
+    },
+    "native-soak-6-300-uninstrumented/matches/9f2dc1ba96265f67709d82d6066ff873/worker.log.gz": {
+      "source_path": "native-soak-6-300-uninstrumented/matches/9f2dc1ba96265f67709d82d6066ff873/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 16003,
+      "raw_sha256": "25dc591e3d288bb10dffb04915c940e5c74eda41ebe0e652c8d00cbfbc29c81a",
+      "archive_sha256": "9c5595ddfe24f0bfbb597fe30f8fd146c8c797e1f06c8f98f6e4f1169df4e08e"
+    },
+    "native-soak-6-300-uninstrumented/matches/a98faf491aacf363af65abc68211a712/worker.log.gz": {
+      "source_path": "native-soak-6-300-uninstrumented/matches/a98faf491aacf363af65abc68211a712/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 19663,
+      "raw_sha256": "5a6a1495ca479abb4865341afcf465cb5802cac6683867c4a871a34d88cd9eb0",
+      "archive_sha256": "cddfd64d540b7462dbe342e2d55f9a152d620973db37f4286a2cfb4ba3af9ec8"
+    },
+    "native-soak-6-300-uninstrumented/matches/e8d2e9a2f98b90517d0c597861b40d1e/worker.log.gz": {
+      "source_path": "native-soak-6-300-uninstrumented/matches/e8d2e9a2f98b90517d0c597861b40d1e/worker.log",
+      "encoding": "gzip",
+      "raw_bytes": 16565,
+      "raw_sha256": "41f9b034454fbcdd32a1d3e97f415d062053ed6c6a68dc340b19227717f6b749",
+      "archive_sha256": "21a4ab130f3d6542cd1fc792e3ba30772bdc7127e149e129dc1c76d78e29f450"
+    },
+    "native-source.tar.gz": {
+      "source_path": "native-source.tar.gz",
+      "encoding": "stored",
+      "raw_bytes": 115582,
+      "raw_sha256": "10b812ba55db0d9d3c9d335ea335cadcadf819ba711c835058aadf163788494b",
+      "archive_sha256": "10b812ba55db0d9d3c9d335ea335cadcadf819ba711c835058aadf163788494b"
+    },
+    "remote_soak_control.py": {
+      "source_path": "remote_soak_control.py",
+      "encoding": "stored",
+      "raw_bytes": 8233,
+      "raw_sha256": "2f9f211ffc4cb72353d106df39712f739a2653ee21d024177ba15ab31e4de731",
+      "archive_sha256": "2f9f211ffc4cb72353d106df39712f739a2653ee21d024177ba15ab31e4de731"
+    },
+    "server-native-scope": {
+      "source_path": "server-native-scope",
+      "encoding": "stored",
+      "raw_bytes": 214,
+      "raw_sha256": "379d0e52ecec617a874247df2271e4fed2af7113406e3d4bac5b0dbe7f97967f",
+      "archive_sha256": "379d0e52ecec617a874247df2271e4fed2af7113406e3d4bac5b0dbe7f97967f"
+    },
+    "final-host-soak.json": {
+      "source_path": "final-host-soak.json",
+      "encoding": "stored",
+      "raw_bytes": 425,
+      "raw_sha256": "28d5b9753f489e44c81cd6b10c088f472840ec902415324b070fb4023520a4f5",
+      "archive_sha256": "28d5b9753f489e44c81cd6b10c088f472840ec902415324b070fb4023520a4f5"
+    }
+  }
+}

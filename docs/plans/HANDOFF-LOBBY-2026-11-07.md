@@ -1,45 +1,43 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальный checkpoint — native Linux capacity boundary, 2026-11-09
+## Актуальный checkpoint — native Linux 300 s soak/A/B, 2026-11-09
 
-[Новый evidence packet и verifier](../evidence/linux-capacity-2026-11-09/README.md)
-фиксирует ступенчатый instrumented loopback прогон на общем dev VPS (2 vCPU,
-3480344KiB RAM), release server и независимые native Rust ten-client shards.
-Source parent `97b119f15cf5d4cb4d44a5a02946bc61d0a3fb0b`; Release42603752686
-полностью SUCCESS. Основной CI42603752525 того же SHA на момент пакета имеет6/7
-SUCCESS, PostgreSQL journey ещё in_progress. Новый documentation/evidence HEAD
-обязан получить собственный полный CI; parent conclusions не переносить.
+[Новый soak evidence packet и verifier](../evidence/linux-capacity-soak-2026-11-09/README.md)
+фиксирует два300-second loopback прогона на общем dev VPS (2 vCPU,3480344KiB RAM),
+те же release server/native ten-client shards и source parent
+`4a0f2ca616a678371bd4d6f2798e117e03357f57`. Runner отдельно расширен до15–300s;
+13/13 Python tests PASS. Rust sources/binaries от предыдущего boundary не менялись.
+Release42611040419 текущего parent полностью SUCCESS,включая macOS. Основной
+CI42611040463 на момент пакета имеет6/7 SUCCESS,PostgreSQL journey ещё in_progress.
+Новый documentation/evidence HEAD обязан получить собственный полный CI.
 Draft release на PR не создаётся.
 
-- Control10/1arena/30s PASS20.0276 sends/s. **40 clients/4 Casual arenas/120s
-  PASS**19.9890–19.9933 sends/s, accepted snapshots p50/p0519.2026/19.1382Hz,
-  server CPU50.64%, peak RSS213.70MiB,0 sequence gaps/restarts.
-- **60 clients/6 arenas/120s PASS**19.7334–19.8022 sends/s, accepted snapshots
-  p50/p0518.5699/18.4987Hz,wire p50/p9582557/84928B/player/s.172409 application
-  dispatches,147586 transforms,140566 snapshots,0 gaps/restarts. Broadcast mean
-  53.896ms,p95/p99<75ms;latest-transform age mean25.785ms,p95<55/p99<150ms.
-  Server CPU72.77%,RSS297.70MiB;generator65.80%/44.36MiB.
-- **80 clients/8 arenas/120s FAIL** неизменного19.5–20.5Hz input gate:
-  15.9626–16.5988 sends/s,accepted snapshots p50/p0517.6672/17.5833Hz.195800
-  dispatches,163838 transforms,180700 snapshots,**7 sequence gaps/0 restarts**.
-  Server CPU95.20%,RSS382.23MiB;generator85.81%/59.25MiB. FAIL сохранён,не
-  переписан как server-only или production вывод.
-- Histograms cumulative process-lifetime,mean/exclusive upper bounds,не exact
-  percentiles/per-command ACK/coordinate-change proof. Принятые runs имеют точные
-  rosters/final health-v2; все owned processes/DB/roles удалены,dev lobby/API
-  остались active. Verifier пересчитывает всё из43 selected hashed files и exact
-  15-source archive,включая7-gap rejection. AppleDouble sidecars исключены.
-- Node A/B40 clients/4arenas/180s отклоняет старый snapshot-gap p95<100ms gate:
-  instrumented578.944ms,uninstrumented587.583ms. При server broadcast mean
-  53.043ms/zero gaps и native PASS той же ступени это подтверждённый bottleneck
-  одного Node generator process,не доказанный server-capacity отказ. Для
-  multi-arena capacity использовать native generator.
+- **60 clients/6 Casual arenas/300s, server metrics OFF: PASS**19.5349–19.6209
+  sends/s,accepted snapshots p50/p0518.4171/18.3927Hz,wire p50/p9587783/89275
+  B/player/s. Server CPU72.46%,RSS299.86MiB;generator69.11%/44.66MiB.
+  Server dispatch/cadence здесь явно не измерены,отсутствие LOAD_METRICS проверено.
+- **Тот же профиль, metrics ON: FAIL** неизменного19.5–20.5Hz input gate:
+  19.4589–19.5355 sends/s,accepted snapshots18.3411/18.3115Hz. Все60 peers и6
+  exact rosters удержались300s. Из worker logs независимо пересчитаны416943
+  application dispatches,356001 transforms,337456 snapshots,**0 gaps/restarts**.
+  Broadcast mean54.497ms,p95/p99<75/100ms;latest-transform age26.038ms,<55/150ms.
+  Server CPU72.27%,RSS300.60MiB;generator66.98%/44.70MiB. FAIL сохранён.
+- Один A/B **не доказывает** причину metrics: без них server CPU выше на0.19pp,
+  generator выше на2.13pp; minimum input изменился только на0.0760/s. Это
+  borderline shared-host variability,не unconditional six-arena/RU acceptance.
+- Median wire даёт41.711/42.136Mbit/s aggregate application traffic на60 players;
+  p95-per-player×60=42.739/42.852Mbit/s. Network headers не включены,uplink/WAN
+  не измерены. Histograms cumulative/bucket upper bounds,не per-command ACK SLA.
+- Оба run имеют final health-v2 и полный owned process/DB/role cleanup;dev lobby/
+  API active. Verifier проверяет20 selected hashed files,15-source archive,
+  input/wire/population/resources/server metrics и FAIL/PASS различие.
 
-`ops/vps/ru/README.md` теперь явно считает старую16MiB/arena формулу
-неподтверждённой для Linux. Peak summed RSS/arena≈53.43MiB на4 и49.62MiB на6,
-включая lobby,не pure marginal cost. **Unit,16-arena setting,nftables иproduction
-formula не изменены.** Это не длительный soak,WAN,vs Bots/mixed,реальный или
-идентичный RU-host/uplink и не SLA; #13 остаётся open.
+Прежний [stepped capacity packet](../evidence/linux-capacity-2026-11-09/README.md)
+не переписан:40/4 и60/6 по120s PASS,80/8 FAIL с7 gaps. Его43-file verifier и
+Node A/B сохраняют вывод о bottleneck одного Node generator;для capacity нужны
+native shards. `ops/vps/ru/README.md` считает16MiB/arena неподтверждённой.
+**Unit,16-arena setting,nftables иproduction formula не изменены.** Реальный или
+идентичный RU-host,vs Bots/mixed,uplink,WAN и SLA остаются open;#13 не закрыт.
 
 Портал `37e705c`: typecheck,260 unit (257 PASS/3 expected skips),RU/global
 production builds PASS. Ranked-seasons6 и ranked-notices7 Next+Chrome RU checks
@@ -54,10 +52,9 @@ collaborator,поэтому нужно человеческое ревью вл�
 и rejected diagnostics сохранены без перезаписи. Тяжёлый Cargo/Bevy/SDK build не
 запускался,третий cargo cache не создавался.
 
-**Следующий capacity gate:** отдельно проверенный более длительный native soak на
-принятых6 аренах с uninstrumented comparison; затем реальный/идентичный изолированный
-RU-host,vs Bots/mixed и measured uplink/network budget. Runner сейчас ограничен120s;
-увеличение длительности — отдельное проверенное изменение,не скрытая remote правка.
+**Следующий capacity gate:** реальный/идентичный изолированный RU-host,vs Bots/
+mixed и measured uplink/network budget; host acceptance не должен скрывать
+instrumented300s FAIL. Не повторять локальный A/B как замену production proof.
 Далее WAN/multi-host/party/Ranked/Resume/fault,directory/trust provisioning;
 current UI-2/UI-3 иphysical C3; independent off-host/RU RPO/RTO иC2/C4 после
 существующих решений владельца; legal/provider/signing/catalog/device/release.
