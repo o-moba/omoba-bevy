@@ -14,7 +14,12 @@ from unittest import mock
 import public_playing_capacity as probe
 
 
-def sample(shard=0, elapsed=0, increment=0):
+def sample(shard=0, elapsed=0, increment=0, preference="quick"):
+    rules = {
+        "quick": (10, 0, False),
+        "humans_only": (10, 0, True),
+        "bot_practice": (1, 9, False),
+    }[preference]
     return {"phase": "running", "elapsed_secs": elapsed, "peers": [
         {"id": i + 1, "snapshot_age_ms": 20,
          "snapshot_meta": {"protocol_version": 16, "server_epoch": shard + 1,
@@ -24,10 +29,12 @@ def sample(shard=0, elapsed=0, increment=0):
                        "accepted_snapshots": 10 + increment,
                        "decode_errors": 0, "framing_errors": 0},
          "public": {"phase": "running", "profile_id": f"p{shard}-{i}", "error": None,
-                    "allocation": {"allocation_id": f"{shard + 1:032x}",
-                                   "endpoint": f"127.0.0.1:{47700 + shard}",
-                                   "preference": "quick", "human_count": 10,
-                                   "bot_count": 0, "rated": False}}}
+                    "allocation": {"allocation_id": (f"{shard * 10 + i + 1:032x}" if preference == "bot_practice"
+                                                     else f"{shard + 1:032x}"),
+                                   "endpoint": (f"127.0.0.1:{47700 + shard * 10 + i}" if preference == "bot_practice"
+                                                else f"127.0.0.1:{47700 + shard}"),
+                                   "preference": preference, "human_count": rules[0],
+                                   "bot_count": rules[1], "rated": rules[2]}}}
         for i in range(10)]}
 
 
@@ -346,6 +353,150 @@ class PopulationEvidenceTests(unittest.TestCase):
             write(bad, status)
             with self.assertRaises(AssertionError):
                 probe.verify_manifests(root, [current], 10)
+
+
+    def test_workloads_separate_generator_shards_from_real_arena_consumption(self):
+        self.assertEqual(probe.workload_preferences("casual", 2), ["quick", "quick"])
+        self.assertEqual(probe.workload_preferences("ranked", 2), ["humans_only", "humans_only"])
+        self.assertEqual(probe.workload_preferences("bots", 2), ["bot_practice", "bot_practice"])
+        mixed = probe.workload_preferences("mixed", 6)
+        self.assertEqual(mixed, ["quick", "humans_only", "bot_practice"] * 2)
+        self.assertEqual(probe.arena_count(mixed), 24)
+        self.assertEqual(probe.arena_count(["bot_practice"]), 10)
+        for shards in (1, 2, 4):
+            with self.subTest(shards=shards), self.assertRaises(AssertionError):
+                probe.workload_preferences("mixed", shards)
+
+    def test_ranked_bots_and_mixed_populations_require_their_exact_rosters(self):
+        ranked = sample(1, preference="humans_only")
+        bots = sample(2, preference="bot_practice")
+        mixed = [sample(0), ranked, bots]
+        self.assertTrue(probe.validate_sample(ranked, preference="humans_only"))
+        self.assertTrue(probe.validate_sample(bots, preference="bot_practice"))
+        self.assertTrue(probe.validate_population([bots], 10, ["bot_practice"]))
+        self.assertTrue(probe.validate_population(mixed, 30,
+                                                  ["quick", "humans_only", "bot_practice"]))
+        self.assertFalse(probe.validate_population(mixed, 30))
+        bad = copy.deepcopy(ranked)
+        bad["peers"][0]["public"]["allocation"]["rated"] = False
+        self.assertFalse(probe.validate_sample(bad, preference="humans_only"))
+        bad = copy.deepcopy(bots)
+        bad["peers"][0]["public"]["allocation"]["human_count"] = 10
+        self.assertFalse(probe.validate_sample(bad, preference="bot_practice"))
+        bad = copy.deepcopy(bots)
+        first = bad["peers"][0]["public"]["allocation"]
+        for peer in bad["peers"][1:]:
+            peer["public"]["allocation"] = copy.deepcopy(first)
+        self.assertFalse(probe.validate_population([bad], 10, ["bot_practice"]))
+
+    def test_mixed_manifests_cover_every_arena_human_and_server_bot(self):
+        current = [sample(0), sample(1, preference="humans_only"),
+                   sample(2, preference="bot_practice")]
+        preferences = ["quick", "humans_only", "bot_practice"]
+        worker_preferences = probe.allocation_preferences(current)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for allocation, preference in worker_preferences.items():
+                peers = [peer for shard in current for peer in shard["peers"]
+                         if peer["public"]["allocation"]["allocation_id"] == allocation]
+                directory = root / "matches" / allocation
+                directory.mkdir(parents=True)
+                humans = [{"profile_id": peer["public"]["profile_id"],
+                           "session_id": f"session-{index}"}
+                          for index, peer in enumerate(peers)]
+                manifest = {"allocation_id": allocation, "preference": preference,
+                            "endpoint": peers[0]["public"]["allocation"]["endpoint"],
+                            "humans": humans}
+                status = {"allocation_id": allocation, "phase": "running", "server_epoch": 7,
+                          "heartbeat_ms": time.time() * 1000,
+                          "joined_sessions": [human["session_id"] for human in humans]}
+                (directory / "manifest.json").write_text(json.dumps(manifest))
+                (directory / "status.json").write_text(json.dumps(status))
+            result = probe.verify_manifests(root, current, 30, preferences)
+            self.assertEqual(result["running_workers"], 12)
+            self.assertEqual(result["human_seats"], 30)
+            self.assertEqual(result["server_bot_seats"], 90)
+            self.assertEqual(result["distinct_endpoints"], 12)
+            bot_allocation = next(allocation for allocation, preference in worker_preferences.items()
+                                  if preference == "bot_practice")
+            path = root / "matches" / bot_allocation / "manifest.json"
+            manifest = json.loads(path.read_text())
+            manifest["preference"] = "quick"
+            path.write_text(json.dumps(manifest))
+            with self.assertRaises(AssertionError):
+                probe.verify_manifests(root, current, 30, preferences)
+
+    def test_mixed_server_metrics_require_one_signed_endpoint_per_bots_worker(self):
+        current = [sample(0), sample(1, preference="humans_only"),
+                   sample(2, preference="bot_practice")]
+        worker_preferences = probe.allocation_preferences(current)
+        timing = {"count": 2, "total_us": 3000, "buckets": [1, 1, 0]}
+        def record(preference):
+            humans = probe.ALLOCATION_RULES[preference]["human_count"]
+            return {"elapsed_secs": 2, "bucket_upper_us": [1000, 5000],
+                    "broadcasts": 3, "broadcast_gaps": timing,
+                    "endpoints": [{"player_id": index + 1, "transport_commands": 25,
+                                   "gameplay_transforms": 20, "last_sequence": 25,
+                                   "sequence_gaps": 0, "sequence_restarts": 0, "snapshots": 2,
+                                   "latest_transform_age_at_snapshot": timing}
+                                  for index in range(humans)]}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for allocation, preference in worker_preferences.items():
+                worker = root / "matches" / allocation
+                worker.mkdir(parents=True)
+                (worker / "worker.log").write_text("LOAD_METRICS " + json.dumps(record(preference)) + "\n")
+            result = probe.summarize_server_load(root, 30, worker_preferences)
+            self.assertEqual(len(result["workers"]), 12)
+            self.assertEqual(result["totals"]["gameplay_transforms"], 600)
+            self.assertEqual(result["totals"]["transport_commands"], 750)
+            bot_allocation = next(allocation for allocation, preference in worker_preferences.items()
+                                  if preference == "bot_practice")
+            log = root / "matches" / bot_allocation / "worker.log"
+            log.write_text("LOAD_METRICS " + json.dumps(record("quick")) + "\n")
+            with self.assertRaisesRegex(AssertionError, "endpoint count contradicts allocation"):
+                probe.summarize_server_load(root, 30, worker_preferences)
+            log.unlink()
+            with self.assertRaisesRegex(AssertionError, "missing or unexpected"):
+                probe.summarize_server_load(root, 30, worker_preferences)
+
+    def test_ranked_qualification_is_explicit_and_bound_to_disposable_database(self):
+        profiles = ["a" * 64, "b" * 64]
+        with mock.patch.object(probe.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout='{"seeded": 2}', stderr="")
+            result = probe.qualify_ranked_profiles(Path("/fixture/helper"), {"PATH": "/bin"},
+                                                   "postgres://localhost/omoba_test", profiles)
+            self.assertEqual(result, {"seeded": 2})
+            request = json.loads(run.call_args.kwargs["input"])
+            self.assertEqual(request, {"profiles": profiles, "target": 10})
+            self.assertEqual(run.call_args.kwargs["env"]["OMOBA_TEST_DATABASE_URL"],
+                             "postgres://localhost/omoba_test")
+            run.return_value = mock.Mock(returncode=1, stdout="", stderr="fixture rejected")
+            with self.assertRaisesRegex(AssertionError, "fixture rejected"):
+                probe.qualify_ranked_profiles(Path("/fixture/helper"), {},
+                                              "postgres://localhost/omoba_test", profiles)
+        required = ["--server-bin", "/not-used", "--bots-bin", "/not-used", "--output", "/not-created"]
+        for extra in (["--workload", "ranked"],
+                      ["--workload", "mixed", "--clients", "20", "--qualify-ranked-fixtures"],
+                      ["--qualify-ranked-fixtures"]):
+            with self.subTest(extra=extra), \
+                    mock.patch.dict(os.environ, {"OMOBA_TEST_DATABASE_URL": "postgres://localhost/omoba_test"}), \
+                    mock.patch.object(probe.subprocess, "run", side_effect=AssertionError("unexpected process")), \
+                    mock.patch.object(probe.socket, "socket", side_effect=AssertionError("unexpected socket")), \
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                probe.main(required + extra)
+
+    def test_bots_cli_reserves_one_lobby_and_ten_worker_ports(self):
+        with mock.patch.dict(os.environ, {"OMOBA_TEST_DATABASE_URL": "postgres://localhost/omoba_test"}), \
+                mock.patch.object(probe.subprocess, "run", side_effect=AssertionError("stop after ports")), \
+                mock.patch.object(probe.socket, "socket") as factory, \
+                self.assertRaisesRegex(AssertionError, "stop after ports"):
+            bind = factory.return_value.__enter__.return_value.bind
+            probe.main(["--server-bin", sys.executable, "--bots-bin", sys.executable,
+                        "--output", "/not-created", "--workload", "bots"])
+            self.assertEqual(bind.call_count, 11)
+            self.assertEqual([call.args[0][1] for call in bind.call_args_list],
+                             [47600, *range(47700, 47710)])
 
 
 if __name__ == "__main__":

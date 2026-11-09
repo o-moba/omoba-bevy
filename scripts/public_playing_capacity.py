@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Measure signed playing clients in an owned loopback Casual lobby.
+"""Measure signed playing clients in an owned loopback public lobby.
 
-Uses ten-client native AI shards, never a live server. Build current server and
-harness --bin bots first and prepare the disposable omoba_test database. Large
-runs require --allow-large and sufficient existing test DB connections; this
-tool never changes database, operating-system or production configuration.
+Uses ten-client native AI shards, never a live server. Casual and Ranked shards
+share one arena; every vs Bots client owns a separate arena with nine server
+bots. Build the current server and harness --bin bots first and prepare the
+disposable omoba_test database. Ranked and mixed runs additionally require an
+explicit synthetic qualification fixture. Large runs require --allow-large and
+sufficient existing test DB connections; this tool never changes database,
+operating-system or production configuration.
 """
 import argparse
 import hashlib
@@ -17,6 +20,40 @@ import subprocess
 import time
 
 from public_bots_rehearsal import isolated_database, read_events, stop_owned
+
+
+ALLOCATION_RULES = {
+    "quick": {"human_count": 10, "bot_count": 0, "rated": False, "arenas_per_shard": 1},
+    "humans_only": {"human_count": 10, "bot_count": 0, "rated": True, "arenas_per_shard": 1},
+    "bot_practice": {"human_count": 1, "bot_count": 9, "rated": False, "arenas_per_shard": 10},
+}
+WORKLOAD_PREFERENCES = {
+    "casual": "quick",
+    "ranked": "humans_only",
+    "bots": "bot_practice",
+}
+MIXED_PREFERENCES = ("quick", "humans_only", "bot_practice")
+
+
+def workload_preferences(workload, shards):
+    """Resolve generator shards separately from the arenas they consume."""
+    assert type(shards) is int and shards >= 1
+    if workload == "mixed":
+        assert shards >= 3 and shards % 3 == 0, "mixed requires equal Casual, Ranked and vs Bots shards"
+        return [MIXED_PREFERENCES[index % 3] for index in range(shards)]
+    assert workload in WORKLOAD_PREFERENCES, "unknown capacity workload"
+    return [WORKLOAD_PREFERENCES[workload]] * shards
+
+
+def arena_count(preferences):
+    assert preferences and all(preference in ALLOCATION_RULES for preference in preferences)
+    return sum(ALLOCATION_RULES[preference]["arenas_per_shard"] for preference in preferences)
+
+
+def allocation_preferences(samples):
+    return {peer["public"]["allocation"]["allocation_id"]:
+            peer["public"]["allocation"]["preference"]
+            for sample in samples for peer in sample["peers"]}
 
 
 def valid_snapshot_meta(meta):
@@ -54,8 +91,9 @@ def worker_diagnostics(root, limit):
             "workers": rows}
 
 
-def validate_sample(sample, size=10):
+def validate_sample(sample, size=10, preference="quick"):
     peers = sample.get("peers", [])
+    rules = ALLOCATION_RULES[preference]
     if sample.get("phase") != "running" or len(peers) != size:
         return False
     profiles = set()
@@ -67,9 +105,10 @@ def validate_sample(sample, size=10):
                 or not valid_snapshot_meta(peer.get("snapshot_meta"))
                 or status.get("phase") != "running" or not status.get("profile_id")
                 or status.get("error") is not None
-                or allocation.get("human_count") != 10 or allocation.get("bot_count") != 0
-                or allocation.get("rated") is not False
-                or allocation.get("preference") != "quick"
+                or allocation.get("human_count") != rules["human_count"]
+                or allocation.get("bot_count") != rules["bot_count"]
+                or allocation.get("rated") is not rules["rated"]
+                or allocation.get("preference") != preference
                 or not allocation.get("allocation_id")
                 or not allocation.get("endpoint", "").startswith("127.0.0.1:")
                 or any(type(wire.get(k)) is not int or wire[k] < 1
@@ -80,9 +119,12 @@ def validate_sample(sample, size=10):
     return len(profiles) == size
 
 
-def validate_population(samples, count):
+def validate_population(samples, count, preferences=None):
     """No historical success may substitute for a missing/current peer."""
-    if len(samples) != count // 10 or not all(validate_sample(s) for s in samples):
+    preferences = preferences or ["quick"] * (count // 10)
+    if (len(samples) != count // 10 or len(preferences) != len(samples)
+            or not all(validate_sample(s, preference=preference)
+                       for s, preference in zip(samples, preferences))):
         return False
     peers = [p for sample in samples for p in sample["peers"]]
     profiles = [p["public"]["profile_id"] for p in peers]
@@ -90,12 +132,14 @@ def validate_population(samples, count):
     for peer in peers:
         a = peer["public"]["allocation"]
         allocations.setdefault(a["allocation_id"], []).append(peer)
-    return (len(set(profiles)) == count and len(allocations) == count // 10
-            and all(len(peers) == 10 for peers in allocations.values())
+    return (len(set(profiles)) == count and len(allocations) == arena_count(preferences)
+            and all(len({p["public"]["allocation"]["preference"] for p in peers}) == 1
+                    and len(peers) == ALLOCATION_RULES[peers[0]["public"]["allocation"]["preference"]]["human_count"]
+                    for peers in allocations.values())
             and all(len({p["public"]["allocation"]["endpoint"] for p in peers}) == 1
                     for peers in allocations.values())
             and len({peers[0]["public"]["allocation"]["endpoint"]
-                     for peers in allocations.values()}) == count // 10)
+                     for peers in allocations.values()}) == arena_count(preferences))
 
 
 def authenticated_population(samples, count):
@@ -122,18 +166,22 @@ def percentile(values, fraction):
     return values[min(len(values) - 1, int(len(values) * fraction))]
 
 
-def verify_manifests(root, samples, count):
+def verify_manifests(root, samples, count, preferences=None):
+    assert validate_population(samples, count, preferences), "cannot verify an invalid current population"
     peers = [p for sample in samples for p in sample["peers"]]
-    allocations = {p["public"]["allocation"]["allocation_id"] for p in peers}
+    worker_preferences = allocation_preferences(samples)
+    allocations = set(worker_preferences)
     profiles = {p["public"]["profile_id"] for p in peers}
     manifest_profiles, endpoints, receipts = [], set(), []
     for allocation in allocations:
+        preference = worker_preferences[allocation]
+        rules = ALLOCATION_RULES[preference]
         assert len(allocation) == 32 and all(c in "0123456789abcdef" for c in allocation)
         directory = root / "matches" / allocation
         manifest = json.loads((directory / "manifest.json").read_text())
         status = json.loads((directory / "status.json").read_text())
         assert manifest["allocation_id"] == status["allocation_id"] == allocation
-        assert manifest["preference"] == "quick" and len(manifest["humans"]) == 10
+        assert manifest["preference"] == preference and len(manifest["humans"]) == rules["human_count"]
         assert status["phase"] == "running" and status["server_epoch"] != 0
         assert set(status["joined_sessions"]) == {h["session_id"] for h in manifest["humans"]}
         assert all(p["public"]["allocation"]["endpoint"] == manifest["endpoint"]
@@ -141,7 +189,9 @@ def verify_manifests(root, samples, count):
         assert 0 <= time.time() * 1000 - status["heartbeat_ms"] < 5000, "stale worker receipt"
         manifest_profiles.extend(h["profile_id"] for h in manifest["humans"])
         endpoints.add(manifest["endpoint"])
-        receipts.append({"allocation_id": allocation, "phase": status["phase"],
+        receipts.append({"allocation_id": allocation, "preference": preference,
+                         "human_count": rules["human_count"], "bot_count": rules["bot_count"],
+                         "rated": rules["rated"], "phase": status["phase"],
                          "server_epoch": status["server_epoch"],
                          "heartbeat_ms": status["heartbeat_ms"],
                          "joined_count": len(status["joined_sessions"]),
@@ -149,9 +199,11 @@ def verify_manifests(root, samples, count):
                          "endpoint": manifest["endpoint"],
                          "manifest_sha256": hashlib.sha256((directory / "manifest.json").read_bytes()).hexdigest()})
     assert len(manifest_profiles) == count and set(manifest_profiles) == profiles
-    assert len(endpoints) == count // 10
+    assert len(endpoints) == len(allocations)
     return {"running_workers": len(allocations), "human_seats": count,
-            "server_bot_seats": 0, "distinct_endpoints": len(endpoints),
+            "server_bot_seats": sum(ALLOCATION_RULES[preference]["bot_count"]
+                                    for preference in worker_preferences.values()),
+            "distinct_endpoints": len(endpoints),
             "receipts_at_acceptance": receipts}
 
 
@@ -266,18 +318,30 @@ def read_load_metric_records(path):
     return records
 
 
-def summarize_server_load(root, clients):
-    """Summarize final cumulative metrics from every live match worker.
+def summarize_server_load(root, clients, worker_preferences=None):
+    """Summarize final cumulative metrics from every expected live match worker.
 
-    Sequence gaps expose signed commands that did not reach application dispatch.
-    Latest-transform age is deliberately not presented as per-command latency.
+    Each worker must contain exactly its signed human endpoints: ten for Casual
+    or Ranked, one for vs Bots. Sequence gaps expose signed commands that did
+    not reach application dispatch. Latest-transform age is deliberately not
+    presented as per-command latency.
     """
     assert type(clients) is int and clients >= 10 and clients % 10 == 0
     paths = sorted((root / "matches").glob("*/worker.log"))
-    assert len(paths) == clients // 10, "missing or unexpected live worker metric logs"
+    if worker_preferences is None:
+        assert len(paths) == clients // 10, "missing or unexpected live worker metric logs"
+        worker_preferences = {path.parent.name: "quick" for path in paths}
+    else:
+        assert (isinstance(worker_preferences, dict) and worker_preferences
+                and all(preference in ALLOCATION_RULES for preference in worker_preferences.values())
+                and sum(ALLOCATION_RULES[preference]["human_count"]
+                        for preference in worker_preferences.values()) == clients), "worker roster contradicts client population"
+        assert {path.parent.name for path in paths} == set(worker_preferences), "missing or unexpected live worker metric logs"
     workers, all_endpoints = [], []
     common_bounds = None
     for path in paths:
+        preference = worker_preferences[path.parent.name]
+        expected_endpoints = ALLOCATION_RULES[preference]["human_count"]
         records = read_load_metric_records(path)
         previous_elapsed = -1.0
         for record in records:
@@ -294,7 +358,7 @@ def summarize_server_load(root, clients):
         assert bounds == common_bounds, "server timing profile changed between workers"
         assert type(final.get("broadcasts")) is int and final["broadcasts"] >= 1, "missing world broadcasts"
         endpoints = final.get("endpoints")
-        assert isinstance(endpoints, list) and len(endpoints) == 10, "worker does not have ten measured endpoints"
+        assert (isinstance(endpoints, list) and len(endpoints) == expected_endpoints), "worker signed-human endpoint count contradicts allocation"
         rows = []
         for endpoint in endpoints:
             assert isinstance(endpoint, dict), "invalid server endpoint report"
@@ -310,10 +374,11 @@ def summarize_server_load(root, clients):
                 endpoint.get("latest_transform_age_at_snapshot"), bounds)
             assert row["latest_transform_age_at_snapshot"]["count"] > 0, "no transform-age observations"
             rows.append(row)
-        assert len({row["player_id"] for row in rows}) == 10, "duplicate gameplay player identity"
+        assert len({row["player_id"] for row in rows}) == expected_endpoints, "duplicate gameplay player identity"
         broadcast_gaps = load_timing_summary(final.get("broadcast_gaps"), bounds)
         worker = {
             "allocation_id": path.parent.name,
+            "preference": preference,
             "worker_log_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "metric_records": len(records),
             "elapsed_secs": final["elapsed_secs"],
@@ -327,6 +392,7 @@ def summarize_server_load(root, clients):
         }
         workers.append(worker)
         all_endpoints.extend(rows)
+    assert len(all_endpoints) == clients, "server metric population contradicts signed clients"
     totals = {key: sum(row[key] for row in all_endpoints) for key in
               ("transport_commands", "gameplay_transforms", "sequence_gaps", "sequence_restarts", "snapshots")}
     return {
@@ -450,11 +516,26 @@ def process_sample(lobby, shards):
             "generator": totals({p.pid for p in shards})}
 
 
+def qualify_ranked_profiles(helper, env, database, profiles):
+    """Seed only disclosed synthetic prior Casual receipts in omoba_test."""
+    fixture = subprocess.run([str(helper)], input=json.dumps({"profiles": profiles, "target": 10}),
+                             text=True, capture_output=True, timeout=120,
+                             env=dict(env, OMOBA_TEST_DATABASE_URL=database))
+    assert fixture.returncode == 0, "isolated Ranked fixture failed: " + fixture.stderr[-1200:]
+    result = json.loads(fixture.stdout)
+    assert isinstance(result, dict), "Ranked qualification helper returned a non-object"
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-bin", type=Path, required=True)
     parser.add_argument("--bots-bin", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--workload", choices=("casual", "ranked", "bots", "mixed"), default="casual",
+                        help="casual keeps the legacy default; mixed uses equal Casual/Ranked/vs Bots shards")
+    parser.add_argument("--qualify-ranked-fixtures", action="store_true",
+                        help="required for ranked/mixed: seed disclosed synthetic prior Casual receipts in loopback omoba_test")
     parser.add_argument("--clients", type=int, default=10)
     parser.add_argument("--seconds", type=float, default=15)
     parser.add_argument("--input-hz", type=int, default=20,
@@ -474,14 +555,28 @@ def main(argv=None):
             or not 0 <= args.input_hz <= 60
             or not args.seconds + 30 <= args.timeout <= 600):
         parser.error("require multiples of10 clients (large opt-in above100),15..300s soak,0..60 input Hz and bounded timeout")
-    rooms = args.clients // 10
-    if not (1024 <= args.port <= 65535 and 1024 <= args.worker_port <= 65536 - rooms
-            and args.port not in range(args.worker_port, args.worker_port + rooms)):
+    shard_count = args.clients // 10
+    try:
+        preferences = workload_preferences(args.workload, shard_count)
+    except AssertionError as error:
+        parser.error(str(error))
+    arenas = arena_count(preferences)
+    ranked_shards = [index for index, preference in enumerate(preferences) if preference == "humans_only"]
+    if ranked_shards and not args.qualify_ranked_fixtures:
+        parser.error("ranked/mixed requires --qualify-ranked-fixtures in the disposable loopback database")
+    if args.qualify_ranked_fixtures and not ranked_shards:
+        parser.error("--qualify-ranked-fixtures is only valid for ranked/mixed workloads")
+    if not (1024 <= args.port <= 65535 and 1024 <= args.worker_port <= 65536 - arenas
+            and args.port not in range(args.worker_port, args.worker_port + arenas)):
         parser.error("invalid/overlapping loopback lobby and worker port range")
-    for binary in (args.server_bin, args.bots_bin):
+    binaries = [args.server_bin, args.bots_bin]
+    qualification_helper = args.server_bin.resolve().parent / "examples/qualify-ranked-fixture"
+    if ranked_shards:
+        binaries.append(qualification_helper)
+    for binary in binaries:
         if not binary.is_file() or not os.access(binary, os.X_OK):
             parser.error(f"not an executable: {binary}")
-    for port in [args.port, *range(args.worker_port, args.worker_port + rooms)]:
+    for port in [args.port, *range(args.worker_port, args.worker_port + arenas)]:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             try:
                 sock.bind(("127.0.0.1", port))
@@ -490,8 +585,8 @@ def main(argv=None):
     setting = subprocess.run(["psql", database, "--no-psqlrc", "-At", "-v", "ON_ERROR_STOP=1",
                               "-c", "SHOW max_connections"],
                              check=True, capture_output=True, text=True, timeout=10)
-    if int(setting.stdout.strip()) < rooms + 8:
-        parser.error("isolated test DB needs at least rooms+8 existing connections; no setting was changed")
+    if int(setting.stdout.strip()) < arenas + 8:
+        parser.error("isolated test DB needs at least arenas+8 existing connections; no setting was changed")
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
     search_gate = root / "start-search"
@@ -499,24 +594,35 @@ def main(argv=None):
            if not k.startswith(("OMOBA_", "GAME_")) and k != "SERVER_ADDR"}
     env.update(SERVER_ADDR=f"127.0.0.1:{args.port}", OMOBA_SERVER_ROLE="lobby",
                OMOBA_DATABASE_URL=database, OMOBA_MATCH_ROOT=str(root / "matches"),
-               OMOBA_CAREER_OUTBOX=str(root / "outbox"), OMOBA_MATCH_CAPACITY=str(rooms),
+               OMOBA_CAREER_OUTBOX=str(root / "outbox"), OMOBA_MATCH_CAPACITY=str(arenas),
                OMOBA_MATCH_FIRST_PORT=str(args.worker_port), OMOBA_MATCH_BIND_IP="127.0.0.1",
                OMOBA_MATCH_PUBLIC_HOST="127.0.0.1", OMOBA_LOBBY_MAX_WAITING="2048",
-               OMOBA_LIMIT_ENDPOINTS_PER_IP="2048", OMOBA_LIMIT_ARENAS_PER_IP="100",
+               OMOBA_LIMIT_ENDPOINTS_PER_IP="2048", OMOBA_LIMIT_ARENAS_PER_IP=str(max(100, arenas)),
                OMOBA_LIMIT_PROBES_PER_IP="10000", OMOBA_LIMIT_PROBES_PER_NETWORK="10000",
                OMOBA_LIMIT_PROBES_GLOBAL="10000", OMOBA_LIMIT_NEW_PROFILES_PER_IP="1000000",
                OMOBA_LIMIT_NEW_PROFILES_TOTAL="10000000")
     if args.server_load_metrics:
         env["OMOBA_LOAD_METRICS"] = "1"
-    report = {"status": "FAIL", "clients": args.clients, "arenas": rooms,
-              "preference": "quick", "server_bots": 0, "soak_seconds": args.seconds,
-              "scope": "local Casual signed native AI clients; not RU/cgroup or Ranked proof",
+    server_bots = sum(ALLOCATION_RULES[preference]["bot_count"] * 10 for preference in preferences)
+    workload_names = {"quick": "Casual", "humans_only": "Ranked", "bot_practice": "vs Bots"}
+    report = {"status": "FAIL", "clients": args.clients, "generator_shards": shard_count,
+              "arenas": arenas, "workload": args.workload, "shard_preferences": preferences,
+              "preference": preferences[0] if len(set(preferences)) == 1 else "mixed",
+              "server_bots": server_bots, "soak_seconds": args.seconds,
+              "scope": "local " + "/".join(dict.fromkeys(workload_names[p] for p in preferences))
+                       + " signed native AI clients; not RU/cgroup, WAN, organic Ranked eligibility or settlement proof",
               "acceptance_scope": "Running population, freshness and durable rosters; received counters and opt-in server dispatch/cadence metrics",
               "input_hz_requested": args.input_hz or None,
+              "ranked_qualification": {
+                  "required": bool(ranked_shards), "status": "pending" if ranked_shards else "not used",
+                  "shards": ranked_shards,
+                  "helper_sha256": hashlib.sha256(qualification_helper.read_bytes()).hexdigest() if ranked_shards else None,
+              },
               "unverified_scope": [
                   "Latency/SLA, physical devices, WAN and real RU host/uplink",
                   "Packet delivery/loss: snapshot sequence includes unsent bootstrap ticks; sequence gaps only expose signed commands absent from application dispatch",
                   "Per-command ACK latency and proof that a Transform changed coordinates",
+                  "Organic Ranked qualification, queue policy and rated settlement; any Ranked capacity roster uses synthetic prior Casual receipts",
               ],
               "fixture_allowances": {k: v for k, v in env.items() if k.startswith("OMOBA_LIMIT_")},
               "server_sha256": hashlib.sha256(args.server_bin.read_bytes()).hexdigest(),
@@ -538,7 +644,10 @@ def main(argv=None):
                      "harness/src/bin/bots.rs", "harness/src/bot.rs", "harness/src/public_client.rs",
                      "server/src/main.rs", "server/src/load_metrics.rs", "server/src/public_transport.rs",
                      "server/src/runtime/dispatch.rs", "server/src/runtime/mod.rs", "server/src/snapshot.rs",
-                     "Cargo.lock", "shared/src/lib.rs", "shared/src/transport.rs", "shared/src/protocol.rs")}
+                     "server/src/match_allocation.rs", "server/src/match_service.rs",
+                     "career-store/examples/qualify-ranked-fixture.rs",
+                     "Cargo.lock", "shared/src/lib.rs", "shared/src/transport.rs", "shared/src/protocol.rs",
+                     "shared/src/match_service.rs")}
     children, writers, readers, shards, latest = [], [], [], [], {}
     auth_latest = {}
     def register(child):
@@ -558,11 +667,11 @@ def main(argv=None):
             assert lobby.poll() is None, "owned lobby exited before listening"
             assert time.monotonic() - started < 30, "owned lobby startup timed out"
             time.sleep(.05)
-        for index in range(rooms):
+        for index, preference in enumerate(preferences):
             log = (root / f"bots-{index:03d}.log").open("w"); writers.append(log)
             command = [str(args.bots_bin.resolve()), "--count", "10", "--server",
                                         f"127.0.0.1:{args.port}", "--public", "--telemetry",
-                                        "--preference", "quick", "--search-gate", str(search_gate)]
+                                        "--preference", preference, "--search-gate", str(search_gate)]
             if args.input_hz:
                 command += ["--input-hz", str(args.input_hz)]
             process = subprocess.Popen(command, env=env, cwd=root,
@@ -585,22 +694,33 @@ def main(argv=None):
                         latest[index] = (now, sample)
                     elif kind == "BOT_AUTH":
                         auth_latest[index] = (now, sample)
-            current = [latest[i][1] for i in range(rooms) if i in latest]
-            fresh = len(latest) == rooms and all(now - at < 3 for at, _ in latest.values())
+            current = [latest[i][1] for i in range(shard_count) if i in latest]
+            fresh = len(latest) == shard_count and all(now - at < 3 for at, _ in latest.values())
             if not search_gate.exists():
-                current_auth = [auth_latest[i][1] for i in range(rooms) if i in auth_latest]
-                auth_fresh = len(auth_latest) == rooms and all(now - at < 3 for at, _ in auth_latest.values())
+                current_auth = [auth_latest[i][1] for i in range(shard_count) if i in auth_latest]
+                auth_fresh = len(auth_latest) == shard_count and all(now - at < 3 for at, _ in auth_latest.values())
                 if auth_fresh and authenticated_population(current_auth, args.clients):
-                    if authenticated_since is None:
-                        authenticated_since = now
-                        report["all_authenticated_after_seconds"] = now - started
-                    if now - authenticated_since >= 5:
-                        search_gate.touch(exist_ok=False)
-                        report["search_released_after_seconds"] = now - started
-                        report["login_fixture"] = "ordinary sign-in; all profiles stable5s before pressing Search; no qualification or policy override"
+                    if ranked_shards and report["ranked_qualification"]["status"] != "seeded":
+                        profiles = [peer["public"]["profile_id"] for index in ranked_shards
+                                    for peer in current_auth[index]["peers"]]
+                        result = qualify_ranked_profiles(qualification_helper, env, database, profiles)
+                        report["ranked_qualification"].update(
+                            status="seeded", target=10, profile_count=len(profiles), result=result)
+                        authenticated_since = None
+                    else:
+                        if authenticated_since is None:
+                            authenticated_since = now
+                            report["all_authenticated_after_seconds"] = now - started
+                        if now - authenticated_since >= 5:
+                            search_gate.touch(exist_ok=False)
+                            report["search_released_after_seconds"] = now - started
+                            report["login_fixture"] = (
+                                "ordinary sign-in; all profiles stable5s before pressing Search; no qualification or policy override"
+                                if not ranked_shards else
+                                "ordinary sign-in; explicit synthetic prior Casual receipts target10 in disposable omoba_test; all profiles stable5s after fixture before Search; not organic eligibility proof")
                 else:
                     authenticated_since = None
-            valid = fresh and validate_population(current, args.clients)
+            valid = fresh and validate_population(current, args.clients, preferences)
             if running_at is None and valid:
                 if args.input_hz:
                     assert all(s.get("input_hz_requested") == args.input_hz for s in current), "native producer did not confirm requested input cadence"
@@ -613,7 +733,7 @@ def main(argv=None):
                     report["resources"].append(process_sample(lobby, shards))
                     next_resources = now + 2
                 if now - running_at >= args.seconds:
-                    report["durable_rosters"] = verify_manifests(root, current, args.clients)
+                    report["durable_rosters"] = verify_manifests(root, current, args.clients, preferences)
                     report["wire"] = summarize_wire(baseline, current)
                     if args.input_hz:
                         report["input"] = summarize_input(baseline, current, args.input_hz)
@@ -622,7 +742,8 @@ def main(argv=None):
                     else:
                         report["input"] = {"status": "not measured; explicit legacy snapshot-paced mode"}
                     if args.server_load_metrics:
-                        report["server_load"] = summarize_server_load(root, args.clients)
+                        report["server_load"] = summarize_server_load(
+                            root, args.clients, allocation_preferences(current))
                         assert report["server_load"]["all_endpoints_without_sequence_gaps"], "signed command sequence gaps reached final report"
                         assert report["server_load"]["all_endpoints_without_sequence_restarts"], "signed command sequence restarted during run"
                     else:
@@ -636,7 +757,7 @@ def main(argv=None):
         raise
     finally:
         report["elapsed_seconds"] = time.monotonic() - started
-        report["before_cleanup"] = worker_diagnostics(root, rooms * 4)
+        report["before_cleanup"] = worker_diagnostics(root, arenas * 4)
         report["latest_shards"] = {str(i): sample for i, (_, sample) in latest.items()}
         report["latest_auth_shards"] = {str(i): sample for i, (_, sample) in auth_latest.items()}
         (root / "report.json").write_text(json.dumps(report, indent=2) + "\n")

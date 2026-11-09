@@ -1951,3 +1951,45 @@ vs Bots/mixed,real/identical RU host,uplink/WAN или production SLA.
 проверенном/open состоянии; human review,WAN/multi-host/fault/trust,UI-2/UI-3,
 physical C3,C2/C4 owner decisions,independent RPO/RTO и final release не закрыты.
 Исходные68=62done/5partial/1open. Никакого merge/release/deploy/keys/grants.
+
+
+## 2026-11-10 — native workload runner and live smoke
+
+Архивный verifier1000-client пакета до этого исправлен: все15 historical sources,
+включая `public_bots_rehearsal.py`, берутся только из evidence snapshot. Полный
+пересчёт и sandbox с сломанными current-checkout helpers PASS; это не меняет
+исторические отчёты. Для `36acb771` Release42652552315 полностью SUCCESS; CI
+42652552305 ждёт завершения PostgreSQL job и получает собственный статус.
+
+Capacity runner обобщён на `--workload casual|ranked|bots|mixed`. Casual остаётся
+default. Десять клиентов Casual/Ranked занимают одну арену, десять vs Bots —
+десять арен по1 human+9 server bots. Проверки population,manifest,worker ports,
+health и server-load endpoints используют реальное число арен. Mixed требует
+multiple30 и равные shards трёх очередей; минимум30 clients=12 arenas. Ranked/
+mixed требуют явного `--qualify-ranked-fixtures`: helper seed target10 synthetic
+prior Casual receipts только в disposable loopback omoba_test. Это не organic
+eligibility/queue-policy/rated-settlement proof. Release linux-capacity-bots
+теперь включает и `bots`,и `examples/qualify-ranked-fixture`.
+
+Static gates PASS:19 capacity tests,72 Release tests,14 rehearsal tests. Маленькие
+live15s loopback smoke с текущими Rust sources и opt-in server metrics PASS:
+
+-10vsBots/10arenas/90serverbots:20.0066sends/s,3746 transforms,0 gaps/restarts;
+-10Ranked/1arena:20.0978sends/s,3440 transforms,0 gaps/restarts;
+-30mixed/12arenas/90serverbots:19.9965–20.0051sends/s,11561 transforms,
+0 gaps/restarts.
+
+Все exact Running rosters,metric workers иhealth-v2 SQL/journal receipts совпали;
+owned processes после teardown отсутствуют. [Selected evidence и standalone
+verifier](../evidence/capacity-workloads-smoke-2026-11-10/README.md) содержат19
+source files,reports,manifests/status/health,worker metric logs иcleanup; raw
+generator logs,DSNs,keys,binaries не архивируются. Verifier пересчитывает acceptance
+срез: post-teardown status может быть failed,поздние log lines не подменяют
+pre-teardown Running receipt.
+
+Это Mac loopback functional smoke,не sustained capacity,RU/WAN/uplink илиSLA.
+Следующий gate — CI нового HEAD и exact Release artifacts,затем isolated actual/
+identical RU host со stepped+sustained Casual/Bots/Ranked/mixed и measured uplink/
+network overhead. Общий dev VPS остаётся diagnostic-only. Исходные68=62done/5partial/
+1open,#13 и production configuration не изменены; human review,C2/C4,devices,
+independent recovery и owner-controlled merge/release остаются открыты.

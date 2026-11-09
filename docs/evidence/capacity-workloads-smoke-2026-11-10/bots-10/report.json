@@ -1,0 +1,6071 @@
+{
+  "status": "PASS",
+  "clients": 10,
+  "generator_shards": 1,
+  "arenas": 10,
+  "workload": "bots",
+  "shard_preferences": [
+    "bot_practice"
+  ],
+  "preference": "bot_practice",
+  "server_bots": 90,
+  "soak_seconds": 15.0,
+  "scope": "local vs Bots signed native AI clients; not RU/cgroup, WAN, organic Ranked eligibility or settlement proof",
+  "acceptance_scope": "Running population, freshness and durable rosters; received counters and opt-in server dispatch/cadence metrics",
+  "input_hz_requested": 20,
+  "ranked_qualification": {
+    "required": false,
+    "status": "not used",
+    "shards": [],
+    "helper_sha256": null
+  },
+  "unverified_scope": [
+    "Latency/SLA, physical devices, WAN and real RU host/uplink",
+    "Packet delivery/loss: snapshot sequence includes unsent bootstrap ticks; sequence gaps only expose signed commands absent from application dispatch",
+    "Per-command ACK latency and proof that a Transform changed coordinates",
+    "Organic Ranked qualification, queue policy and rated settlement; any Ranked capacity roster uses synthetic prior Casual receipts"
+  ],
+  "fixture_allowances": {
+    "OMOBA_LIMIT_ENDPOINTS_PER_IP": "2048",
+    "OMOBA_LIMIT_ARENAS_PER_IP": "100",
+    "OMOBA_LIMIT_PROBES_PER_IP": "10000",
+    "OMOBA_LIMIT_PROBES_PER_NETWORK": "10000",
+    "OMOBA_LIMIT_PROBES_GLOBAL": "10000",
+    "OMOBA_LIMIT_NEW_PROFILES_PER_IP": "1000000",
+    "OMOBA_LIMIT_NEW_PROFILES_TOTAL": "10000000"
+  },
+  "server_sha256": "f8c6daad7fbd556f1b64769ce99240e127033c9c9b254345d6576ad2b747e2d8",
+  "bots_sha256": "5ee8d341de8c0d4e2b3f063d561f14408c33cf5623f66d73a2cb68a8dafc3234",
+  "resources": [
+    {
+      "at": 532310.218737125,
+      "server": {
+        "processes": 11,
+        "rss_mib": 184.84375,
+        "cpu_seconds": 1.69
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.375,
+        "cpu_seconds": 0.23
+      }
+    },
+    {
+      "at": 532312.316489708,
+      "server": {
+        "processes": 11,
+        "rss_mib": 185.21875,
+        "cpu_seconds": 1.98
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.390625,
+        "cpu_seconds": 0.29
+      }
+    },
+    {
+      "at": 532314.413162041,
+      "server": {
+        "processes": 11,
+        "rss_mib": 185.5625,
+        "cpu_seconds": 2.26
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.390625,
+        "cpu_seconds": 0.34
+      }
+    },
+    {
+      "at": 532316.503727708,
+      "server": {
+        "processes": 11,
+        "rss_mib": 186.390625,
+        "cpu_seconds": 2.54
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.390625,
+        "cpu_seconds": 0.39
+      }
+    },
+    {
+      "at": 532318.603785583,
+      "server": {
+        "processes": 11,
+        "rss_mib": 186.9375,
+        "cpu_seconds": 2.85
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.390625,
+        "cpu_seconds": 0.44
+      }
+    },
+    {
+      "at": 532320.707063125,
+      "server": {
+        "processes": 11,
+        "rss_mib": 187.140625,
+        "cpu_seconds": 3.16
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.421875,
+        "cpu_seconds": 0.5
+      }
+    },
+    {
+      "at": 532322.79604575,
+      "server": {
+        "processes": 11,
+        "rss_mib": 187.328125,
+        "cpu_seconds": 3.5
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.453125,
+        "cpu_seconds": 0.56
+      }
+    },
+    {
+      "at": 532324.891032041,
+      "server": {
+        "processes": 11,
+        "rss_mib": 187.640625,
+        "cpu_seconds": 3.85
+      },
+      "generator": {
+        "processes": 1,
+        "rss_mib": 6.453125,
+        "cpu_seconds": 0.61
+      }
+    }
+  ],
+  "source_parent": "36acb77129011a3799867f9755ca9684f153bc7e",
+  "source_dirty_paths": [
+    ".github/workflows/release.yml",
+    "CHANGELOG.md",
+    "ops/vps/ru/README.md",
+    "scripts/public_playing_capacity.py",
+    "scripts/test_public_playing_capacity.py"
+  ],
+  "source_sha256": {
+    "scripts/public_playing_capacity.py": "11afdf219ce354c356e7bc3c5284b14b25d8f95570f67ed7809db30e92e68ae4",
+    "scripts/public_bots_rehearsal.py": "6aa99b8f6f4f40571e1857fa86c738dccb9ad000670980883e9fcc2d7b073cac",
+    "harness/src/bin/bots.rs": "e367bb20023abb170176dad664f9007916d5de14e7f574f745ebc46d98116f71",
+    "harness/src/bot.rs": "899a3e91bec6cffac76b277e4e981d45adf0131e6ba6f4a783824d91f61c0d97",
+    "harness/src/public_client.rs": "8cdd4848a51779f3ef57ec63b3ee6487fae653b2277e38f0e583a2ef4d1debf4",
+    "server/src/main.rs": "574fed414663eda587682a659b67ac7de8570f5936391a6b0041027466d739aa",
+    "server/src/load_metrics.rs": "2a0b2c214cfb93183bc342873dbdfa12d962a049a5e4995c40587a7b29d598b7",
+    "server/src/public_transport.rs": "e341b67159c160e444639e8f6f274cabb409b7c6f8ff330ff5df32d8b213fdaf",
+    "server/src/runtime/dispatch.rs": "e240458dedc5b2988865acfcfe9117a00c527ad03658b3ac4f627ffbe5e87077",
+    "server/src/runtime/mod.rs": "87a80bf51d4c25c166d774510088d272b582bf927a3d8f189081ff18cb257125",
+    "server/src/snapshot.rs": "c867c37bbf3fe9eddf2a6e49a548ba34124f7b22b844cd46dc2df634969f65b3",
+    "server/src/match_allocation.rs": "83a0d3264b3b7f7839ac935585e8ff332c604cfdca34f1086799dfb340b8b754",
+    "server/src/match_service.rs": "9201310629d79e6b4671044f6567a0ce4f3b3bf7a37ac4c580df002b6c4dc7bc",
+    "career-store/examples/qualify-ranked-fixture.rs": "ec9bcba2b91040b39e368ea00ced5ebe4fe132d4f5e3024e49c6d739c7215475",
+    "Cargo.lock": "7f9d507b2d24608ca9ee045a8e96fca981c3d7b163bd7ad705dc3aff34931b14",
+    "shared/src/lib.rs": "b428d4d87b6a6281fe526959e9d7162252108bb147d357659f074aaca0277ed4",
+    "shared/src/transport.rs": "4039272ce723e8ccc13b30abbc1f059fdaf721257e4187f2544d16b8d4f15cd7",
+    "shared/src/protocol.rs": "4fed0addc8cef8694d28b911af10f75983c475a6c788a41dff1c4479596df5a4",
+    "shared/src/match_service.rs": "7cfef6dafb4c82879bb9cb9d78c0932872c96e8dcc602e22a83f606cedb66381"
+  },
+  "all_authenticated_after_seconds": 2.1813607080839574,
+  "search_released_after_seconds": 7.274592875037342,
+  "login_fixture": "ordinary sign-in; all profiles stable5s before pressing Search; no qualification or policy override",
+  "all_running_after_seconds": 17.424897750024684,
+  "initial_shards": {
+    "0": {
+      "buffs": 0,
+      "elapsed_secs": 17.211309875,
+      "input_hz_requested": 20,
+      "join_error": "None",
+      "meta": {
+        "match_id": 1,
+        "protocol_version": 16,
+        "server_epoch": 1794241892123981001,
+        "snapshot_tick": 128
+      },
+      "minions": 0,
+      "peers": [
+        {
+          "cached_input_transforms": 7,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              42,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 42,
+            "total_us": 737
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "ca10f27e720cd0f4292881ad677f7387",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47900",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952054,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 217
+              },
+              "prepare": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 290
+              },
+              "send": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 2166
+              },
+              "sign": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 2717
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "cb77adf4729d422ea2ba8a3cb4d1dd954d0b27166fa24a3e8b966c4a37ebcfac",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 146,
+            "sent_transforms": 97,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                85,
+                0,
+                5,
+                5,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 96,
+              "total_us": 5301154
+            }
+          },
+          "snapshot_age_ms": 8,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892123981001,
+            "snapshot_tick": 128
+          },
+          "transport": {
+            "accepted_snapshots": 106,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 345816,
+            "received_datagrams": 376
+          }
+        },
+        {
+          "cached_input_transforms": 7,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              42,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 43,
+            "total_us": 50217
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "278ffe7bbc7afdfd9f0aab3c714b3b43",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47902",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952073,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  145,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 145,
+                "total_us": 108
+              },
+              "prepare": {
+                "buckets": [
+                  145,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 145,
+                "total_us": 39
+              },
+              "send": {
+                "buckets": [
+                  145,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 145,
+                "total_us": 846
+              },
+              "sign": {
+                "buckets": [
+                  145,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 145,
+                "total_us": 1931
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "cdb2fafd4e9841389d64b9a38fcd1cba618df2c328464421903f4af08ee6af97",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 145,
+            "sent_transforms": 96,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                82,
+                0,
+                5,
+                5,
+                1,
+                0,
+                0,
+                0
+              ],
+              "count": 95,
+              "total_us": 5300998
+            }
+          },
+          "snapshot_age_ms": 56,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892147744001,
+            "snapshot_tick": 126
+          },
+          "transport": {
+            "accepted_snapshots": 105,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 341852,
+            "received_datagrams": 371
+          }
+        },
+        {
+          "cached_input_transforms": 6,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              42,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 43,
+            "total_us": 6570
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "bc8012d82660bb324607e312a46f8aab",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47901",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952063,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 56
+              },
+              "prepare": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 10
+              },
+              "send": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 727
+              },
+              "sign": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 1889
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "f4e096c7ed98419ebeab11d563317a7f23d3060b84ad4908b7657411c5cef9c9",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 146,
+            "sent_transforms": 97,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                1,
+                83,
+                0,
+                8,
+                3,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 96,
+              "total_us": 5300967
+            }
+          },
+          "snapshot_age_ms": 8,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892135565001,
+            "snapshot_tick": 128
+          },
+          "transport": {
+            "accepted_snapshots": 107,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 343195,
+            "received_datagrams": 375
+          }
+        },
+        {
+          "cached_input_transforms": 7,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              43,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 43,
+            "total_us": 625
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "6a168cfbd49b6402fa2a078be1db1221",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47904",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952091,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  147,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 147,
+                "total_us": 36
+              },
+              "prepare": {
+                "buckets": [
+                  147,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 147,
+                "total_us": 12
+              },
+              "send": {
+                "buckets": [
+                  147,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 147,
+                "total_us": 690
+              },
+              "sign": {
+                "buckets": [
+                  147,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 147,
+                "total_us": 1844
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "86a767cd604042cfb02982c91b4b76b568e6a18a5cfd43f39670bfe750c7653f",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 147,
+            "sent_transforms": 98,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                1,
+                85,
+                0,
+                4,
+                6,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 97,
+              "total_us": 5300933
+            }
+          },
+          "snapshot_age_ms": 7,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892163735001,
+            "snapshot_tick": 126
+          },
+          "transport": {
+            "accepted_snapshots": 107,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 343579,
+            "received_datagrams": 375
+          }
+        },
+        {
+          "cached_input_transforms": 8,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              43,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 43,
+            "total_us": 22
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "4807934801d470e21d5135cf73185885",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47903",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952083,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 13
+              },
+              "prepare": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 4
+              },
+              "send": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 639
+              },
+              "sign": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 1782
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "be48648cc39a4439924ecfd540f0a977b5210263880b473085f4666e6753151f",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 146,
+            "sent_transforms": 97,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                1,
+                83,
+                0,
+                4,
+                7,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 96,
+              "total_us": 5300916
+            }
+          },
+          "snapshot_age_ms": 7,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892159741001,
+            "snapshot_tick": 126
+          },
+          "transport": {
+            "accepted_snapshots": 106,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 341142,
+            "received_datagrams": 374
+          }
+        },
+        {
+          "cached_input_transforms": 0,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 1,
+            "total_us": 6931
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "17a1350f4ebe1791f22cc1a92bbe5cbc",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47908",
+              "human_count": 1,
+              "join_deadline_ms": 1794241954067,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 15
+              },
+              "prepare": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 9
+              },
+              "send": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 492
+              },
+              "sign": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 1323
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "b6096b10340e4419b26164e71ef296f549659d1641964400b491ae047d460f1a",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 105,
+            "sent_transforms": 55,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                42,
+                0,
+                4,
+                7,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 54,
+              "total_us": 3257716
+            }
+          },
+          "snapshot_age_ms": 7,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241894134953001,
+            "snapshot_tick": 92
+          },
+          "transport": {
+            "accepted_snapshots": 74,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 241217,
+            "received_datagrams": 265
+          }
+        },
+        {
+          "cached_input_transforms": 7,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              43,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 43,
+            "total_us": 575
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "df33dc7a94a2a6bb3692c6d65e64865f",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47905",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952100,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 16
+              },
+              "prepare": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 4
+              },
+              "send": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 622
+              },
+              "sign": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 1788
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "0f15440e829445e8a9b122566110dd3fa5ae6bfea78f45a79c9f3be2898daffc",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 146,
+            "sent_transforms": 97,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                1,
+                83,
+                1,
+                5,
+                5,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 96,
+              "total_us": 5257187
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892180696001,
+            "snapshot_tick": 127
+          },
+          "transport": {
+            "accepted_snapshots": 107,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 346622,
+            "received_datagrams": 377
+          }
+        },
+        {
+          "cached_input_transforms": 8,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              43,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 43,
+            "total_us": 20
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "f2993965a1abd7b1ff571b8ba87f094d",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47907",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952118,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 18
+              },
+              "prepare": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 0
+              },
+              "send": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 622
+              },
+              "sign": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 1805
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "f44d3701af14450abc3513c7350e1c7cca1392b0e8e14565a318179dc800719a",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 146,
+            "sent_transforms": 97,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                1,
+                82,
+                1,
+                6,
+                5,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 96,
+              "total_us": 5308253
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892196608001,
+            "snapshot_tick": 125
+          },
+          "transport": {
+            "accepted_snapshots": 105,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 344348,
+            "received_datagrams": 373
+          }
+        },
+        {
+          "cached_input_transforms": 7,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              42,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 43,
+            "total_us": 6608
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "20eba5949b259f7864764feb96847b57",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47906",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952109,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 29
+              },
+              "prepare": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 4
+              },
+              "send": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 653
+              },
+              "sign": {
+                "buckets": [
+                  146,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 146,
+                "total_us": 1813
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "c94e75f7e1fc44ba86417044b51f1d4336c19ca504bf48c1b49b9fb65f0ec4af",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 146,
+            "sent_transforms": 97,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                1,
+                0,
+                0,
+                1,
+                83,
+                1,
+                8,
+                2,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 96,
+              "total_us": 5257241
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892196608001,
+            "snapshot_tick": 126
+          },
+          "transport": {
+            "accepted_snapshots": 106,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 343923,
+            "received_datagrams": 374
+          }
+        },
+        {
+          "cached_input_transforms": 0,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              2,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 2,
+            "total_us": 324
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "e23bddd200e1d7c8a6270bf25b811fef",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47909",
+              "human_count": 1,
+              "join_deadline_ms": 1794241954077,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 9
+              },
+              "prepare": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 4
+              },
+              "send": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 421
+              },
+              "sign": {
+                "buckets": [
+                  105,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 105,
+                "total_us": 1266
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "50e51674ed3b4a4ca317422acff351db9ecb1a47fefd40a28baa357bdcb971e2",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 105,
+            "sent_transforms": 55,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                43,
+                0,
+                7,
+                4,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 54,
+              "total_us": 3257890
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241894151018001,
+            "snapshot_tick": 92
+          },
+          "transport": {
+            "accepted_snapshots": 74,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 243548,
+            "received_datagrams": 267
+          }
+        }
+      ],
+      "phase": "running",
+      "players": [
+        {
+          "action_sequence": 0,
+          "action_slot": 0,
+          "class": "warrior",
+          "gold": 4,
+          "hp": 250.0,
+          "id": 1,
+          "inventory": [
+            "vitality_gem"
+          ],
+          "is_bot": false,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 30.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": {
+            "error": null,
+            "item_id": "vitality_gem",
+            "match_id": 1,
+            "request_id": 1
+          },
+          "level": 1,
+          "mana": 100.0,
+          "max_hp": 250.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": true,
+          "team": "Green",
+          "x": -50.09452819824219,
+          "xp": 0,
+          "z": -53.65190505981445
+        },
+        {
+          "action_sequence": 0,
+          "action_slot": 0,
+          "class": "mage",
+          "gold": 0,
+          "hp": 180.0,
+          "id": 2,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 100.0,
+          "max_hp": 180.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": false,
+          "team": "Green",
+          "x": -52.244930267333984,
+          "xp": 0,
+          "z": -48.321773529052734
+        },
+        {
+          "action_sequence": 0,
+          "action_slot": 0,
+          "class": "ranger",
+          "gold": 0,
+          "hp": 185.0,
+          "id": 3,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 100.0,
+          "max_hp": 185.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": true,
+          "team": "Green",
+          "x": -59.778221130371094,
+          "xp": 0,
+          "z": -68.732177734375
+        },
+        {
+          "action_sequence": 1,
+          "action_slot": 0,
+          "class": "warden",
+          "gold": 0,
+          "hp": 210.0,
+          "id": 4,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 88.47533416748047,
+          "max_hp": 210.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": true,
+          "team": "Green",
+          "x": -49.51772689819336,
+          "xp": 0,
+          "z": -57.177894592285156
+        },
+        {
+          "action_sequence": 0,
+          "action_slot": 0,
+          "class": "cleric",
+          "gold": 0,
+          "hp": 230.0,
+          "id": 5,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 100.0,
+          "max_hp": 230.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": true,
+          "team": "Green",
+          "x": -60.32917404174805,
+          "xp": 0,
+          "z": -70.17147827148438
+        }
+      ],
+      "producer_timing": {
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "loop_work": {
+          "buckets": [
+            262,
+            79,
+            2,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 344,
+          "total_us": 231100
+        },
+        "overrun_rebases": 0,
+        "receive_work": {
+          "buckets": [
+            3449,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 3450,
+          "total_us": 108451
+        },
+        "session_work": {
+          "buckets": [
+            3450,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 3450,
+          "total_us": 11321
+        },
+        "telemetry_format_write_work": {
+          "buckets": [
+            14,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 15,
+          "total_us": 5588
+        },
+        "telemetry_prepare_work": {
+          "buckets": [
+            15,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 15,
+          "total_us": 1814
+        },
+        "wake_lateness": {
+          "buckets": [
+            20,
+            213,
+            111,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 345,
+          "total_us": 1176782
+        }
+      },
+      "state": "Running",
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "protected": false,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "protected": false,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 3,
+          "protected": false,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 4,
+          "protected": false,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "protected": false,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "protected": false,
+          "team": "Blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 9,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 10,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 11,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 12,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 13,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 14,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 15,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 16,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 17,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 18,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 19,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 20,
+          "protected": true,
+          "team": "Blue"
+        }
+      ]
+    }
+  },
+  "durable_rosters": {
+    "running_workers": 10,
+    "human_seats": 10,
+    "server_bot_seats": 90,
+    "distinct_endpoints": 10,
+    "receipts_at_acceptance": [
+      {
+        "allocation_id": "278ffe7bbc7afdfd9f0aab3c714b3b43",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892147744001,
+        "heartbeat_ms": 1794241914291,
+        "joined_count": 1,
+        "profiles": [
+          "cdb2fafd4e9841389d64b9a38fcd1cba618df2c328464421903f4af08ee6af97"
+        ],
+        "endpoint": "127.0.0.1:47902",
+        "manifest_sha256": "4bd055557b2ab56997452ab0c95a2923889120e03e08190dbeae060811bdb097"
+      },
+      {
+        "allocation_id": "df33dc7a94a2a6bb3692c6d65e64865f",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892180696001,
+        "heartbeat_ms": 1794241914332,
+        "joined_count": 1,
+        "profiles": [
+          "0f15440e829445e8a9b122566110dd3fa5ae6bfea78f45a79c9f3be2898daffc"
+        ],
+        "endpoint": "127.0.0.1:47905",
+        "manifest_sha256": "de4d6ceb5a782e6fc3a07555d3b5ff0b0da75deae6d75b13d5eba3b0e3b4cb4f"
+      },
+      {
+        "allocation_id": "6a168cfbd49b6402fa2a078be1db1221",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892163735001,
+        "heartbeat_ms": 1794241914312,
+        "joined_count": 1,
+        "profiles": [
+          "86a767cd604042cfb02982c91b4b76b568e6a18a5cfd43f39670bfe750c7653f"
+        ],
+        "endpoint": "127.0.0.1:47904",
+        "manifest_sha256": "47b73fc924a8258eda8afb31b1b06899a75aab0ffd26880ad67085513df671a2"
+      },
+      {
+        "allocation_id": "f2993965a1abd7b1ff571b8ba87f094d",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892196608001,
+        "heartbeat_ms": 1794241914342,
+        "joined_count": 1,
+        "profiles": [
+          "f44d3701af14450abc3513c7350e1c7cca1392b0e8e14565a318179dc800719a"
+        ],
+        "endpoint": "127.0.0.1:47907",
+        "manifest_sha256": "e7e3ef14a774a9accf7347d1887ee1d45ce8edfef76b809472f247512964cb4f"
+      },
+      {
+        "allocation_id": "ca10f27e720cd0f4292881ad677f7387",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892123981001,
+        "heartbeat_ms": 1794241914262,
+        "joined_count": 1,
+        "profiles": [
+          "cb77adf4729d422ea2ba8a3cb4d1dd954d0b27166fa24a3e8b966c4a37ebcfac"
+        ],
+        "endpoint": "127.0.0.1:47900",
+        "manifest_sha256": "09bc746c2c9e5371cfdb546843a642fdbf92fdd7d836117de1f0a52bb10c2c36"
+      },
+      {
+        "allocation_id": "20eba5949b259f7864764feb96847b57",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892196608001,
+        "heartbeat_ms": 1794241914348,
+        "joined_count": 1,
+        "profiles": [
+          "c94e75f7e1fc44ba86417044b51f1d4336c19ca504bf48c1b49b9fb65f0ec4af"
+        ],
+        "endpoint": "127.0.0.1:47906",
+        "manifest_sha256": "de6c5953ca40ad48a21792acd83e9b9ad837bd9a4458e348b2cd1125b85ca703"
+      },
+      {
+        "allocation_id": "4807934801d470e21d5135cf73185885",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892159741001,
+        "heartbeat_ms": 1794241914311,
+        "joined_count": 1,
+        "profiles": [
+          "be48648cc39a4439924ecfd540f0a977b5210263880b473085f4666e6753151f"
+        ],
+        "endpoint": "127.0.0.1:47903",
+        "manifest_sha256": "31ac4d05a11c7ee24234f883fe37cb0011c6281bc6a5344ef8da34edb2a907d5"
+      },
+      {
+        "allocation_id": "17a1350f4ebe1791f22cc1a92bbe5cbc",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241894134953001,
+        "heartbeat_ms": 1794241914232,
+        "joined_count": 1,
+        "profiles": [
+          "b6096b10340e4419b26164e71ef296f549659d1641964400b491ae047d460f1a"
+        ],
+        "endpoint": "127.0.0.1:47908",
+        "manifest_sha256": "055ae7ce1a00f176ffb38467d1bad9e51f84b2c94234b867e38dcefa5cd46fe5"
+      },
+      {
+        "allocation_id": "e23bddd200e1d7c8a6270bf25b811fef",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241894151018001,
+        "heartbeat_ms": 1794241914287,
+        "joined_count": 1,
+        "profiles": [
+          "50e51674ed3b4a4ca317422acff351db9ecb1a47fefd40a28baa357bdcb971e2"
+        ],
+        "endpoint": "127.0.0.1:47909",
+        "manifest_sha256": "1d4265c7a96737bacbd5542f18882dc1e04c21a3b448d5e944dd2b147547ca69"
+      },
+      {
+        "allocation_id": "bc8012d82660bb324607e312a46f8aab",
+        "preference": "bot_practice",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "phase": "running",
+        "server_epoch": 1794241892135565001,
+        "heartbeat_ms": 1794241914253,
+        "joined_count": 1,
+        "profiles": [
+          "f4e096c7ed98419ebeab11d563317a7f23d3060b84ad4908b7657411c5cef9c9"
+        ],
+        "endpoint": "127.0.0.1:47901",
+        "manifest_sha256": "2867e88a830a072db0c25eab631f65ea28062f3edbfa2f65df512b010e3b6825"
+      }
+    ]
+  },
+  "wire": {
+    "bytes_per_second_per_player": {
+      "p50": 61224.978859897616,
+      "p95": 61683.58530920419,
+      "p99": 61683.58530920419,
+      "max": 61683.58530920419
+    },
+    "accepted_snapshots_per_second_per_player": {
+      "p50": 16.91782554460177,
+      "p05": 16.777428652115447
+    },
+    "observed_broadcast_tick_span_per_second_per_player": {
+      "p50": 17.90060379200602,
+      "p05": 17.760206899519698
+    },
+    "accepted_fraction_of_observed_tick_span": {
+      "p50": 0.9448818897637795,
+      "p05": 0.94140625
+    },
+    "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+  },
+  "input": {
+    "requested_hz": 20,
+    "successful_signed_transforms_per_second": {
+      "min": 20.00655717930085,
+      "p05": 20.00655717930085,
+      "p50": 20.00655717930085,
+      "p95": 20.00655717930085,
+      "max": 20.00655717930085
+    },
+    "cached_snapshot_transforms": {
+      "total": 447,
+      "min_per_peer": 44
+    },
+    "all_peers_within_2_5_percent": true,
+    "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+  },
+  "producer_timing": {
+    "bucket_upper_us": [
+      1000,
+      5000,
+      10000,
+      25000,
+      45000,
+      55000,
+      75000,
+      100000,
+      150000,
+      250000,
+      500000,
+      1000000
+    ],
+    "loop_work": {
+      "count": 285,
+      "total_us": 379425,
+      "buckets": [
+        5,
+        279,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 1331.3157894736842,
+      "p95_exclusive_upper_us": 5000,
+      "p99_exclusive_upper_us": 5000
+    },
+    "receive_work": {
+      "count": 2850,
+      "total_us": 272389,
+      "buckets": [
+        2850,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 95.57508771929824,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "wake_lateness": {
+      "count": 285,
+      "total_us": 895713,
+      "buckets": [
+        17,
+        208,
+        60,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 3142.8526315789472,
+      "p95_exclusive_upper_us": 10000,
+      "p99_exclusive_upper_us": 10000
+    },
+    "session_work": {
+      "count": 2850,
+      "total_us": 8983,
+      "buckets": [
+        2850,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 3.1519298245614036,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "telemetry_prepare_work": {
+      "count": 14,
+      "total_us": 1764,
+      "buckets": [
+        14,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 126.0,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "telemetry_format_write_work": {
+      "count": 14,
+      "total_us": 1001,
+      "buckets": [
+        14,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 71.5,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "transform_gaps": {
+      "count": 2850,
+      "total_us": 142486867,
+      "buckets": [
+        0,
+        0,
+        0,
+        0,
+        15,
+        2835,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 49995.39192982456,
+      "p95_exclusive_upper_us": 55000,
+      "p99_exclusive_upper_us": 55000
+    },
+    "navigation_work": {
+      "count": 2768,
+      "total_us": 9179,
+      "buckets": [
+        2768,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 3.316112716763006,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_prepare": {
+      "count": 3285,
+      "total_us": 806,
+      "buckets": [
+        3285,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 0.24535768645357686,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_sign": {
+      "count": 3285,
+      "total_us": 43023,
+      "buckets": [
+        3285,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 13.096803652968037,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_encode": {
+      "count": 3285,
+      "total_us": 1194,
+      "buckets": [
+        3285,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 0.3634703196347032,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_send": {
+      "count": 3285,
+      "total_us": 17984,
+      "buckets": [
+        3285,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 5.474581430745815,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "overrun_rebases": 0,
+    "scope": "soak-only cumulative histogram differences; wall time includes OS descheduling; quantiles are bucket bounds, not exact percentiles; overflow has no finite upper bound"
+  },
+  "server_load": {
+    "status": "measured",
+    "workers": [
+      {
+        "allocation_id": "17a1350f4ebe1791f22cc1a92bbe5cbc",
+        "preference": "bot_practice",
+        "worker_log_sha256": "0d110df21c5fc6c2d4c7bd456e8abd862b15192a0620c4fcad48e07c957f2dcc",
+        "metric_records": 19,
+        "elapsed_secs": 19.414242959,
+        "broadcasts": 328,
+        "broadcast_gaps": {
+          "count": 327,
+          "total_us": 19359501,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            10,
+            317,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59203.366972477066,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 398,
+          "gameplay_transforms": 340,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 302
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 296,
+          "total_us": 6216665,
+          "buckets": [
+            60,
+            0,
+            2,
+            136,
+            77,
+            20,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 21002.24662162162,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 398,
+            "gameplay_transforms": 340,
+            "last_sequence": 398,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 302,
+            "latest_transform_age_at_snapshot": {
+              "count": 296,
+              "total_us": 6216665,
+              "buckets": [
+                60,
+                0,
+                2,
+                136,
+                77,
+                20,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 21002.24662162162,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "20eba5949b259f7864764feb96847b57",
+        "preference": "bot_practice",
+        "worker_log_sha256": "1b527e74e51570ac6ca3971bdc2862b71fba75c2f956be0b06b39e7c7179ffbf",
+        "metric_records": 21,
+        "elapsed_secs": 21.358752083,
+        "broadcasts": 360,
+        "broadcast_gaps": {
+          "count": 359,
+          "total_us": 21296792,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            15,
+            343,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59322.54038997214,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 446,
+          "gameplay_transforms": 382,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 336
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 330,
+          "total_us": 6907316,
+          "buckets": [
+            66,
+            0,
+            0,
+            161,
+            80,
+            22,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 20931.260606060605,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 446,
+            "gameplay_transforms": 382,
+            "last_sequence": 446,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 336,
+            "latest_transform_age_at_snapshot": {
+              "count": 330,
+              "total_us": 6907316,
+              "buckets": [
+                66,
+                0,
+                0,
+                161,
+                80,
+                22,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 20931.260606060605,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "278ffe7bbc7afdfd9f0aab3c714b3b43",
+        "preference": "bot_practice",
+        "worker_log_sha256": "791e6d31bc6332101f4215dd3bd4be7b52e5671d47599966a219433969782a68",
+        "metric_records": 21,
+        "elapsed_secs": 21.397590042,
+        "broadcasts": 361,
+        "broadcast_gaps": {
+          "count": 360,
+          "total_us": 21337628,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            9,
+            350,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59271.188888888886,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 446,
+          "gameplay_transforms": 381,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 336
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 331,
+          "total_us": 7034686,
+          "buckets": [
+            67,
+            0,
+            1,
+            157,
+            83,
+            20,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 21252.827794561934,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 446,
+            "gameplay_transforms": 381,
+            "last_sequence": 446,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 336,
+            "latest_transform_age_at_snapshot": {
+              "count": 331,
+              "total_us": 7034686,
+              "buckets": [
+                67,
+                0,
+                1,
+                157,
+                83,
+                20,
+                1,
+                1,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 21252.827794561934,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "4807934801d470e21d5135cf73185885",
+        "preference": "bot_practice",
+        "worker_log_sha256": "23ff1087d56d0cd9395eafcc5b5129f2fc720bfd1bdb5cef5f250b5c567f43f9",
+        "metric_records": 21,
+        "elapsed_secs": 21.356292834,
+        "broadcasts": 361,
+        "broadcast_gaps": {
+          "count": 360,
+          "total_us": 21295292,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            19,
+            341,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59153.58888888889,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 445,
+          "gameplay_transforms": 381,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 336
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 330,
+          "total_us": 6953181,
+          "buckets": [
+            71,
+            0,
+            2,
+            144,
+            86,
+            25,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 21070.245454545453,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 445,
+            "gameplay_transforms": 381,
+            "last_sequence": 445,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 336,
+            "latest_transform_age_at_snapshot": {
+              "count": 330,
+              "total_us": 6953181,
+              "buckets": [
+                71,
+                0,
+                2,
+                144,
+                86,
+                25,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 21070.245454545453,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "6a168cfbd49b6402fa2a078be1db1221",
+        "preference": "bot_practice",
+        "worker_log_sha256": "98eab7c59b35aab6892d8dab10cbe4da3ce99b2d7742e5283afa0089bb6d0aed",
+        "metric_records": 21,
+        "elapsed_secs": 21.334004291,
+        "broadcasts": 361,
+        "broadcast_gaps": {
+          "count": 360,
+          "total_us": 21271947,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            23,
+            336,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59088.74166666667,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 447,
+          "gameplay_transforms": 382,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 337
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 331,
+          "total_us": 6998700,
+          "buckets": [
+            65,
+            0,
+            2,
+            153,
+            88,
+            21,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 21144.108761329306,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 447,
+            "gameplay_transforms": 382,
+            "last_sequence": 447,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 337,
+            "latest_transform_age_at_snapshot": {
+              "count": 331,
+              "total_us": 6998700,
+              "buckets": [
+                65,
+                0,
+                2,
+                153,
+                88,
+                21,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 21144.108761329306,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "bc8012d82660bb324607e312a46f8aab",
+        "preference": "bot_practice",
+        "worker_log_sha256": "c32873457c5bdba13451387b42aa0ca07f7ea715e6c5a6af1ba4c46557f3b75c",
+        "metric_records": 21,
+        "elapsed_secs": 21.563065708,
+        "broadcasts": 364,
+        "broadcast_gaps": {
+          "count": 363,
+          "total_us": 21511580,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            15,
+            348,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59260.55096418733,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 450,
+          "gameplay_transforms": 385,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 339
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 333,
+          "total_us": 7156780,
+          "buckets": [
+            70,
+            0,
+            0,
+            150,
+            86,
+            24,
+            0,
+            0,
+            3,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 21491.83183183183,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 450,
+            "gameplay_transforms": 385,
+            "last_sequence": 450,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 339,
+            "latest_transform_age_at_snapshot": {
+              "count": 333,
+              "total_us": 7156780,
+              "buckets": [
+                70,
+                0,
+                0,
+                150,
+                86,
+                24,
+                0,
+                0,
+                3,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 21491.83183183183,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "ca10f27e720cd0f4292881ad677f7387",
+        "preference": "bot_practice",
+        "worker_log_sha256": "bebb1899d4c9684f62b2aa7ea81729c3d9d46f1d94b6652b79bdfbe0d195d9dd",
+        "metric_records": 21,
+        "elapsed_secs": 21.569754292,
+        "broadcasts": 363,
+        "broadcast_gaps": {
+          "count": 362,
+          "total_us": 21512877,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            17,
+            344,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59427.83701657459,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 451,
+          "gameplay_transforms": 385,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 337
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 332,
+          "total_us": 6887834,
+          "buckets": [
+            72,
+            0,
+            1,
+            153,
+            89,
+            16,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 20746.48795180723,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 451,
+            "gameplay_transforms": 385,
+            "last_sequence": 451,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 337,
+            "latest_transform_age_at_snapshot": {
+              "count": 332,
+              "total_us": 6887834,
+              "buckets": [
+                72,
+                0,
+                1,
+                153,
+                89,
+                16,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 20746.48795180723,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "df33dc7a94a2a6bb3692c6d65e64865f",
+        "preference": "bot_practice",
+        "worker_log_sha256": "d3be00e6e9de247884b5e2c73f1cc39f089ec4f60116747048cdf0f94683d71f",
+        "metric_records": 21,
+        "elapsed_secs": 21.49805575,
+        "broadcasts": 364,
+        "broadcast_gaps": {
+          "count": 363,
+          "total_us": 21447113,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            21,
+            342,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59082.95592286501,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 451,
+          "gameplay_transforms": 385,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 340
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 334,
+          "total_us": 6956429,
+          "buckets": [
+            67,
+            0,
+            1,
+            158,
+            82,
+            25,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 20827.631736526946,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 451,
+            "gameplay_transforms": 385,
+            "last_sequence": 451,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 340,
+            "latest_transform_age_at_snapshot": {
+              "count": 334,
+              "total_us": 6956429,
+              "buckets": [
+                67,
+                0,
+                1,
+                158,
+                82,
+                25,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 20827.631736526946,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "e23bddd200e1d7c8a6270bf25b811fef",
+        "preference": "bot_practice",
+        "worker_log_sha256": "d4ef2db7814470c3a675ec96e70cf44da9d3828f5ee8eec00605db5dc25ba6fe",
+        "metric_records": 19,
+        "elapsed_secs": 19.444816417,
+        "broadcasts": 328,
+        "broadcast_gaps": {
+          "count": 327,
+          "total_us": 19384247,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            21,
+            306,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59279.04281345566,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 399,
+          "gameplay_transforms": 341,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 302
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 296,
+          "total_us": 6297667,
+          "buckets": [
+            56,
+            0,
+            1,
+            143,
+            72,
+            23,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 21275.902027027027,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 399,
+            "gameplay_transforms": 341,
+            "last_sequence": 399,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 302,
+            "latest_transform_age_at_snapshot": {
+              "count": 296,
+              "total_us": 6297667,
+              "buckets": [
+                56,
+                0,
+                1,
+                143,
+                72,
+                23,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 21275.902027027027,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      },
+      {
+        "allocation_id": "f2993965a1abd7b1ff571b8ba87f094d",
+        "preference": "bot_practice",
+        "worker_log_sha256": "ed8441bbac02053c166a5ec51dcf3e036c39772390333946598b94c6e20b6d70",
+        "metric_records": 21,
+        "elapsed_secs": 21.434735583,
+        "broadcasts": 362,
+        "broadcast_gaps": {
+          "count": 361,
+          "total_us": 21381659,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            19,
+            342,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 59228.97229916898,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "totals": {
+          "transport_commands": 448,
+          "gameplay_transforms": 384,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 337
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 332,
+          "total_us": 6985818,
+          "buckets": [
+            72,
+            0,
+            2,
+            148,
+            85,
+            23,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 21041.62048192771,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 55000
+        },
+        "endpoints": [
+          {
+            "player_id": 1,
+            "transport_commands": 448,
+            "gameplay_transforms": 384,
+            "last_sequence": 448,
+            "sequence_gaps": 0,
+            "sequence_restarts": 0,
+            "snapshots": 337,
+            "latest_transform_age_at_snapshot": {
+              "count": 332,
+              "total_us": 6985818,
+              "buckets": [
+                72,
+                0,
+                2,
+                148,
+                85,
+                23,
+                1,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "mean_us": 21041.62048192771,
+              "p95_exclusive_upper_us": 55000,
+              "p99_exclusive_upper_us": 55000
+            }
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "transport_commands": 4381,
+      "gameplay_transforms": 3746,
+      "sequence_gaps": 0,
+      "sequence_restarts": 0,
+      "snapshots": 3302
+    },
+    "all_endpoints_without_sequence_gaps": true,
+    "all_endpoints_without_sequence_restarts": true,
+    "bucket_upper_us": [
+      1000,
+      5000,
+      10000,
+      25000,
+      45000,
+      55000,
+      75000,
+      100000,
+      150000,
+      250000,
+      500000,
+      1000000
+    ],
+    "broadcasts": 3552,
+    "broadcast_gaps": {
+      "count": 3542,
+      "total_us": 209798636,
+      "buckets": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        169,
+        3369,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 59231.68718238283,
+      "p95_exclusive_upper_us": 75000,
+      "p99_exclusive_upper_us": 75000
+    },
+    "latest_transform_age_at_snapshot": {
+      "count": 3245,
+      "total_us": 68395076,
+      "buckets": [
+        666,
+        0,
+        12,
+        1503,
+        828,
+        219,
+        9,
+        2,
+        6,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 21077.065023112482,
+      "p95_exclusive_upper_us": 55000,
+      "p99_exclusive_upper_us": 55000
+    },
+    "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+    "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+    "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+  },
+  "elapsed_seconds": 32.43510262505151,
+  "before_cleanup": {
+    "observed_unix_ms": 1794241914386,
+    "scan_limited": false,
+    "workers": [
+      {
+        "allocation_id": "17a1350f4ebe1791f22cc1a92bbe5cbc",
+        "archived": false,
+        "status": {
+          "allocation_id": "17a1350f4ebe1791f22cc1a92bbe5cbc",
+          "server_epoch": 1794241894134953001,
+          "heartbeat_ms": 1794241914232,
+          "phase": "running",
+          "result_id": "17a1350f4ebe1791f22cc1a92bbe5cbc"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241914365,
+          "server_epoch": 1794241894134953001,
+          "probe_checked_ms": 1794241904989,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 17051,
+        "log_tail": "ed transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,10,283,0,0,0,0,0,0],\"count\":293,\"total_us\":17346649},\"broadcasts\":294,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":17.401372834,\"endpoints\":[{\"gameplay_transforms\":300,\"last_sequence\":352,\"latest_transform_age_at_snapshot\":{\"buckets\":[52,0,2,121,67,19,1,0,0,0,0,0,0],\"count\":262,\"total_us\":5524908},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":268,\"transport_commands\":352}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,10,300,0,0,0,0,0,0],\"count\":310,\"total_us\":18357031},\"broadcasts\":311,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":18.411764084,\"endpoints\":[{\"gameplay_transforms\":320,\"last_sequence\":375,\"latest_transform_age_at_snapshot\":{\"buckets\":[56,0,2,130,70,20,1,0,0,0,0,0,0],\"count\":279,\"total_us\":5843854},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":285,\"transport_commands\":375}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,10,317,0,0,0,0,0,0],\"count\":327,\"total_us\":19359501},\"broadcasts\":328,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.414242959,\"endpoints\":[{\"gameplay_transforms\":340,\"last_sequence\":398,\"latest_transform_age_at_snapshot\":{\"buckets\":[60,0,2,136,77,20,1,0,0,0,0,0,0],\"count\":296,\"total_us\":6216665},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":302,\"transport_commands\":398}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "20eba5949b259f7864764feb96847b57",
+        "archived": false,
+        "status": {
+          "allocation_id": "20eba5949b259f7864764feb96847b57",
+          "server_epoch": 1794241892196608001,
+          "heartbeat_ms": 1794241914348,
+          "phase": "running",
+          "result_id": "20eba5949b259f7864764feb96847b57"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912425,
+          "server_epoch": 1794241892196608001,
+          "probe_checked_ms": 1794241903041,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18186,
+        "log_tail": "ed transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,11,312,1,0,0,0,0,0],\"count\":324,\"total_us\":19250790},\"broadcasts\":325,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.312732917,\"endpoints\":[{\"gameplay_transforms\":341,\"last_sequence\":398,\"latest_transform_age_at_snapshot\":{\"buckets\":[57,0,0,144,72,21,1,0,0,0,0,0,0],\"count\":295,\"total_us\":6272485},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":301,\"transport_commands\":398}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,13,327,1,0,0,0,0,0],\"count\":341,\"total_us\":20256622},\"broadcasts\":342,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.318574042,\"endpoints\":[{\"gameplay_transforms\":361,\"last_sequence\":421,\"latest_transform_age_at_snapshot\":{\"buckets\":[60,0,0,153,76,22,1,0,0,0,0,0,0],\"count\":312,\"total_us\":6619046},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":318,\"transport_commands\":421}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,15,343,1,0,0,0,0,0],\"count\":359,\"total_us\":21296792},\"broadcasts\":360,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.358752083,\"endpoints\":[{\"gameplay_transforms\":382,\"last_sequence\":446,\"latest_transform_age_at_snapshot\":{\"buckets\":[66,0,0,161,80,22,1,0,0,0,0,0,0],\"count\":330,\"total_us\":6907316},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":336,\"transport_commands\":446}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "278ffe7bbc7afdfd9f0aab3c714b3b43",
+        "archived": false,
+        "status": {
+          "allocation_id": "278ffe7bbc7afdfd9f0aab3c714b3b43",
+          "server_epoch": 1794241892147744001,
+          "heartbeat_ms": 1794241914291,
+          "phase": "running",
+          "result_id": "278ffe7bbc7afdfd9f0aab3c714b3b43"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912382,
+          "server_epoch": 1794241892147744001,
+          "probe_checked_ms": 1794241903106,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18361,
+        "log_tail": "plied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,9,316,1,0,0,0,0,0],\"count\":326,\"total_us\":19316887},\"broadcasts\":327,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.376834333,\"endpoints\":[{\"gameplay_transforms\":341,\"last_sequence\":399,\"latest_transform_age_at_snapshot\":{\"buckets\":[59,0,1,139,75,20,1,1,1,0,0,0,0],\"count\":297,\"total_us\":6430173},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":302,\"transport_commands\":399}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,9,333,1,0,0,0,0,0],\"count\":343,\"total_us\":20327170},\"broadcasts\":344,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.387125167,\"endpoints\":[{\"gameplay_transforms\":361,\"last_sequence\":422,\"latest_transform_age_at_snapshot\":{\"buckets\":[64,0,1,147,79,20,1,1,1,0,0,0,0],\"count\":314,\"total_us\":6715263},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":319,\"transport_commands\":422}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,9,350,1,0,0,0,0,0],\"count\":360,\"total_us\":21337628},\"broadcasts\":361,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.397590042,\"endpoints\":[{\"gameplay_transforms\":381,\"last_sequence\":446,\"latest_transform_age_at_snapshot\":{\"buckets\":[67,0,1,157,83,20,1,1,1,0,0,0,0],\"count\":331,\"total_us\":7034686},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":336,\"transport_commands\":446}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "4807934801d470e21d5135cf73185885",
+        "archived": false,
+        "status": {
+          "allocation_id": "4807934801d470e21d5135cf73185885",
+          "server_epoch": 1794241892159741001,
+          "heartbeat_ms": 1794241914311,
+          "phase": "running",
+          "result_id": "4807934801d470e21d5135cf73185885"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912502,
+          "server_epoch": 1794241892159741001,
+          "probe_checked_ms": 1794241903106,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18377,
+        "log_tail": "ed transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,18,308,0,0,0,0,0,0],\"count\":326,\"total_us\":19280781},\"broadcasts\":327,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.341764917,\"endpoints\":[{\"gameplay_transforms\":341,\"last_sequence\":399,\"latest_transform_age_at_snapshot\":{\"buckets\":[62,0,2,131,77,22,2,0,0,0,0,0,0],\"count\":296,\"total_us\":6248645},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":302,\"transport_commands\":399}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,19,324,0,0,0,0,0,0],\"count\":343,\"total_us\":20290232},\"broadcasts\":344,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.351225875,\"endpoints\":[{\"gameplay_transforms\":361,\"last_sequence\":422,\"latest_transform_age_at_snapshot\":{\"buckets\":[66,0,2,137,83,23,2,0,0,0,0,0,0],\"count\":313,\"total_us\":6621941},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":319,\"transport_commands\":422}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,19,341,0,0,0,0,0,0],\"count\":360,\"total_us\":21295292},\"broadcasts\":361,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.356292834,\"endpoints\":[{\"gameplay_transforms\":381,\"last_sequence\":445,\"latest_transform_age_at_snapshot\":{\"buckets\":[71,0,2,144,86,25,2,0,0,0,0,0,0],\"count\":330,\"total_us\":6953181},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":336,\"transport_commands\":445}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "6a168cfbd49b6402fa2a078be1db1221",
+        "archived": false,
+        "status": {
+          "allocation_id": "6a168cfbd49b6402fa2a078be1db1221",
+          "server_epoch": 1794241892163735001,
+          "heartbeat_ms": 1794241914312,
+          "phase": "running",
+          "result_id": "6a168cfbd49b6402fa2a078be1db1221"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912397,
+          "server_epoch": 1794241892163735001,
+          "probe_checked_ms": 1794241903111,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18384,
+        "log_tail": "ed transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,22,303,1,0,0,0,0,0],\"count\":326,\"total_us\":19263410},\"broadcasts\":327,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.325451583,\"endpoints\":[{\"gameplay_transforms\":342,\"last_sequence\":401,\"latest_transform_age_at_snapshot\":{\"buckets\":[59,0,2,134,79,21,2,0,0,0,0,0,0],\"count\":297,\"total_us\":6329063},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":303,\"transport_commands\":401}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,23,319,1,0,0,0,0,0],\"count\":343,\"total_us\":20265870},\"broadcasts\":344,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.327920333,\"endpoints\":[{\"gameplay_transforms\":362,\"last_sequence\":424,\"latest_transform_age_at_snapshot\":{\"buckets\":[62,0,2,144,83,21,2,0,0,0,0,0,0],\"count\":314,\"total_us\":6655833},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":320,\"transport_commands\":424}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,23,336,1,0,0,0,0,0],\"count\":360,\"total_us\":21271947},\"broadcasts\":361,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.334004291,\"endpoints\":[{\"gameplay_transforms\":382,\"last_sequence\":447,\"latest_transform_age_at_snapshot\":{\"buckets\":[65,0,2,153,88,21,2,0,0,0,0,0,0],\"count\":331,\"total_us\":6998700},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":337,\"transport_commands\":447}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "bc8012d82660bb324607e312a46f8aab",
+        "archived": false,
+        "status": {
+          "allocation_id": "bc8012d82660bb324607e312a46f8aab",
+          "server_epoch": 1794241892135565001,
+          "heartbeat_ms": 1794241914253,
+          "phase": "running",
+          "result_id": "bc8012d82660bb324607e312a46f8aab"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912267,
+          "server_epoch": 1794241892135565001,
+          "probe_checked_ms": 1794241902984,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18379,
+        "log_tail": "ed transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,14,315,0,0,0,0,0,0],\"count\":329,\"total_us\":19489524},\"broadcasts\":330,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.540991791,\"endpoints\":[{\"gameplay_transforms\":345,\"last_sequence\":404,\"latest_transform_age_at_snapshot\":{\"buckets\":[62,0,0,135,78,21,0,0,3,0,0,0,0],\"count\":299,\"total_us\":6465905},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":305,\"transport_commands\":404}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,14,332,0,0,0,0,0,0],\"count\":346,\"total_us\":20500556},\"broadcasts\":347,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.552032875,\"endpoints\":[{\"gameplay_transforms\":365,\"last_sequence\":427,\"latest_transform_age_at_snapshot\":{\"buckets\":[66,0,0,143,82,22,0,0,3,0,0,0,0],\"count\":316,\"total_us\":6788416},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":322,\"transport_commands\":427}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,15,348,0,0,0,0,0,0],\"count\":363,\"total_us\":21511580},\"broadcasts\":364,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.563065708,\"endpoints\":[{\"gameplay_transforms\":385,\"last_sequence\":450,\"latest_transform_age_at_snapshot\":{\"buckets\":[70,0,0,150,86,24,0,0,3,0,0,0,0],\"count\":333,\"total_us\":7156780},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":339,\"transport_commands\":450}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "ca10f27e720cd0f4292881ad677f7387",
+        "archived": false,
+        "status": {
+          "allocation_id": "ca10f27e720cd0f4292881ad677f7387",
+          "server_epoch": 1794241892123981001,
+          "heartbeat_ms": 1794241914262,
+          "phase": "running",
+          "result_id": "ca10f27e720cd0f4292881ad677f7387"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912248,
+          "server_epoch": 1794241892123981001,
+          "probe_checked_ms": 1794241902975,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18381,
+        "log_tail": "ed transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,15,312,1,0,0,0,0,0],\"count\":328,\"total_us\":19470712},\"broadcasts\":329,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.527574834,\"endpoints\":[{\"gameplay_transforms\":344,\"last_sequence\":402,\"latest_transform_age_at_snapshot\":{\"buckets\":[65,0,1,138,77,16,0,0,1,0,0,0,0],\"count\":298,\"total_us\":6184185},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":303,\"transport_commands\":402}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,17,327,1,0,0,0,0,0],\"count\":345,\"total_us\":20481964},\"broadcasts\":346,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.538834584,\"endpoints\":[{\"gameplay_transforms\":364,\"last_sequence\":425,\"latest_transform_age_at_snapshot\":{\"buckets\":[68,0,1,144,85,16,0,0,1,0,0,0,0],\"count\":315,\"total_us\":6578528},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":320,\"transport_commands\":425}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,17,344,1,0,0,0,0,0],\"count\":362,\"total_us\":21512877},\"broadcasts\":363,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.569754292,\"endpoints\":[{\"gameplay_transforms\":385,\"last_sequence\":451,\"latest_transform_age_at_snapshot\":{\"buckets\":[72,0,1,153,89,16,0,0,1,0,0,0,0],\"count\":332,\"total_us\":6887834},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":337,\"transport_commands\":451}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "df33dc7a94a2a6bb3692c6d65e64865f",
+        "archived": false,
+        "status": {
+          "allocation_id": "df33dc7a94a2a6bb3692c6d65e64865f",
+          "server_epoch": 1794241892180696001,
+          "heartbeat_ms": 1794241914332,
+          "phase": "running",
+          "result_id": "df33dc7a94a2a6bb3692c6d65e64865f"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912412,
+          "server_epoch": 1794241892180696001,
+          "probe_checked_ms": 1794241903031,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18382,
+        "log_tail": "ied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,19,310,0,0,0,0,0,0],\"count\":329,\"total_us\":19436228},\"broadcasts\":330,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.487155209,\"endpoints\":[{\"gameplay_transforms\":344,\"last_sequence\":403,\"latest_transform_age_at_snapshot\":{\"buckets\":[60,0,0,143,74,22,1,0,0,0,0,0,0],\"count\":300,\"total_us\":6245253},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":306,\"transport_commands\":403}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,20,326,0,0,0,0,0,0],\"count\":346,\"total_us\":20443639},\"broadcasts\":347,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.494574167,\"endpoints\":[{\"gameplay_transforms\":365,\"last_sequence\":428,\"latest_transform_age_at_snapshot\":{\"buckets\":[64,0,0,149,78,25,1,0,0,0,0,0,0],\"count\":317,\"total_us\":6652893},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":323,\"transport_commands\":428}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,21,342,0,0,0,0,0,0],\"count\":363,\"total_us\":21447113},\"broadcasts\":364,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.49805575,\"endpoints\":[{\"gameplay_transforms\":385,\"last_sequence\":451,\"latest_transform_age_at_snapshot\":{\"buckets\":[67,0,1,158,82,25,1,0,0,0,0,0,0],\"count\":334,\"total_us\":6956429},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":340,\"transport_commands\":451}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "e23bddd200e1d7c8a6270bf25b811fef",
+        "archived": false,
+        "status": {
+          "allocation_id": "e23bddd200e1d7c8a6270bf25b811fef",
+          "server_epoch": 1794241894151018001,
+          "heartbeat_ms": 1794241914287,
+          "phase": "running",
+          "result_id": "e23bddd200e1d7c8a6270bf25b811fef"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241914371,
+          "server_epoch": 1794241894151018001,
+          "probe_checked_ms": 1794241914368,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 16893,
+        "log_tail": "lied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,20,273,0,0,0,0,0,0],\"count\":293,\"total_us\":17341284},\"broadcasts\":294,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":17.4018345,\"endpoints\":[{\"gameplay_transforms\":300,\"last_sequence\":351,\"latest_transform_age_at_snapshot\":{\"buckets\":[48,0,0,127,63,23,0,1,0,0,0,0,0],\"count\":262,\"total_us\":5653687},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":268,\"transport_commands\":351}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,20,290,0,0,0,0,0,0],\"count\":310,\"total_us\":18377148},\"broadcasts\":311,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":18.437707875,\"endpoints\":[{\"gameplay_transforms\":321,\"last_sequence\":376,\"latest_transform_age_at_snapshot\":{\"buckets\":[52,0,1,134,68,23,0,1,0,0,0,0,0],\"count\":279,\"total_us\":5990734},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":285,\"transport_commands\":376}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,21,306,0,0,0,0,0,0],\"count\":327,\"total_us\":19384247},\"broadcasts\":328,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.444816417,\"endpoints\":[{\"gameplay_transforms\":341,\"last_sequence\":399,\"latest_transform_age_at_snapshot\":{\"buckets\":[56,0,1,143,72,23,0,1,0,0,0,0,0],\"count\":296,\"total_us\":6297667},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":302,\"transport_commands\":399}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      },
+      {
+        "allocation_id": "f2993965a1abd7b1ff571b8ba87f094d",
+        "archived": false,
+        "status": {
+          "allocation_id": "f2993965a1abd7b1ff571b8ba87f094d",
+          "server_epoch": 1794241892196608001,
+          "heartbeat_ms": 1794241914342,
+          "phase": "running",
+          "result_id": "f2993965a1abd7b1ff571b8ba87f094d"
+        },
+        "health": {
+          "version": 2,
+          "updated_ms": 1794241912425,
+          "server_epoch": 1794241892196608001,
+          "probe_checked_ms": 1794241903041,
+          "sql_ready": true,
+          "journal_ready": true,
+          "staged_dodges": 0,
+          "legacy_floors": 0,
+          "unpersisted_results": 0,
+          "critical_replies": 0,
+          "reply_receiver_closed": false,
+          "blocked_since_ms": null
+        },
+        "log_bytes": 18377,
+        "log_tail": "plied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,15,311,0,0,0,0,0,0],\"count\":326,\"total_us\":19325537},\"broadcasts\":327,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":19.378596,\"endpoints\":[{\"gameplay_transforms\":343,\"last_sequence\":401,\"latest_transform_age_at_snapshot\":{\"buckets\":[66,0,0,132,76,21,1,0,1,0,0,0,0],\"count\":297,\"total_us\":6288297},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":302,\"transport_commands\":401}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,17,326,0,0,0,0,0,0],\"count\":343,\"total_us\":20333755},\"broadcasts\":344,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":20.386824083,\"endpoints\":[{\"gameplay_transforms\":363,\"last_sequence\":424,\"latest_transform_age_at_snapshot\":{\"buckets\":[69,0,1,140,80,22,1,0,1,0,0,0,0],\"count\":314,\"total_us\":6623391},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":319,\"transport_commands\":424}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\nLOAD_METRICS {\"broadcast_gaps\":{\"buckets\":[0,0,0,0,0,19,342,0,0,0,0,0,0],\"count\":361,\"total_us\":21381659},\"broadcasts\":362,\"bucket_upper_us\":[1000,5000,10000,25000,45000,55000,75000,100000,150000,250000,500000,1000000],\"elapsed_secs\":21.434735583,\"endpoints\":[{\"gameplay_transforms\":384,\"last_sequence\":448,\"latest_transform_age_at_snapshot\":{\"buckets\":[72,0,2,148,85,23,1,0,1,0,0,0,0],\"count\":332,\"total_us\":6985818},\"player_id\":1,\"sequence_gaps\":0,\"sequence_restarts\":0,\"snapshots\":337,\"transport_commands\":448}],\"scope\":\"verified signed application dispatch; ordinary applied transforms; complete snapshot kernel sends; cumulative since process start\"}\n"
+      }
+    ]
+  },
+  "latest_shards": {
+    "0": {
+      "buffs": 0,
+      "elapsed_secs": 31.456639416,
+      "input_hz_requested": 20,
+      "join_error": "None",
+      "meta": {
+        "match_id": 1,
+        "protocol_version": 16,
+        "server_epoch": 1794241892123981001,
+        "snapshot_tick": 381
+      },
+      "minions": 9,
+      "peers": [
+        {
+          "cached_input_transforms": 53,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              321,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 321,
+            "total_us": 3537
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "ca10f27e720cd0f4292881ad677f7387",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47900",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952054,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 692
+              },
+              "prepare": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 980
+              },
+              "send": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 6463
+              },
+              "sign": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 8583
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "cb77adf4729d422ea2ba8a3cb4d1dd954d0b27166fa24a3e8b966c4a37ebcfac",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 475,
+            "sent_transforms": 382,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                369,
+                0,
+                5,
+                5,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 381,
+              "total_us": 19553194
+            }
+          },
+          "snapshot_age_ms": 1,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892123981001,
+            "snapshot_tick": 381
+          },
+          "transport": {
+            "accepted_snapshots": 345,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1214358,
+            "received_datagrams": 1225
+          }
+        },
+        {
+          "cached_input_transforms": 51,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              327,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 328,
+            "total_us": 50496
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "278ffe7bbc7afdfd9f0aab3c714b3b43",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47902",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952073,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 386
+              },
+              "prepare": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 82
+              },
+              "send": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 2694
+              },
+              "sign": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 6313
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "cdb2fafd4e9841389d64b9a38fcd1cba618df2c328464421903f4af08ee6af97",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 474,
+            "sent_transforms": 381,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                1,
+                2,
+                366,
+                0,
+                5,
+                5,
+                1,
+                0,
+                0,
+                0
+              ],
+              "count": 380,
+              "total_us": 19553197
+            }
+          },
+          "snapshot_age_ms": 1,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892147744001,
+            "snapshot_tick": 381
+          },
+          "transport": {
+            "accepted_snapshots": 346,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1220555,
+            "received_datagrams": 1232
+          }
+        },
+        {
+          "cached_input_transforms": 51,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              327,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 328,
+            "total_us": 7054
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "bc8012d82660bb324607e312a46f8aab",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47901",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952063,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 178
+              },
+              "prepare": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 26
+              },
+              "send": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 2337
+              },
+              "sign": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 6011
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "f4e096c7ed98419ebeab11d563317a7f23d3060b84ad4908b7657411c5cef9c9",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 474,
+            "sent_transforms": 382,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                2,
+                367,
+                0,
+                8,
+                3,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 381,
+              "total_us": 19553167
+            }
+          },
+          "snapshot_age_ms": 1,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892135565001,
+            "snapshot_tick": 382
+          },
+          "transport": {
+            "accepted_snapshots": 347,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1202885,
+            "received_datagrams": 1235
+          }
+        },
+        {
+          "cached_input_transforms": 51,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              282,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 282,
+            "total_us": 2105
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "6a168cfbd49b6402fa2a078be1db1221",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47904",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952091,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  477,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 477,
+                "total_us": 103
+              },
+              "prepare": {
+                "buckets": [
+                  477,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 477,
+                "total_us": 23
+              },
+              "send": {
+                "buckets": [
+                  477,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 477,
+                "total_us": 2205
+              },
+              "sign": {
+                "buckets": [
+                  477,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 477,
+                "total_us": 6010
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "86a767cd604042cfb02982c91b4b76b568e6a18a5cfd43f39670bfe750c7653f",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 477,
+            "sent_transforms": 383,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                2,
+                369,
+                0,
+                4,
+                6,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 382,
+              "total_us": 19553147
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892163735001,
+            "snapshot_tick": 382
+          },
+          "transport": {
+            "accepted_snapshots": 348,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1220238,
+            "received_datagrams": 1250
+          }
+        },
+        {
+          "cached_input_transforms": 52,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              328,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 328,
+            "total_us": 186
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "4807934801d470e21d5135cf73185885",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47903",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952083,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 61
+              },
+              "prepare": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 15
+              },
+              "send": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 2162
+              },
+              "sign": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 5886
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "be48648cc39a4439924ecfd540f0a977b5210263880b473085f4666e6753151f",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 474,
+            "sent_transforms": 382,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                2,
+                367,
+                0,
+                4,
+                7,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 381,
+              "total_us": 19553147
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892159741001,
+            "snapshot_tick": 382
+          },
+          "transport": {
+            "accepted_snapshots": 347,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1214581,
+            "received_datagrams": 1226
+          }
+        },
+        {
+          "cached_input_transforms": 45,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              285,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 286,
+            "total_us": 7278
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "17a1350f4ebe1791f22cc1a92bbe5cbc",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47908",
+              "human_count": 1,
+              "join_deadline_ms": 1794241954067,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 41
+              },
+              "prepare": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 20
+              },
+              "send": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 1914
+              },
+              "sign": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 5333
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "b6096b10340e4419b26164e71ef296f549659d1641964400b491ae047d460f1a",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 433,
+            "sent_transforms": 340,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                3,
+                325,
+                0,
+                4,
+                7,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 339,
+              "total_us": 17502974
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241894134953001,
+            "snapshot_tick": 346
+          },
+          "transport": {
+            "accepted_snapshots": 314,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1084705,
+            "received_datagrams": 1104
+          }
+        },
+        {
+          "cached_input_transforms": 51,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              298,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 298,
+            "total_us": 1757
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "df33dc7a94a2a6bb3692c6d65e64865f",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47905",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952100,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 38
+              },
+              "prepare": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 11
+              },
+              "send": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 2014
+              },
+              "sign": {
+                "buckets": [
+                  475,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 475,
+                "total_us": 5794
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "0f15440e829445e8a9b122566110dd3fa5ae6bfea78f45a79c9f3be2898daffc",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 475,
+            "sent_transforms": 382,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                3,
+                366,
+                1,
+                5,
+                5,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 381,
+              "total_us": 19502374
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892180696001,
+            "snapshot_tick": 382
+          },
+          "transport": {
+            "accepted_snapshots": 348,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1220964,
+            "received_datagrams": 1235
+          }
+        },
+        {
+          "cached_input_transforms": 52,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              328,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 328,
+            "total_us": 177
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "f2993965a1abd7b1ff571b8ba87f094d",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47907",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952118,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 62
+              },
+              "prepare": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 4
+              },
+              "send": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 2036
+              },
+              "sign": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 5833
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "f44d3701af14450abc3513c7350e1c7cca1392b0e8e14565a318179dc800719a",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 474,
+            "sent_transforms": 382,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                1,
+                0,
+                3,
+                365,
+                1,
+                6,
+                5,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 381,
+              "total_us": 19553430
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892196608001,
+            "snapshot_tick": 381
+          },
+          "transport": {
+            "accepted_snapshots": 346,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1216518,
+            "received_datagrams": 1225
+          }
+        },
+        {
+          "cached_input_transforms": 52,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              327,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 328,
+            "total_us": 6918
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "20eba5949b259f7864764feb96847b57",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47906",
+              "human_count": 1,
+              "join_deadline_ms": 1794241952109,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 71
+              },
+              "prepare": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 10
+              },
+              "send": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 2166
+              },
+              "sign": {
+                "buckets": [
+                  474,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 474,
+                "total_us": 5987
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "c94e75f7e1fc44ba86417044b51f1d4336c19ca504bf48c1b49b9fb65f0ec4af",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 474,
+            "sent_transforms": 382,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                1,
+                0,
+                0,
+                3,
+                366,
+                1,
+                8,
+                2,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 381,
+              "total_us": 19502413
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241892196608001,
+            "snapshot_tick": 380
+          },
+          "transport": {
+            "accepted_snapshots": 346,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1175697,
+            "received_datagrams": 1217
+          }
+        },
+        {
+          "cached_input_transforms": 46,
+          "id": 1,
+          "navigation_work": {
+            "buckets": [
+              287,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "count": 287,
+            "total_us": 2300
+          },
+          "public": {
+            "allocation": {
+              "allocation_id": "e23bddd200e1d7c8a6270bf25b811fef",
+              "bot_count": 9,
+              "endpoint": "127.0.0.1:47909",
+              "human_count": 1,
+              "join_deadline_ms": 1794241954077,
+              "preference": "bot_practice",
+              "rated": false,
+              "team": "green"
+            },
+            "authority_resets": 0,
+            "command_work": {
+              "encode": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 79
+              },
+              "prepare": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 11
+              },
+              "send": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 1871
+              },
+              "sign": {
+                "buckets": [
+                  433,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "count": 433,
+                "total_us": 5431
+              }
+            },
+            "error": null,
+            "phase": "running",
+            "profile_id": "50e51674ed3b4a4ca317422acff351db9ecb1a47fefd40a28baa357bdcb971e2",
+            "ranked_accepted_count": null,
+            "ranked_denied_counts": [],
+            "sent_gameplay_commands": 433,
+            "sent_transforms": 340,
+            "stale_career_packets": 0,
+            "transform_gaps": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                326,
+                0,
+                7,
+                4,
+                0,
+                0,
+                0,
+                0
+              ],
+              "count": 339,
+              "total_us": 17503079
+            }
+          },
+          "snapshot_age_ms": 0,
+          "snapshot_meta": {
+            "match_id": 1,
+            "protocol_version": 16,
+            "server_epoch": 1794241894151018001,
+            "snapshot_tick": 345
+          },
+          "transport": {
+            "accepted_snapshots": 313,
+            "decode_errors": 0,
+            "framing_errors": 0,
+            "received_bytes": 1046621,
+            "received_datagrams": 1094
+          }
+        }
+      ],
+      "phase": "running",
+      "players": [
+        {
+          "action_sequence": 1,
+          "action_slot": 0,
+          "class": "warrior",
+          "gold": 32,
+          "hp": 250.0,
+          "id": 1,
+          "inventory": [
+            "vitality_gem"
+          ],
+          "is_bot": false,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 30.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": {
+            "error": null,
+            "item_id": "vitality_gem",
+            "match_id": 1,
+            "request_id": 1
+          },
+          "level": 1,
+          "mana": 91.9423599243164,
+          "max_hp": 250.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": false,
+          "team": "Green",
+          "x": -1.6380696296691895,
+          "xp": 0,
+          "z": -4.022922039031982
+        },
+        {
+          "action_sequence": 2,
+          "action_slot": 255,
+          "class": "mage",
+          "gold": 0,
+          "hp": 150.87998962402344,
+          "id": 2,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 85.81913757324219,
+          "max_hp": 180.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": false,
+          "team": "Green",
+          "x": -4.572707176208496,
+          "xp": 0,
+          "z": -2.2003567218780518
+        },
+        {
+          "action_sequence": 0,
+          "action_slot": 0,
+          "class": "ranger",
+          "gold": 0,
+          "hp": 185.0,
+          "id": 3,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 100.0,
+          "max_hp": 185.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": false,
+          "team": "Green",
+          "x": 0.3085773289203644,
+          "xp": 0,
+          "z": -75.19042205810547
+        },
+        {
+          "action_sequence": 11,
+          "action_slot": 255,
+          "class": "warden",
+          "gold": 0,
+          "hp": 228.0,
+          "id": 4,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 2,
+          "mana": 112.0,
+          "max_hp": 228.0,
+          "max_mana": 112.0,
+          "ranks": [
+            2,
+            1,
+            1,
+            1
+          ],
+          "shop_available": false,
+          "team": "Green",
+          "x": -20.668916702270508,
+          "xp": 85,
+          "z": -42.504520416259766
+        },
+        {
+          "action_sequence": 0,
+          "action_slot": 0,
+          "class": "cleric",
+          "gold": 0,
+          "hp": 230.0,
+          "id": 5,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 100.0,
+          "max_hp": 230.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": false,
+          "team": "Green",
+          "x": 2.151468276977539,
+          "xp": 0,
+          "z": -75.23240661621094
+        },
+        {
+          "action_sequence": 2,
+          "action_slot": 255,
+          "class": "mage",
+          "gold": 0,
+          "hp": 150.87998962402344,
+          "id": 6,
+          "inventory": [],
+          "is_bot": true,
+          "item_bonuses": {
+            "attack_speed_multiplier": 1.0,
+            "damage_multiplier": 1.0,
+            "max_hp": 0.0,
+            "max_mana": 0.0,
+            "move_speed_multiplier": 1.0,
+            "spell_haste_multiplier": 1.0
+          },
+          "last_purchase": null,
+          "level": 1,
+          "mana": 85.81913757324219,
+          "max_hp": 180.0,
+          "max_mana": 100.0,
+          "ranks": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "shop_available": false,
+          "team": "Blue",
+          "x": 5.988428115844727,
+          "xp": 0,
+          "z": 3.5774176120758057
+        }
+      ],
+      "producer_timing": {
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "loop_work": {
+          "buckets": [
+            267,
+            358,
+            3,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 629,
+          "total_us": 610525
+        },
+        "overrun_rebases": 0,
+        "receive_work": {
+          "buckets": [
+            6299,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 6300,
+          "total_us": 380840
+        },
+        "session_work": {
+          "buckets": [
+            6300,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 6300,
+          "total_us": 20304
+        },
+        "telemetry_format_write_work": {
+          "buckets": [
+            28,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 29,
+          "total_us": 6589
+        },
+        "telemetry_prepare_work": {
+          "buckets": [
+            29,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 29,
+          "total_us": 3578
+        },
+        "wake_lateness": {
+          "buckets": [
+            37,
+            421,
+            171,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 630,
+          "total_us": 2072495
+        }
+      },
+      "state": "Running",
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "protected": false,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "protected": false,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 3,
+          "protected": false,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 4,
+          "protected": false,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "protected": false,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "protected": false,
+          "team": "Blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 9,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 10,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 11,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 12,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 13,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 14,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 15,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 16,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 17,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 18,
+          "protected": true,
+          "team": "Blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 19,
+          "protected": true,
+          "team": "Green"
+        },
+        {
+          "hp": 240.0,
+          "id": 20,
+          "protected": true,
+          "team": "Blue"
+        }
+      ]
+    }
+  },
+  "latest_auth_shards": {
+    "0": {
+      "elapsed_secs": 6.205074708,
+      "peers": [
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "cb77adf4729d422ea2ba8a3cb4d1dd954d0b27166fa24a3e8b966c4a37ebcfac"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "cdb2fafd4e9841389d64b9a38fcd1cba618df2c328464421903f4af08ee6af97"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "f4e096c7ed98419ebeab11d563317a7f23d3060b84ad4908b7657411c5cef9c9"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "86a767cd604042cfb02982c91b4b76b568e6a18a5cfd43f39670bfe750c7653f"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "be48648cc39a4439924ecfd540f0a977b5210263880b473085f4666e6753151f"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "b6096b10340e4419b26164e71ef296f549659d1641964400b491ae047d460f1a"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "0f15440e829445e8a9b122566110dd3fa5ae6bfea78f45a79c9f3be2898daffc"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "f44d3701af14450abc3513c7350e1c7cca1392b0e8e14565a318179dc800719a"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "c94e75f7e1fc44ba86417044b51f1d4336c19ca504bf48c1b49b9fb65f0ec4af"
+          }
+        },
+        {
+          "public": {
+            "allocation": null,
+            "auth_age_ms": 102,
+            "error": null,
+            "phase": "authenticated",
+            "profile_id": "50e51674ed3b4a4ca317422acff351db9ecb1a47fefd40a28baa357bdcb971e2"
+          }
+        }
+      ]
+    }
+  }
+}

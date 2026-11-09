@@ -5,6 +5,19 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Generalize the native loopback capacity runner beyond Casual: add explicit
+  Casual, Ranked, vs Bots and equal-shard mixed workloads; account for one arena
+  per Casual/Ranked shard but ten per ten-client vs Bots shard; validate exact
+  rosters, manifests, worker ports and signed-human metric endpoints. Ranked and
+  mixed require disclosed synthetic prior Casual receipts in disposable
+  `omoba_test`, never an organic-eligibility or settlement claim. Package the
+  matching Release qualification helper with `linux-capacity-bots`. All 19
+  capacity,72 Release and14 rehearsal tests pass. Small live15s loopback smoke
+  runs pass for10vsBots/10arenas,10Ranked/1arena and30mixed/12arenas with exact
+  rosters,healthy workers and0 sequence gaps/restarts. Archive19-source selected
+  evidence with a standalone recomputing verifier. Sustained actual/identical
+  RU-host and uplink acceptance have not run; #13 remains open.
+
 - Pin the archived 1000-client server-load verifier to a complete 15-file
   historical source snapshot, including `public_bots_rehearsal.py`; remove every
   current-checkout import and source-hash fallback. Normal recomputation and a

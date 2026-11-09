@@ -693,10 +693,13 @@ multi-arena acceptance. The older single-process
 for lifecycle/small diagnostics, but its 40-client Node loop itself distorted the
 four-arena receive gate and is not a multi-arena 20 Hz capacity oracle.
 
-1. Copy the release server, the Release workflow's `linux-capacity-bots` artifact,
-   [scripts/public_playing_capacity.py](../../../scripts/public_playing_capacity.py)
-   and its current fixture dependencies. Verify their hashes against the same
-   reviewed release/source; never reuse a generator from another candidate.
+1. Copy the release server and the Release workflow's `linux-capacity-bots`
+   artifact. It contains `bots` and `examples/qualify-ranked-fixture`; keep the
+   latter beside the server under `examples/`, where the fixture runner expects
+   it. Copy [scripts/public_playing_capacity.py](../../../scripts/public_playing_capacity.py)
+   and its current fixture dependencies. Verify all hashes against the same
+   reviewed release/source; never reuse a generator or qualification helper from
+   another candidate.
 2. Create a new disposable loopback `/omoba_test` database and restricted roles,
    migrate career13/portal11 and apply the matching current grants. Refuse to
    reuse an existing database. Bind a separate loopback lobby and workers on free
@@ -712,7 +715,7 @@ four-arena receive gate and is not a multi-arena 20 Hz capacity oracle.
    python3 scripts/public_playing_capacity.py \
      --server-bin /root/capacity/server-under-unit-limits \
      --bots-bin /root/capacity/bots --output /root/capacity/native-60 \
-     --clients=60 --seconds=120 --input-hz=20 --server-load-metrics
+     --workload=casual --clients=60 --seconds=120 --input-hz=20 --server-load-metrics
    ```
    Keep the 19.5–20.5 Hz per-peer actual-send gate unchanged. Require exact Running
    rosters, fresh health-v2/SQL/journal state, zero signed sequence restarts and
@@ -722,10 +725,16 @@ four-arena receive gate and is not a multi-arena 20 Hz capacity oracle.
    overwrite its report. Repeat the accepted step uninstrumented and for 300 s
    before deriving host capacity. Retain any instrumented rejection even when
    the uninstrumented comparison passes; one A/B is not a root-cause proof.
-4. Add equivalent native vs Bots and mixed Casual/Ranked coverage; the current
-   native runner above is Casual-only and does not close those rows. Measure the
-   real uplink and include IP/UDP/NIC overhead. Only then set and record
-   `OMOBA_MATCH_CAPACITY`, cgroup limits, the same arena range in
+4. Add equivalent native vs Bots, Ranked and mixed coverage with `--workload=bots`,
+   `--workload=ranked` and `--workload=mixed`. Ten vs Bots clients consume ten
+   arenas, not one. Mixed requires a multiple of 30 clients and assigns equal
+   Casual/Ranked/vs Bots shards: the minimum 30-client run consumes 12 arenas.
+   Size worker-port ranges and PostgreSQL connections by arenas, not client
+   shards. Ranked and mixed require `--qualify-ranked-fixtures`; this seeds ten
+   disclosed synthetic prior Casual receipts per Ranked profile only in the
+   disposable database and is not organic eligibility or rated-settlement proof.
+   Measure the real uplink and include IP/UDP/NIC overhead. Only then set and
+   record `OMOBA_MATCH_CAPACITY`, cgroup limits, the same arena range in
    `nftables-omoba.conf` and PostgreSQL `max_connections` (≥ capacity + 32,
    [data.md](../../../docs/architecture/data.md)). `ru_host.py bootstrap --apply`
    and `ship` remain separate reviewed/owner-controlled deployment actions.
