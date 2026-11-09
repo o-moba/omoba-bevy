@@ -658,6 +658,27 @@ traffic at 60 players, excluding network headers; this is loopback, not uplink
 acceptance. Six arenas therefore remain a borderline dev fixture, not an RU
 capacity setting.
 
+A newer [exact-Release workload packet](../../../docs/evidence/linux-capacity-workloads-2026-11-10/README.md)
+covers all queue types on the same diagnostic host. Release `42657406745` at
+`73651bc6` succeeded for macOS, Windows, Linux and Android and supplied the
+matching server, bots and Ranked fixture. Each run lasted 30 s with server
+metrics enabled:
+
+| Workload | Signed humans / arenas | Input min–max /s | Sequence gaps / restarts | Server CPU mean | Summed server RSS peak |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| vs Bots | 10 / 10 | 19.9967–19.9967 | 0 / 0 | 49.27% | 474.46 MiB |
+| Ranked | 10 / 1 | 19.9991–19.9991 | 0 / 0 | 14.12% | 84.25 MiB |
+| Mixed | 30 / 12 | 19.9941–19.9985 | 0 / 0 | 59.32% | 549.64 MiB |
+
+Mixed contained one Casual, one Ranked and ten vs Bots arenas. Ranked eligibility
+was explicitly synthetic. Summed RSS counts shared pages in each process and is
+not PSS or cgroup usage; nevertheless the mixed peak means the historical
+500 MiB setting is **not accepted**. Do not raise or lower it from these shared
+loopback samples alone: measure actual cgroup usage and sustained capacity on
+the isolated target host first. The standalone verifier recomputes all 133
+payload files and signed worker counters. Final checks found no owned process,
+disposable database or role; both ordinary dev services remained active.
+
 For historical scale only (not this host, no cgroup limits): on the developer Mac
 (Apple M4 Pro, dev build, 2026-10-25) 20 vs Bots arenas took 26% of one core and
 312 MiB in all (about 1.3% and 16 MiB each), every player reached Running within

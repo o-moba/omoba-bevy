@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Verify exact Release `73651bc6` binaries on the shared Linux dev VPS for
+  three instrumented30s workloads:10vsBots/10arenas,10Ranked/1arena and
+  30mixed/12arenas all PASS with19.9941–19.9991 sends/s,exact rosters and0
+  signed sequence gaps/restarts. Release42657406745 succeeds on all four
+  platforms and supplies the matching bots/Ranked fixture. Archive a19-source,
+  133-payload-file recomputing packet and final cleanup. Mixed summed process
+  RSS peaks at549.64MiB (not PSS/cgroup usage), so the historical500MiB RU
+  setting remains unvalidated; isolated RU-host/uplink/sustained gates stay open.
+
 - Generalize the native loopback capacity runner beyond Casual: add explicit
   Casual, Ranked, vs Bots and equal-shard mixed workloads; account for one arena
   per Casual/Ranked shard but ten per ten-client vs Bots shard; validate exact

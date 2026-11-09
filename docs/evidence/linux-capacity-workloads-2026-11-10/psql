@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Fixture-only psql adapter for public_playing_capacity's SHOW max_connections."""
+import subprocess
+import sys
+from urllib.parse import unquote, urlparse
+
+url = urlparse(sys.argv[1])
+database = unquote(url.path.lstrip("/"))
+assert database == "omoba_test" and url.hostname == "127.0.0.1"
+command = ["docker", "exec", "-i", "supabase_db_ekza-dev", "psql", "-X", "-U", "postgres", "-d", database]
+command.extend(sys.argv[2:])
+raise SystemExit(subprocess.run(command).returncode)

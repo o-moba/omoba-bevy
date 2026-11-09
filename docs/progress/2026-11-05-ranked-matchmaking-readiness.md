@@ -1993,3 +1993,48 @@ identical RU host со stepped+sustained Casual/Bots/Ranked/mixed и measured up
 network overhead. Общий dev VPS остаётся diagnostic-only. Исходные68=62done/5partial/
 1open,#13 и production configuration не изменены; human review,C2/C4,devices,
 independent recovery и owner-controlled merge/release остаются открыты.
+
+
+## 2026-11-10 — exact-Release Linux workload controls
+
+Для `73651bc6` Release42657406745 полностью SUCCESS: macOS, Windows, Linux и
+Android. Linux artifact действительно содержит `bots` и
+`examples/qualify-ranked-fixture`; server взят из пакета того же run. Actual
+SHA256: server `ecb7648e…f5ca`, bots `8c528c58…7695`, Ranked helper
+`67d257c2…0373`. На общем2-vCPU dev VPS создан новый disposable loopback
+`omoba_test` с restricted career13/portal11 roles, прежним diagnostic cgroup
+450M/500M/190%/96 и отдельными портами. Ordinary `omoba_dev`, dev lobby/API,
+production,firewall и public ports не менялись.
+
+Три exact-release instrumented30s Running-soak контроля PASS:
+
+-10vsBots clients/10arenas/90serverbots:19.9967sends/s,6927 transforms,0 gaps/
+restarts; server CPU49.27%,summed RSS peak474.46MiB;
+-10Ranked/1arena:19.9991sends/s,6761 transforms,0 gaps/restarts;14.12%/84.25MiB;
+-30mixed/12arenas/90serverbots:19.9941–19.9985sends/s,20671 transforms,
+0 gaps/restarts;59.32%/549.64MiB.
+
+Mixed=1 Casual+1 Ranked+10 vsBots workers. Все rosters,manifest sessions,
+health-v2 SQL/journal и metric workers совпали. Ranked/mixed seeded target10
+synthetic prior Casual receipts явно записаны и не являются organic eligibility/
+settlement proof. Post-teardown status может быть settling/failed; standalone
+verifier использует pre-teardown Running receipts и первые acceptance metric
+records,не выдавая позднее состояние за acceptance.
+
+[Exact selected packet](../evidence/linux-capacity-workloads-2026-11-10/README.md)
+содержит133 hashed payload files,19 report sources и24 дополнительных migration/
+grant inputs в source archive. Обычный и `python3 -S` verifier PASS: пересчитаны
+все hashes,worker endpoint/aggregate counters,rosters,health,input иcleanup.
+Raw generator logs,DSNs,keys и binaries не архивировались. Owned processes,
+disposable DB/roles отсутствуют,оба dev services active; новый remote fixture и
+его archive удалены после проверки скачанного пакета.
+
+Суммарный RSS mixed549.64MiB не является PSS или cgroup usage,но не позволяет
+принять исторический RU MemoryMax500MiB. RU README обновлён без изменения16-arena
+unit,nftables или limits. Нужен isolated actual/identical RU host с фактическим
+cgroup usage,stepped+sustained workloads и measured uplink/IP/UDP/NIC overhead.
+Общий dev VPS остаётся diagnostic-only; #13=open,счётчик62done/5partial/1open
+не менялся. Прежний CI42652552305 для `36acb771` теперь полностью SUCCESS;
+для текущего `73651bc6` CI42657406867 на момент записи завершил6/7 jobs и ждёт
+PostgreSQL. Human review,C2/C4,devices,WAN/fault,independent recovery иowner-
+controlled merge/release/RU rollout остаются отдельными открытыми gates.
