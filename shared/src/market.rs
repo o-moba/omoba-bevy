@@ -213,14 +213,14 @@ impl Market {
         match self {
             Self::Global => Legal::NONE,
             Self::Ru => Legal {
-                // The Russian drafts (LR-04, plan section 7) until the
-                // counsel-approved texts replace them with a new version.
-                version: Some("0-draft"),
+                // Edition 1 of the Russian texts, published 2026-11-05
+                // (owner-approved, LR-04). A new edition gets a new version.
+                version: Some("1"),
                 privacy: Some("https://omoba.ru/privacy"),
                 terms: Some("https://omoba.ru/terms"),
                 source: Some("https://github.com/o-moba/omoba-bevy/tree/v{version}-ru"),
-                // The owner provides these (LR-21); empty until then.
-                support_email: None,
+                // Provided by the owner (LR-21); the communities are not yet.
+                support_email: Some("prostosobolev@gmail.com"),
                 community_vk: None,
                 community_telegram: None,
                 // Placeholder the owner confirms with counsel (LR-07).
@@ -571,7 +571,7 @@ mod tests {
         assert!(!Legal::NONE.any());
         let ru = Market::Ru.legal();
         assert!(ru.any());
-        assert_eq!(ru.version, Some("0-draft"));
+        assert_eq!(ru.version, Some("1"));
         assert_eq!(ru.age_rating, Some("12+"));
         for link in [ru.privacy, ru.terms].into_iter().flatten() {
             assert!(link.starts_with("https://omoba.ru/"), "{link}");
@@ -581,10 +581,11 @@ mod tests {
             Some("https://github.com/o-moba/omoba-bevy/tree/v0.45.0-ru")
         );
         assert_eq!(Legal::NONE.source_for("0.45.0"), None);
-        // Hidden until the owner provides them (LR-21).
+        // The owner provided the support e-mail; the communities stay hidden
+        // until provided (LR-21).
         assert_eq!(
             (ru.support_email, ru.community_vk, ru.community_telegram),
-            (None, None, None)
+            (Some("prostosobolev@gmail.com"), None, None)
         );
     }
 

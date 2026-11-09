@@ -27,7 +27,7 @@ distinguish repository code from live service readiness.
 | Downloads | IPFS links | `omoba.ru/downloads/` on the RU host, IPFS mirror, status «Открытая бета» | — |
 | Android app | `space.ekza.omoba.beta` | `space.ekza.omoba.ru`, "OMOBA" | — |
 | Platforms | macOS, Windows, Linux, Android, iOS | macOS, Windows, Linux, Android | none yet (blocked) |
-| Legal documents to accept on first launch | none | `omoba.ru/terms`, `omoba.ru/privacy`, version `0-draft` | none |
+| Legal documents to accept on first launch | none | `omoba.ru/terms`, `omoba.ru/privacy`, version `1` | none |
 | Age sign | none | `12+` (placeholder until the owner confirms it, LR-07) | none |
 
 Players can still pick any language in Settings. The RU servers are planned names
@@ -130,10 +130,11 @@ A market's legal table (`shared/src/market.rs` `Market::legal`, `scripts/markets
 
 | Field | RU value | Shown |
 | --- | --- | --- |
-| `version` | `0-draft` (the Russian drafts, LR-04) | first-launch card |
+| `version` | `1` (the Russian texts, edition 1, published 2026-11-05 (owner-approved, without counsel review), LR-04) | first-launch card |
 | `privacy`, `terms` | `https://omoba.ru/privacy`, `https://omoba.ru/terms` | card, Settings → About, package README |
 | `source` | `https://github.com/o-moba/omoba-bevy/tree/v{version}-ru` | About, README (`{version}` is the release) |
-| `support_email`, `community_vk`, `community_telegram` | empty until the owner provides them (LR-21) | About, README; hidden while empty |
+| `support_email` | `prostosobolev@gmail.com` (provided by the owner, LR-21) | About, README |
+| `community_vk`, `community_telegram` | empty until the owner provides them (LR-21) | About, README; hidden while empty |
 | `age_rating` | `12+` (placeholder, LR-07) | card, boot splash, About, README |
 
 The global and CN markets have none of these, so their game shows no card and no
@@ -174,11 +175,11 @@ release and the age sign. It has no hosting notes. Dev builds keep the English
 tester README, ending with the bilingual legal block (`legal_readme`); the global
 README is unchanged. `release.py catalog --market ru` refuses to write the download
 catalog until the public tag `v<version>-ru` exists on GitHub, so the source link
-always resolves. While the owner has not provided the support e-mail and a community
-(LR-21), `build` prints a note and the README names only the portal.
+always resolves. While the owner has not provided a community (LR-21), `build` prints a
+note and the README names only the support e-mail and the portal.
 
-When the counsel-approved texts replace the drafts, give them a new `version` in
-both tables (and the portal's): every player is asked again.
+When a new edition replaces edition 1 (for example after counsel review), give it a new
+`version` in both tables (and the portal's): every player is asked again.
 
 ## Sign in with VK ID
 

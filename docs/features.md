@@ -1348,9 +1348,9 @@ follows.
 
 ## Legal acceptance, About and age sign in the game (LR-06, unreleased)
 
-- An RU build opens with a card before anything else: «Перед игрой», the age sign `12+`, links to the User Agreement and the Privacy Policy on `omoba.ru` (opened in the browser), the document version (`0-draft`), a language switch and «Я принимаю…». **Continue** stays disabled until the switch is on.
+- An RU build opens with a card before anything else: «Перед игрой», the age sign `12+`, links to the User Agreement and the Privacy Policy on `omoba.ru` (opened in the browser), the document version (`1`), a language switch and «Я принимаю…». **Continue** stays disabled until the switch is on.
 - Until the player accepts, the game opens no lobby connection, does not read the release catalog and offers no VK sign-in, device link or website pairing. The acceptance is kept in the market's settings folder (`legal_acceptance.json`: region, document version, time); a new document version asks again. It is not sent to a server yet.
-- Settings → «Об игре» shows the build label, `12+`, both documents and the source code of this release (`github.com/o-moba/omoba-bevy/tree/v<version>-ru`). Support e-mail, VK community and Telegram appear there once the owner provides them. The boot splash shows `12+` too.
+- Settings → «Об игре» shows the build label, `12+`, both documents and the source code of this release (`github.com/o-moba/omoba-bevy/tree/v<version>-ru`). The support e-mail (`prostosobolev@gmail.com`) is shown there; VK community and Telegram appear once the owner provides them. The boot splash shows `12+` too.
 - RU package READMEs end with the age sign and the same links. `release.py catalog --market ru` refuses until the public tag `v<version>-ru` exists.
 - The global build is unchanged: its market has no legal table, so no card, no About page and no gate.
 - Copy in en, ru and zh-Hans (`client/i18n/*/legal.json`).
