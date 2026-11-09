@@ -1,69 +1,74 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальный checkpoint — native Linux 300 s soak/A/B, 2026-11-09
+## Актуальный checkpoint — exact-Release workloads и RU no-ship gates, 2026-11-10
 
-[Новый soak evidence packet и verifier](../evidence/linux-capacity-soak-2026-11-09/README.md)
-фиксирует два300-second loopback прогона на общем dev VPS (2 vCPU,3480344KiB RAM),
-те же release server/native ten-client shards и source parent
-`4a0f2ca616a678371bd4d6f2798e117e03357f57`. Runner отдельно расширен до15–300s;
-13/13 Python tests PASS. Rust sources/binaries от предыдущего boundary не менялись.
-Release42611040419 текущего parent полностью SUCCESS,включая macOS. Основной
-CI42611040463 на момент пакета имеет6/7 SUCCESS,PostgreSQL journey ещё in_progress.
-Новый documentation/evidence HEAD обязан получить собственный полный CI.
-Draft release на PR не создаётся.
+Проверенный code/evidence HEAD игры `3c00011c0b67d3b21587754b45281887987a7fdc`,
+PR148 open в `dev`. Release42662261628 полностью SUCCESS:macOS,Windows,Linux,
+Android;draft release skipped. Основной CI42662261577 тоже полностью SUCCESS,
+все7 jobs включая PostgreSQL-backed journeys. Прежний `73651bc6` имеет полностью
+успешные Release42657406745 и CI42657406867. Этот documentation checkpoint
+сохраняется следующим коммитом и обязан получить собственный CI/Release.
+[Exact-Release workload evidence](../evidence/linux-capacity-workloads-2026-11-10/README.md)
+проверяет сервер и generators из полностью успешного Release42657406745 для
+`73651bc6` на общем2-vCPU dev VPS. Три instrumented30s Running-soak контроля PASS:
+10vsBots/10arenas,10Ranked/1arena и30mixed/12arenas; input19.9941–19.9991/s,
+0 signed sequence gaps/restarts,все exact rosters иhealth-v2 совпали. Ranked/mixed
+используют явно synthetic target10 prior Casual receipts: это не organic eligibility
+или settlement proof. Standalone verifier в обычном и`python3 -S` режиме PASS,
+пересчитывая133 hashed payload files и worker counters. Owned processes,disposable
+DB/roles и remote fixture удалены;ordinary dev lobby/API остались active.
 
-- **60 clients/6 Casual arenas/300s, server metrics OFF: PASS**19.5349–19.6209
-  sends/s,accepted snapshots p50/p0518.4171/18.3927Hz,wire p50/p9587783/89275
-  B/player/s. Server CPU72.46%,RSS299.86MiB;generator69.11%/44.66MiB.
-  Server dispatch/cadence здесь явно не измерены,отсутствие LOAD_METRICS проверено.
-- **Тот же профиль, metrics ON: FAIL** неизменного19.5–20.5Hz input gate:
-  19.4589–19.5355 sends/s,accepted snapshots18.3411/18.3115Hz. Все60 peers и6
-  exact rosters удержались300s. Из worker logs независимо пересчитаны416943
-  application dispatches,356001 transforms,337456 snapshots,**0 gaps/restarts**.
-  Broadcast mean54.497ms,p95/p99<75/100ms;latest-transform age26.038ms,<55/150ms.
-  Server CPU72.27%,RSS300.60MiB;generator66.98%/44.70MiB. FAIL сохранён.
-- Один A/B **не доказывает** причину metrics: без них server CPU выше на0.19pp,
-  generator выше на2.13pp; minimum input изменился только на0.0760/s. Это
-  borderline shared-host variability,не unconditional six-arena/RU acceptance.
-- Median wire даёт41.711/42.136Mbit/s aggregate application traffic на60 players;
-  p95-per-player×60=42.739/42.852Mbit/s. Network headers не включены,uplink/WAN
-  не измерены. Histograms cumulative/bucket upper bounds,не per-command ACK SLA.
-- Оба run имеют final health-v2 и полный owned process/DB/role cleanup;dev lobby/
-  API active. Verifier проверяет20 selected hashed files,15-source archive,
-  input/wire/population/resources/server metrics и FAIL/PASS различие.
+Mixed summed RSS peak549.64MiB не является PSS/cgroup usage,но не позволяет принять
+исторический RU MemoryMax500MiB. **16-arena unit,limits,nftables иproduction не
+изменялись.** Общий dev VPS только diagnostic:30s controls и прежний300s Casual
+A/B не являются isolated-host sustained capacity. Instrumented300s FAIL
+(19.4589–19.5355/s) сохранён;uninstrumented PASS не отменяет его. Старый80/8 FAIL
+с7 gaps тоже сохранён. #13=open,исходные68=62done/5partial/1open.
 
-Прежний [stepped capacity packet](../evidence/linux-capacity-2026-11-09/README.md)
-не переписан:40/4 и60/6 по120s PASS,80/8 FAIL с7 gaps. Его43-file verifier и
-Node A/B сохраняют вывод о bottleneck одного Node generator;для capacity нужны
-native shards. `ops/vps/ru/README.md` считает16MiB/arena неподтверждённой.
-**Unit,16-arena setting,nftables иproduction formula не изменены.** Реальный или
-идентичный RU-host,vs Bots/mixed,uplink,WAN и SLA остаются open;#13 не закрыт.
+Портал `37e705c04acb59816710584c414619b80f687f35`,PR33 open в`dev`,merge state
+CLEAN: typecheck,257 unit PASS/3 expected skips,RU/global builds и13 Next+Chrome
+Ranked checks PASS. GitHub checks не настроены;это не PostgreSQL/physical-device
+proof. В обоих PR новых человеческих reviews/requests нет. Нужен независимый
+human review;self-review не является приёмкой.
 
-Портал `37e705c`: typecheck,260 unit (257 PASS/3 expected skips),RU/global
-production builds PASS. Ranked-seasons6 и ranked-notices7 Next+Chrome RU checks
-PASS без page errors/unexpected API; локальные серверы остановлены. GitHub checks
-у PR33 не настроены; leaderboard/game-directory требуют своих loopback binaries/
-fixtures. В обоих репозиториях GitHub показывает только автора `wotori` как
-collaborator,поэтому нужно человеческое ревью владельца/приглашённого reviewer,
-не self-review.
+### Текущее решение по RU — NO SHIP до внешних gates
 
-Прежние [server-load1000 proof](../evidence/server-load-metrics-2026-11-09/README.md),
-[buffered telemetry/input20 proof](../evidence/input20-buffered-2026-11-07/README.md)
-и rejected diagnostics сохранены без перезаписи. Тяжёлый Cargo/Bevy/SDK build не
-запускался,третий cargo cache не создавался.
+[Release checklist](../../../ops/vps/ru/release-checklist.md) содержит dated matrix
+S1–S12/P1–P9. PR CI/Release и loopback evidence не заполняют её автоматически:
+нужен versioned exact RU package,owner-controlled ship/preflight/downloads/alerts и
+все per-platform fresh-player scenarios. На текущем candidate нет основания объявлять
+RU release ready или создавать release result с PASS.
 
-**Следующий capacity gate:** реальный/идентичный изолированный RU-host,vs Bots/
-mixed и measured uplink/network budget; host acceptance не должен скрывать
-instrumented300s FAIL. Не повторять локальный A/B как замену production proof.
+Следующий технический gate — **изолированный реальный или идентичный RU-host**:
+exact-Release stepped+sustained Casual/vsBots/Ranked/mixed,фактический cgroup
+memory/CPU/tasks,uplink с IP/UDP/NIC overhead и принятый seat ceiling. Не повторять
+local1000,terminal-spool,PG16/18 recovery или старый Casual A/B без новой причины.
 Далее WAN/multi-host/party/Ranked/Resume/fault,directory/trust provisioning;
-current UI-2/UI-3 иphysical C3; independent off-host/RU RPO/RTO иC2/C4 после
-существующих решений владельца; legal/provider/signing/catalog/device/release.
-Сохранять полный scope68+9+UI/physical/off-host/WAN/trust/RU,исходные68=62/5/1.
+UI-2/UI-3 иphysical C3; independent off-host recovery с measured RPO/RTO иC2/C4
+после решений владельца; legal/provider/signing/catalog/device иhuman review.
+Только затем owner-controlled merge/release/RU rollout.
 
-Основная работа по-прежнему в feature branches `feat/ranked-matchmaking-readiness`:
-игра mm-game/PR148 и портал mm-web/PR33 →dev, оба open/not merged. Ни dev/main
-merge,ни release/deploy/reset/keys/grants не было. Следующие коммиты должны
-получить собственный CI.
+Основная работа по-прежнему в feature branches `feat/ranked-matchmaking-readiness`.
+Ни dev/main merge,ни release/deploy/reset/keys/grants не было. Тяжёлый Cargo/Bevy/
+SDK build не запускался,третий cargo cache не создавался. Новый HEAD обязан получить
+собственный полный CI и4-platform Release;родительские зелёные runs не переносятся.
+
+### История native Linux 300 s soak/A/B, 2026-11-09
+
+[Soak evidence packet и verifier](../evidence/linux-capacity-soak-2026-11-09/README.md)
+фиксирует два300-second loopback прогона на общем dev VPS:60 clients/6 Casual arenas,
+metrics OFF PASS19.5349–19.6209 sends/s;metrics ON FAIL19.4589–19.5355/s. Все60
+peers удержались300s;worker logs дают416943 application dispatches,356001
+transforms,337456 snapshots,0 gaps/restarts. Один A/B не доказывает причину metrics.
+Median wire41.711/42.136Mbit/s aggregate application traffic на60 players исключает
+network headers и не измеряет uplink/WAN. Полный owned cleanup подтверждён.
+
+Прежний [stepped capacity packet](../evidence/linux-capacity-2026-11-09/README.md):
+40/4 и60/6 по120s PASS,80/8 FAIL с7 gaps. Node A/B доказывает bottleneck одного
+Node generator;для capacity нужны independent native shards. Прежние
+[server-load1000](../evidence/server-load-metrics-2026-11-09/README.md) и
+[buffered telemetry/input20](../evidence/input20-buffered-2026-11-07/README.md)
+proofs и rejected diagnostics сохранены без перезаписи.
 
 ## История b3c74bd1 — timing до исправления вывода
 

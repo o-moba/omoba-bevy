@@ -2038,3 +2038,28 @@ cgroup usage,stepped+sustained workloads и measured uplink/IP/UDP/NIC overhead.
 для текущего `73651bc6` CI42657406867 на момент записи завершил6/7 jobs и ждёт
 PostgreSQL. Human review,C2/C4,devices,WAN/fault,independent recovery иowner-
 controlled merge/release/RU rollout остаются отдельными открытыми gates.
+
+
+## 2026-11-10 — verified candidate CI и актуальная RU no-ship matrix
+
+Для code/evidence HEAD `3c00011c0b67d3b21587754b45281887987a7fdc` основной
+CI42662261577 полностью SUCCESS:все7 jobs,включая PostgreSQL-backed complete
+public Ranked journeys. Release42662261628 тоже полностью SUCCESS для macOS,
+Windows,Linux и Android;draft release skipped. Предыдущий `73651bc6` теперь имеет
+полностью успешные CI42657406867(7/7)и Release42657406745(4 platform). Зелёные
+статусы родителей не переносятся на следующий documentation HEAD.
+
+HANDOFF/TODO обновлены до exact-Release Casual/vsBots/Ranked/mixed checkpoint.
+[RU release checklist](../../../ops/vps/ru/release-checklist.md) получил dated
+S1–S12/P1–P9 snapshot:текущее решение **NO SHIP**,все release-specific строки OPEN,
+а не FAIL. PR CI и loopback evidence не засчитываются как versioned `make release-ru`,
+owner-required local `make check`,host ship/status/preflight,publication/download/
+alert или fresh-player per-platform acceptance. Портал остаётся`37e705c`,оба PR open,
+formal human reviews/requests нет;self-review не является приёмкой.
+
+Следующий материальный gate — isolated actual/identical RU host со stepped+sustained
+workloads,actual cgroup memory/CPU/tasks и uplink/IP/UDP/NIC overhead. Далее WAN/
+multi-host/fault/trust,UI/physical devices,independent off-host RPO/RTO,C2/C4 owner
+decisions,legal/provider/signing/catalog и human review. Original68=62done/5partial/
+1open,#13 open. Никакого merge,release,RU deploy,production/reset/keys/grants или
+изменения16-arena/500MiB/nftables configuration не выполнялось.

@@ -4,50 +4,59 @@ Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sess
 
 Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career13, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
 
-## Current release checkpoint — 2026-11-09
+## Current release checkpoint — 2026-11-10
 
-Latest measured continuation: [five-minute native soak and metrics A/B with recomputing verifier](../evidence/linux-capacity-soak-2026-11-09/README.md).
-On the shared2-vCPU dev VPS, the60-client/six-Casual-arena uninstrumented run
-passes300s at19.5349–19.6209 sends/s,18.4171Hz median accepted snapshots,
-72.46% server CPU and299.86MiB peak RSS. The corresponding instrumented run
-retains its complete population but **FAILS** the unchanged input gate at
-19.4589–19.5355 sends/s. Its archived worker logs independently reconstruct
-416943 application dispatches,356001 gameplay transforms,337456 complete
-snapshots and0 signed sequence gaps/restarts. The20-file verifier preserves
-this FAIL/PASS distinction and checks that the second run has no server metrics.
+Verified game code/evidence HEAD `3c00011c0b67d3b21587754b45281887987a7fdc`,
+PR148 open into `dev`: CI42662261577 passes all7 jobs and Release42662261628
+passes macOS,Windows,Linux and Android;draft release skipped. Previous `73651bc6`
+also has fully successful CI42657406867 and Release42657406745. This documentation
+checkpoint requires its own CI/Release after commit.
+[Exact-Release workload evidence](../evidence/linux-capacity-workloads-2026-11-10/README.md)
+uses the server and generators from fully successful Release42657406745 at
+`73651bc6`. On the shared2-vCPU dev VPS,instrumented30s controls PASS for
+10vsBots/10arenas,10Ranked/1arena and30mixed/12arenas:19.9941–19.9991 sends/s,
+0 signed sequence gaps/restarts,exact rosters and health-v2. Ranked/mixed explicitly
+seed synthetic target10 prior Casual receipts,not organic eligibility or settlement.
+The standalone verifier PASSes normally and under`python3 -S`,recomputing133 hashed
+payload files and worker counters. Owned processes,DB/roles and remote fixture were
+removed;ordinary dev lobby/API stayed active.
 
-The single A/B does not prove that instrumentation caused the rejection:
-server CPU was72.27% instrumented versus72.46% without metrics; generator CPU
-was66.98% versus69.11%. Minimum input moved only0.0760/s. Median wire rates
-correspond to41.711/42.136Mbit/s aggregate application traffic at60 players,
-excluding IP/UDP/NIC overhead and without measuring uplink/WAN. Six arenas are
-therefore a borderline shared-dev fixture, not an unconditional or RU capacity
-acceptance. All fixture processes/DB/roles were removed; dev services stayed active.
+Mixed summed RSS peaks at549.64MiB. It is not PSS/cgroup usage,but the historical
+RU MemoryMax500MiB remains unvalidated. The16-arena unit,limits,nftables and
+production configuration were NOT changed. These30s shared-host controls do not
+replace isolated-host stepped+sustained acceptance. The previous instrumented300s
+Casual FAIL(19.4589–19.5355/s),uninstrumented PASS and80/8 FAIL with7 gaps remain
+immutable. #13 stays open;original68 stays62 done/5 partial/1 open.
 
-The preceding [stepped native Linux boundary](../evidence/linux-capacity-2026-11-09/README.md)
-remains immutable:40/4arenas/120s and60/6arenas/120s PASS,80/8arenas/120s FAILS
-at15.9626–16.5988 sends/s with7 sequence gaps. Its43-file verifier and Node A/B
-retain the evidence that the old single Node generator distorted multi-arena
-receive timing. Use independent native Rust shards for capacity gates.
+Portal `37e705c04acb59816710584c414619b80f687f35`,PR33 open into`dev`,merge state
+CLEAN: typecheck,257 unit PASS/3 expected skips,RU/global builds,ranked-seasons6
+and ranked-notices7 Next+Chrome checks PASS. No portal GitHub checks are configured;
+these are not PostgreSQL/physical-device proof. Both PRs have zero formal human
+reviews/requests;self-review is not acceptance.
 
-The RU README marks the old16MiB/arena formula unvalidated for Linux. The16-arena
-setting,500MiB unit,nftables and production configuration were NOT changed.
-Actual/identical isolated RU-host,vs Bots/mixed,measured uplink/network budget,
-WAN and production SLA remain open; #13 stays open. Next is host-specific
-acceptance that does not hide the instrumented300s rejection, not another local
-repetition presented as production proof.
+**Current RU decision is NO SHIP.** The dated S1–S12/P1–P9 matrix in
+[the RU release checklist](../../../ops/vps/ru/release-checklist.md) separates CI
+and loopback evidence from versioned RU package,owner-controlled deployment,
+public/download/alert and fresh-player platform gates. None may be inferred PASS.
 
-Source parent `4a0f2ca6`: Release42611040419 is fully SUCCESS,including macOS;
-main CI42611040463 has6/7 SUCCESS with PostgreSQL journey running at this checkpoint.
-The new documentation/evidence HEAD requires its own CI. Portal `37e705c`:
-typecheck,257 unit PASS/3 expected skips,RU/global builds,ranked-seasons6 and
-ranked-notices7 Next+Chrome checks PASS. No portal GitHub checks are configured;
-richer loopback browser journeys and independent human review remain. Neither PR
-is merged; no production/RU/release action occurred. Previous [server-load1000](../evidence/server-load-metrics-2026-11-09/README.md)
-and [buffered-input](../evidence/input20-buffered-2026-11-07/README.md) proofs
-remain immutable. Original68 stays62 done/5 partial/1 open; all critic/UI/
-physical/off-host/trust/release gates remain additional.
+Next capacity gate: isolated actual/identical RU host,exact-Release stepped+
+sustained Casual/vsBots/Ranked/mixed,actual cgroup memory/CPU/tasks and uplink
+with IP/UDP/NIC overhead. Then WAN/multi-host/party/Ranked/Resume/fault,directory/
+trust provisioning,UI-2/UI-3,physical C3,independent off-host RPO/RTO,C2/C4 owner
+decisions,legal/provider/signing/catalog/device,human review and only then owner-
+controlled merge/release/RU rollout. Do not repeat accepted local1000,terminal-
+spool,PG16/18 recovery or old Casual A/B without a new reason.
 [All decisions, open PRs and next commands](HANDOFF-LOBBY-2026-11-07.md).
+
+### Previous native Linux capacity checkpoints
+
+The [five-minute native soak and metrics A/B](../evidence/linux-capacity-soak-2026-11-09/README.md)
+retains its FAIL/PASS distinction and the [stepped native Linux boundary](../evidence/linux-capacity-2026-11-09/README.md)
+retains43-file source/binary verification. The old single Node generator distorted
+multi-arena receive timing;use independent native Rust shards for capacity gates.
+Previous [server-load1000](../evidence/server-load-metrics-2026-11-09/README.md)
+and [buffered-input](../evidence/input20-buffered-2026-11-07/README.md) proofs
+remain immutable. Neither PR is merged;no production/RU/release action occurred.
 
 
 Original68: **62 done,5 partial (#1,#2,#12,#20,#50),1 open (#13)**.

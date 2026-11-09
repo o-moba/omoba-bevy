@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Record the current RU release decision as NO SHIP with a dated S1–S12/P1–P9
+  readiness matrix. Separate successful PR packaging and loopback evidence from
+  versioned RU packages,host/publication/device acceptance,human review,isolated
+  sustained capacity/uplink,WAN/trust,independent recovery and C2/C4 decisions.
+  Update the current handoff without changing production or the62/5/1 finding count.
+
 - Verify exact Release `73651bc6` binaries on the shared Linux dev VPS for
   three instrumented30s workloads:10vsBots/10arenas,10Ranked/1arena and
   30mixed/12arenas all PASS with19.9941–19.9991 sends/s,exact rosters and0
