@@ -6,22 +6,30 @@ players. Review method and the full list of findings: [the plan](../plans/ranked
 (eight reviewers, two-lens verification, a completeness critic; 68 confirmed
 findings). Decision record: ADR-027.
 
-## Current checkpoint — 2026-11-07
+## Current checkpoint — 2026-11-09
 
-Latest measured continuation: [buffered telemetry and accepted local input20](../evidence/input20-buffered-2026-11-07/README.md).
-A1000/30s diagnostic isolates telemetry formatting/output (64.484ms mean,
-p99<500ms) while signing/UDP/nav/session p99 are below1ms. Encoding the whole
-unchanged BOT_SAMPLE line before write_all fixes write amplification. V7 now
-PASS:1000 signed native AI peers/100 ten-seat Casual arenas/120s Running,
-each19.711–20.001 actual signed transforms/s within the original2.5% gate;
-control10/30s PASS20.00365Hz. Final100 workers have matching healthy v2 receipts,
-SQL/journal ready and no backlog/closure; rosters exact, authority resets0 and
-owned cleanup complete.41 library/4 UDP/25 Python/4 strict Clippy PASS, including
-exact telemetry bytes/partial writes/error behavior. Received snapshots remain
-median14.706Hz; p95 wire79786.64B/player/s, aggregate572.539Mbit/s excluding
-network headers. Per-command acceptance/latency, longer-duration/WAN/actual RU
-host/uplink and all other critic/UI/physical/off-host/trust/release gates remain.
-Original68 stays62 done/5 partial/1 open; earlier measured failures are immutable. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
+Latest measured continuation: [server dispatch, latest-transform age and cadence](../evidence/server-load-metrics-2026-11-09/README.md).
+Opt-in per-worker cumulative metrics now bind verified signed application
+dispatch, ordinary gameplay Transform handler entry, complete snapshot kernel
+sends and actual world-broadcast intervals to the capacity report. Missing or
+malformed records and any sequence gap/restart reject the run. Control10/30s
+and full1000/120s PASS: every peer sends19.834–20.000 transforms/s in the full
+profile;100 workers report2712856 gameplay transforms,0 gaps/restarts and
+1858997 complete snapshot sends. Latest-transform age at snapshot has34.868ms
+mean and250/500ms p95/p99 exclusive upper bounds; broadcast gap mean73.596ms
+with the same bounds. These are process-lifetime instrumented loopback
+histograms, not per-command ACK latency or proof of coordinate changes.
+
+Final rosters/health/authority/cleanup all pass;562 server and12 Python tests
+pass, and the evidence verifier recomputes every aggregate from archived
+observation-time LOAD_METRICS lines. Client accepted snapshots median13.025Hz/
+p0512.018; aggregate received application/framing traffic499.660Mbit/s,
+excluding network headers. Per-second JSON instrumentation, macOS scheduling
+and opt1/debug assertions prevent an uninstrumented-release interpretation.
+Longer Linux/RU/uplink,WAN/multi-host,party/Ranked/Resume/fault,trust/directory,
+UI/physical/off-host recovery and owner-controlled release remain open.
+Original68 stays62 done/5 partial/1 open. Previous buffered-input proof and
+all rejected diagnostics remain immutable. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
 
 
 The authoritative remaining order is now at the top of
@@ -1842,3 +1850,36 @@ Changing optimization across all roots together resolves the prior local symptom
 in this run, without identifying a single crate or proving overload impossible.
 Original68 remains62 done,5 partial,1 open; full CI and critic/UI/physical/trust/
 independent recovery/RU release requirements retain their complete scope.
+
+
+## 2026-11-09 — сохранение пакета, портал и восстановление macOS CI
+
+Пакет buffered input20 и все27 файлов исходников/доказательств сохранены и
+запушены в `bb7a3dbe`; архивный verifier и11 Python cases PASS, хеши семи
+исходников совпадают с принятым прогоном. `origin/dev` влит без конфликтов в
+`52241a2e`. Это не merge PR в `dev`: PR148 остаётся открытым.
+
+Release на прежних heads отменял только macOS job до checkout. GitHub annotation
+точно сообщает `The configuration 'macos-14-arm64-us-default' is not supported`;
+образ `macos-14` выведен из поддержки2026-11-02. `c97225e5` переводит только
+Release runner на поддерживаемый `macos-15`, сохраняя Apple-silicon packaging.
+Для этого head запущены CI42592591947 и Release42592591932; итог фиксируется
+только после их завершения. PR workflow не создаёт draft release.
+
+Портал `37e705c`: typecheck PASS,260 unit tests обнаружено/257 PASS/0 FAIL/3
+expected skips,RU иglobal production builds PASS. Два browser harness удаляли
+все `OMOBA_*` из дочернего env, но не возвращали `OMOBA_MARKET`, поэтому RU build
+запускался как global и instrumentation останавливал Next. Тесты теперь сами
+закрепляют `OMOBA_MARKET=ru`; production-код портала не изменён. Ranked seasons
+(6 checks) и notices (7 checks) проходят на production Next+Chrome с synthetic
+loopback Account API, viewport852×393, без page errors/unexpected API. Скриншоты
+и JSON reports сохранены локально; owned Next processes завершены, worktree чист.
+Это не PostgreSQL/physical-device proof. Leaderboard/game-directory journeys,
+независимый review и GitHub checks (для PR33 их нет) остаются отдельными gates.
+
+Следующий технический gate не повторяет accepted1000-client send test: нужны
+server-side per-command acceptance, input-to-snapshot latency иserver cadence,
+затем sustained Linux/RU-or-identical host/uplink/WAN/multi-host. Исходные68
+остаются62 done/5 partial/1 open. UI-2/UI-3/current pixels, physical C3,
+independent off-host/RU recovery, C2/C4 owner decisions, trust/release и merges
+не закрыты и не подменяются локальными проверками. Production/RU не изменялись.

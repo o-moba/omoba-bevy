@@ -20,6 +20,7 @@ mod game_world;
 mod hero;
 mod hero_stats;
 mod hero_timers;
+mod load_metrics;
 #[cfg(test)]
 mod map_config_tests;
 mod match_allocation;

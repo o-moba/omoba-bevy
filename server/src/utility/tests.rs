@@ -422,7 +422,7 @@ fn signed_roster_dash_and_haste_dispatch_to_authority_and_replicate() {
         };
         command.signature = hex(&key.sign(&command.signing_bytes()).to_bytes());
         let bytes = serde_json::to_vec(&PublicClientDatagram::SignedCommand { command }).unwrap();
-        let Decision::Dispatch(packet) = gate.receive(
+        let Decision::DispatchSigned(packet, _) = gate.receive(
             addr,
             &bytes,
             rt.server_epoch,

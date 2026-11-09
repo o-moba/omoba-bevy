@@ -117,6 +117,11 @@ impl ServerRuntime {
                             public_transport::Decision::Dispatch(packet) => {
                                 self.handle_packet(addr, packet, now)
                             }
+                            public_transport::Decision::DispatchSigned(packet, sequence) => {
+                                self.load_metrics.signed_dispatch(addr, sequence);
+                                self.handle_packet(addr, packet, now);
+                                self.load_metrics.finish_dispatch();
+                            }
                             public_transport::Decision::Reply(bytes) => {
                                 let _ = self.transport.send_to(&bytes, addr);
                             }
@@ -370,15 +375,28 @@ impl ServerRuntime {
             | ClientPacket::Utility { .. }
             | ClientPacket::BasicAttack { .. }
             | ClientPacket::UpgradeSkill { .. }
-            | ClientPacket::BuyItem { .. }) => common::command::apply(
-                &mut self.world,
-                addr,
-                &packet,
-                self.server_epoch,
-                self.match_id,
-                now,
-            )
-            .expect("gameplay command"),
+            | ClientPacket::BuyItem { .. }) => {
+                let flow = common::command::apply(
+                    &mut self.world,
+                    addr,
+                    &packet,
+                    self.server_epoch,
+                    self.match_id,
+                    now,
+                )
+                .expect("gameplay command");
+                if matches!(packet, ClientPacket::Transform { .. })
+                    && let Some(player_id) = self
+                        .world
+                        .players
+                        .get(&addr)
+                        .map(|player| player.hero.identity.id)
+                {
+                    self.load_metrics
+                        .applied_transform(addr, player_id, wall_now);
+                }
+                flow
+            }
             ClientPacket::Join {
                 prematch,
                 team,

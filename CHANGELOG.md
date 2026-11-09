@@ -5,6 +5,20 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add opt-in per-worker signed-dispatch, gameplay Transform, complete snapshot
+  send and world-broadcast histograms. The capacity runner now rejects missing/
+  malformed metrics and sequence gaps/restarts. Instrumented loopback1000/120s
+  PASS:19.834–20.000 sends/s per peer,2712856 gameplay transforms,0 gaps/restarts,
+  34.868ms mean latest-transform age at snapshot and73.596ms mean broadcast gap.
+  Archive observation-time metric lines with a recomputing verifier; retain the
+  exact per-command-ACK/WAN/RU/SLA limits.562 server and12 Python tests PASS.
+
+- Move Release macOS packages from the retired `macos-14` GitHub runner to
+  `macos-15`; the old label cancelled jobs before checkout. Keep Apple-silicon
+  packaging unchanged and require a fresh PR package build. Pin the portal's
+  ranked Next+Chrome harnesses to the RU market: typecheck,257 unit PASS/3
+  expected skips,RU/global builds and13 browser checks pass on portal `37e705c`.
+
 - Buffer each complete native BOT_SAMPLE line before stdout, preserving exact
   JSON/escaping and partial-write/error behavior. Reproduced streamed telemetry
   stalls (64.48ms mean) no longer prevent the measured20Hz input profile:1000

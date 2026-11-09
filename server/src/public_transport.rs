@@ -28,6 +28,7 @@ pub(crate) enum Decision {
     Drop,
     Reply(Vec<u8>),
     Dispatch(ClientPacket),
+    DispatchSigned(ClientPacket, u64),
 }
 struct Endpoint {
     client_nonce: String,
@@ -350,7 +351,7 @@ impl PublicTransport {
                 endpoint.auth_nonce = Some(principal.session_nonce);
                 endpoint.sequence = command.sequence;
                 endpoint.touched = now;
-                Decision::Dispatch(packet)
+                Decision::DispatchSigned(packet, command.sequence)
             }
             PublicClientDatagram::TransportProbe { .. } => unreachable!(),
         }
@@ -529,7 +530,7 @@ mod tests {
         ));
         assert!(matches!(
             gate.receive(addr, &bytes, 7, 2, false, Some(principal.clone()), now),
-            Decision::Dispatch(ClientPacket::Leave)
+            Decision::DispatchSigned(ClientPacket::Leave, 1)
         ));
         assert!(matches!(
             gate.receive(addr, &bytes, 7, 2, false, Some(principal), now),
@@ -755,7 +756,7 @@ mod tests {
                 Some(principal.clone()),
                 resume
             ),
-            Decision::Dispatch(ClientPacket::Ping)
+            Decision::DispatchSigned(ClientPacket::Ping, _)
         ));
     }
 

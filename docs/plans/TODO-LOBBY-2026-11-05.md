@@ -4,22 +4,33 @@ Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sess
 
 Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career13, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Volumes/Orico/omoba-build-cache/target-b`.
 
-## Current release checkpoint — 2026-11-07
+## Current release checkpoint — 2026-11-09
 
-Latest measured continuation: [buffered telemetry and accepted local input20](../evidence/input20-buffered-2026-11-07/README.md).
-A1000/30s diagnostic isolates telemetry formatting/output (64.484ms mean,
-p99<500ms) while signing/UDP/nav/session p99 are below1ms. Encoding the whole
-unchanged BOT_SAMPLE line before write_all fixes write amplification. V7 now
-PASS:1000 signed native AI peers/100 ten-seat Casual arenas/120s Running,
-each19.711–20.001 actual signed transforms/s within the original2.5% gate;
-control10/30s PASS20.00365Hz. Final100 workers have matching healthy v2 receipts,
-SQL/journal ready and no backlog/closure; rosters exact, authority resets0 and
-owned cleanup complete.41 library/4 UDP/25 Python/4 strict Clippy PASS, including
-exact telemetry bytes/partial writes/error behavior. Received snapshots remain
-median14.706Hz; p95 wire79786.64B/player/s, aggregate572.539Mbit/s excluding
-network headers. Per-command acceptance/latency, longer-duration/WAN/actual RU
-host/uplink and all other critic/UI/physical/off-host/trust/release gates remain.
-Original68 stays62 done/5 partial/1 open; earlier measured failures are immutable. [All decisions, open PRs and next commands](HANDOFF-LOBBY-2026-11-07.md).
+Previous game head `c97225e5` contains buffered telemetry/evidence, current `dev`
+and the supported Release `macos-15` runner. Release42592591932 is fully green,
+including macOS; main CI42592591947 still has its PostgreSQL journey running at
+this checkpoint. The new server-metrics package requires and must receive its
+own CI at the pushed HEAD; do not transfer the parent conclusions to it.
+Portal head `37e705c`: typecheck,257 unit PASS/3 expected skips,RU/global builds,
+ranked-seasons6 and ranked-notices7 Next+Chrome checks PASS. No portal GitHub
+checks are configured; richer loopback browser journeys and independent review
+remain. Neither PR is merged; no production/RU/release action has occurred.
+
+Latest measured continuation: [server dispatch, latest-transform age and cadence](../evidence/server-load-metrics-2026-11-09/README.md).
+Instrumented1000/120s PASS with1000 signed native AI peers/100 Casual arenas:
+each19.834–20.000 actual sends/s,2712856 gameplay Transform handler entries,
+0 signed sequence gaps/restarts,1858997 complete snapshot sends. Latest-transform
+age at snapshot mean34.868ms; world-broadcast gap mean73.596ms; both p95/p99
+exclusive upper bounds250/500ms. This is not per-command ACK latency or proof
+that coordinates changed. Final100 healthy workers, exact rosters,0 observed
+authority resets and complete owned cleanup pass.562 server and12 Python tests
+pass; verifier recomputes archived observation-time LOAD_METRICS. Accepted
+snapshots median13.025Hz/p0512.018 and aggregate received traffic499.660Mbit/s
+without network headers keep sustained Linux/RU/uplink/WAN capacity open.
+Previous [buffered-input proof](../evidence/input20-buffered-2026-11-07/README.md)
+and rejected diagnostics remain immutable. Original68 stays62 done/5 partial/1
+open; all critic/UI/physical/off-host/trust/release gates remain additional.
+[All decisions, open PRs and next commands](HANDOFF-LOBBY-2026-11-07.md).
 
 
 Original68: **62 done,5 partial (#1,#2,#12,#20,#50),1 open (#13)**.

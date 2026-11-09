@@ -1,54 +1,68 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальный checkpoint — buffered input20, после b3c74bd1
+## Актуальный checkpoint — server-load metrics, 2026-11-09
 
-Предыдущий goal-turn был progress: воспроизведены отказы и добавлены измерения.
-В этом продолжении найдена и исправлена подтверждённая причина в load producer.
-[Полный новый proof/verifier](../evidence/input20-buffered-2026-11-07/README.md)
-приоритетнее всех исторических «20Hz FAIL/не измерен/NOT RUN» ниже.
+Новый HEAD этого коммита содержит opt-in серверные метрики и самопроверяемый
+evidence packet. Прежний pushed head `c97225e5`: buffered input20/evidence,
+актуальный `origin/dev` и Release runner `macos-15`. Release42592591932 полностью
+SUCCESS, включая macOS; основной CI42592591947 на момент пакета имеет6/7 SUCCESS,
+PostgreSQL journey ещё in_progress. Эти runs относятся только к `c97225e5`.
+Для нового pushed HEAD обязателен собственный полный CI; parent conclusions не
+переносить. Draft release на PR не создаётся.
 
-- V6 diagnostic1000/30s FAIL18.211–20.000Hz. Prepare/sign/encode/UDP/nav/session
-  p99<1ms, но streaming JSON formatting/stdout: mean64.484ms, p99<500ms.
-- Полная BOT_SAMPLE строка теперь кодируется в один буфер и передаётся write_all.
-  Те же bytes/escaping/поля, partial/interrupted writes/error propagation.
-  Regression>4KiB: old formatter>20 accepting sink calls, новый1, bytes равны.
-  Это sink-call contract, не опубликованный syscall trace.
-- V7 control10/30s PASS20.00365Hz; **1000/120s PASS**, каждый19.711–20.001Hz
-  при прежнем19.5–20.5Hz gate.100 арен/1000 unique signed AI peers,0 server bots,
-  точные durable rosters,0 observed auth resets,100 final matching healthy-v2
-  workers SQL/journal ready,0 backlog/closed/blocked. All Running54.297s,
-  total174.464s. Cached transforms589562/min370peer, receive freshness не подделана.
-- Telemetry mean5.276ms/p99<75ms, loop p99<25ms, gap p95/p99<75ms; это exclusive
-  histogram bounds, не точные процентили и не server latency/SLA.267 rebases/120s.
-  V6 diagnostic30s иV7 acceptance120s — разная длительность/прогрессия, не formal
-  statistical host benchmark.41 whole library/4 UDP/25 Python/4 strict Clippy PASS.
-- Received snapshots median14.706Hz/p0513.864. p95 wire79786.64B/player/s,
-  total71.567MB/s=572.539Mbit/s application/framing, без IP/UDP/NIC overhead.
-  Server4.662 mean cores/1577.75MiB peak summed RSS; generator3.644/633.95MiB;
-  PostgreSQL/container CPU не входит. M4 не квалифицирует RU2vCPU/4GB/uplink.
-- Production248 source hashes и server5c6f4e6f… неизменны. Новая compilation
-  только маленького harness/library/bots/UDP test на coherent opt1 cached graph,
-  зависимости read-only. Root≈11GiB: **no heavy Cargo/Bevy/SDK/client build**.
-- Все свои v6/v7 контейнеры/volume удалены, финальные inventories пусты,
-  живых локальных probes нет. Исходные v1–v6 отказы сохранены как FAIL своих
-  профилей. Raw/helpers/binaries: `.agent/codex-ranked-readiness/load-input20/`.
-  `stages-before-buffer-build.json` принадлежитV6, `build.json` —V7.
+Портал `37e705c`: typecheck,260 unit (257 PASS/3 expected skips),RU/global
+production builds PASS. Ranked-seasons6 и ranked-notices7 Next+Chrome RU checks
+PASS без page errors/unexpected API; локальные серверы остановлены. GitHub checks
+у PR33 не настроены; leaderboard/game-directory требуют своих loopback binaries/
+fixtures. В обоих репозиториях GitHub показывает только автора `wotori` как
+collaborator, поэтому формально запросить независимого reviewer через PR нельзя;
+нужно человеческое ревью владельца/приглашённого reviewer, не self-review.
 
-**Следующие реальные gates:** per-command server acceptance/input-to-snapshot
-latency и server cadence, длительность/реальный или идентичный Linux/RU host и
-uplink/traffic budget; WAN/multi-host/party/Ranked/Resume/fault/trust packaging;
-current UI-2/UI-3 иphysical C3; independent off-host/RU RPO/RTO иC2/C4 после
-существующих решений владельца; legal/provider/signing/catalog/device/release.
-Не повторять исправление/старые failed probes вместо следующего gate.
-Сохранять полный scope68+9+UI/physical/off-host/WAN/trust/RU, исходные68=62/5/1.
+[Новый proof/verifier](../evidence/server-load-metrics-2026-11-09/README.md):
+`OMOBA_LOAD_METRICS=1` добавляет cumulative per-second JSON о verified signed
+application dispatch, ordinary gameplay Transform handler entry, complete
+snapshot kernel sends и actual world-broadcast starts. Wire protocol, gameplay
+таймеры/правила не меняются; без opt-in endpoint state не хранится. Runner
+отклоняет missing/malformed metrics и любые sequence gaps/restarts.
+
+- Control10/30s PASS20.026Hz; **instrumented1000/120s PASS**, каждый
+  19.834–20.000 sends/s при неизменном19.5–20.5Hz gate.100 арен/1000 unique
+  signed AI peers,0 server bots,точные rosters,0 observed auth resets,100 final
+  healthy-v2 workers SQL/journal ready,0 backlog/closed/blocked.
+- Server totals:3166007 signed application dispatches,2712856 gameplay
+  transforms,0 sequence gaps/restarts,1858997 complete snapshot sends.
+  Latest-transform age at snapshot:1854112 observations,mean34.868ms,
+  p95/p99 exclusive upper250/500ms. Broadcast gaps188105,mean73.596ms,
+  p95/p99 exclusive upper250/500ms. Это process-lifetime histograms,mean и
+  bucket bounds, не exact percentiles/per-command ACK/coordinate-change proof.
+- Received snapshots median13.025Hz/p0512.018. Сумма per-peer average receive
+  rates62.458MB/s=499.660Mbit/s application/framing без IP/UDP/NIC. p95 per-peer
+  75215B/s;1000*p95≈601.723Mbit/s — расчёт масштабирования,не aggregate p95.
+- Per-second JSON instrumentation,opt1/debug assertions и macOS loopback влияют
+  на интерпретацию cadence; это не uninstrumented release benchmark и не RU SLA.
+  Длительность/Linux/RU host/uplink остаются следующим capacity gate.
+- Полный server suite562 PASS/0 FAIL/16 ignored,12 Python PASS. Verifier
+  пересчитывает input/wire/producer/server aggregates,rosters/health/cleanup из
+  compressed reports и observation-time LOAD_METRICS lines. Полные worker logs
+  могут дописаться после metric summary; их final hashes не обязаны совпадать
+  с observation-time hashes. Raw/helpers/binaries:`.agent/codex-ranked-readiness/load-server-metrics/`.
+  Свой PG18.6/schema13/11 container/volume удалён,final process inventory пуст.
+- Прежнее [buffered telemetry/input20 proof](../evidence/input20-buffered-2026-11-07/README.md)
+  и все rejected diagnostics сохранены без перезаписи. Тяжёлый Cargo/Bevy/SDK
+  build не запускался,третий cargo cache не создавался.
+
+**Следующие реальные gates:** длительный soak на реальном или идентичном
+Linux/RU host,uplink/traffic budget; WAN/multi-host/party/Ranked/Resume/fault,
+directory/trust provisioning; current UI-2/UI-3 иphysical C3; independent
+off-host/RU RPO/RTO иC2/C4 после существующих решений владельца;
+legal/provider/signing/catalog/device/release. Не выдавать новый loopback PASS
+за production capacity. Сохранять полный scope68+9+UI/physical/off-host/WAN/
+trust/RU,исходные68=62/5/1.
 
 Основная работа по-прежнему в feature branches `feat/ranked-matchmaking-readiness`:
 игра mm-game/PR148 и портал mm-web/PR33 →dev, оба open/not merged. Ни dev/main
-merge, ни release/deploy/reset/keys/grants не было. Владельцу ответили с точными
-путями TODO/progress/CHANGELOG/HANDOFF и последним pushed checkpoint. Новый
-исправленный пакет нужно сохранить и push после этих проверок (см. actual Git).
-Parent b3 CI42359193386 иautomatic Release42359193422 перепроверять по GitHub;
-после push будет новый head/run. Не считать parent gate текущих новых файлов.
+merge,ни release/deploy/reset/keys/grants не было. Следующие коммиты должны
+получить собственный CI.
 
 ## История b3c74bd1 — timing до исправления вывода
 
@@ -231,7 +245,7 @@ root13GiB ниже20GiB, поэтому новую тяжёлую сборку �
 | Назначение | Worktree / ветка | PR / состояние на момент передачи |
 |---|---|---|
 | Игра, сервер, Account API, ops | `_workspace/worktrees/mm-game`, `feat/ranked-matchmaking-readiness` | [omoba-bevy#148](https://github.com/o-moba/omoba-bevy/pull/148), open, в `dev`; сюда сохраняется этот checkpoint |
-| Портал | `_workspace/worktrees/mm-web`, та же ветка; HEAD `f868fa4641d74899d5c5844def5fd078281fd9a7` | [omoba-web#33](https://github.com/o-moba/omoba-web/pull/33), open, в `dev` |
+| Портал | `_workspace/worktrees/mm-web`, та же ветка; HEAD `37e705c04acb59816710584c414619b80f687f35` | [omoba-web#33](https://github.com/o-moba/omoba-web/pull/33), open, в `dev` |
 | Выпуск игры | `dev` → `main` | [omoba-bevy#101](https://github.com/o-moba/omoba-bevy/pull/101), **Draft**, решение владельца |
 | Выпуск портала | `dev` → `main` | [omoba-web#10](https://github.com/o-moba/omoba-web/pull/10), **Draft**, решение владельца |
 | Документация RU offer | `docs/lr-67c-built` → `dev` | [omoba-bevy#146](https://github.com/o-moba/omoba-bevy/pull/146), open, отдельная более ранняя работа |

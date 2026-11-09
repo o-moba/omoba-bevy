@@ -133,6 +133,50 @@ class PopulationEvidenceTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             probe.summarize_input(before, bad, 20)
 
+    def test_server_load_summarizes_final_cumulative_metrics_and_exposes_gaps(self):
+        bounds = [1000, 5000]
+        timing = {"count": 2, "total_us": 3000, "buckets": [1, 1, 0]}
+        def record(elapsed, gaps=0):
+            return {"elapsed_secs": elapsed, "bucket_upper_us": bounds,
+                    "broadcasts": 3, "broadcast_gaps": timing,
+                    "endpoints": [{"player_id": index + 1, "transport_commands": 25,
+                                   "gameplay_transforms": 20, "last_sequence": 25,
+                                   "sequence_gaps": gaps if index == 0 else 0,
+                                   "sequence_restarts": 0, "snapshots": 2,
+                                   "latest_transform_age_at_snapshot": timing}
+                                  for index in range(10)]}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            worker = root / "matches" / ("a" * 32)
+            worker.mkdir(parents=True)
+            log = worker / "worker.log"
+            log.write_text("ordinary log line\nLOAD_METRICS " + json.dumps(record(1)) + "\n"
+                           + "LOAD_METRICS " + json.dumps(record(2)) + "\n")
+            result = probe.summarize_server_load(root, 10)
+            self.assertEqual(result["totals"]["gameplay_transforms"], 200)
+            self.assertEqual(result["totals"]["transport_commands"], 250)
+            self.assertEqual(result["totals"]["snapshots"], 20)
+            self.assertEqual(result["latest_transform_age_at_snapshot"]["mean_us"], 1500)
+            self.assertEqual(result["latest_transform_age_at_snapshot"]["p95_exclusive_upper_us"], 5000)
+            self.assertEqual(result["broadcast_gaps"]["count"], 2)
+            self.assertTrue(result["all_endpoints_without_sequence_gaps"])
+            self.assertTrue(result["all_endpoints_without_sequence_restarts"])
+            self.assertEqual(result["workers"][0]["metric_records"], 2)
+            self.assertIn("not per-command ACK latency", result["scope"])
+            log.write_text("LOAD_METRICS " + json.dumps(record(2, gaps=3)) + "\n")
+            gaps = probe.summarize_server_load(root, 10)
+            self.assertEqual(gaps["totals"]["sequence_gaps"], 3)
+            self.assertFalse(gaps["all_endpoints_without_sequence_gaps"])
+            log.write_text("ordinary log only\n")
+            with self.assertRaisesRegex(AssertionError, "no LOAD_METRICS"):
+                probe.summarize_server_load(root, 10)
+            log.write_text("LOAD_METRICS {broken json}\n")
+            with self.assertRaisesRegex(AssertionError, "malformed LOAD_METRICS"):
+                probe.summarize_server_load(root, 10)
+            log.unlink()
+            with self.assertRaisesRegex(AssertionError, "missing or unexpected"):
+                probe.summarize_server_load(root, 10)
+
     def test_pre_cleanup_diagnostics_include_archived_workers_without_auth_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

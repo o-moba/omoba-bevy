@@ -224,6 +224,128 @@ def summarize_input(before, after, requested_hz):
             "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"}
 
 
+def load_timing_summary(value, bounds):
+    """Validate one cumulative server histogram and publish bucket-bounded quantiles."""
+    zero = {"count": 0, "total_us": 0, "buckets": [0] * (len(bounds) + 1)}
+    result = timing_delta(zero, value, bounds)
+    result["mean_us"] = result["total_us"] / result["count"] if result["count"] else None
+    for quantile in (95, 99):
+        cumulative = 0
+        result[f"p{quantile}_exclusive_upper_us"] = None
+        for index, count in enumerate(result["buckets"]):
+            cumulative += count
+            if result["count"] and cumulative * 100 >= result["count"] * quantile:
+                result[f"p{quantile}_exclusive_upper_us"] = bounds[index] if index < len(bounds) else None
+                break
+    return result
+
+
+def merge_load_timings(values, bounds):
+    merged = {"count": 0, "total_us": 0, "buckets": [0] * (len(bounds) + 1)}
+    for value in values:
+        checked = timing_delta({"count": 0, "total_us": 0, "buckets": [0] * (len(bounds) + 1)}, value, bounds)
+        for counter in ("count", "total_us"):
+            merged[counter] += checked[counter]
+        merged["buckets"] = [a + b for a, b in zip(merged["buckets"], checked["buckets"])]
+    return load_timing_summary(merged, bounds)
+
+
+def read_load_metric_records(path):
+    records = []
+    with path.open(encoding="utf-8", errors="replace") as log:
+        for line_number, line in enumerate(log, 1):
+            if not line.startswith("LOAD_METRICS "):
+                continue
+            try:
+                value = json.loads(line[len("LOAD_METRICS "):])
+            except ValueError as error:
+                raise AssertionError(f"malformed LOAD_METRICS at {path}:{line_number}") from error
+            assert isinstance(value, dict), f"non-object LOAD_METRICS at {path}:{line_number}"
+            records.append(value)
+    assert records, f"no LOAD_METRICS records in {path}"
+    return records
+
+
+def summarize_server_load(root, clients):
+    """Summarize final cumulative metrics from every live match worker.
+
+    Sequence gaps expose signed commands that did not reach application dispatch.
+    Latest-transform age is deliberately not presented as per-command latency.
+    """
+    assert type(clients) is int and clients >= 10 and clients % 10 == 0
+    paths = sorted((root / "matches").glob("*/worker.log"))
+    assert len(paths) == clients // 10, "missing or unexpected live worker metric logs"
+    workers, all_endpoints = [], []
+    common_bounds = None
+    for path in paths:
+        records = read_load_metric_records(path)
+        previous_elapsed = -1.0
+        for record in records:
+            elapsed = record.get("elapsed_secs")
+            assert type(elapsed) in (int, float) and elapsed > previous_elapsed, "non-monotonic server metric time"
+            previous_elapsed = elapsed
+        final = records[-1]
+        bounds = final.get("bucket_upper_us")
+        assert (isinstance(bounds, list) and bounds
+                and all(type(n) is int and n > 0 for n in bounds)
+                and bounds == sorted(set(bounds))), "invalid server timing bounds"
+        if common_bounds is None:
+            common_bounds = bounds
+        assert bounds == common_bounds, "server timing profile changed between workers"
+        assert type(final.get("broadcasts")) is int and final["broadcasts"] >= 1, "missing world broadcasts"
+        endpoints = final.get("endpoints")
+        assert isinstance(endpoints, list) and len(endpoints) == 10, "worker does not have ten measured endpoints"
+        rows = []
+        for endpoint in endpoints:
+            assert isinstance(endpoint, dict), "invalid server endpoint report"
+            for key in ("transport_commands", "gameplay_transforms", "last_sequence",
+                        "sequence_gaps", "sequence_restarts", "snapshots"):
+                assert type(endpoint.get(key)) is int and endpoint[key] >= 0, f"invalid {key}"
+            assert type(endpoint.get("player_id")) is int and endpoint["player_id"] > 0, "missing gameplay player identity"
+            assert endpoint["transport_commands"] >= endpoint["gameplay_transforms"] > 0, "command counters contradict transforms"
+            assert endpoint["snapshots"] > 0, "endpoint stopped before final snapshot report"
+            row = {key: endpoint[key] for key in ("player_id", "transport_commands", "gameplay_transforms",
+                   "last_sequence", "sequence_gaps", "sequence_restarts", "snapshots")}
+            row["latest_transform_age_at_snapshot"] = load_timing_summary(
+                endpoint.get("latest_transform_age_at_snapshot"), bounds)
+            assert row["latest_transform_age_at_snapshot"]["count"] > 0, "no transform-age observations"
+            rows.append(row)
+        assert len({row["player_id"] for row in rows}) == 10, "duplicate gameplay player identity"
+        broadcast_gaps = load_timing_summary(final.get("broadcast_gaps"), bounds)
+        worker = {
+            "allocation_id": path.parent.name,
+            "worker_log_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "metric_records": len(records),
+            "elapsed_secs": final["elapsed_secs"],
+            "broadcasts": final["broadcasts"],
+            "broadcast_gaps": broadcast_gaps,
+            "totals": {key: sum(row[key] for row in rows) for key in
+                       ("transport_commands", "gameplay_transforms", "sequence_gaps", "sequence_restarts", "snapshots")},
+            "latest_transform_age_at_snapshot": merge_load_timings(
+                [row["latest_transform_age_at_snapshot"] for row in rows], bounds),
+            "endpoints": rows,
+        }
+        workers.append(worker)
+        all_endpoints.extend(rows)
+    totals = {key: sum(row[key] for row in all_endpoints) for key in
+              ("transport_commands", "gameplay_transforms", "sequence_gaps", "sequence_restarts", "snapshots")}
+    return {
+        "status": "measured",
+        "workers": workers,
+        "totals": totals,
+        "all_endpoints_without_sequence_gaps": totals["sequence_gaps"] == 0,
+        "all_endpoints_without_sequence_restarts": totals["sequence_restarts"] == 0,
+        "bucket_upper_us": common_bounds,
+        "broadcasts": sum(worker["broadcasts"] for worker in workers),
+        "broadcast_gaps": merge_load_timings([worker["broadcast_gaps"] for worker in workers], common_bounds),
+        "latest_transform_age_at_snapshot": merge_load_timings(
+            [row["latest_transform_age_at_snapshot"] for row in all_endpoints], common_bounds),
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run",
+    }
+
+
 def timing_delta(before, after, bounds):
     """Cumulative histogram difference: never let warm-up mask soak stalls."""
     result = {}
@@ -339,6 +461,8 @@ def main(argv=None):
                         help="independent signed movement cadence1..60Hz;0 explicitly retains legacy snapshot-paced mode")
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument("--allow-large", action="store_true")
+    parser.add_argument("--server-load-metrics", action="store_true",
+                        help="emit authoritative signed-dispatch, applied-transform and snapshot-send histograms")
     parser.add_argument("--port", type=int, default=47600)
     parser.add_argument("--worker-port", type=int, default=47700)
     args = parser.parse_args(argv)
@@ -382,15 +506,17 @@ def main(argv=None):
                OMOBA_LIMIT_PROBES_PER_IP="10000", OMOBA_LIMIT_PROBES_PER_NETWORK="10000",
                OMOBA_LIMIT_PROBES_GLOBAL="10000", OMOBA_LIMIT_NEW_PROFILES_PER_IP="1000000",
                OMOBA_LIMIT_NEW_PROFILES_TOTAL="10000000")
+    if args.server_load_metrics:
+        env["OMOBA_LOAD_METRICS"] = "1"
     report = {"status": "FAIL", "clients": args.clients, "arenas": rooms,
               "preference": "quick", "server_bots": 0, "soak_seconds": args.seconds,
               "scope": "local Casual signed native AI clients; not RU/cgroup or Ranked proof",
-              "acceptance_scope": "Running population, freshness and durable rosters; received counters only",
+              "acceptance_scope": "Running population, freshness and durable rosters; received counters and opt-in server dispatch/cadence metrics",
               "input_hz_requested": args.input_hz or None,
               "unverified_scope": [
-                  "Per-command server acceptance, send-gap jitter and input-to-snapshot latency",
                   "Latency/SLA, physical devices, WAN and real RU host/uplink",
-                  "Packet delivery/loss: snapshot sequence includes unsent bootstrap ticks",
+                  "Packet delivery/loss: snapshot sequence includes unsent bootstrap ticks; sequence gaps only expose signed commands absent from application dispatch",
+                  "Per-command ACK latency and proof that a Transform changed coordinates",
               ],
               "fixture_allowances": {k: v for k, v in env.items() if k.startswith("OMOBA_LIMIT_")},
               "server_sha256": hashlib.sha256(args.server_bin.read_bytes()).hexdigest(),
@@ -404,10 +530,14 @@ def main(argv=None):
                              cwd=source_root, capture_output=True, text=True,
                              check=True, timeout=5)
     report["source_dirty_paths"] = [line[3:] for line in changes.stdout.splitlines()]
+    if not args.server_load_metrics:
+        report["unverified_scope"].insert(0, "Server signed-dispatch acceptance, transform age at snapshots and world-broadcast cadence")
     report["source_sha256"] = {
         name: hashlib.sha256((source_root / name).read_bytes()).hexdigest()
         for name in ("scripts/public_playing_capacity.py", "scripts/public_bots_rehearsal.py",
                      "harness/src/bin/bots.rs", "harness/src/bot.rs", "harness/src/public_client.rs",
+                     "server/src/main.rs", "server/src/load_metrics.rs", "server/src/public_transport.rs",
+                     "server/src/runtime/dispatch.rs", "server/src/runtime/mod.rs", "server/src/snapshot.rs",
                      "Cargo.lock", "shared/src/lib.rs", "shared/src/transport.rs", "shared/src/protocol.rs")}
     children, writers, readers, shards, latest = [], [], [], [], {}
     auth_latest = {}
@@ -491,6 +621,12 @@ def main(argv=None):
                         assert report["input"]["all_peers_within_2_5_percent"], "actual per-peer input cadence outside requested profile"
                     else:
                         report["input"] = {"status": "not measured; explicit legacy snapshot-paced mode"}
+                    if args.server_load_metrics:
+                        report["server_load"] = summarize_server_load(root, args.clients)
+                        assert report["server_load"]["all_endpoints_without_sequence_gaps"], "signed command sequence gaps reached final report"
+                        assert report["server_load"]["all_endpoints_without_sequence_restarts"], "signed command sequence restarted during run"
+                    else:
+                        report["server_load"] = {"status": "not requested"}
                     report["status"] = "PASS"
                     break
             time.sleep(.1)
