@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Buffer each complete native BOT_SAMPLE line before stdout, preserving exact
+  JSON/escaping and partial-write/error behavior. Reproduced streamed telemetry
+  stalls (64.48ms mean) no longer prevent the measured20Hz input profile:1000
+  signed AI peers/100 Casual arenas sustain120s, each19.711–20.001 transforms/s
+  within the unchanged gate. Add prepare/sign/encode/send and telemetry timing;
+  retain original rejected diagnostics and open latency/WAN/RU/release gates.
+
+
 - Preserve actual nonblocking20Hz full-population rejections and add bounded
   producer wall/send-gap histograms with soak-only baseline differences. Separate
   receive, session and navigation timing; record rare loop stalls without

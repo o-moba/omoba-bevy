@@ -37,6 +37,7 @@ pub mod protocol;
 mod public_client;
 pub use public_client::PublicBotStatus;
 pub mod server;
+pub mod telemetry;
 
 pub use bot::Bot;
 pub use protocol::{

@@ -1,6 +1,56 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальный checkpoint — timing, после de5291fd
+## Актуальный checkpoint — buffered input20, после b3c74bd1
+
+Предыдущий goal-turn был progress: воспроизведены отказы и добавлены измерения.
+В этом продолжении найдена и исправлена подтверждённая причина в load producer.
+[Полный новый proof/verifier](../evidence/input20-buffered-2026-11-07/README.md)
+приоритетнее всех исторических «20Hz FAIL/не измерен/NOT RUN» ниже.
+
+- V6 diagnostic1000/30s FAIL18.211–20.000Hz. Prepare/sign/encode/UDP/nav/session
+  p99<1ms, но streaming JSON formatting/stdout: mean64.484ms, p99<500ms.
+- Полная BOT_SAMPLE строка теперь кодируется в один буфер и передаётся write_all.
+  Те же bytes/escaping/поля, partial/interrupted writes/error propagation.
+  Regression>4KiB: old formatter>20 accepting sink calls, новый1, bytes равны.
+  Это sink-call contract, не опубликованный syscall trace.
+- V7 control10/30s PASS20.00365Hz; **1000/120s PASS**, каждый19.711–20.001Hz
+  при прежнем19.5–20.5Hz gate.100 арен/1000 unique signed AI peers,0 server bots,
+  точные durable rosters,0 observed auth resets,100 final matching healthy-v2
+  workers SQL/journal ready,0 backlog/closed/blocked. All Running54.297s,
+  total174.464s. Cached transforms589562/min370peer, receive freshness не подделана.
+- Telemetry mean5.276ms/p99<75ms, loop p99<25ms, gap p95/p99<75ms; это exclusive
+  histogram bounds, не точные процентили и не server latency/SLA.267 rebases/120s.
+  V6 diagnostic30s иV7 acceptance120s — разная длительность/прогрессия, не formal
+  statistical host benchmark.41 whole library/4 UDP/25 Python/4 strict Clippy PASS.
+- Received snapshots median14.706Hz/p0513.864. p95 wire79786.64B/player/s,
+  total71.567MB/s=572.539Mbit/s application/framing, без IP/UDP/NIC overhead.
+  Server4.662 mean cores/1577.75MiB peak summed RSS; generator3.644/633.95MiB;
+  PostgreSQL/container CPU не входит. M4 не квалифицирует RU2vCPU/4GB/uplink.
+- Production248 source hashes и server5c6f4e6f… неизменны. Новая compilation
+  только маленького harness/library/bots/UDP test на coherent opt1 cached graph,
+  зависимости read-only. Root≈11GiB: **no heavy Cargo/Bevy/SDK/client build**.
+- Все свои v6/v7 контейнеры/volume удалены, финальные inventories пусты,
+  живых локальных probes нет. Исходные v1–v6 отказы сохранены как FAIL своих
+  профилей. Raw/helpers/binaries: `.agent/codex-ranked-readiness/load-input20/`.
+  `stages-before-buffer-build.json` принадлежитV6, `build.json` —V7.
+
+**Следующие реальные gates:** per-command server acceptance/input-to-snapshot
+latency и server cadence, длительность/реальный или идентичный Linux/RU host и
+uplink/traffic budget; WAN/multi-host/party/Ranked/Resume/fault/trust packaging;
+current UI-2/UI-3 иphysical C3; independent off-host/RU RPO/RTO иC2/C4 после
+существующих решений владельца; legal/provider/signing/catalog/device/release.
+Не повторять исправление/старые failed probes вместо следующего gate.
+Сохранять полный scope68+9+UI/physical/off-host/WAN/trust/RU, исходные68=62/5/1.
+
+Основная работа по-прежнему в feature branches `feat/ranked-matchmaking-readiness`:
+игра mm-game/PR148 и портал mm-web/PR33 →dev, оба open/not merged. Ни dev/main
+merge, ни release/deploy/reset/keys/grants не было. Владельцу ответили с точными
+путями TODO/progress/CHANGELOG/HANDOFF и последним pushed checkpoint. Новый
+исправленный пакет нужно сохранить и push после этих проверок (см. actual Git).
+Parent b3 CI42359193386 иautomatic Release42359193422 перепроверять по GitHub;
+после push будет новый head/run. Не считать parent gate текущих новых файлов.
+
+## История b3c74bd1 — timing до исправления вывода
 
 Предыдущий goal-turn был progress: сохранён и запушен полноценный checkpoint,
 не завершение всего релиза. В этом продолжении prepared v2 уже реально выполнен.

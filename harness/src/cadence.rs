@@ -14,6 +14,14 @@ pub struct TimingHistogram {
     pub buckets: [u64; 13],
 }
 
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct CommandTiming {
+    pub prepare: TimingHistogram,
+    pub sign: TimingHistogram,
+    pub encode: TimingHistogram,
+    pub send: TimingHistogram,
+}
+
 impl TimingHistogram {
     pub fn record(&mut self, elapsed: Duration) {
         let micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);

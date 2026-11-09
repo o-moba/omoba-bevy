@@ -45,6 +45,7 @@ pub struct PublicBotStatus {
     pub sent_gameplay_commands: u64,
     pub sent_transforms: u64,
     pub transform_gaps: crate::cadence::TimingHistogram,
+    pub command_work: crate::cadence::CommandTiming,
 }
 
 pub(crate) struct PublicSession {
@@ -167,6 +168,7 @@ impl PublicSession {
                 sent_gameplay_commands: 0,
                 sent_transforms: 0,
                 transform_gaps: Default::default(),
+                command_work: Default::default(),
             },
         }
     }
@@ -271,6 +273,7 @@ impl PublicSession {
         let (Some(auth), Some(path)) = (&self.auth, &self.path) else {
             return false;
         };
+        let prepare_started = Instant::now();
         self.sequence += 1;
         let mut command = SignedCommand {
             server_epoch: self.epoch,
@@ -282,8 +285,27 @@ impl PublicSession {
             payload: serde_json::to_string(packet).expect("gameplay command serializes"),
             signature: String::new(),
         };
+        self.status
+            .command_work
+            .prepare
+            .record(prepare_started.elapsed());
+        let sign_started = Instant::now();
         command.signature = hex(&self.key.sign(&command.signing_bytes()).to_bytes());
-        Self::datagram(socket, &PublicClientDatagram::SignedCommand { command });
+        self.status.command_work.sign.record(sign_started.elapsed());
+        let encode_started = Instant::now();
+        let bytes = serde_json::to_vec(&PublicClientDatagram::SignedCommand { command })
+            .expect("public bot datagram serializes");
+        self.status
+            .command_work
+            .encode
+            .record(encode_started.elapsed());
+        let send_started = Instant::now();
+        assert_eq!(
+            socket.send(&bytes).expect("send public bot datagram"),
+            bytes.len(),
+            "incomplete public bot datagram"
+        );
+        self.status.command_work.send.record(send_started.elapsed());
         self.status.sent_gameplay_commands = self.status.sent_gameplay_commands.saturating_add(1);
         if matches!(packet, ClientPacket::Transform { .. }) {
             self.status.sent_transforms = self.status.sent_transforms.saturating_add(1);
@@ -858,6 +880,10 @@ mod tests {
         assert_eq!(session.status.sent_gameplay_commands, 3);
         assert_eq!(session.status.sent_transforms, 2);
         assert_eq!(session.status.transform_gaps.count, 1);
+        assert_eq!(session.status.command_work.prepare.count, 3);
+        assert_eq!(session.status.command_work.sign.count, 3);
+        assert_eq!(session.status.command_work.encode.count, 3);
+        assert_eq!(session.status.command_work.send.count, 3);
         session.reset_transport(false);
         assert!(!session.send(&socket, &pose));
         assert_eq!(session.status.sent_gameplay_commands, 3);

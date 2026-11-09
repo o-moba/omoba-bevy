@@ -8,16 +8,20 @@ findings). Decision record: ADR-027.
 
 ## Current checkpoint — 2026-11-07
 
-Latest measured continuation: [input20 timing, exact rejections and cleanup](../evidence/input20-timing-2026-11-07/README.md).
-The prepared nonblocking v2 now ran:10-client control PASS20.001Hz;1000/120s FAIL
-18.771–19.583Hz. Further v4/v5 full-target attempts also FAIL unchanged19.5–20.5
-per-peer input acceptance. All retain1000 fresh peers/100 arenas, rosters and zero
-observed auth resets, with complete owned cleanup. V5 wall histograms expose
-p99 loop stalls below150ms while receive/session/navigation p99 are below1ms;
-next isolate signing/serialization/send/telemetry before optimizing. Actual
-send-gap p95<75ms/p99<150ms are bucket bounds, not latency/SLA.38 library/4 UDP/
-25 Python/4 strict Clippy PASS. Original68 and all additional release gates stay
-open in their previous scopes. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
+Latest measured continuation: [buffered telemetry and accepted local input20](../evidence/input20-buffered-2026-11-07/README.md).
+A1000/30s diagnostic isolates telemetry formatting/output (64.484ms mean,
+p99<500ms) while signing/UDP/nav/session p99 are below1ms. Encoding the whole
+unchanged BOT_SAMPLE line before write_all fixes write amplification. V7 now
+PASS:1000 signed native AI peers/100 ten-seat Casual arenas/120s Running,
+each19.711–20.001 actual signed transforms/s within the original2.5% gate;
+control10/30s PASS20.00365Hz. Final100 workers have matching healthy v2 receipts,
+SQL/journal ready and no backlog/closure; rosters exact, authority resets0 and
+owned cleanup complete.41 library/4 UDP/25 Python/4 strict Clippy PASS, including
+exact telemetry bytes/partial writes/error behavior. Received snapshots remain
+median14.706Hz; p95 wire79786.64B/player/s, aggregate572.539Mbit/s excluding
+network headers. Per-command acceptance/latency, longer-duration/WAN/actual RU
+host/uplink and all other critic/UI/physical/off-host/trust/release gates remain.
+Original68 stays62 done/5 partial/1 open; earlier measured failures are immutable. [All decisions, open PRs and next commands](../plans/HANDOFF-LOBBY-2026-11-07.md).
 
 
 The authoritative remaining order is now at the top of

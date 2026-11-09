@@ -249,10 +249,14 @@ def summarize_producer_timing(before, after):
     assert bounds and all(type(n) is int and n > 0 for n in bounds), "invalid timing bounds"
     assert bounds == sorted(set(bounds)), "timing bounds not strictly ordered"
     shard_keys = ["loop_work", "receive_work", "wake_lateness"]
-    if all("session_work" in s["producer_timing"] for s in before + after):
-        shard_keys.append("session_work")
+    for key in ("session_work", "telemetry_prepare_work", "telemetry_format_write_work"):
+        if all(key in s["producer_timing"] for s in before + after):
+            shard_keys.append(key)
     navigation = all("navigation_work" in p for s in before + after for p in s["peers"])
+    commands = all("command_work" in p["public"] for s in before + after for p in s["peers"])
+    command_stages = ("prepare", "sign", "encode", "send") if commands else ()
     keys = shard_keys + ["transform_gaps"] + (["navigation_work"] if navigation else [])
+    keys += ["command_" + stage for stage in command_stages]
     totals = {key: {"count": 0, "total_us": 0, "buckets": [0] * (len(bounds) + 1)} for key in keys}
     rebases = 0
 
@@ -278,6 +282,9 @@ def summarize_producer_timing(before, after):
             if navigation:
                 add("navigation_work", previous["navigation_work"], peer["navigation_work"])
             a, b = previous["public"], peer["public"]
+            for stage in command_stages:
+                delta = add("command_" + stage, a["command_work"][stage], b["command_work"][stage])
+                assert delta["count"] == b["sent_gameplay_commands"] - a["sent_gameplay_commands"], "command timing contradicts signed sends"
             delta = add("transform_gaps", a["transform_gaps"], b["transform_gaps"])
             assert delta["count"] == b["sent_transforms"] - a["sent_transforms"], "send-gap count contradicts actual sends"
     for timing in totals.values():

@@ -306,6 +306,8 @@ fn main() {
     let mut loop_work = harness::cadence::TimingHistogram::default();
     let mut receive_work = harness::cadence::TimingHistogram::default();
     let mut session_work = harness::cadence::TimingHistogram::default();
+    let mut telemetry_prepare_work = harness::cadence::TimingHistogram::default();
+    let mut telemetry_format_write_work = harness::cadence::TimingHistogram::default();
     let mut wake_lateness = harness::cadence::TimingHistogram::default();
     let mut overrun_rebases = 0_u64;
     loop {
@@ -646,6 +648,7 @@ fn main() {
                 GameState::Victory { .. } => "victory",
             };
             if last_telemetry.elapsed() >= Duration::from_secs(1) || phase != last_phase {
+                let telemetry_started = Instant::now();
                 last_telemetry = Instant::now();
                 last_phase = phase.to_owned();
                 let players: Vec<_> = snapshot.players().iter().map(|p| serde_json::json!({
@@ -664,23 +667,27 @@ fn main() {
                     "cached_input_transforms":r.cached_input_transforms,
                     "navigation_work":r.navigation_work,
                     "snapshot_meta":r.bot.snapshot_meta(),
-                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count,"stale_career_packets":s.stale_career_packets,"authority_resets":s.authority_resets,"sent_transforms":s.sent_transforms,"sent_gameplay_commands":s.sent_gameplay_commands,"transform_gaps":s.transform_gaps}))
+                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count,"stale_career_packets":s.stale_career_packets,"authority_resets":s.authority_resets,"sent_transforms":s.sent_transforms,"sent_gameplay_commands":s.sent_gameplay_commands,"transform_gaps":s.transform_gaps,"command_work":s.command_work}))
                 })).collect();
-                println!(
-                    "BOT_SAMPLE {}",
-                    serde_json::json!({
-                        "elapsed_secs":started.elapsed().as_secs_f64(),"meta":snapshot.meta(),
-                        "input_hz_requested":args.input_hz,
-                        "producer_timing": {"loop_work":loop_work, "receive_work":receive_work,
-                            "session_work":session_work,
-                            "wake_lateness":wake_lateness,"overrun_rebases":overrun_rebases,
-                            "bucket_upper_us":harness::cadence::TIMING_BUCKET_UPPER_US},
-                        "phase":phase,"state":format!("{:?}",snapshot.game_state()),
-                        "players":players,"structures":structures,"peers":peers,
-                        "minions":snapshot.minions().len(),"buffs":snapshot.team_buffs().len(),
-                        "join_error":format!("{:?}",snapshot.join_error())
-                    })
-                );
+                let sample = serde_json::json!({
+                    "elapsed_secs":started.elapsed().as_secs_f64(),"meta":snapshot.meta(),
+                    "input_hz_requested":args.input_hz,
+                    "producer_timing": {"loop_work":loop_work, "receive_work":receive_work,
+                        "session_work":session_work,
+                        "telemetry_prepare_work":telemetry_prepare_work,
+                        "telemetry_format_write_work":telemetry_format_write_work,
+                        "wake_lateness":wake_lateness,"overrun_rebases":overrun_rebases,
+                        "bucket_upper_us":harness::cadence::TIMING_BUCKET_UPPER_US},
+                    "phase":phase,"state":format!("{:?}",snapshot.game_state()),
+                    "players":players,"structures":structures,"peers":peers,
+                    "minions":snapshot.minions().len(),"buffs":snapshot.team_buffs().len(),
+                    "join_error":format!("{:?}",snapshot.join_error())
+                });
+                telemetry_prepare_work.record(telemetry_started.elapsed());
+                let output_started = Instant::now();
+                harness::telemetry::write_sample(&mut std::io::stdout().lock(), &sample)
+                    .expect("write bot telemetry");
+                telemetry_format_write_work.record(output_started.elapsed());
             }
         }
         if args.telemetry

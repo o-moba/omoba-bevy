@@ -72,11 +72,22 @@ class PopulationEvidenceTests(unittest.TestCase):
         for samples in (before, after):
             for s in samples:
                 s["producer_timing"]["session_work"] = copy.deepcopy(s["producer_timing"]["loop_work"])
+                s["producer_timing"]["telemetry_prepare_work"] = copy.deepcopy(s["producer_timing"]["loop_work"])
+                s["producer_timing"]["telemetry_format_write_work"] = copy.deepcopy(s["producer_timing"]["loop_work"])
                 for p in s["peers"]:
                     p["navigation_work"] = copy.deepcopy(s["producer_timing"]["loop_work"])
+                    p["public"]["command_work"] = {k: copy.deepcopy(s["producer_timing"]["loop_work"])
+                        for k in ("prepare", "sign", "encode", "send")}
+                    p["public"]["sent_gameplay_commands"] = s["producer_timing"]["loop_work"]["count"] + 3
         detail = probe.summarize_producer_timing(before, after)
         self.assertEqual(detail["session_work"]["count"], 2)
         self.assertEqual(detail["navigation_work"]["buckets"], [0, 10, 10])
+        self.assertEqual(detail["command_send"]["count"], 20)
+        self.assertEqual(detail["telemetry_format_write_work"]["count"], 2)
+        bad = copy.deepcopy(after)
+        bad[0]["peers"][0]["public"]["sent_gameplay_commands"] += 1
+        with self.assertRaises(AssertionError):
+            probe.summarize_producer_timing(before, bad)
         self.assertIn("not measured", probe.summarize_producer_timing([sample()], [sample()])["status"])
         for initial, final in (([], []), (before, after + after)):
             with self.assertRaises(AssertionError):
