@@ -11,8 +11,11 @@ All notable changes are recorded here. The canonical version is
   settlement change is introduced; the report distinguishes this AI policy from
   a map override. CI run 42765496399 exposed the need for it: all ten clients
   stayed connected until the authoritative 2700 s duration cap, while the prior
-  identical-code rehearsal won in 413.307 s. Twenty Python harness tests pass;
-  the changed candidate still requires its own full live CI and Release runs.
+  identical-code rehearsal won in 413.307 s. Twenty Python harness tests pass.
+  On `778da741`, CI 42777841623 passes 7/7 and Release 42777841887 passes 4/4:
+  the live standard-map rehearsal completes with Green winning in 118.213 s, one
+  saved rated result for ten active profiles and no map override. This closes the
+  observed CI failure; it does not close the separate RU-host and release gates.
 
 - Archive a hash-pinned ARM64 Docker capacity rehearsal on a 4 CPU / 4 GiB cgroup.
   All four 30 s workload controls pass; Casual 600/60 sustains the unchanged input

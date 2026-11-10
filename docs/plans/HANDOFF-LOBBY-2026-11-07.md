@@ -15,9 +15,12 @@ CI 42744673194 (7/7) и Release 42744672979 (4/4) SUCCESS. На `031a96fd` Relea
 413.307s. Это зафиксированный duration-capped AI stalemate, не скрытый regression.
 Rehearsal теперь включает существующий loopback-only `--rush-objectives` на обычной
 карте: signed movement/casts и authoritative rules сохранены, `test_map_override=false`.
-20 Python harness tests PASS; live-проверка и полные CI/Release нового SHA обязательны.
-Портал `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`. Оба PR требуют независимого
-человеческого ревью; self-review приёмкой не является.
+20 Python harness tests PASS. На `778da741cb5f3a20d77b6ccd224f413b10aad7a5` CI
+42777841623 SUCCESS 7/7 и Release 42777841887 SUCCESS 4/4. Архив подтверждает победу
+Green за118.213s,10 completed/saved/rated результатов,один result ID,стандартную
+`verdant_default` и active participation; наблюдаемый CI FAIL закрыт. Следующий docs
+SHA обязан получить свои runs. Портал `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`.
+Оба PR требуют независимого человеческого ревью; self-review приёмкой не является.
 
 ## Docker capacity rehearsal — 2026-11-10
 

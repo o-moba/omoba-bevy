@@ -21,7 +21,12 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
   FAILED только в `ranked-victory`: все 10 клиентов остались подключены до
   authoritative cap 2700 с без победы. Предыдущий идентичный код завершил матч за
   413,307 с. Rehearsal теперь явно фокусирует signed AI на доступных строениях без
-  custom map и изменения правил; итоговый SHA обязан получить новые полные runs.
+  custom map и изменения правил. На `778da741cb5f3a20d77b6ccd224f413b10aad7a5`
+  [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42777841623) и
+  [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42777841887) SUCCESS.
+  Live PASS: Green победил за 118,213 с, все 10 результатов completed/saved/rated,
+  один result ID, стандартная карта и активные участники. Последующий docs SHA
+  обязан получить свои runs; это не закрывает RU-host и внешние release gates.
 - Портал [PR #33](https://github.com/o-moba/omoba-web/pull/33),
   `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`. Записаны typecheck, 257 успешных
   unit-тестов и 3 ожидаемых пропуска. Усиленный leaderboard loopback PASS требует
