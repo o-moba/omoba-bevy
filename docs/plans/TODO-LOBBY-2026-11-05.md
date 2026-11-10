@@ -13,6 +13,19 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 ### Подтверждено на этом срезе
 
+- **UI-2 и UI-3 приняты в exact-source offscreen RU Mobile 852×393.** На
+  `19c2616d5150f4a1256eb85a8cb7cf2ea2009478` compatibility PASS: полный текст
+  ошибки и offline hint не пересекаются с bottom navigation. Тот же build выявил
+  UI-2 FAIL: nameplates выродились в `…`, roster names выходили за панель. После
+  стабилизации доступной ширины и fitting roster, на
+  `5f3149816ca7f074c5cab205881585e5a0c4feec` Draft и Lobby PASS: пять `WWW…`
+  nameplates, пять `WWWWW…` podium names и пять roster rows с читаемым префиксом
+  остаются внутри панелей. Все 41 captured label geometries в пределах nodes;
+  verifier прошёл в обычном и `python3 -S` режиме. Кодовый SHA имеет
+  [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42802254350) и
+  [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42802254459).
+  Это synthetic offscreen preview, не physical C3. Последующий docs SHA обязан
+  получить собственные полные runs. [UI evidence](../evidence/ui-mobile-states-2026-11-10/README.md)
 - Игра [PR #148](https://github.com/o-moba/omoba-bevy/pull/148): кодовый родитель
   `546c1dae241726e29fef89dd4e0ca95a44fb0c6c` прошёл [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42744673194)
   и [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42744672979).
@@ -101,11 +114,12 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
    На независимом хосте и хранилище проверить восстановление данных, очереди
    результатов и повторную доставку. Записать измеренные RPO/RTO и решение о
    достаточности. [C2](reviews/C2-DRAIN-2026-11-07.md) · [C4](reviews/C4-PITR-PARAMETERS-2026-11-07.md)
-5. [ ] **UI-2, UI-3 и C3.** На совпадающей с кандидатом сборке проверить ширину
-   реальных глифов длинных имён в Draft/Lobby и состояние ошибки совместимости.
-   Проверить keep-awake, возврат в поиск и тактильный сигнал на физических
-   устройствах. Зафиксировать версию, платформу, язык и результат каждого
-   состояния. Для macOS использовать репозиторный рецепт offscreen.
+5. [ ] **UI-2/UI-3 приняты в offscreen; C3 и физические устройства открыты.**
+   Exact-source RU Mobile 852×393 Draft/Lobby/compatibility визуально PASS,
+   hashes и 41 label geometry проверены. [UI evidence](../evidence/ui-mobile-states-2026-11-10/README.md)
+   Это не заменяет физические устройства: проверить keep-awake, возврат в поиск,
+   background/resume и тактильный сигнал, а также Vulkan Android в P1–P9.
+   Зафиксировать версию, платформу, язык и результат каждого состояния.
 6. [ ] **Точный RU-кандидат и внешние условия.** Зафиксировать версию, парные
    SHA игры и портала, подписи и хеши. Пройти S1 (`make check` на release commit),
    S2 (versioned `make release-ru`), требования провайдеров, площадок и legal.

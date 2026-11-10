@@ -22,6 +22,22 @@ Green за118.213s,10 completed/saved/rated результатов,один resu
 SHA обязан получить свои runs. Портал `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`.
 Оба PR требуют независимого человеческого ревью; self-review приёмкой не является.
 
+## Exact-source UI acceptance — 2026-11-10
+
+[UI evidence](../evidence/ui-mobile-states-2026-11-10/README.md) закрывает UI-2 и
+UI-3 только в пределах offscreen synthetic RU Mobile 852×393. Compatibility PASS
+на `19c2616d`; полный error text и offline hint не пересекаются с navigation.
+Прежний Draft/Lobby FAIL сохранён: labels выродились в `…`, roster overflow.
+После исправления stable width/FittedLabel и roster clipping на `5f314981` оба
+состояния визуально PASS; все пять Draft nameplates и пять Lobby podium/roster
+rows сохраняют читаемый префикс с многоточием и не выходят за панели. Verifier в
+обычном и `python3 -S` режиме проверил 3 accepted captures,41 geometry labels,
+2 rejected captures,PNG/source/binary hashes. CI42802254350 SUCCESS 7/7 и
+Release42802254459 SUCCESS 4/4 относятся к `5f314981`; docs HEAD ждёт своих runs.
+Это не physical phone/Vulkan/keep-awake/resume/haptics: **C3 остаётся partial**.
+Следующий docs commit и полные runs нужно сохранить, затем независимое human
+review обоих PR. NO SHIP и внешние RU gates не меняются.
+
 ## Docker capacity rehearsal — 2026-11-10
 
 [Архив с независимым пересчётом](../evidence/docker-capacity-2026-11-10/README.md)
@@ -90,7 +106,7 @@ exact-Release stepped+sustained Casual/vsBots/Ranked/mixed,фактически�
 memory/CPU/tasks,uplink с IP/UDP/NIC overhead и принятый seat ceiling. Не повторять
 local1000,terminal-spool,PG16/18 recovery или старый Casual A/B без новой причины.
 Далее WAN/multi-host/party/Ranked/Resume/fault,directory/trust provisioning;
-UI-2/UI-3 иphysical C3; independent off-host recovery с measured RPO/RTO иC2/C4
+physical C3 и device matrix; independent off-host recovery с measured RPO/RTO иC2/C4
 после решений владельца; legal/provider/signing/catalog/device иhuman review.
 Только затем owner-controlled merge/release/RU rollout.
 

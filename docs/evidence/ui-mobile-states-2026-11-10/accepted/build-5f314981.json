@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "source_parent": "5f3149816ca7f074c5cab205881585e5a0c4feec",
+  "workflow_run_id": 42802254459,
+  "workflow_url": "https://github.com/o-moba/omoba-bevy/actions/runs/42802254459",
+  "artifact": "macos-qa-client",
+  "build_command": "OMOBA_MARKET=ru cargo build --locked -p client --bin client",
+  "binary_sha256": "60f7214fc79dc2ce2e31130068df367ae90a9131a241a5e3bf0d169c80fc96c7",
+  "binary_format": "Mach-O 64-bit executable arm64",
+  "profile": "debug",
+  "market": "ru"
+}

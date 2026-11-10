@@ -5,6 +5,17 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Accept exact-source RU Mobile UI-2/UI-3 offscreen captures at 852×393.
+  Compatibility passes on `19c2616d`; its rejected widest-name Draft/Lobby
+  captures remain archived. On `5f314981`, stable nameplate width and fitted,
+  clipped roster labels keep all five Draft/Lobby prefixes and ellipses inside
+  their panels. The capture gate now rejects ellipsis-only labels and geometry
+  overflow. CI 42802254350 passes 7/7 and Release 42802254459 passes 4/4.
+  A standalone verifier recomputes three accepted captures, 41 label geometries
+  and two rejected captures in normal and `python -S` modes. This is synthetic
+  offscreen evidence, not physical C3/Vulkan/keep-awake/resume/haptics proof;
+  the later docs SHA still needs its own complete runs.
+
 - Make the standard-map Ranked victory rehearsal focus unprotected structures
   through the existing loopback-only signed AI policy instead of waiting for a
   potentially indefinite lane stalemate. No custom map, server-rule or rated

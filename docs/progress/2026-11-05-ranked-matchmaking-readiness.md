@@ -2100,3 +2100,28 @@ multi-host/fault/trust,UI/physical devices,independent off-host RPO/RTO,C2/C4 ow
 decisions,legal/provider/signing/catalog и human review. Original68=62done/5partial/
 1open,#13 open. Никакого merge,release,RU deploy,production/reset/keys/grants или
 изменения16-arena/500MiB/nftables configuration не выполнялось.
+
+
+## 2026-11-10 — exact-source UI-2/UI-3 acceptance
+
+[UI evidence](../evidence/ui-mobile-states-2026-11-10/README.md) сохраняет принятые
+и отклонённые captures без перезаписи raw verdict fields. Compatibility/UI-3 на
+`19c2616d5150f4a1256eb85a8cb7cf2ea2009478` визуально PASS: полный RU error text
+и offline hint не пересекаются с bottom navigation. Его Draft/Lobby FAIL сохранён:
+nameplates выродились в `…`, roster nicknames выходили за правую панель.
+
+На `5f3149816ca7f074c5cab205881585e5a0c4feec` stable nameplate width и fitted/
+clipped roster labels дают визуальный PASS для пяти Draft nameplates,пяти podium
+names и пяти roster rows. Префиксы `WWW…`/`WWWWW…` читаемы,ellipsis-only labels
+и overflow отсутствуют. Exact-source ARM64 RU debug binary SHA256
+`60f7214fc79dc2ce2e31130068df367ae90a9131a241a5e3bf0d169c80fc96c7` из
+Release42802254459; Release SUCCESS4/4 и CI42802254350 SUCCESS7/7. Verifier в
+обычном и `python3 -S` режиме проверил3 accepted captures,41 label geometries,
+2 rejected captures и все PNG/source/binary links.
+
+Это offscreen synthetic Mobile852×393,не physical device/Vulkan/keep-awake/
+resume/haptics proof. UI-2/UI-3 закрыты только в этой области,C3 partial. Следующий
+documentation HEAD обязан получить собственные полные CI/Release. Счётчик исходных
+находок62done/5partial/1open и решение **NO SHIP** не меняются: isolated RU host/
+uplink,WAN/multi-host/fault/trust,independent recovery,C2/C4,human review,legal/
+provider/signing/catalog/device и owner-controlled rollout остаются открыты.
