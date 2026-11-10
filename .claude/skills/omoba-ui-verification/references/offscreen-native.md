@@ -20,6 +20,14 @@ the actual binary SHA256 and build provenance. The normal client without `qa`
 or an older binary does not support the mode. The helper refuses a native
 summary that does not explicitly confirm offscreen rendering.
 
+`OMOBA_TOUCH_CONTROLS=1` selects the desktop mobile preview only in a **debug**
+build. A desktop Release client always uses `UiProfile::Desktop`; its 852×393
+frame is not mobile UI-2/UI-3 acceptance even when the `qa` feature is present.
+For the `wide-draft`, `wide-lobby` and `compatibility` scenes use an exact-source
+RU debug QA client and require the summary's `ui_profile = Mobile`. Pull-request
+Release CI publishes that executable briefly as `macos-qa-client`; retain its
+run/head SHA and binary hash with the accepted frames.
+
 Only when a matching build is missing, follow the repository's cache/disk rules
 and run the targeted build once. Example for **assigned cache B**:
 
@@ -53,10 +61,14 @@ match the built client's version: `0-draft` is the verified2026-11-06 fixture,
 not a permanent/legal approval. Region and language are separate; the helper's
 default language is English. Pick only the language/viewport the task requires.
 
-Available individual scenes: `taken`, `party-restart`, `search-restart`,
-`remake-menu`, `remake-prompt`, `surrender-prompt`, `remade-result`,
-`surrender-result`. Default viewport is852×393 at scale1/touch layout. This list
-is a menu, not an instruction to capture all scenes or a device/language matrix.
+Available individual scenes: `taken`, `wide-draft`, `wide-lobby`,
+`compatibility`, `party-restart`, `search-restart`, `remake-menu`,
+`remake-prompt`, `surrender-prompt`, `remade-result`, `surrender-result`.
+Default viewport is852×393 at scale1/touch layout. The three `wide-*`/
+compatibility scenes also retain Creator Loop's observed labels and actual
+label geometry in `capture.json`; missing diagnostics or a non-Mobile profile
+fails the helper. This list is a menu, not an instruction to capture all scenes
+or a device/language matrix.
 The helper downloads nothing, preserves failed attempts and stops only its own
 process group on panic/deadline. Outputs must stay under the checkout's ignored
 `.agent/`; do not publish the generated `state/` (it can contain fixture keys).

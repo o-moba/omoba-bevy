@@ -11,13 +11,20 @@ import subprocess
 import sys
 import time
 
-SCENES = ("taken", "party-restart", "search-restart", "remake-menu",
-          "remake-prompt", "surrender-prompt", "remade-result", "surrender-result")
+SCENES = ("taken", "wide-draft", "wide-lobby", "compatibility",
+          "party-restart", "search-restart", "remake-menu", "remake-prompt",
+          "surrender-prompt", "remade-result", "surrender-result")
+OBSERVED_SCENES = {
+    "wide-draft": ("Draft", ("PrematchStageText-",)),
+    "wide-lobby": ("Lobby", ("LobbyMemberName-", "LobbyMemberStatus-")),
+    "compatibility": ("Home", ("HomeCompatibilityDetail", "HomeOfflineNotice")),
+}
 SOURCE_FILES = ("client/src/lib.rs", "client/src/qa/mod.rs",
                 "client/src/qa/offscreen.rs", "client/src/qa/fair_play_qa.rs",
                 "client/src/qa/result_qa.rs", "client/src/qa/creator_loop_qa.rs",
                 "client/src/net/session.rs", "client/src/pause_menu/match_votes.rs",
                 "client/src/world.rs", "client/src/platform.rs",
+                "client/src/platform/ui_profile.rs",
                 "client/src/frontend/mod.rs", "client/src/frontend/home.rs",
                 "client/src/frontend/widgets.rs",
                 "client/src/frontend/lobby.rs", "client/src/frontend/draft.rs",
@@ -135,7 +142,7 @@ def main():
                OMOBA_FAIR_PLAY_QA_OUTPUT=str(output), OMOBA_FAIR_PLAY_QA_SCENE=args.scene,
                NO_PROXY="127.0.0.1,localhost,::1", no_proxy="127.0.0.1,localhost,::1")
     loop = output / "loop"
-    if args.guide:
+    if args.guide or args.scene in OBSERVED_SCENES:
         loop.mkdir()
         env["OMOBA_CREATOR_LOOP_QA"] = str(loop)
     git = lambda *command: subprocess.check_output(["git", *command], cwd=root)
@@ -182,6 +189,23 @@ def main():
                 or summary.get("render_surface") != "offscreen image with virtual window metrics"
                 or summary.get("locale") != args.language):
             raise RuntimeError("native state/readback/offscreen/locale gate did not pass")
+        if args.scene in OBSERVED_SCENES:
+            expected_screen, prefixes = OBSERVED_SCENES[args.scene]
+            observed = json.loads((loop / "qa-state.json").read_text())
+            labels = observed.get("labels", {})
+            geometry = observed.get("label_geometry", {})
+            report["observed"] = {"screen": observed.get("screen"),
+                                  "labels": labels, "label_geometry": geometry}
+            if (summary.get("ui_profile") != "Mobile"
+                    or summary.get("debug_assertions") is not True):
+                raise RuntimeError("UI-2/UI-3 scenes require an exact-source debug Mobile preview")
+            if observed.get("screen") != expected_screen:
+                raise RuntimeError("retained Creator Loop state does not match the captured screen")
+            for prefix in prefixes:
+                matches = [name for name in labels if name.startswith(prefix)]
+                required = 5 if prefix.startswith(("PrematchStageText-", "LobbyMember")) else 1
+                if len(matches) < required or any(name not in geometry for name in matches):
+                    raise RuntimeError("missing observed labels or geometry for " + prefix)
         report["screenshot"] = png(output / "fair-play.png", (args.width, args.height), output)
         if args.guide:
             if not guide_sent:
