@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Make the standard-map Ranked victory rehearsal focus unprotected structures
+  through the existing loopback-only signed AI policy instead of waiting for a
+  potentially indefinite lane stalemate. No custom map, server-rule or rated
+  settlement change is introduced; the report distinguishes this AI policy from
+  a map override. CI run 42765496399 exposed the need for it: all ten clients
+  stayed connected until the authoritative 2700 s duration cap, while the prior
+  identical-code rehearsal won in 413.307 s. Twenty Python harness tests pass;
+  the changed candidate still requires its own full live CI and Release runs.
+
 - Archive a hash-pinned ARM64 Docker capacity rehearsal on a 4 CPU / 4 GiB cgroup.
   All four 30 s workload controls pass; Casual 600/60 sustains the unchanged input
   gate for 300 s, 700/70 is snapshot-degraded and 800/80 fails at 13.9668–17.1602

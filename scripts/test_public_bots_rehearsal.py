@@ -1,8 +1,11 @@
 import copy
 import io
+import json
 import os
+from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -96,6 +99,28 @@ class PublicBotsRehearsalTests(unittest.TestCase):
         self.assertEqual(list(rehearsal.read_events(stream)), [
             ("BOT_RESULT", [{"saved": True}]), ("BOT_SAMPLE", {"phase": "victory"})])
         self.assertEqual(list(rehearsal.read_events(stream)), [])
+
+    def test_standard_map_victory_can_enable_objective_rush_without_a_map_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "server"
+            bots = root / "bots"
+            output = root / "evidence"
+            server.write_text("#!/bin/sh\nprintf 'UDP game server is listening on 127.0.0.1\\n'\nsleep 30\n")
+            bots.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\n")
+            server.chmod(0o755)
+            bots.chmod(0o755)
+            with mock.patch.dict(os.environ, {"OMOBA_TEST_DATABASE_URL": "postgres://tester@127.0.0.1/omoba_test"}):
+                with self.assertRaisesRegex(AssertionError, "AI clients exited"):
+                    rehearsal.main(["--server-bin", str(server), "--bots-bin", str(bots),
+                                    "--output", str(output), "--require-victory", "--rush-objectives",
+                                    "--seconds", "1", "--timeout", "2"])
+            arguments = (root / "bots.args").read_text().splitlines()
+            self.assertIn("--rush-objectives", arguments)
+            self.assertIn("--exit-after-result", arguments)
+            report = json.loads((output / "report.json").read_text())
+            self.assertTrue(report["ai_objective_rush"])
+            self.assertFalse(report["test_map_override"])
 
     @staticmethod
     def completed_ranked(rated_matches=0):

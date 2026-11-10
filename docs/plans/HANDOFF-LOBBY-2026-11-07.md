@@ -8,9 +8,16 @@
 порядок API/DOM и обязательную `Калибровка 1/20`; 257 unit / 3 skips и typecheck
 повторены. S9 включён в блокирующие S1–S12, но фактический reboot остаётся OPEN.
 [Evidence](../evidence/portal-loopback-2026-11-10/leaderboard-strengthened-report.json).
-Игра `546c1dae241726e29fef89dd4e0ca95a44fb0c6c`: CI 42744673194 (7/7)
-и Release 42744672979 (4/4) SUCCESS. Портал `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`.
-Новый evidence SHA требует новых проверок и независимого человеческого ревью.
+Игра: кодовый родитель `546c1dae241726e29fef89dd4e0ca95a44fb0c6c` имеет
+CI 42744673194 (7/7) и Release 42744672979 (4/4) SUCCESS. На `031a96fd` Release
+42765496531 SUCCESS 4/4, но CI 42765496399 FAILED только на `ranked-victory`:
+10/10 клиентов остались connected до authoritative 2700s cap; прежний PASS занял
+413.307s. Это зафиксированный duration-capped AI stalemate, не скрытый regression.
+Rehearsal теперь включает существующий loopback-only `--rush-objectives` на обычной
+карте: signed movement/casts и authoritative rules сохранены, `test_map_override=false`.
+20 Python harness tests PASS; live-проверка и полные CI/Release нового SHA обязательны.
+Портал `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`. Оба PR требуют независимого
+человеческого ревью; self-review приёмкой не является.
 
 ## Docker capacity rehearsal — 2026-11-10
 

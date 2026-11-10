@@ -13,10 +13,15 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 ### Подтверждено на этом срезе
 
-- Игра [PR #148](https://github.com/o-moba/omoba-bevy/pull/148),
-  `546c1dae241726e29fef89dd4e0ca95a44fb0c6c`. [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42744673194)
-  и [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42744672979)
-  прошли на этом SHA. Последующий evidence-коммит обязан получить новые runs.
+- Игра [PR #148](https://github.com/o-moba/omoba-bevy/pull/148): кодовый родитель
+  `546c1dae241726e29fef89dd4e0ca95a44fb0c6c` прошёл [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42744673194)
+  и [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42744672979).
+  На evidence-коммите `031a96fd03d3dd353b3293052d26ae605cf6986b` Release прошёл 4/4,
+  но [CI 42765496399](https://github.com/o-moba/omoba-bevy/actions/runs/42765496399)
+  FAILED только в `ranked-victory`: все 10 клиентов остались подключены до
+  authoritative cap 2700 с без победы. Предыдущий идентичный код завершил матч за
+  413,307 с. Rehearsal теперь явно фокусирует signed AI на доступных строениях без
+  custom map и изменения правил; итоговый SHA обязан получить новые полные runs.
 - Портал [PR #33](https://github.com/o-moba/omoba-web/pull/33),
   `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`. Записаны typecheck, 257 успешных
   unit-тестов и 3 ожидаемых пропуска. Усиленный leaderboard loopback PASS требует

@@ -239,8 +239,8 @@ def main(argv=None):
         case = output / "ranked-victory"
         run("ranked-victory", [sys.executable, "scripts/public_bots_rehearsal.py",
                               "--server-bin", str(target / "debug/server"),
-                              "--bots-bin", str(target / "debug/bots"), "--require-victory", "--qualify-ranked-fixtures",
-                              "--timeout", str(args.ranked_timeout), "--output", str(case)],
+                              "--bots-bin", str(target / "debug/bots"), "--require-victory", "--rush-objectives",
+                              "--qualify-ranked-fixtures", "--timeout", str(args.ranked_timeout), "--output", str(case)],
             process_report=case / "report.json", timeout=args.ranked_timeout + 60)
         report["status"] = "PASS"
     except BaseException as error:

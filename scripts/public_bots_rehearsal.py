@@ -193,6 +193,8 @@ def main(argv=None):
                         help="prove wire denial0/9, real tenth public game and Ranked acceptance10")
     parser.add_argument("--seconds", type=float, default=15)
     parser.add_argument("--require-victory", action="store_true")
+    parser.add_argument("--rush-objectives", action="store_true",
+                        help="focus loopback AI on unprotected structures without changing server rules")
     parser.add_argument("--test-map", type=Path, help="explicit local custom map; never a rated proof")
     parser.add_argument("--timeout", type=float, default=180)
     args = parser.parse_args(argv)
@@ -203,6 +205,8 @@ def main(argv=None):
         parser.error("use 1..10 clients; Ranked requires ten")
     if args.ranked_eligibility and not (args.clients == 1 and args.preference == "bot_practice" and args.require_victory and not args.test_map):
         parser.error("eligibility requires one vs-Bots client, real victory and the standard map")
+    if args.rush_objectives and not args.require_victory:
+        parser.error("--rush-objectives requires --require-victory")
     if not 0 < args.seconds <= args.timeout <= 3600:
         parser.error("require 0 < seconds <= timeout <= 3600")
     for binary in (args.server_bin, args.bots_bin):
@@ -228,7 +232,7 @@ def main(argv=None):
         command.append("--exit-after-result")
     if args.ranked_eligibility:
         command.append("--ranked-eligibility-probe")
-    if args.test_map:
+    if args.test_map or args.rush_objectives:
         command.append("--rush-objectives")
     if args.test_map:
         source = args.test_map.read_bytes()
@@ -240,7 +244,8 @@ def main(argv=None):
         env["OMOBA_MATCH_TEST_MAP_CONFIG"] = str(config)
     children, samples = [], deque(maxlen=60)
     report = {"status": "RUNNING", "clients": args.clients, "preference": args.preference,
-              "victory_required": args.require_victory, "test_map_override": bool(args.test_map)}
+              "victory_required": args.require_victory, "ai_objective_rush": args.test_map is not None or args.rush_objectives,
+              "test_map_override": bool(args.test_map)}
     started, running_at, bots_exited_at = time.monotonic(), None, None
     try:
         with (root / "lobby.log").open("w") as lf, (root / "bots.log").open("w") as bf:

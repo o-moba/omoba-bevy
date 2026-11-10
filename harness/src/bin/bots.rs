@@ -516,7 +516,7 @@ fn main() {
                     });
                     let view = WorldView::from_snapshot(&snapshot, my_id, team);
                     let mut decision = brain.decide(x, z, &view);
-                    // A disposable custom-map rehearsal can focus objectives
+                    // An explicit loopback victory rehearsal can focus objectives
                     // instead of waiting for the lane AI's midgame rally. All
                     // movement, range, cooldown and damage remain authoritative.
                     if args.rush_objectives
