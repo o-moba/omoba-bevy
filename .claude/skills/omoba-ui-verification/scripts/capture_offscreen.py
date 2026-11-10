@@ -16,7 +16,7 @@ SCENES = ("taken", "wide-draft", "wide-lobby", "compatibility",
           "surrender-prompt", "remade-result", "surrender-result")
 OBSERVED_SCENES = {
     "wide-draft": ("Draft", ("PrematchStageText-",)),
-    "wide-lobby": ("Lobby", ("LobbyMemberName-", "LobbyMemberStatus-")),
+    "wide-lobby": ("Lobby", ("LobbyMemberName-", "LobbyMemberStatus-", "LobbyRosterName-")),
     "compatibility": ("Home", ("HomeCompatibilityDetail", "HomeOfflineNotice")),
 }
 SOURCE_FILES = ("client/src/lib.rs", "client/src/qa/mod.rs",
@@ -203,9 +203,18 @@ def main():
                 raise RuntimeError("retained Creator Loop state does not match the captured screen")
             for prefix in prefixes:
                 matches = [name for name in labels if name.startswith(prefix)]
-                required = 5 if prefix.startswith(("PrematchStageText-", "LobbyMember")) else 1
+                required = 5 if prefix.startswith(
+                    ("PrematchStageText-", "LobbyMember", "LobbyRoster")) else 1
                 if len(matches) < required or any(name not in geometry for name in matches):
                     raise RuntimeError("missing observed labels or geometry for " + prefix)
+                for name in matches:
+                    if labels[name].strip() == "…":
+                        raise RuntimeError("label collapsed to an ellipsis: " + name)
+                    shaped = geometry[name].get("layout_size")
+                    available = geometry[name].get("node_size")
+                    if (not shaped or not available
+                            or any(shaped[axis] > available[axis] + 1.0 for axis in (0, 1))):
+                        raise RuntimeError("shaped label exceeds its node: " + name)
         report["screenshot"] = png(output / "fair-play.png", (args.width, args.height), output)
         if args.guide:
             if not guide_sent:

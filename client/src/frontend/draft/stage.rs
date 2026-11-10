@@ -247,7 +247,11 @@ pub(crate) fn spawn_team_stage(
                                         TextLayout::justify(Justify::Center)
                                             .with_linebreak(LineBreak::NoWrap),
                                         Node {
-                                            max_width: Val::Percent(100.0),
+                                            // A content-sized node shrinks together with
+                                            // the elided text and eventually leaves only
+                                            // an ellipsis. Keep the plate's full width
+                                            // stable for the actual-glyph fitter.
+                                            width: Val::Percent(100.0),
                                             min_width: Val::Px(0.0),
                                             ..default()
                                         },

@@ -730,7 +730,9 @@ fn spawn_nameplates(
                         ),
                         TextLayout::new(Justify::Center, LineBreak::NoWrap),
                         Node {
-                            max_width: Val::Percent(100.0),
+                            // Do not let the measured text shrink its own
+                            // available width on every elision pass.
+                            width: Val::Percent(100.0),
                             min_width: Val::Px(0.0),
                             ..default()
                         },
@@ -745,7 +747,9 @@ fn spawn_nameplates(
                         ),
                         TextLayout::new(Justify::Center, LineBreak::NoWrap),
                         Node {
-                            max_width: Val::Percent(100.0),
+                            // Do not let the measured text shrink its own
+                            // available width on every elision pass.
+                            width: Val::Percent(100.0),
                             min_width: Val::Px(0.0),
                             ..default()
                         },
@@ -910,12 +914,22 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                                             |row| {
                                                 row.spawn((
                                                     label(&member.nickname, 13.0, theme::IVORY),
+                                                    TextLayout::new(
+                                                        Justify::Start,
+                                                        LineBreak::NoWrap,
+                                                    ),
                                                     Node {
                                                         flex_grow: 1.0,
                                                         flex_basis: Val::Px(0.0),
                                                         min_width: Val::Px(0.0),
+                                                        overflow: Overflow::clip(),
                                                         ..default()
                                                     },
+                                                    widgets::FittedLabel,
+                                                    Name::new(format!(
+                                                        "LobbyRosterName-{}",
+                                                        member.player_id
+                                                    )),
                                                 ));
                                                 if view.is_leader() && member.player_id != view.you
                                                 {
