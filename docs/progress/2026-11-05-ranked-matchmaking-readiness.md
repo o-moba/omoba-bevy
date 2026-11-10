@@ -6,7 +6,24 @@ players. Review method and the full list of findings: [the plan](../plans/ranked
 (eight reviewers, two-lens verification, a completeness critic; 68 confirmed
 findings). Decision record: ADR-027.
 
-## Current portal loopback checkpoint — 2026-11-10
+## Leaderboard and S9 review follow-up — 2026-11-10
+
+The two latest review findings are addressed without production portal changes. The
+leaderboard test now requires at least two distinct ratings, exact API and DOM order,
+and a second fixture with lifetime experience but current-season placement below 20.
+A fresh disposable loopback run passed with ratings 1351/900 and mandatory visible
+`Калибровка 1/20`; opt-out and 390 px also passed. Unit tests repeated at 257 PASS /
+3 expected skips and typecheck passed. The three-key seed places synthetic counters
+before real settlement so projection cannot overwrite them. Its committed SHA still
+requires CI and a fresh executable run under the local disk guard.
+[Evidence](../evidence/portal-loopback-2026-11-10/leaderboard-strengthened-report.json)
+
+The RU decision rule now blocks on every applicable S1–S12/P1–P9 row, including S9,
+and requires owner-approved justification for N/A. The stale CI baseline was updated
+to `550d2827`. This is a documentation-policy fix only: no RU reboot was performed,
+S9 remains OPEN, the original findings remain 62/5/1 and the decision remains NO SHIP.
+
+## Previous portal loopback checkpoint — 2026-11-10
 
 [Current portal evidence](../evidence/portal-loopback-2026-11-10/README.md) binds game
 code `5cd10d83f4b1016060830b58f5b763e19e3f96ea` and portal

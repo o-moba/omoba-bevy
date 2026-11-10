@@ -1,6 +1,17 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
-## Актуальный checkpoint — portal loopback, exact-Release workloads и RU no-ship gates, 2026-11-10
+## Актуальный список до выпуска — 2026-11-10
+
+[TODO по итогам ревью](TODO-LOBBY-2026-11-05.md#актуальный-todo-до-ru-релиза--2026-11-10)
+содержит критерии закрытия #13 и остальных условий выпуска. Замечания к leaderboard
+и правилу S9 исправлены: свежий loopback PASS доказывает две разные записи 1351/900,
+порядок API/DOM и обязательную `Калибровка 1/20`; 257 unit / 3 skips и typecheck
+повторены. S9 включён в блокирующие S1–S12, но фактический reboot остаётся OPEN.
+[Evidence](../evidence/portal-loopback-2026-11-10/leaderboard-strengthened-report.json).
+CI 42684446948 и Release 42684447265 для базового `550d2827` завершились успешно;
+новые SHA требуют новых проверок и независимого человеческого ревью.
+
+## История portal loopback и Linux workload-контролей — 2026-11-10
 
 Игра PR148 open в `dev`; code/evidence HEAD `5cd10d83f4b1016060830b58f5b763e19e3f96ea`
 исправляет только synthetic portal fixture. Родительский documentation HEAD `a7ef3492`
@@ -37,7 +48,7 @@ self-review не является приёмкой.
 
 ### Текущее решение по RU — NO SHIP до внешних gates
 
-[Release checklist](../../../ops/vps/ru/release-checklist.md) содержит dated matrix
+[Release checklist](../../ops/vps/ru/release-checklist.md) содержит dated matrix
 S1–S12/P1–P9. PR CI/Release и loopback evidence не заполняют её автоматически:
 нужен versioned exact RU package,owner-controlled ship/preflight/downloads/alerts и
 все per-platform fresh-player scenarios. На текущем candidate нет основания объявлять

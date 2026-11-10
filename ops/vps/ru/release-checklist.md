@@ -18,8 +18,8 @@ they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 
 ## Current pre-release snapshot — 2026-11-10
 
-This is a readiness snapshot for game code candidate
-`5cd10d83f4b1016060830b58f5b763e19e3f96ea` and portal candidate
+This is a readiness snapshot for the last fully verified game baseline
+`550d2827f6c47730fdc992ede23d3a4eff224711` and portal baseline
 `ff8f50165bdce761425e27369d6fff7d8fd250ea`, **not a release result**. No RU version
 has been selected and no S3/S4/S10 deployment or publication has been authorized.
 The current decision is **NO SHIP**. `OPEN` means no acceptable evidence for this
@@ -28,7 +28,7 @@ filled result template only when executing an authorized release.
 
 | Rows | State | What is already known / what is still required |
 | --- | --- | --- |
-| S1 | OPEN | Parent `a7ef3492` passed CI 42671008602 (7/7) and Release 42671009078 (4/4). Current `5cd10d83` plus the documentation checkpoint needs its own CI/Release. The owner-required local `make check` on the final release commit is not recorded |
+| S1 | OPEN | Baseline `550d2827` passed CI 42684446948 (7/7) and Release 42684447265 (4/4). The subsequent leaderboard fixture/checklist changes require fresh workflows on their committed SHA. The owner-required local `make check` on the final release commit is not recorded |
 | S2 | OPEN | Four-platform PR packaging is evidence of buildability, not `make release-ru` output in `dist/v<version>-ru/` with its contract and hashes |
 | S3–S4 | OPEN | Exact server/portal bundles have not been shipped or accepted on the RU host; owner-controlled action |
 | S5–S9 | OPEN | No current RU host status, external preflight, lobby/worker compatibility or reboot result for this candidate |
@@ -83,9 +83,12 @@ For Android use a Vulkan device from the published minimum list (LR-25).
 
 ## 3. Decision
 
-- Any FAIL in S1–S8, S10–S12 or P1–P9 blocks the announcement. Fix and rerun the affected
-  rows, or roll back (`ru_host.py rollback`, [README › Rollback](README.md#rollback)).
-- Record N/A only with the reason and the owner's approval.
+- Any FAIL in S1–S12 or P1–P9 blocks the announcement. This includes S9 whenever
+  `reboot-check` is applicable: record its PASS and `seconds_to_ready` before sign-off.
+  Fix and rerun the affected rows, or roll back (`ru_host.py rollback`,
+  [README › Rollback](README.md#rollback)).
+- Record N/A only with the reason and the owner's approval; for S9, explicitly record
+  why this is neither a new host nor a kit change. No applicable row may be omitted.
 - The owner signs off the result file in `docs/progress/`.
 
 ## Result template

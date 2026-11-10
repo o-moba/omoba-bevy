@@ -5,6 +5,17 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Strengthen the leaderboard browser regression: require multiple distinct ratings,
+  exact API/DOM ordering and mandatory visible seasonal placement. Add a third
+  synthetic fixture and remove the projection-counter race. Fresh loopback passes
+  with ratings 1351/900 and `Калибровка 1/20`; 257 unit tests / 3 skips and typecheck
+  pass. Make every applicable S1–S12 row, including S9 reboot, release-blocking.
+
+- Refresh the RU release TODO against game `550d2827` and portal `ff8f501`.
+  Record the green game workflows, verified historical archives, remaining
+  leaderboard test coverage and S9 checklist ambiguity. Specify the evidence
+  required for isolated host capacity, WAN, recovery, devices and release.
+
 - Repair the current portal fixtures: synthetic browser profiles now satisfy the
   existing ten-public-completion Ranked admission fixture before real settlement,
   and the leaderboard browser test checks current-season placement counts/copy.

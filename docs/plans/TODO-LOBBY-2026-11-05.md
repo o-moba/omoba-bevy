@@ -4,52 +4,106 @@ Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sess
 
 Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career13, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Users/wotori/git/ekza/omoba-bevy/target-b`.
 
-## Current release checkpoint — 2026-11-10
+## Актуальный TODO до RU-релиза — 2026-11-10
 
-Game code/evidence HEAD `5cd10d83f4b1016060830b58f5b763e19e3f96ea`,PR148 open into
-`dev`,contains only the synthetic portal eligibility fixture repair. Parent `a7ef3492`
-has fully successful CI42671008602 (7/7) and Release42671009078 (4/4);the current
-code+documentation checkpoint requires its own CI/Release after commit.
-[Exact-Release workload evidence](../evidence/linux-capacity-workloads-2026-11-10/README.md)
-uses the server and generators from fully successful Release42657406745 at
-`73651bc6`. On the shared2-vCPU dev VPS,instrumented30s controls PASS for
-10vsBots/10arenas,10Ranked/1arena and30mixed/12arenas:19.9941–19.9991 sends/s,
-0 signed sequence gaps/restarts,exact rosters and health-v2. Ranked/mixed explicitly
-seed synthetic target10 prior Casual receipts,not organic eligibility or settlement.
-The standalone verifier PASSes normally and under`python3 -S`,recomputing133 hashed
-payload files and worker counters. Owned processes,DB/roles and remote fixture were
-removed;ordinary dev lobby/API stayed active.
+**Решение по выпуску: NO SHIP.** По исходным находкам 62 закрыты, #1, #2, #12,
+#20 и #50 частично закрыты, #13 открыт. По критику C1 и C5–C9 закрыты на уровне
+кода или комплекта выкладки, C2 и C3 частичные, C4 открыт. Ниже рабочий список
+для завершения. Исходные 68 строк и история проверок сохранены далее.
 
-Mixed summed RSS peaks at549.64MiB. It is not PSS/cgroup usage,but the historical
-RU MemoryMax500MiB remains unvalidated. The16-arena unit,limits,nftables and
-production configuration were NOT changed. These30s shared-host controls do not
-replace isolated-host stepped+sustained acceptance. The previous instrumented300s
-Casual FAIL(19.4589–19.5355/s),uninstrumented PASS and80/8 FAIL with7 gaps remain
-immutable. #13 stays open;original68 stays62 done/5 partial/1 open.
+### Подтверждено на этом срезе
 
-Portal `ff8f50165bdce761425e27369d6fff7d8fd250ea`,PR33 open into`dev`:typecheck and
-257 unit PASS/3 expected skips. [Current portal loopback evidence](../evidence/portal-loopback-2026-11-10/README.md)
-binds7 signed-directory and5 leaderboard/privacy PASS groups on RU production Next+
-real RU Account API/PostgreSQL,including seasonal placement `Калибровка 3/20`. Previous
-RU/global builds and13 Ranked checks on`37e705c` remain valid for unchanged production
-code. Only stale test fixtures changed:Ranked maturity setup and seasonal leaderboard
-expectations. No portal GitHub checks are configured;these are not physical-device,
-WAN or RU-host proof. Both PRs have zero formal human reviews/requests;self-review
-is not acceptance.
+- Игра [PR #148](https://github.com/o-moba/omoba-bevy/pull/148),
+  `550d2827f6c47730fdc992ede23d3a4eff224711`. [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42684446948)
+  и [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42684447265)
+  прошли на этом SHA. Draft release пропущен по условию PR.
+- Портал [PR #33](https://github.com/o-moba/omoba-web/pull/33),
+  `ff8f50165bdce761425e27369d6fff7d8fd250ea`. Записаны typecheck, 257 успешных
+  unit-тестов, 3 ожидаемых пропуска, 7 проверок signed directory и 5 групп
+  leaderboard/privacy. RU/global builds и 13 Ranked browser checks с предыдущего
+  SHA относятся к тому же production-коду. В GitHub у портала нет checks. Оба
+  PR открыты в `dev` и ожидают человеческого ревью. [Отчёт портала](../evidence/portal-loopback-2026-11-10/README.md)
+- Замечание об историческом verifier закрыто в `36acb771`. Он использует
+  заархивированный helper и сверяет исходники внутри пакета. Пересчёт серверного
+  прогона на 1000 клиентов и трёх Linux workload-контролей повторно прошёл с
+  `python3 -S`. [Архив сервера](../evidence/server-load-metrics-2026-11-09/README.md)
+  · [Linux-контроли](../evidence/linux-capacity-workloads-2026-11-10/README.md)
+- На общем dev VPS три 30-секундных контроля прошли для 10 vs Bots / 10 арен,
+  10 Ranked / 1 арены и 30 mixed / 12 арен. Ranked и mixed использовали явно
+  подготовленные synthetic qualification receipts. Mixed достиг 549,64 МиБ
+  суммы RSS процессов. Для лимита 500 МиБ нужен отдельный замер памяти cgroup.
+  Прежние результаты остаются: 60 клиентов на 300 с без метрик прошли, с
+  метриками минимум 19,459/с при пороге 19,5/с. 80 клиентов не прошли 120 с,
+  зафиксировано 7 пропусков sequence. [Длительный прогон](../evidence/linux-capacity-soak-2026-11-09/README.md)
 
-**Current RU decision is NO SHIP.** The dated S1–S12/P1–P9 matrix in
-[the RU release checklist](../../../ops/vps/ru/release-checklist.md) separates CI
-and loopback evidence from versioned RU package,owner-controlled deployment,
-public/download/alert and fresh-player platform gates. None may be inferred PASS.
+### Замечания по текущему срезу
 
-Next capacity gate: isolated actual/identical RU host,exact-Release stepped+
-sustained Casual/vsBots/Ranked/mixed,actual cgroup memory/CPU/tasks and uplink
-with IP/UDP/NIC overhead. Then WAN/multi-host/party/Ranked/Resume/fault,directory/
-trust provisioning,UI-2/UI-3,physical C3,independent off-host RPO/RTO,C2/C4 owner
-decisions,legal/provider/signing/catalog/device,human review and only then owner-
-controlled merge/release/RU rollout. Do not repeat accepted local1000,terminal-
-spool,PG16/18 recovery or old Casual A/B without a new reason.
-[All decisions, open PRs and next commands](HANDOFF-LOBBY-2026-11-07.md).
+- [x] **Портал — ложный PASS leaderboard устранён.** Тест требует минимум две
+  записи с разным рейтингом, проверяет полный API tie-break и порядок DOM. Второй
+  fixture обязан иметь lifetime 20 и сезонный счётчик ниже 20; текст калибровки
+  обязателен и сохраняется в отчёте. Свежий loopback PASS: две записи 1351/900,
+  `Калибровка 1/20`, opt-out и 390 px. Повторены 257 unit PASS / 3 expected skips
+  и typecheck. Обновлённый seed задаёт counters до settlement, исключая гонку
+  projection; его итоговый SHA ещё должен пройти CI и свежий executable запуск.
+  [Evidence](../evidence/portal-loopback-2026-11-10/leaderboard-strengthened-report.json)
+- [x] **Комплект выкладки — правило S9 согласовано.** FAIL любой строки S1–S12
+  или P1–P9 блокирует анонс. Для применимого S9 требуется PASS и `seconds_to_ready`;
+  N/A нуждается в причине и одобрении владельца. Снимок CI обновлён до зелёного
+  `550d2827`. Это закрывает противоречие документа, но не сам runtime reboot-check:
+  S9 остаётся OPEN в матрице выпуска. [Правило решения](../../ops/vps/ru/release-checklist.md#3-decision)
+
+### До выпуска
+
+1. [ ] **Независимое ревью кандидатов.** Назначить человека на PR #148 и #33,
+   исправить замечания выше и из ревью, получить approval на итоговые SHA.
+   У обоих PR сейчас 0 ревью и 0 формальных запросов. Для каждого нового SHA
+   зафиксировать соответствующие проверки. Для портала приложить вывод локальных
+   проверок и отчёт интеграции, пока GitHub checks отсутствуют.
+2. [ ] **#13, #1, #2, #20 и #50 — вместимость и uplink.** Согласовать конкретный
+   изолированный целевой или эквивалентный RU-стенд и зафиксировать CPU, память,
+   cgroup и канал. Перед прогоном привязать сервер, native generators, SQL-схему
+   career13/portal11, grants и протокол16 к одному кандидату. Использовать
+   отдельные порты, базу и роли. На каждом профиле Casual, vs Bots, Ranked и
+   mixed пройти контроль, ступени и длительный интервал на принятой ступени.
+   Сохранить фактические CPU/memory/tasks cgroup, input 19,5–20,5/с на клиента,
+   rosters, health, gaps/restarts, частоту снимков и задержки. Возраст последнего
+   Transform фиксировать отдельно от измеренной задержки конкретной команды.
+   Реальный uplink замерить внешним трафиком с IP/UDP/NIC overhead. Для него
+   нужен сетевой сценарий отдельно от loopback runner. Записать доказанную
+   ёмкость, запас канала, порты, `MemoryMax`/`CPUQuota`/`TasksMax` и лимиты БД.
+   Текущие 16 арен и 500 МиБ ещё требуют подтверждения. [Инструкция замера](../../ops/vps/ru/README.md#arena-capacity-lr-09)
+3. [ ] **#12 и сетевое масштабирование.** Прогнать WAN с измеренными задержками
+   и потерями, party, Ranked и Resume при разрывах и отказах. Проверить два хоста,
+   публикацию подписанного каталога, доверие, маршрутизацию и восстановление
+   после отказа. Публикация и provisioning ключей входят в согласованный этап
+   выкладки. [План каталога](game-directory.md)
+4. [ ] **C2/C4 и независимое восстановление.** Получить решения владельца по
+   готовым кандидатам, затем интегрировать drain/update/rollback и PITR.
+   На независимом хосте и хранилище проверить восстановление данных, очереди
+   результатов и повторную доставку. Записать измеренные RPO/RTO и решение о
+   достаточности. [C2](reviews/C2-DRAIN-2026-11-07.md) · [C4](reviews/C4-PITR-PARAMETERS-2026-11-07.md)
+5. [ ] **UI-2, UI-3 и C3.** На совпадающей с кандидатом сборке проверить ширину
+   реальных глифов длинных имён в Draft/Lobby и состояние ошибки совместимости.
+   Проверить keep-awake, возврат в поиск и тактильный сигнал на физических
+   устройствах. Зафиксировать версию, платформу, язык и результат каждого
+   состояния. Для macOS использовать репозиторный рецепт offscreen.
+6. [ ] **Точный RU-кандидат и внешние условия.** Зафиксировать версию, парные
+   SHA игры и портала, подписи и хеши. Пройти S1 (`make check` на release commit),
+   S2 (versioned `make release-ru`), требования провайдеров, площадок и legal.
+   Согласовать условия публикации и поддерживаемые устройства. Пройти P1–P9
+   на четырёх RU-платформах с точными пакетами, включая физический Vulkan Android.
+7. [ ] **Выкладка и решение о выпуске.** После согласования владельца пройти
+   S3–S9 и S12 на целевом контуре с готовым откатом, затем S10–S11 для публикации
+   и проверки загрузок из российской сети. Сохранить подписанный владельцем
+   итоговый отчёт S1–S12/P1–P9 с PASS или согласованным N/A по каждой строке.
+   Merge/release/RU rollout выполняются по согласованному порядку с мониторингом.
+   [Матрица приёмки](../../ops/vps/ru/release-checklist.md)
+
+Первый инфраструктурный шаг — выбрать и описать изолированный стенд для #13.
+Ревью, исправление браузерного теста, UI и подготовка независимого восстановления
+могут идти параллельно. Общий dev VPS уже дал диагностические результаты для всех
+четырёх профилей. Повторять их имеет смысл для конкретной новой гипотезы.
+[Передача следующему агенту](HANDOFF-LOBBY-2026-11-07.md)
 
 ### Previous native Linux capacity checkpoints
 
@@ -245,7 +299,9 @@ Eight independent read-only reviewers (lobby queue, allocation/start, rating/set
 - [minor/scale/S] **nftables lobby rule is 400 pkt/s per source IP: ~250 players behind one carrier-grade NAT saturate it and the kernel drops FindMatch/presence for all of them** — `ops/vps/ru/nftables-omoba.conf:56`. Fix: Raise the lobby limit to e.g. 4000/s burst 8000 (it is a flood guard, not a fairness tool) or key the dynamic set by `ip saddr . udp sport` so each NAT'd client gets its own bucket; document the new figure in README 'Admission limits'. — **done — nftables lobby rule 4000/s burst 8000**
 - [minor/gap/S] **No alert when match results pile up unsettled (PostgreSQL slow/down): players sit on 'Сохранение результата…' and nobody is paged** — `ops/vps/ru/ru_monitor.py:435`. Fix: In `ru_monitor.py` add `settlement_problems`: count `*.json` receipts older than N minutes under `/var/lib/omoba-ru/matches/*/` worker outboxes and the lobby outbox, alert when > 0 for 5 min; optionally have the lobby write `pending_settlements` into capacity.json so the existing report path carries it. — **done in kit — bounded terminal-outbox scan, >=5 min threshold anchored to original result time; identical retries preserve file age. Typed queue-dodge journal checks cover stale/corrupt/capacity-limited delivery with no player IDs. All42 monitor cases, actual native report interoperability and real-PG schema/IO failure/recovery PASS. Required anonymous process health covers pre-persistence SQL/role/journal/floor/result blockers. Controlled-load latency and RU installation remain release gates.**
 
-## Next steps, in order
+## Historical continuation plan
+
+For current priorities and acceptance criteria, use the [release TODO above](#актуальный-todo-до-ru-релиза--2026-11-10).
 
 1. Complete the current game/portal PR gates into `dev`: `make check`,
    `scripts/postgres_tests.py`, full public journeys and portal checks. The owner

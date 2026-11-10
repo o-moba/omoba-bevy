@@ -29,6 +29,24 @@ page copy, no horizontal overflow at 390 px, settings opt-out and its explanatio
 the current-season placement line. The second synthetic profile visibly rendered
 `Калибровка 3/20`; the test no longer waits for the obsolete pre-season `Новичок` copy.
 
+## Strengthened leaderboard follow-up
+
+The conditional calibration check is removed. The test now requires at least two
+entries with different ratings, verifies the complete API tie-break and matching DOM
+order, and requires the second fixture to have lifetime experience but fewer than 20
+current-season games. A fresh isolated loopback run passed with ratings 1351/900 and
+mandatory visible `Калибровка 1/20`; the report records the observed text and ratings.
+Portal unit tests again passed 257 with 3 expected skips, and typecheck passed.
+[Machine-readable follow-up report](leaderboard-strengthened-report.json)
+
+The browser run used the existing RU Account API and previous seed binary, then an
+explicit disposable SQL fixture after projection and the registration trigger. The
+edited three-key seed moves synthetic counters before genuine settlement to avoid that
+race. Its targeted `cargo check` passed before this reorder; current formatting passes,
+while the committed SHA still needs CI and a fresh executable run under the local disk
+guard. No production portal code changed. S9 policy was corrected separately; no RU
+reboot or production acceptance is claimed.
+
 ## Fixture repairs bound to these runs
 
 `account-api/examples/seed-local-portal.rs` now gives its synthetic profiles the
