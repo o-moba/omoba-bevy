@@ -14,15 +14,24 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 ### Подтверждено на этом срезе
 
 - Игра [PR #148](https://github.com/o-moba/omoba-bevy/pull/148),
-  `550d2827f6c47730fdc992ede23d3a4eff224711`. [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42684446948)
-  и [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42684447265)
-  прошли на этом SHA. Draft release пропущен по условию PR.
+  `546c1dae241726e29fef89dd4e0ca95a44fb0c6c`. [CI 7/7](https://github.com/o-moba/omoba-bevy/actions/runs/42744673194)
+  и [Release 4/4](https://github.com/o-moba/omoba-bevy/actions/runs/42744672979)
+  прошли на этом SHA. Последующий evidence-коммит обязан получить новые runs.
 - Портал [PR #33](https://github.com/o-moba/omoba-web/pull/33),
-  `ff8f50165bdce761425e27369d6fff7d8fd250ea`. Записаны typecheck, 257 успешных
-  unit-тестов, 3 ожидаемых пропуска, 7 проверок signed directory и 5 групп
-  leaderboard/privacy. RU/global builds и 13 Ranked browser checks с предыдущего
-  SHA относятся к тому же production-коду. В GitHub у портала нет checks. Оба
-  PR открыты в `dev` и ожидают человеческого ревью. [Отчёт портала](../evidence/portal-loopback-2026-11-10/README.md)
+  `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`. Записаны typecheck, 257 успешных
+  unit-тестов и 3 ожидаемых пропуска. Усиленный leaderboard loopback PASS требует
+  две записи 1351/900, полный ordering, opt-out, 390 px и `Калибровка 1/20`.
+  RU/global builds и 13 Ranked browser checks относятся к неизменному production-коду.
+  В GitHub у портала нет checks. Оба PR открыты в `dev` и ожидают человеческого
+  ревью. [Отчёт портала](../evidence/portal-loopback-2026-11-10/README.md)
+- Docker ARM64 loopback на 4 CPU / 4 ГиБ: 600 клиентов / 60 арен прошли 300 с,
+  700 формально прошли input gate с деградацией snapshots, 800 не прошли input gate;
+  в сохранённых worker logs восстановлены 707 signed sequence gaps и 0 restarts.
+  На 160/16 за 120 с память 378,72 МиБ, но sustained 16-arena не выполнен. Два
+  500/50 soak остановлены естественными победами, поэтому continuous-Running PASS
+  на 300 с у этой ступени нет. Два запуска verifier пересчитали 458 payload-файлов
+  и 30 cgroup-сводок. Это не RU x86_64/uplink/WAN/SLA приёмка; #13 остаётся OPEN.
+  [Docker evidence](../evidence/docker-capacity-2026-11-10/README.md)
 - Замечание об историческом verifier закрыто в `36acb771`. Он использует
   заархивированный helper и сверяет исходники внутри пакета. Пересчёт серверного
   прогона на 1000 клиентов и трёх Linux workload-контролей повторно прошёл с

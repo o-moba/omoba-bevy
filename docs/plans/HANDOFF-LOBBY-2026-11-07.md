@@ -8,8 +8,29 @@
 порядок API/DOM и обязательную `Калибровка 1/20`; 257 unit / 3 skips и typecheck
 повторены. S9 включён в блокирующие S1–S12, но фактический reboot остаётся OPEN.
 [Evidence](../evidence/portal-loopback-2026-11-10/leaderboard-strengthened-report.json).
-CI 42684446948 и Release 42684447265 для базового `550d2827` завершились успешно;
-новые SHA требуют новых проверок и независимого человеческого ревью.
+Игра `546c1dae241726e29fef89dd4e0ca95a44fb0c6c`: CI 42744673194 (7/7)
+и Release 42744672979 (4/4) SUCCESS. Портал `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`.
+Новый evidence SHA требует новых проверок и независимого человеческого ревью.
+
+## Docker capacity rehearsal — 2026-11-10
+
+[Архив с независимым пересчётом](../evidence/docker-capacity-2026-11-10/README.md)
+привязан к source parent `546c1dae` и ARM64 binaries из run 42753061924. Изолированный
+Docker cgroup 4 CPU / 4 ГиБ, swap off, pids.max512 и network none; PostgreSQL, lobby,
+workers и native generators делят лимиты. Все четыре 30s workload-контроля PASS.
+Casual 160/16 PASS120s при378.72MiB;500/50 PASS120s;600/60 PASS300s при1226.10MiB,
+370.36%CPU и существенном throttling.700/70 формально PASS input,но snapshots p50
+12.686/s — degraded.800/80 FAIL: input13.9668–17.1602/s,snapshots9.141/s,707 signed
+sequence gaps/0 restarts в retained logs.900/1000 не запускались и ёмкость1000 на
+этом профиле не доказана. Два500/50 300s сценария остановлены natural victories
+на156.656s/130.148s;это не capacity failures,но и не continuous-Running PASS.
+
+Verifier в обычном и `python -S` режиме пересчитал458 payload files,30 cgroup
+summaries,43 archived sources и19-file report-source map. Он восстанавливает
+recorded metric snapshots перед teardown,не принимая поздние строки за исходные
+замеры. **#13 OPEN,NO SHIP.** Нужны sustained16-arena,per-workload acceptance,
+реальный/идентичный RU x86_64 host,внешний uplink с headers,WAN и production limits.
+16 arenas/500MiB и production не менялись.
 
 ## История portal loopback и Linux workload-контролей — 2026-11-10
 

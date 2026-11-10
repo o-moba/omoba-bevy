@@ -1,0 +1,1341 @@
+{
+  "status": "PASS",
+  "label": "casual-180-120",
+  "workload": "casual",
+  "clients": 180,
+  "seconds": 120,
+  "generator": "exact native Rust release bots; workload-aware independent ten-client shards",
+  "source_parent": "546c1dae241726e29fef89dd4e0ca95a44fb0c6c",
+  "release_run": 42753061924,
+  "server_sha256": "fee88530f0c2db49243957fc7d0ffc629d972180a4d720db0034c1e207baac2f",
+  "bots_sha256": "cb7f795a52f65699f3ccef512a7a2e524d9ef8573d02a85b4a1a674feac598d9",
+  "helper_sha256": "34bac34852224e67f22590618d55ce77882352853e0e2acb0a9f928982d68518",
+  "server_load_metrics": true,
+  "database": "omoba_test",
+  "scope": "native ARM64 single-container 4-CPU/4-GiB loopback capacity; PostgreSQL, server and generators share the cgroup; not RU-host/uplink/WAN/production SLA",
+  "container": {
+    "cpus": "4.0",
+    "memory": "4g",
+    "pids_limit": 512,
+    "platform": "linux/arm64"
+  },
+  "arenas": 18,
+  "migration_sha256": {
+    "career-store/migrations/postgres/001_career.sql": "013ea70d69c747dbb86a62c0c949e61bc69999b2b148c73e041ebc2c956d5649",
+    "career-store/migrations/postgres/002_player_handles.sql": "fcd5ff3160d77802269c6359f6f22224c4bdd088cea0d1420bf60cfd7cfbb59b",
+    "career-store/migrations/postgres/003_device_keys.sql": "72c747d5de42866bef9697ed0e034dfa23c05908250c223351b716dd6819d849",
+    "career-store/migrations/postgres/004_admission_limits.sql": "5f0fbb387a53014f011b747db41fd6ce5d87b1a813ec83e0af262f69d615286c",
+    "career-store/migrations/postgres/005_sanctions.sql": "896817ee8236359940da52350a0a3831b175a740e541da209035b13e5b054fe4",
+    "career-store/migrations/postgres/006_rating_ladder.sql": "e21e681c1de6003e10e6576c147f8a5c5c6295073b2f91fa6fa2e7a48248cf79",
+    "career-store/migrations/postgres/007_fair_play.sql": "afa51b69509c60104da5576ef65402764872c6bfdf43beceaef8032ca6907ef7",
+    "career-store/migrations/postgres/008_match_votes.sql": "586d5044d0c5c84bfb8a4766fd2c5087be38bfb93730eead4fa388a5bc803b15",
+    "career-store/migrations/postgres/009_ranked_eligibility.sql": "7dec42e68a97fb71d68eb9336c31da83f6fd273929e11210fd689a6fc9782b09",
+    "career-store/migrations/postgres/010_ranked_seasons.sql": "e53b76ecdf0ef59f2a07394086c3671f4b6548ace17a75d28019e008ef6642e5",
+    "career-store/migrations/postgres/011_queue_discipline.sql": "aa8a7552807e62b49f5eafebd63bce636c43d05784653abe856554f8ad56af8a",
+    "career-store/migrations/postgres/012_ready_ownership.sql": "450894081a890073d5c6946858381a8f3d60de127c7fcbc5288fb857992ae323",
+    "career-store/migrations/postgres/013_ready_retention.sql": "8f9299e86cfd8ef957e75ebf478f3d3e1e952c46ba7da9e93db536b56a483694",
+    "account-api/migrations/001_portal.sql": "4dc0d38d57a4f15be356f3c92f088ac659d687b29c56c9fadd91c613a03b474c",
+    "account-api/migrations/002_devices.sql": "b53fbb2d2dc4cdf2c2af021bd0b9e26a50c6733b958081c5ebf2857a11605021",
+    "account-api/migrations/003_supporter.sql": "3f8c97cb430dff4f2accf34e632caaa741c04e621ed210cddd76e6e5700dc6f4",
+    "account-api/migrations/004_class_builds.sql": "eab52272758412feb3cfcf07b2c75d9022f0e87faa08515235e4cac48b143d2a",
+    "account-api/migrations/005_ekza_library.sql": "fca37d742561fae60a72a410eb18ced1a593324dece06f1a3e773b6565253a34",
+    "account-api/migrations/006_supporter_recognition.sql": "c1dc68d9b95e80b24849d0b2b7a8a0e878b45dae71c7efd55303798cf53283bc",
+    "account-api/migrations/007_social_sign_in.sql": "318e6eff599ececdce4de7b975895aa0b616d55c2d73342d78c202c05293a8b2",
+    "account-api/migrations/009_yookassa_supporter.sql": "15f78761b3eeaf47dc648f864b32c8b48683324610a27a74a98e368b91f907a2",
+    "account-api/migrations/010_social_registration.sql": "7f24d1fe318e8ec2eb3124c0b51cdda095337599f11deb33bd94f9a37ac5e3fe",
+    "account-api/migrations/011_leaderboard.sql": "cf5ea73c120d2b049fe9b2ffd828efff3749ef1d227383508f6290f896381714",
+    "account-api/ops/grants.sql": "eb36f7739c23c17e22751c7bb25dddd8b2b0927f8248c76742aa2bbd2882ff86"
+  },
+  "career_schema": 13,
+  "portal_schema": 11,
+  "elapsed_seconds": 140.93495756399352,
+  "cgroup": {
+    "limits": {
+      "cpu.max": "400000 100000",
+      "memory.max": "4294967296",
+      "pids.max": "512"
+    },
+    "sample_count": 142,
+    "memory_current_max": 424591360,
+    "memory_peak_final": 426905600,
+    "pids_current_max": 125,
+    "pids_peak_final": 125,
+    "memory_events_first": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "memory_events_final": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "network_first": {
+      "lo": {
+        "rx_bytes": 9796449161,
+        "tx_bytes": 9796449161
+      },
+      "tunl0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "gre0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "gretap0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "erspan0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip_vti0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip6_vti0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "sit0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip6tnl0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip6gre0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      }
+    },
+    "network_final": {
+      "lo": {
+        "rx_bytes": 12061622968,
+        "tx_bytes": 12061622968
+      },
+      "tunl0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "gre0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "gretap0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "erspan0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip_vti0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip6_vti0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "sit0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip6tnl0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      },
+      "ip6gre0": {
+        "rx_bytes": 0,
+        "tx_bytes": 0
+      }
+    },
+    "cpu_interval_percent_mean": 116.31528221081744,
+    "cpu_interval_percent_max": 163.5983696862721,
+    "nr_throttled_final": 10,
+    "throttled_usec_final": 2932078
+  },
+  "probe_status": "PASS",
+  "input": {
+    "requested_hz": 20,
+    "successful_signed_transforms_per_second": {
+      "min": 19.999774221410483,
+      "p05": 19.999774221410483,
+      "p50": 20.00010913207158,
+      "p95": 20.01335836955132,
+      "max": 20.01335836955132
+    },
+    "cached_snapshot_transforms": {
+      "total": 44342,
+      "min_per_peer": 242
+    },
+    "all_peers_within_2_5_percent": true,
+    "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+  },
+  "wire": {
+    "bytes_per_second_per_player": {
+      "p50": 82219.01105142695,
+      "p95": 84026.49271510949,
+      "p99": 84696.01433326385,
+      "max": 84727.24260325539
+    },
+    "accepted_snapshots_per_second_per_player": {
+      "p50": 17.951015132595487,
+      "p05": 17.921176435289464
+    },
+    "observed_broadcast_tick_span_per_second_per_player": {
+      "p50": 18.944530629337724,
+      "p05": 18.910791282528187
+    },
+    "accepted_fraction_of_observed_tick_span": {
+      "p50": 0.9476462824461065,
+      "p05": 0.9473684210526315
+    },
+    "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+  },
+  "producer_timing": {
+    "bucket_upper_us": [
+      1000,
+      5000,
+      10000,
+      25000,
+      45000,
+      55000,
+      75000,
+      100000,
+      150000,
+      250000,
+      500000,
+      1000000
+    ],
+    "loop_work": {
+      "count": 43134,
+      "total_us": 71248153,
+      "buckets": [
+        3826,
+        39213,
+        76,
+        16,
+        1,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 1651.786363425604,
+      "p95_exclusive_upper_us": 5000,
+      "p99_exclusive_upper_us": 5000
+    },
+    "receive_work": {
+      "count": 431340,
+      "total_us": 57526328,
+      "buckets": [
+        431154,
+        186,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 133.36655074882924,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "wake_lateness": {
+      "count": 43134,
+      "total_us": 53531362,
+      "buckets": [
+        21306,
+        21763,
+        63,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 1241.0479436175638,
+      "p95_exclusive_upper_us": 5000,
+      "p99_exclusive_upper_us": 5000
+    },
+    "session_work": {
+      "count": 431340,
+      "total_us": 1087528,
+      "buckets": [
+        431337,
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 2.5212778782399035,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "telemetry_prepare_work": {
+      "count": 2097,
+      "total_us": 271693,
+      "buckets": [
+        2097,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 129.56270863137817,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "telemetry_format_write_work": {
+      "count": 2097,
+      "total_us": 673782,
+      "buckets": [
+        1986,
+        109,
+        2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 321.307582260372,
+      "p95_exclusive_upper_us": 5000,
+      "p99_exclusive_upper_us": 5000
+    },
+    "transform_gaps": {
+      "count": 431340,
+      "total_us": 21565440135,
+      "buckets": [
+        1,
+        5,
+        7,
+        5,
+        718,
+        429974,
+        625,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 49996.38367645013,
+      "p95_exclusive_upper_us": 55000,
+      "p99_exclusive_upper_us": 55000
+    },
+    "navigation_work": {
+      "count": 198281,
+      "total_us": 1143180,
+      "buckets": [
+        198203,
+        1,
+        74,
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 5.76545407779868,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_prepare": {
+      "count": 502814,
+      "total_us": 49207,
+      "buckets": [
+        502814,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 0.09786322576539237,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_sign": {
+      "count": 502814,
+      "total_us": 6997916,
+      "buckets": [
+        502791,
+        23,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 13.917504285879073,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_encode": {
+      "count": 502814,
+      "total_us": 395025,
+      "buckets": [
+        502810,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 0.7856284828982486,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "command_send": {
+      "count": 502814,
+      "total_us": 529830,
+      "buckets": [
+        502813,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 1.0537296097562916,
+      "p95_exclusive_upper_us": 1000,
+      "p99_exclusive_upper_us": 1000
+    },
+    "overrun_rebases": 0,
+    "scope": "soak-only cumulative histogram differences; wall time includes OS descheduling; quantiles are bucket bounds, not exact percentiles; overflow has no finite upper bound"
+  },
+  "server_load": {
+    "status": "measured",
+    "totals": {
+      "transport_commands": 528899,
+      "gameplay_transforms": 452950,
+      "sequence_gaps": 0,
+      "sequence_restarts": 0,
+      "snapshots": 408613
+    },
+    "all_endpoints_without_sequence_gaps": true,
+    "all_endpoints_without_sequence_restarts": true,
+    "bucket_upper_us": [
+      1000,
+      5000,
+      10000,
+      25000,
+      45000,
+      55000,
+      75000,
+      100000,
+      150000,
+      250000,
+      500000,
+      1000000
+    ],
+    "broadcasts": 41313,
+    "broadcast_gaps": {
+      "count": 41295,
+      "total_us": 2300614335,
+      "buckets": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        16106,
+        25184,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 55711.69233563385,
+      "p95_exclusive_upper_us": 75000,
+      "p99_exclusive_upper_us": 75000
+    },
+    "latest_transform_age_at_snapshot": {
+      "count": 407757,
+      "total_us": 7870623463,
+      "buckets": [
+        93994,
+        1021,
+        4111,
+        173191,
+        128324,
+        6892,
+        87,
+        111,
+        20,
+        6,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 19302.239968903046,
+      "p95_exclusive_upper_us": 45000,
+      "p99_exclusive_upper_us": 55000
+    },
+    "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+    "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+    "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+  },
+  "resources": [
+    {
+      "at": 565201.670241197,
+      "server": {
+        "processes": 19,
+        "rss_mib": 197.42578125,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 109.640625,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565203.736196781,
+      "server": {
+        "processes": 19,
+        "rss_mib": 197.4765625,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 109.71875,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565205.797035616,
+      "server": {
+        "processes": 19,
+        "rss_mib": 197.53515625,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 109.7421875,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565207.852443992,
+      "server": {
+        "processes": 19,
+        "rss_mib": 198.0,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 109.78515625,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565209.901422867,
+      "server": {
+        "processes": 19,
+        "rss_mib": 198.375,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 109.8359375,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565211.963977909,
+      "server": {
+        "processes": 19,
+        "rss_mib": 198.640625,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 109.96875,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565214.011589952,
+      "server": {
+        "processes": 19,
+        "rss_mib": 198.96484375,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.20703125,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565216.068841578,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.109375,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.40625,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565218.118438329,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.1875,
+        "cpu_seconds": 1.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.53125,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565220.17142608,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.21484375,
+        "cpu_seconds": 4.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.5859375,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565222.227424497,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.23828125,
+        "cpu_seconds": 10.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.61328125,
+        "cpu_seconds": 0.0
+      }
+    },
+    {
+      "at": 565224.291186248,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.28125,
+        "cpu_seconds": 15.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.65234375,
+        "cpu_seconds": 3.0
+      }
+    },
+    {
+      "at": 565226.351457041,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.29296875,
+        "cpu_seconds": 18.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.671875,
+        "cpu_seconds": 11.0
+      }
+    },
+    {
+      "at": 565228.404506834,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.3671875,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 110.7734375,
+        "cpu_seconds": 16.0
+      }
+    },
+    {
+      "at": 565230.45574196,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.44140625,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.05859375,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565232.506871544,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.45703125,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.32421875,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565234.567085337,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.4921875,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.48046875,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565236.624843338,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.48828125,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.57421875,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565238.683725839,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.49609375,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.65625,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565240.747446465,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.51171875,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.71875,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565242.799072549,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.51953125,
+        "cpu_seconds": 19.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.78125,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565244.865862008,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.6015625,
+        "cpu_seconds": 20.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.80078125,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565246.923395842,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.53515625,
+        "cpu_seconds": 21.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.8203125,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565248.975679218,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.6328125,
+        "cpu_seconds": 24.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.84375,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565251.016166094,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.671875,
+        "cpu_seconds": 28.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.90234375,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565253.064307178,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.6875,
+        "cpu_seconds": 32.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.9375,
+        "cpu_seconds": 18.0
+      }
+    },
+    {
+      "at": 565255.110403971,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.69140625,
+        "cpu_seconds": 35.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.94140625,
+        "cpu_seconds": 24.0
+      }
+    },
+    {
+      "at": 565257.157444139,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.78125,
+        "cpu_seconds": 37.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.9453125,
+        "cpu_seconds": 31.0
+      }
+    },
+    {
+      "at": 565259.213113056,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.78515625,
+        "cpu_seconds": 37.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.953125,
+        "cpu_seconds": 33.0
+      }
+    },
+    {
+      "at": 565261.278768682,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.80078125,
+        "cpu_seconds": 37.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.953125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565263.335424808,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.80078125,
+        "cpu_seconds": 37.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.953125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565265.385138059,
+      "server": {
+        "processes": 19,
+        "rss_mib": 199.80078125,
+        "cpu_seconds": 37.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.953125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565267.446231227,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.2109375,
+        "cpu_seconds": 37.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.953125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565269.50447452,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.6015625,
+        "cpu_seconds": 38.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.95703125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565271.557797228,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9609375,
+        "cpu_seconds": 38.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 111.97265625,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565273.623089979,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.8984375,
+        "cpu_seconds": 39.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.0078125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565275.67747723,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.8984375,
+        "cpu_seconds": 39.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.05078125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565277.731607189,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.90234375,
+        "cpu_seconds": 42.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.1015625,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565279.810662857,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9140625,
+        "cpu_seconds": 47.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.1328125,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565281.871539775,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9140625,
+        "cpu_seconds": 51.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.1796875,
+        "cpu_seconds": 36.0
+      }
+    },
+    {
+      "at": 565283.935533401,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9140625,
+        "cpu_seconds": 55.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.1953125,
+        "cpu_seconds": 39.0
+      }
+    },
+    {
+      "at": 565285.999502152,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9140625,
+        "cpu_seconds": 55.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.21484375,
+        "cpu_seconds": 47.0
+      }
+    },
+    {
+      "at": 565288.057184194,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.93359375,
+        "cpu_seconds": 55.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.234375,
+        "cpu_seconds": 49.0
+      }
+    },
+    {
+      "at": 565290.119161695,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.95703125,
+        "cpu_seconds": 55.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.234375,
+        "cpu_seconds": 52.0
+      }
+    },
+    {
+      "at": 565292.189342738,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.95703125,
+        "cpu_seconds": 56.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.24609375,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565294.257241614,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.95703125,
+        "cpu_seconds": 56.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.265625,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565296.307652531,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.95703125,
+        "cpu_seconds": 56.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.2890625,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565298.368148741,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9609375,
+        "cpu_seconds": 57.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.3046875,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565300.424526825,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.96484375,
+        "cpu_seconds": 57.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.3203125,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565302.477929784,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.96484375,
+        "cpu_seconds": 57.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.3359375,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565304.53843566,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9765625,
+        "cpu_seconds": 59.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.33984375,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565306.596601036,
+      "server": {
+        "processes": 19,
+        "rss_mib": 200.9765625,
+        "cpu_seconds": 63.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.33984375,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565308.657529204,
+      "server": {
+        "processes": 19,
+        "rss_mib": 201.01171875,
+        "cpu_seconds": 68.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.33984375,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565310.71444958,
+      "server": {
+        "processes": 19,
+        "rss_mib": 201.0546875,
+        "cpu_seconds": 71.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.34375,
+        "cpu_seconds": 54.0
+      }
+    },
+    {
+      "at": 565312.766670706,
+      "server": {
+        "processes": 19,
+        "rss_mib": 201.0546875,
+        "cpu_seconds": 73.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.35546875,
+        "cpu_seconds": 59.0
+      }
+    },
+    {
+      "at": 565314.820327957,
+      "server": {
+        "processes": 19,
+        "rss_mib": 201.0546875,
+        "cpu_seconds": 74.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.35546875,
+        "cpu_seconds": 62.0
+      }
+    },
+    {
+      "at": 565316.879641499,
+      "server": {
+        "processes": 19,
+        "rss_mib": 201.0546875,
+        "cpu_seconds": 74.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.35546875,
+        "cpu_seconds": 67.0
+      }
+    },
+    {
+      "at": 565318.92422075,
+      "server": {
+        "processes": 19,
+        "rss_mib": 201.0546875,
+        "cpu_seconds": 74.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.35546875,
+        "cpu_seconds": 67.0
+      }
+    },
+    {
+      "at": 565320.971435626,
+      "server": {
+        "processes": 19,
+        "rss_mib": 201.0546875,
+        "cpu_seconds": 74.0
+      },
+      "generator": {
+        "processes": 18,
+        "rss_mib": 112.35546875,
+        "cpu_seconds": 71.0
+      }
+    }
+  ],
+  "ranked_qualification": {
+    "required": false,
+    "status": "not used",
+    "shards": [],
+    "helper_sha256": null
+  },
+  "remaining_before_forced_cleanup": [],
+  "owned_processes_remain": [],
+  "database_absent": true,
+  "roles_absent": true
+}

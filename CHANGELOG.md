@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Archive a hash-pinned ARM64 Docker capacity rehearsal on a 4 CPU / 4 GiB cgroup.
+  All four 30 s workload controls pass; Casual 600/60 sustains the unchanged input
+  gate for 300 s, 700/70 is snapshot-degraded and 800/80 fails at 13.9668–17.1602
+  sends/s with 707 signed sequence gaps and zero restarts in retained worker logs.
+  Two 500/50 long scenarios end in natural victories, not continuous-Running PASSes.
+  A standard-library verifier recomputes 458 payloads, 30 cgroup summaries and ten
+  selected runs from 43 archived sources in normal and `python -S` modes. Keep #13
+  and RU x86_64-host/uplink/WAN/SLA acceptance open; production limits are unchanged.
+
 - Strengthen the leaderboard browser regression: require multiple distinct ratings,
   exact API/DOM ordering and mandatory visible seasonal placement. Add a third
   synthetic fixture and remove the projection-counter race. Fresh loopback passes

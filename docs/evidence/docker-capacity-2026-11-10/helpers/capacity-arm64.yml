@@ -1,0 +1,55 @@
+name: ARM64 capacity artifacts
+
+# Temporary native ARM64 build for the local Docker capacity rehearsal. The
+# source parent is the reviewed PR candidate; this branch adds only this file.
+on:
+  push:
+    branches: [agent/docker-arm64-capacity]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify the exact candidate source
+        run: |
+          git diff --exit-code 546c1dae241726e29fef89dd4e0ca95a44fb0c6c -- . ':(exclude).github/workflows/capacity-arm64.yml'
+          test "$(uname -m)" = "aarch64"
+          echo 546c1dae241726e29fef89dd4e0ca95a44fb0c6c > source-parent.txt
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: capacity-linux-arm64
+      - name: Build native server and Account API
+        run: cargo build --release --locked -p server -p omoba-account-api
+      - name: Build native capacity generators
+        run: cargo build --release --locked -p harness --bin bots -p omoba-career-store --example qualify-ranked-fixture
+      - name: Record artifact hashes
+        run: sha256sum source-parent.txt target/release/server target/release/omoba-account-api target/release/bots target/release/examples/qualify-ranked-fixture > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-capacity-546c1dae
+          path: |
+            source-parent.txt
+            SHA256SUMS.txt
+            target/release/server
+            target/release/omoba-account-api
+            target/release/bots
+            target/release/examples/qualify-ranked-fixture
+          if-no-files-found: error
+          retention-days: 3
