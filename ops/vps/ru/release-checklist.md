@@ -16,11 +16,11 @@ local debug build.
 profile's names in [scripts/markets.py](../../../scripts/markets.py), the only place
 they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 
-## Current pre-release snapshot — 2026-11-10
+## Current pre-release snapshot — 2026-11-11
 
-This is a readiness snapshot for the last fully verified game baseline
-`550d2827f6c47730fdc992ede23d3a4eff224711` and portal baseline
-`ff8f50165bdce761425e27369d6fff7d8fd250ea`, **not a release result**. No RU version
+This is a readiness snapshot for the fully verified continuation game baseline
+`a7cd574b9accc211c5c4f09033f2e0661163ec61` and portal baseline
+`84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`, **not a release result**. No RU version
 has been selected and no S3/S4/S10 deployment or publication has been authorized.
 The current decision is **NO SHIP**. `OPEN` means no acceptable evidence for this
 exact RU release; it does not mean a check failed. Replace this snapshot with the
@@ -28,7 +28,7 @@ filled result template only when executing an authorized release.
 
 | Rows | State | What is already known / what is still required |
 | --- | --- | --- |
-| S1 | OPEN | Baseline `550d2827` passed CI 42684446948 (7/7) and Release 42684447265 (4/4). The subsequent leaderboard fixture/checklist changes require fresh workflows on their committed SHA. The owner-required local `make check` on the final release commit is not recorded |
+| S1 | OPEN | Baseline `a7cd574b` passed its own CI 43016841080 (7/7) and Release 43016841500 (4/4). The owner-required local `make check` on the final selected release commit is not recorded; subsequent documentation commits do not transfer this baseline to another SHA |
 | S2 | OPEN | Four-platform PR packaging is evidence of buildability, not `make release-ru` output in `dist/v<version>-ru/` with its contract and hashes |
 | S3–S4 | OPEN | Exact server/portal bundles have not been shipped or accepted on the RU host; owner-controlled action |
 | S5–S9 | OPEN | No current RU host status, external preflight, lobby/worker compatibility or reboot result for this candidate |

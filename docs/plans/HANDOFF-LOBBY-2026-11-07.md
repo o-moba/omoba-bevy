@@ -21,9 +21,12 @@ Lobby закрыт [exact-source evidence](../evidence/lobby-roster-identity-202
 43010114221; helper HEAD `95d38e07`. 19 архивных native source hashes совпадают с
 capture, verifier дважды PASS: 24 artifacts и 20 label geometries.
 
-Оба замечания закрыты evidence. Следующий пакет удаляет временный review workflow;
-итоговый SHA обязан получить собственные CI 7/7 и Release 4/4. Зелёные родительские
-runs не переносить.
+Оба замечания закрыты evidence. Временный review workflow удалён. Итоговый SHA
+`a7cd574b9accc211c5c4f09033f2e0661163ec61` получил собственные полностью успешные
+[CI 43016841080](https://github.com/o-moba/omoba-bevy/actions/runs/43016841080)
+(7/7) и [Release 43016841500](https://github.com/o-moba/omoba-bevy/actions/runs/43016841500)
+(4/4: macOS, Windows, Linux, Android). Это проверки continuation candidate, не
+перенос родительских результатов и не разрешение на выпуск.
 
 Оба PR по-прежнему требуют независимого человеческого ревью. Self-review и эти
 доказательства не являются approval. Исходные 68 остаются 62 done / 5 partial / 1

@@ -13,6 +13,12 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 ### Подтверждено на этом срезе
 
+- **Итоговый continuation candidate получил собственные полные проверки.** На
+  `a7cd574b9accc211c5c4f09033f2e0661163ec61` [CI 43016841080](https://github.com/o-moba/omoba-bevy/actions/runs/43016841080)
+  полностью SUCCESS 7/7, [Release 43016841500](https://github.com/o-moba/omoba-bevy/actions/runs/43016841500)
+  полностью SUCCESS 4/4: macOS, Windows, Linux и Android. Портал остаётся на
+  `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41` с принятым clean-seed run 43012620207.
+  Это не independent human approval и не RU release acceptance; NO SHIP сохраняется.
 - **UI-2 и UI-3 приняты в exact-source offscreen RU Mobile 852×393.** На
   `19c2616d5150f4a1256eb85a8cb7cf2ea2009478` compatibility PASS: полный текст
   ошибки и offline hint не пересекаются с bottom navigation. Тот же build выявил
@@ -88,7 +94,7 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 - [x] **Комплект выкладки — правило S9 согласовано.** FAIL любой строки S1–S12
   или P1–P9 блокирует анонс. Для применимого S9 требуется PASS и `seconds_to_ready`;
   N/A нуждается в причине и одобрении владельца. Снимок CI обновлён до зелёного
-  `550d2827`. Это закрывает противоречие документа, но не сам runtime reboot-check:
+  `a7cd574b`. Это закрывает противоречие документа, но не сам runtime reboot-check:
   S9 остаётся OPEN в матрице выпуска. [Правило решения](../../ops/vps/ru/release-checklist.md#3-decision)
 
 ### До выпуска

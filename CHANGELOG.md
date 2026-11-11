@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Confirm final continuation candidate `a7cd574b` on its own workflows: CI
+  43016841080 passes all seven jobs and Release 43016841500 passes macOS, Windows,
+  Linux and Android. Keep independent human review, isolated RU capacity/uplink,
+  WAN/fault/recovery, physical devices and exact-package acceptance open; RU remains
+  NO SHIP and no merge, deployment or rollout is authorized by these checks.
+
 - Keep Lobby roster identities distinguishable beside the kick action: the public
   `#NNNN` tag is separate from the elided long nickname and cannot shrink away.
   The RU Mobile 852×393 capture visually accepts visible `#1000`…`#1002`; QA state

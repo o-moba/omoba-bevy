@@ -27,10 +27,13 @@ skip 3, typecheck and production RU build pass, and two ordered ratings 1031/985
 appear with visible `Калибровка 1/20`; opt-out, own rank and 390 px overflow checks
 also pass. [Evidence and verifier](../evidence/portal-clean-seed-2026-11-11/README.md)
 
-This is synthetic loopback/offscreen evidence, not physical-device, WAN, isolated
-RU-host, recovery or release acceptance. Original findings remain 62 done / 5
-partial / 1 open, and RU remains **NO SHIP**. Final documentation HEAD requires its
-own complete CI and four-platform Release and independent human review.
+Final documentation SHA `a7cd574b9accc211c5c4f09033f2e0661163ec61` has its own
+complete [CI 43016841080](https://github.com/o-moba/omoba-bevy/actions/runs/43016841080)
+(7/7) and [Release 43016841500](https://github.com/o-moba/omoba-bevy/actions/runs/43016841500)
+(4/4: macOS, Windows, Linux, Android), both fully successful. This is synthetic
+loopback/offscreen evidence, not physical-device, WAN, isolated RU-host, recovery
+or release acceptance. Original findings remain 62 done / 5 partial / 1 open, and
+RU remains **NO SHIP**. Independent human review is still required.
 
 ## Leaderboard and S9 review follow-up — 2026-11-10
 
