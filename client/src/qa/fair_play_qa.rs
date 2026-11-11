@@ -200,7 +200,11 @@ fn watermark(mut commands: Commands) {
         Pickable::IGNORE,
     ));
 }
-const WIDE_NAME: &str = "WWWWWWWWWWWWWWWWWWWW#1234";
+const WIDE_NAME_BASE: &str = "WWWWWWWWWWWWWWWWWWWW";
+
+fn wide_name(tag: u64) -> String {
+    format!("{WIDE_NAME_BASE}#{tag:04}")
+}
 
 fn draft(wide: bool) -> PrematchSnapshot {
     let avatars = ["agnes", "pirate-bot", "good-knight", "lady-koi", "crowley"];
@@ -217,7 +221,7 @@ fn draft(wide: bool) -> PrematchSnapshot {
                 handheld: Default::default(),
                 player_id: i + 1,
                 nickname: if wide {
-                    WIDE_NAME.into()
+                    wide_name(1234)
                 } else {
                     format!("Player {}", i + 1)
                 },
@@ -249,7 +253,7 @@ fn wide_party() -> PartyView {
             members: (0..5)
                 .map(|i| shared::party::PartyMember {
                     player_id: i + 1,
-                    nickname: WIDE_NAME.into(),
+                    nickname: wide_name(1000 + i),
                     avatar: Some(avatars[i as usize].into()),
                     leader: i == 0,
                     in_match: false,

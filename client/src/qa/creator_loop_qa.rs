@@ -1157,6 +1157,7 @@ fn return_state(
             || key.as_str().starts_with("LobbyMemberName-")
             || key.as_str().starts_with("LobbyMemberStatus-")
             || key.as_str().starts_with("LobbyRosterName-")
+            || key.as_str().starts_with("LobbyRosterTag-")
         {
             texts.insert(key.as_str().to_owned(), text.0.clone().into());
             label_geometry.insert(key.as_str().to_owned(), serde_json::json!({

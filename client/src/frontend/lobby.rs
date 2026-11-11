@@ -180,6 +180,19 @@ fn member_status(member: &shared::party::PartyMember) -> (&'static str, Color) {
     }
 }
 
+/// Keep the public handle tag outside the elided nickname so equal prefixes
+/// cannot make two roster rows indistinguishable next to the kick action.
+fn roster_identity(member: &shared::party::PartyMember) -> (&str, String) {
+    match member.nickname.rsplit_once('#') {
+        Some((name, tag))
+            if !name.is_empty() && tag.len() == 4 && tag.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            (name, format!("#{tag}"))
+        }
+        _ => (member.nickname.as_str(), format!("#{}", member.player_id)),
+    }
+}
+
 #[derive(PartialEq, Clone)]
 struct LobbySignature {
     view: PartyView,
@@ -901,6 +914,7 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                         if let Some(party) = &view.party {
                             column.spawn(label(tr("lobby.social.members"), 11.0, theme::GOLD));
                             for member in &party.members {
+                                let (nickname, tag) = roster_identity(member);
                                 column
                                     .spawn((social_card(), BackgroundColor(theme::TILE)))
                                     .with_children(|card| {
@@ -913,7 +927,7 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                                         .with_children(
                                             |row| {
                                                 row.spawn((
-                                                    label(&member.nickname, 13.0, theme::IVORY),
+                                                    label(nickname, 13.0, theme::IVORY),
                                                     TextLayout::new(
                                                         Justify::Start,
                                                         LineBreak::NoWrap,
@@ -928,6 +942,21 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                                                     widgets::FittedLabel,
                                                     Name::new(format!(
                                                         "LobbyRosterName-{}",
+                                                        member.player_id
+                                                    )),
+                                                ));
+                                                row.spawn((
+                                                    label(tag, 11.0, theme::MUTED),
+                                                    TextLayout::new(
+                                                        Justify::Start,
+                                                        LineBreak::NoWrap,
+                                                    ),
+                                                    Node {
+                                                        flex_shrink: 0.0,
+                                                        ..default()
+                                                    },
+                                                    Name::new(format!(
+                                                        "LobbyRosterTag-{}",
                                                         member.player_id
                                                     )),
                                                 ));
@@ -1438,6 +1467,21 @@ mod tests {
         m.away = true;
         assert_eq!(member_status(&m).0, "Away");
     }
+    #[test]
+    fn roster_identity_keeps_public_tags_beside_elided_names() {
+        let mut first = member(2, false);
+        first.nickname = "WWWWWWWWWWWWWWWWWWWW#1001".into();
+        let mut second = member(3, false);
+        second.nickname = "WWWWWWWWWWWWWWWWWWWW#1002".into();
+        assert_eq!(
+            roster_identity(&first),
+            ("WWWWWWWWWWWWWWWWWWWW", "#1001".into())
+        );
+        assert_eq!(roster_identity(&first).1, "#1001");
+        assert_eq!(roster_identity(&second).1, "#1002");
+        assert_eq!(roster_identity(&member(7, false)), ("P7", "#7".into()));
+    }
+
     #[test]
     fn five_members_keep_identity_and_centre_even_when_someone_else_leads() {
         let mut view = party_view(4, 2, &[1, 2, 3, 4, 5]);
