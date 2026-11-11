@@ -16,7 +16,8 @@ SCENES = ("taken", "wide-draft", "wide-lobby", "compatibility",
           "surrender-prompt", "remade-result", "surrender-result")
 OBSERVED_SCENES = {
     "wide-draft": ("Draft", ("PrematchStageText-",)),
-    "wide-lobby": ("Lobby", ("LobbyMemberName-", "LobbyMemberStatus-", "LobbyRosterName-")),
+    "wide-lobby": ("Lobby", ("LobbyMemberName-", "LobbyMemberStatus-",
+                              "LobbyRosterName-", "LobbyRosterTag-")),
     "compatibility": ("Home", ("HomeCompatibilityDetail", "HomeOfflineNotice")),
 }
 SOURCE_FILES = ("client/src/lib.rs", "client/src/qa/mod.rs",
@@ -215,6 +216,12 @@ def main():
                     if (not shaped or not available
                             or any(shaped[axis] > available[axis] + 1.0 for axis in (0, 1))):
                         raise RuntimeError("shaped label exceeds its node: " + name)
+            if args.scene == "wide-lobby":
+                tags = {name: text for name, text in labels.items()
+                        if name.startswith("LobbyRosterTag-")}
+                expected = {f"#{tag:04}" for tag in range(1000, 1005)}
+                if len(tags) != 5 or set(tags.values()) != expected:
+                    raise RuntimeError("wide lobby must retain five distinct public handle tags")
         report["screenshot"] = png(output / "fair-play.png", (args.width, args.height), output)
         if args.guide:
             if not guide_sent:
