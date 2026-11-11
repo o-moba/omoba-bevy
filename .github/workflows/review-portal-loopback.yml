@@ -16,6 +16,9 @@ jobs:
     name: clean seed and leaderboard browser
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
     services:
       postgres:
         image: postgres:18-alpine
@@ -73,7 +76,14 @@ jobs:
         run: mkdir -p "$EVIDENCE_DIR"
       - name: Run portal unit tests
         working-directory: portal
-        run: npm test | tee "$EVIDENCE_DIR/unit-tests.log"
+        run: |
+          set -euo pipefail
+          # Unit tests assert market-dependent allowlists from their own clean
+          # environment, not the RU service environment used below.
+          while IFS='=' read -r name _; do
+            case "$name" in OMOBA_*) unset "$name" ;; esac
+          done < <(env)
+          npm test | tee "$EVIDENCE_DIR/unit-tests.log"
       - name: Run portal typecheck
         working-directory: portal
         run: npm run typecheck | tee "$EVIDENCE_DIR/typecheck.log"
