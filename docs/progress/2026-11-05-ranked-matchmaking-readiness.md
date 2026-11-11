@@ -6,22 +6,40 @@ players. Review method and the full list of findings: [the plan](../plans/ranked
 (eight reviewers, two-lens verification, a completeness critic; 68 confirmed
 findings). Decision record: ADR-027.
 
+## Lobby identity and clean-seed review follow-up — 2026-11-11
+
+The Lobby roster now keeps the existing public `nickname#NNNN` tag in a separate
+no-wrap, non-shrinking label beside the kick action while the long nickname is
+elided. The RU Mobile 852×393 capture is visually accepted: `#1001` and `#1002`
+are readable beside `Исключить`, leader `#1000` is visible, and no visible row
+clips or overlaps. QA state retains the exact set `#1000`…`#1004`; the last two
+rows are below the scroll viewport and are not claimed as simultaneously visible.
+All 20 label geometries fit. Native source/binary are pinned to `f8f68c3d` from
+fully successful Release 43010114221; the helper is at `95d38e07`. The archive
+contains the 19 matching native sources and passes its verifier in normal and
+`python3 -S` modes. [Evidence](../evidence/lobby-roster-identity-2026-11-11/README.md)
+
+The clean-seed leaderboard finding is closed by accepted run
+[43012620207](https://github.com/o-moba/omoba-bevy/actions/runs/43012620207).
+A fresh PostgreSQL 18-alpine service ran the current `seed-local-portal` executable
+and strengthened Playwright test without manual SQL. Unit tests pass 257 / fail 0 /
+skip 3, typecheck and production RU build pass, and two ordered ratings 1031/985
+appear with visible `Калибровка 1/20`; opt-out, own rank and 390 px overflow checks
+also pass. [Evidence and verifier](../evidence/portal-clean-seed-2026-11-11/README.md)
+
+This is synthetic loopback/offscreen evidence, not physical-device, WAN, isolated
+RU-host, recovery or release acceptance. Original findings remain 62 done / 5
+partial / 1 open, and RU remains **NO SHIP**. Final documentation HEAD requires its
+own complete CI and four-platform Release and independent human review.
+
 ## Leaderboard and S9 review follow-up — 2026-11-10
 
-The two latest review findings are addressed without production portal changes. The
-leaderboard test now requires at least two distinct ratings, exact API and DOM order,
-and a second fixture with lifetime experience but current-season placement below 20.
-A fresh disposable loopback run passed with ratings 1351/900 and mandatory visible
-`Калибровка 1/20`; opt-out and 390 px also passed. Unit tests repeated at 257 PASS /
-3 expected skips and typecheck passed. The three-key seed places synthetic counters
-before real settlement so projection cannot overwrite them. Its committed SHA still
-requires CI and a fresh executable run under the local disk guard.
-[Evidence](../evidence/portal-loopback-2026-11-10/leaderboard-strengthened-report.json)
-
-The RU decision rule now blocks on every applicable S1–S12/P1–P9 row, including S9,
-and requires owner-approved justification for N/A. The stale CI baseline was updated
-to `550d2827`. This is a documentation-policy fix only: no RU reboot was performed,
-S9 remains OPEN, the original findings remain 62/5/1 and the decision remains NO SHIP.
+The leaderboard test now requires at least two distinct ratings, exact API and DOM
+order, and a second fixture with lifetime experience but current-season placement
+below 20. The initial loopback run used ratings 1351/900; the newer clean-seed run
+above supersedes it for executable acceptance. The RU decision rule blocks on every
+applicable S1–S12/P1–P9 row, including S9, with owner-approved justification for N/A.
+No RU reboot was performed: S9 remains OPEN.
 
 ## Previous portal loopback checkpoint — 2026-11-10
 

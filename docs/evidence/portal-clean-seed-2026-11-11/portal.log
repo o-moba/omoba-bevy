@@ -1,0 +1,9 @@
+
+> omoba-player-portal@0.1.0 start
+> node scripts/start.mjs
+
+▲ Next.js 16.3.8
+- Local:         http://127.0.0.1:3010
+- Network:       http://127.0.0.1:3010
+✓ Ready in 0ms
+✓ Running next.config took 3ms

@@ -1,0 +1,49 @@
+{
+  "passed": true,
+  "entries": 2,
+  "ratings": [
+    {
+      "profile_id": "b58aa7734d204bb598d2181531a5a231703e6e2b53bb4f52b5d53f4fe4bb0a48",
+      "nickname": "Portal Ranger#6648",
+      "rating": 1031,
+      "rank": 1
+    },
+    {
+      "profile_id": "494aad76c50447d3aa85e67bafaeea998d7c7ee6738f42b795dd555f2426d21d",
+      "nickname": "Portal Rival#3226",
+      "rating": 985,
+      "rank": 2
+    }
+  ],
+  "me": {
+    "listed": true,
+    "rank": 1,
+    "ranked": {
+      "completed_matches": 22,
+      "ends_at_ms": 1802172836960,
+      "losses": 0,
+      "rated_matches": 22,
+      "season_id": 1,
+      "started_at_ms": 1794396836960,
+      "wins": 22
+    },
+    "rated_matches": 22,
+    "rating": 1031
+  },
+  "placement": {
+    "lifetime_rated_matches": 21,
+    "season_rated_matches": 1,
+    "text": "Калибровка 1/20"
+  },
+  "checks": [
+    "two or more entries with distinct ratings",
+    "API and DOM ordering, ranked own row",
+    "no MMR/raw codes",
+    "390px no horizontal scroll",
+    "settings opt-out hides and explains",
+    "mandatory current-season placement progress line"
+  ],
+  "limitations": [
+    "Loopback fixture database; not the RU production API."
+  ]
+}

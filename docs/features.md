@@ -12,7 +12,9 @@ before solo bot games. Lobby ceilings are sized for ~1000 players (configurable
 queue, 2048 endpoints, carrier-grade-NAT per-IP limits, `server_full`/`lobby_busy`
 instead of silence), the party lobby stops broadcasting on every heartbeat, party
 refusals and all lobby/prematch messages reach players as localized text, and the
-portal gains a leaderboard with an opt-out. See
+portal gains a leaderboard with an opt-out. In the prematch roster, the public
+`#NNNN` handle tag stays visible beside the kick action even when long nicknames
+with the same prefix are elided. See
 [match progression](match-progression.md#ranked-window-at-low-population-lr-35),
 [the plan](plans/ranked-launch-readiness-2026-11-05.md) and ADR-027.
 

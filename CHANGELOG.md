@@ -5,6 +5,23 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Keep Lobby roster identities distinguishable beside the kick action: the public
+  `#NNNN` tag is separate from the elided long nickname and cannot shrink away.
+  The RU Mobile 852×393 capture visually accepts visible `#1000`…`#1002`; QA state
+  retains exact tags through `#1004`, with the lower two outside the scroll
+  viewport. Pin native source/binary to `f8f68c3d` from Release 43010114221 and
+  archive 19 matching sources, 20 valid label geometries and a standard-library
+  verifier that passes normally and with `python3 -S`.
+
+- Close the clean-seed leaderboard review finding with accepted run 43012620207:
+  a fresh PostgreSQL 18-alpine service runs the current `seed-local-portal`
+  executable and strengthened browser test without manual SQL. The retained pack
+  independently proves 257 unit PASS / 0 FAIL / 3 expected skips, typecheck,
+  production RU build, ordered ratings 1031/985 and visible `Калибровка 1/20`, plus
+  own rank, opt-out and 390 px overflow. Rejected earlier workflow attempts and
+  their causes remain documented. This synthetic loopback result does not close
+  physical-device, WAN, RU-host, recovery or shipment gates.
+
 - Accept exact-source RU Mobile UI-2/UI-3 offscreen captures at 852×393.
   Compatibility passes on `19c2616d`; its rejected widest-name Draft/Lobby
   captures remain archived. On `5f314981`, stable nameplate width and fitted,

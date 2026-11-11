@@ -4,7 +4,7 @@ Dump of the 2026-11-05 ranked matchmaking review so nothing is lost between sess
 
 Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), portal `feat/ranked-matchmaking-readiness` → o-moba/omoba-web#33. Disposable current-schema PostgreSQL: Docker `omoba-mm-seasons-pg` on 127.0.0.1:55582 (`omoba_test`, career13, portal11; owned fixture only). Legacy prototype fixture `omoba-mm-test-pg` on55581 is retained separately and is not clean-installation proof. Cargo cache B: `/Users/wotori/git/ekza/omoba-bevy/target-b`.
 
-## Актуальный TODO до RU-релиза — 2026-11-10
+## Актуальный TODO до RU-релиза — 2026-11-11
 
 **Решение по выпуску: NO SHIP.** По исходным находкам 62 закрыты, #1, #2, #12,
 #20 и #50 частично закрыты, #13 открыт. По критику C1 и C5–C9 закрыты на уровне
@@ -41,12 +41,12 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
   один result ID, стандартная карта и активные участники. Последующий docs SHA
   обязан получить свои runs; это не закрывает RU-host и внешние release gates.
 - Портал [PR #33](https://github.com/o-moba/omoba-web/pull/33),
-  `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`. Записаны typecheck, 257 успешных
-  unit-тестов и 3 ожидаемых пропуска. Усиленный leaderboard loopback PASS требует
-  две записи 1351/900, полный ordering, opt-out, 390 px и `Калибровка 1/20`.
-  RU/global builds и 13 Ranked browser checks относятся к неизменному production-коду.
-  В GitHub у портала нет checks. Оба PR открыты в `dev` и ожидают человеческого
-  ревью. [Отчёт портала](../evidence/portal-loopback-2026-11-10/README.md)
+  `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`. Строгий clean-seed run 43012620207
+  на чистой PostgreSQL 18-alpine запустил текущий executable и browser test без
+  ручного SQL: 257 unit PASS / 0 FAIL / 3 expected skips, typecheck и production
+  RU build PASS, две записи 1031/985, ordering, opt-out, 390 px и
+  `Калибровка 1/20`. Оба PR открыты в `dev` и ожидают человеческого ревью.
+  [Clean-seed evidence](../evidence/portal-clean-seed-2026-11-11/README.md)
 - Docker ARM64 loopback на 4 CPU / 4 ГиБ: 600 клиентов / 60 арен прошли 300 с,
   700 формально прошли input gate с деградацией snapshots, 800 не прошли input gate;
   в сохранённых worker logs восстановлены 707 signed sequence gaps и 0 restarts.
@@ -70,14 +70,21 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 ### Замечания по текущему срезу
 
+- [x] **Lobby — участники с одинаковым длинным префиксом различимы рядом с
+  «Исключить».** Публичный `#NNNN` вынесен в отдельный no-wrap label. На RU Mobile
+  852×393 визуально PASS: `#1001` и `#1002` читаются рядом с kick, лидер сохраняет
+  `#1000`; QA state содержит точное множество `#1000`…`#1004`, все 20 label
+  geometries в пределах nodes. Два нижних тега находятся за пределами scroll
+  viewport и не выдаются за одновременно видимые на PNG. Binary/source `f8f68c3d`
+  из Release 43010114221, helper HEAD `95d38e07`; 19 native source hashes совпадают.
+  [Evidence](../evidence/lobby-roster-identity-2026-11-11/README.md)
 - [x] **Портал — ложный PASS leaderboard устранён.** Тест требует минимум две
-  записи с разным рейтингом, проверяет полный API tie-break и порядок DOM. Второй
-  fixture обязан иметь lifetime 20 и сезонный счётчик ниже 20; текст калибровки
-  обязателен и сохраняется в отчёте. Свежий loopback PASS: две записи 1351/900,
-  `Калибровка 1/20`, opt-out и 390 px. Повторены 257 unit PASS / 3 expected skips
-  и typecheck. Обновлённый seed задаёт counters до settlement, исключая гонку
-  projection; его итоговый SHA ещё должен пройти CI и свежий executable запуск.
-  [Evidence](../evidence/portal-loopback-2026-11-10/leaderboard-strengthened-report.json)
+  записи с разным рейтингом, проверяет полный API tie-break и порядок DOM. Строгий
+  run 43012620207 на чистой БД выполнил текущий seed executable и browser test без
+  ручного SQL: две записи 1031/985, `Калибровка 1/20`, opt-out и 390 px; 257 unit
+  PASS / 0 FAIL / 3 expected skips, typecheck и production RU build PASS. Ранние
+  неполные workflow runs отклонены с записанными причинами.
+  [Evidence](../evidence/portal-clean-seed-2026-11-11/README.md)
 - [x] **Комплект выкладки — правило S9 согласовано.** FAIL любой строки S1–S12
   или P1–P9 блокирует анонс. Для применимого S9 требуется PASS и `seconds_to_ready`;
   N/A нуждается в причине и одобрении владельца. Снимок CI обновлён до зелёного

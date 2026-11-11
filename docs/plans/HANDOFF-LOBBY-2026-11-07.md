@@ -1,8 +1,38 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
+## Два замечания ревью — 2026-11-11
+
+Leaderboard закрыт строгим [clean-seed run 43012620207](https://github.com/o-moba/omoba-bevy/actions/runs/43012620207):
+чистый PostgreSQL 18-alpine, текущий executable `seed-local-portal`, настоящие RU
+Account API и production Next, затем усиленный Playwright без ручного SQL. Пересчёт
+артефактов: 257 unit PASS / 0 FAIL / 3 expected skips, typecheck и RU build PASS,
+две записи 1031/985 в правильном порядке, `Калибровка 1/20`, opt-out и 390 px PASS.
+Game acceptance SHA `1b61b9bd`, portal `84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`.
+[Постоянный evidence](../evidence/portal-clean-seed-2026-11-11/README.md). Три ранних
+workflow run отклонены по записанным причинам; зелёный browser job сам по себе не
+принимался как полный gate.
+
+Lobby закрыт [exact-source evidence](../evidence/lobby-roster-identity-2026-11-11/README.md).
+Публичный `#NNNN` вынесен из обрезаемого ника в отдельный no-wrap label рядом с kick.
+На RU Mobile 852×393 визуально видны `#1000`, `#1001`, `#1002`; последние два —
+непосредственно рядом с «Исключить», без overlap/clipping. QA state хранит точное
+множество `#1000`…`#1004`; два нижних ряда вне scroll viewport и не выдаются за
+одновременно видимые. Binary/source `f8f68c3d` из полностью успешного Release
+43010114221; helper HEAD `95d38e07`. 19 архивных native source hashes совпадают с
+capture, verifier дважды PASS: 24 artifacts и 20 label geometries.
+
+Оба замечания закрыты evidence. Следующий пакет удаляет временный review workflow;
+итоговый SHA обязан получить собственные CI 7/7 и Release 4/4. Зелёные родительские
+runs не переносить.
+
+Оба PR по-прежнему требуют независимого человеческого ревью. Self-review и эти
+доказательства не являются approval. Исходные 68 остаются 62 done / 5 partial / 1
+open, **RU NO SHIP**: изолированный RU-host/uplink, WAN/fault, C2/C4 off-host
+recovery, physical C3, S1–S12/P1–P9 и owner-controlled rollout остаются открыты.
+
 ## Актуальный список до выпуска — 2026-11-10
 
-[TODO по итогам ревью](TODO-LOBBY-2026-11-05.md#актуальный-todo-до-ru-релиза--2026-11-10)
+[TODO по итогам ревью](TODO-LOBBY-2026-11-05.md#актуальный-todo-до-ru-релиза--2026-11-11)
 содержит критерии закрытия #13 и остальных условий выпуска. Замечания к leaderboard
 и правилу S9 исправлены: свежий loopback PASS доказывает две разные записи 1351/900,
 порядок API/DOM и обязательную `Калибровка 1/20`; 257 unit / 3 skips и typecheck

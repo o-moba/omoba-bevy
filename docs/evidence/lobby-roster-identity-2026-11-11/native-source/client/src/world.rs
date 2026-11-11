@@ -1,0 +1,840 @@
+use bevy::camera::Hdr;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::ecs::system::SystemParam;
+use bevy::gltf::{Gltf, GltfLoaderSettings};
+use bevy::light::CascadeShadowConfigBuilder;
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
+use bevy::prelude::*;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal};
+use bevy::world_serialization::WorldAssetRoot;
+#[cfg(not(target_os = "android"))]
+use ekza_bevy_sdk::bevy::EkzaModelCatalog;
+use std::collections::HashMap;
+
+use crate::camera::{CAMERA2D_BASE_SCALE, CameraState, MainCamera, locked_camera_offset};
+use crate::combat::CombatStats;
+use crate::maps::MapLayout;
+use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
+use crate::net::{NetworkAvatar, NetworkCharacterChoice, NetworkSpriteCharacter};
+use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
+use crate::sprite::{PlayerVisualMode, in_models3d};
+use crate::team::{CharacterChoice, Team, TeamSelection};
+
+pub const DEFAULT_LIGHT_ILLUMINANCE: f32 = 11_000.0;
+pub const MIN_LIGHT_ILLUMINANCE: f32 = 4_000.0;
+pub const MAX_LIGHT_ILLUMINANCE: f32 = 120_000.0;
+pub const DEFAULT_AMBIENT_BRIGHTNESS: f32 = 650.0;
+pub const MIN_AMBIENT_BRIGHTNESS: f32 = 0.0;
+pub const MAX_AMBIENT_BRIGHTNESS: f32 = 3_500.0;
+pub const DEFAULT_LIGHT_PITCH_DEG: f32 = 55.0;
+pub const MIN_LIGHT_PITCH_DEG: f32 = 10.0;
+pub const MAX_LIGHT_PITCH_DEG: f32 = 85.0;
+pub const DEFAULT_LIGHT_YAW_DEG: f32 = -45.0;
+pub const MIN_LIGHT_YAW_DEG: f32 = -180.0;
+pub const MAX_LIGHT_YAW_DEG: f32 = 180.0;
+
+#[derive(Resource, Clone)]
+pub struct PlayerAssets {
+    pub scene: Option<Handle<WorldAsset>>,
+    pub gltf: Option<Handle<Gltf>>,
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<StandardMaterial>,
+}
+
+#[cfg(not(target_os = "android"))]
+pub type PlayerModelCatalog = EkzaModelCatalog;
+
+// The shipped game uses its packaged roster. Android does not need the SDK's
+// unused remote-model loader (and its different Activity/HTTP dependencies).
+#[cfg(target_os = "android")]
+#[derive(Resource, Default, Clone)]
+pub struct PlayerModelCatalog;
+
+#[cfg(target_os = "android")]
+impl PlayerModelCatalog {
+    pub fn handles_for(
+        &self,
+        _: ekza_bevy_sdk::EkzaCharacter,
+    ) -> (Option<Handle<WorldAsset>>, Option<Handle<Gltf>>) {
+        (None, None)
+    }
+
+    pub fn label_for(&self, character: ekza_bevy_sdk::EkzaCharacter) -> String {
+        character.as_str().to_owned()
+    }
+}
+
+/// The Ekza SDK's character for the shared wire choice. The shared enum mirrors
+/// the SDK's variants and wire ids; the orphan rule rules out a `From` impl here.
+pub fn sdk_character(choice: CharacterChoice) -> ekza_bevy_sdk::EkzaCharacter {
+    use ekza_bevy_sdk::EkzaCharacter;
+    match choice {
+        CharacterChoice::Ipfs => EkzaCharacter::Ipfs,
+        CharacterChoice::Toka => EkzaCharacter::Toka,
+        CharacterChoice::Wang => EkzaCharacter::Wang,
+        CharacterChoice::Cube => EkzaCharacter::Cube,
+        CharacterChoice::Paco => EkzaCharacter::Paco,
+    }
+}
+
+pub fn model_assets_for_choice(
+    catalog: &PlayerModelCatalog,
+    choice: CharacterChoice,
+) -> (Option<Handle<WorldAsset>>, Option<Handle<Gltf>>) {
+    catalog.handles_for(sdk_character(choice))
+}
+
+/// Lazily-created asset handles for roster avatars (slug -> scene + gltf).
+/// Avatars load on first use (local selection or a remote player wearing them)
+/// instead of preloading all 15 GLBs at startup.
+#[derive(Resource, Default)]
+pub struct AvatarAssetCache {
+    handles: HashMap<String, (Handle<WorldAsset>, Handle<Gltf>)>,
+}
+
+impl AvatarAssetCache {
+    pub fn ensure_loaded(
+        &mut self,
+        asset_server: &AssetServer,
+        slug: &str,
+    ) -> (Handle<WorldAsset>, Handle<Gltf>) {
+        self.ensure_loaded_from(asset_server, slug, format!("avatars/{slug}.glb"))
+    }
+
+    /// `path` is the model's asset path; store avatars live under `ekza://`.
+    fn ensure_loaded_from(
+        &mut self,
+        asset_server: &AssetServer,
+        slug: &str,
+        path: String,
+    ) -> (Handle<WorldAsset>, Handle<Gltf>) {
+        self.handles
+            .entry(slug.to_owned())
+            .or_insert_with(|| {
+                info!("Loading roster avatar model '{slug}'");
+                (
+                    asset_server
+                        .load_builder()
+                        .with_settings(|settings: &mut GltfLoaderSettings| {
+                            settings.include_source = true
+                        })
+                        .load(format!("{path}#Scene0")),
+                    asset_server
+                        .load_builder()
+                        .with_settings(|settings: &mut GltfLoaderSettings| {
+                            settings.include_source = true
+                        })
+                        .load(path),
+                )
+            })
+            .clone()
+    }
+
+    /// Every roster avatar requested so far (slug + gltf handle).
+    pub fn requested(&self) -> impl Iterator<Item = (&str, &Handle<Gltf>)> {
+        self.handles
+            .iter()
+            .map(|(slug, (_scene, gltf))| (slug.as_str(), gltf))
+    }
+}
+
+/// Resolves the model for a player from either the roster avatar slug
+/// (primary demo path) or the legacy SDK character catalog (fallback).
+/// Unknown slugs silently fall back to the legacy character model.
+#[derive(SystemParam)]
+pub struct PlayerModelResolver<'w> {
+    catalog: Res<'w, PlayerModelCatalog>,
+    avatars: ResMut<'w, AvatarAssetCache>,
+    asset_server: Res<'w, AssetServer>,
+}
+
+impl PlayerModelResolver<'_> {
+    pub fn resolve(
+        &mut self,
+        character: CharacterChoice,
+        avatar: Option<&str>,
+    ) -> (Option<Handle<WorldAsset>>, Option<Handle<Gltf>>) {
+        use omoba_passport::store::{self, ModelState};
+        if let Some(slug) = avatar
+            && omoba_passport::avatars::avatar_definition(slug).is_none()
+            && ekza_bevy_sdk::passport::is_protected_slug(slug)
+        {
+            // Someone wears a store avatar published after our last catalogue
+            // read. Refresh in the background; `take_changed` re-resolves.
+            store::request_refresh();
+        }
+        if let Some(slug) = avatar
+            && omoba_passport::avatars::avatar_definition(slug).is_some()
+        {
+            if store::knows(slug) {
+                // Verified install on first use, off the main thread. Until it
+                // lands (or if it cannot), the legacy model stands in.
+                if store::model_state(slug) != ModelState::Ready {
+                    return self.catalog.handles_for(sdk_character(character));
+                }
+                let (scene, gltf) = self.avatars.ensure_loaded_from(
+                    &self.asset_server,
+                    slug,
+                    store::model_asset_path(slug),
+                );
+                return (Some(scene), Some(gltf));
+            }
+            if let Some(protected) = omoba_passport::avatars::avatar_definition(slug)
+                .and_then(|entry| entry.passport.as_ref())
+            {
+                let path = omoba_passport::assets::client_asset_root()
+                    .join("avatars")
+                    .join(format!("{slug}.glb"));
+                if let Err(error) = omoba_passport::verify_local(protected, &path) {
+                    warn!("Purchased avatar integrity check failed: {error}");
+                    return self.catalog.handles_for(sdk_character(character));
+                }
+            }
+            let (scene, gltf) = self.avatars.ensure_loaded(&self.asset_server, slug);
+            return (Some(scene), Some(gltf));
+        }
+        self.catalog.handles_for(sdk_character(character))
+    }
+}
+
+pub struct SetupPlugin;
+
+impl Plugin for SetupPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Startup,
+            setup_scene.after(crate::persistence::load_persistent_client_settings),
+        )
+        .add_systems(
+            Startup,
+            setup_main_camera.after(crate::persistence::load_persistent_client_settings),
+        )
+        .init_resource::<LightingSettings>()
+        .init_resource::<AvatarAssetCache>()
+        .add_systems(
+            Update,
+            (
+                sync_selected_player_assets,
+                force_vrm_models_double_sided,
+                apply_lighting_settings_system,
+            )
+                .run_if(in_models3d()),
+        );
+        register_local_player_spawn(app);
+    }
+}
+
+// Snapshot application can create the admitted local hero with deferred Commands.
+// Flush those commands before checking for a fallback hero, otherwise both paths
+// spawn a root and next-frame duplicate cleanup races scene/animation attachment.
+pub(crate) fn register_local_player_spawn(app: &mut App) {
+    app.add_systems(
+        Update,
+        spawn_local_player_on_team.after(crate::net::ClientNetPipeline::ApplySnapshot),
+    );
+}
+
+#[derive(Resource, Clone, Copy)]
+pub struct LightingSettings {
+    pub illuminance: f32,
+    pub ambient_brightness: f32,
+    pub light_pitch_deg: f32,
+    pub light_yaw_deg: f32,
+}
+
+impl Default for LightingSettings {
+    fn default() -> Self {
+        Self {
+            illuminance: DEFAULT_LIGHT_ILLUMINANCE,
+            ambient_brightness: DEFAULT_AMBIENT_BRIGHTNESS,
+            light_pitch_deg: DEFAULT_LIGHT_PITCH_DEG,
+            light_yaw_deg: DEFAULT_LIGHT_YAW_DEG,
+        }
+    }
+}
+
+#[derive(Component)]
+struct SceneDirectionalLight;
+
+fn setup_scene(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    lighting_settings: Res<LightingSettings>,
+    visual_mode: Res<PlayerVisualMode>,
+) {
+    let is_2d = *visual_mode == PlayerVisualMode::Sprite2d;
+    let player_mesh_handle: Handle<Mesh> = if is_2d {
+        Handle::default()
+    } else {
+        meshes.add(Mesh::from(Cuboid::new(
+            PLAYER_SIZE,
+            PLAYER_SIZE,
+            PLAYER_SIZE,
+        )))
+    };
+    let player_material_handle: Handle<StandardMaterial> = if is_2d {
+        Handle::default()
+    } else {
+        materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)))
+    };
+    // Release candidates use the shipped roster only. Legacy SDK choices keep
+    // the primitive stand-in; constructing its remote catalog starts downloads
+    // even when the player picked a completely offline roster avatar.
+    let catalog = PlayerModelCatalog::default();
+    let (initial_scene, initial_gltf) = model_assets_for_choice(&catalog, CharacterChoice::Ipfs);
+
+    commands.insert_resource(catalog.clone());
+    commands.insert_resource(PlayerAssets {
+        scene: initial_scene,
+        gltf: initial_gltf,
+        mesh: player_mesh_handle.clone(),
+        material: player_material_handle.clone(),
+    });
+
+    if is_2d {
+        return;
+    }
+
+    let pitch_rad = lighting_settings
+        .light_pitch_deg
+        .clamp(MIN_LIGHT_PITCH_DEG, MAX_LIGHT_PITCH_DEG)
+        .to_radians();
+    let yaw_rad = lighting_settings
+        .light_yaw_deg
+        .clamp(MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG)
+        .to_radians();
+    let light_transform =
+        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, yaw_rad, -pitch_rad, 0.0));
+    commands.spawn((
+        DirectionalLight {
+            // Near-neutral daylight preserves the cool slate floor and the
+            // distinction between warm spell cores and cyan electricity.
+            color: Color::srgb(1.0, 0.98, 0.94),
+            illuminance: lighting_settings
+                .illuminance
+                .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE),
+            // Bevy's Android example disables shadows for affected mobile drivers.
+            shadow_maps_enabled: !cfg!(target_os = "android"),
+            ..default()
+        },
+        light_transform,
+        CascadeShadowConfigBuilder {
+            first_cascade_far_bound: 35.0,
+            maximum_distance: 360.0,
+            ..default()
+        }
+        .build(),
+        SceneDirectionalLight,
+        Name::new("Verdant / warm afternoon sun"),
+    ));
+    commands.insert_resource(GlobalAmbientLight {
+        color: Color::srgb(0.62, 0.80, 0.88),
+        brightness: lighting_settings
+            .ambient_brightness
+            .clamp(MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS),
+        ..default()
+    });
+}
+
+fn setup_main_camera(
+    mut commands: Commands,
+    mut cam_state: ResMut<CameraState>,
+    visual_mode: Res<PlayerVisualMode>,
+) {
+    if *visual_mode == PlayerVisualMode::Sprite2d {
+        cam_state.pitch = 0.0;
+        cam_state.yaw = 0.0;
+        commands.spawn((
+            Camera2d,
+            #[cfg(target_os = "android")]
+            Msaa::Off,
+            Projection::Orthographic(OrthographicProjection {
+                scale: CAMERA2D_BASE_SCALE * cam_state.zoom,
+                ..OrthographicProjection::default_2d()
+            }),
+            Transform::default(),
+            MainCamera,
+            Name::new("MainCamera2d"),
+        ));
+        return;
+    }
+
+    let map_center = Vec3::new(0.0, PLAYER_SIZE * 0.5, 0.0);
+    let initial_cam_pos = map_center + locked_camera_offset(cam_state.zoom);
+    let initial_cam_transform =
+        Transform::from_translation(initial_cam_pos).looking_at(map_center, Vec3::Y);
+    let (yaw, pitch, _) = initial_cam_transform.rotation.to_euler(EulerRot::YXZ);
+    cam_state.pitch = pitch;
+    cam_state.yaw = yaw;
+    commands.spawn((
+        Camera3d::default(),
+        // Conservative Android default from Bevy 0.18's mobile example.
+        #[cfg(target_os = "android")]
+        Msaa::Off,
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::srgb(0.12, 0.19, 0.20)),
+            ..default()
+        },
+        Hdr,
+        Tonemapping::TonyMcMapface,
+        ColorGrading {
+            global: ColorGradingGlobal {
+                post_saturation: 1.08,
+                ..default()
+            },
+            ..default()
+        },
+        // Only HDR skill cores/rims feed the glow. Broad LDR floor and field
+        // fills stay readable; increasing global exposure would wash them out.
+        Bloom {
+            intensity: 0.12,
+            low_frequency_boost: 0.10,
+            high_pass_frequency: 0.75,
+            prefilter: BloomPrefilter {
+                threshold: 1.0,
+                threshold_softness: 0.15,
+            },
+            composite_mode: BloomCompositeMode::Additive,
+            ..default()
+        },
+        DistanceFog {
+            color: Color::srgb(0.32, 0.46, 0.46),
+            falloff: FogFalloff::Linear {
+                start: 260.0,
+                end: 850.0,
+            },
+            ..default()
+        },
+        initial_cam_transform,
+        MainCamera,
+        Name::new("MainCamera3d"),
+    ));
+}
+
+fn apply_lighting_settings_system(
+    mode: Res<PlayerVisualMode>,
+    settings: Res<LightingSettings>,
+    mut ambient_light: ResMut<GlobalAmbientLight>,
+    mut light_query: Query<(&mut DirectionalLight, &mut Transform), With<SceneDirectionalLight>>,
+) {
+    if *mode != PlayerVisualMode::Models3d {
+        return;
+    }
+    if !settings.is_changed() {
+        return;
+    }
+
+    ambient_light.brightness = settings
+        .ambient_brightness
+        .clamp(MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS);
+
+    if let Ok((mut light, mut transform)) = light_query.single_mut() {
+        light.illuminance = settings
+            .illuminance
+            .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE);
+        let pitch_rad = settings
+            .light_pitch_deg
+            .clamp(MIN_LIGHT_PITCH_DEG, MAX_LIGHT_PITCH_DEG)
+            .to_radians();
+        let yaw_rad = settings
+            .light_yaw_deg
+            .clamp(MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG)
+            .to_radians();
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw_rad, -pitch_rad, 0.0);
+    }
+}
+
+fn sync_selected_player_assets(
+    team_selection: Res<TeamSelection>,
+    visual_mode: Res<PlayerVisualMode>,
+    mut models: PlayerModelResolver,
+    mut player_assets: ResMut<PlayerAssets>,
+) {
+    if *visual_mode != PlayerVisualMode::Models3d {
+        return;
+    }
+    let (scene, gltf) = models.resolve(team_selection.character, team_selection.avatar.as_deref());
+    let label = team_selection
+        .avatar
+        .as_deref()
+        .and_then(omoba_passport::avatars::avatar_definition)
+        .map(|avatar| avatar.display_name.clone())
+        .unwrap_or_else(|| {
+            models
+                .catalog
+                .label_for(sdk_character(team_selection.character))
+        });
+
+    let changed = player_assets.scene != scene || player_assets.gltf != gltf;
+    if changed {
+        player_assets.scene = scene;
+        player_assets.gltf = gltf;
+        info!("Selected player model: {label}");
+    }
+}
+
+fn spawn_local_player_on_team(
+    mut commands: Commands,
+    session: Res<crate::net::ClientSession>,
+    team_selection: Res<TeamSelection>,
+    player_assets: Res<PlayerAssets>,
+    map_layout: Res<MapLayout>,
+    existing_players: Query<Entity, With<Player>>,
+    mut cam_state: ResMut<CameraState>,
+    mut camera_query: Query<&mut Transform, With<MainCamera>>,
+    visual_mode: Res<PlayerVisualMode>,
+) {
+    // The opt-in draft owns its final spawn in the snapshot pipeline. This
+    // legacy fallback must not recreate a hero while Draft removes old models.
+    if session.joined_prematch() || team_selection.team.is_none() || !session.join_confirmed() {
+        return;
+    }
+    if existing_players.iter().next().is_some() {
+        return;
+    }
+    let team = team_selection.team.unwrap();
+    let character = team_selection.character;
+    let avatar = team_selection.avatar.clone();
+    let spawn = map_layout.team_spawn(team);
+
+    spawn_player_entity(
+        &mut commands,
+        &player_assets,
+        spawn,
+        team,
+        character,
+        avatar,
+        Some(team_selection.sprite_character.clone()),
+        *visual_mode,
+    );
+    if let Ok(mut camera_transform) = camera_query.single_mut() {
+        cam_state.locked = true;
+        if *visual_mode == PlayerVisualMode::Sprite2d {
+            let render = crate::world2d::simulation_xz_to_render_xy(spawn);
+            camera_transform.translation.x = render.x;
+            camera_transform.translation.y = render.y;
+        } else {
+            let zoom = cam_state.zoom;
+            camera_transform.translation = spawn + locked_camera_offset(zoom);
+            let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
+            *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
+        }
+    }
+}
+
+fn spawn_player_entity(
+    commands: &mut Commands,
+    assets: &PlayerAssets,
+    spawn: Vec3,
+    team: Team,
+    character: CharacterChoice,
+    avatar: Option<String>,
+    sprite_character: Option<String>,
+    visual_mode: PlayerVisualMode,
+) {
+    if visual_mode == PlayerVisualMode::Sprite2d {
+        commands.spawn((
+            Transform::from_translation(spawn),
+            Visibility::default(),
+            Player,
+            PlayerBody,
+            CombatStats::default(),
+            VerticalVelocity::default(),
+            team,
+            NetworkCharacterChoice(character),
+            NetworkAvatar(avatar),
+            NetworkSpriteCharacter(sprite_character),
+            Name::new(format!("Player-{}", team.as_str())),
+        ));
+        return;
+    }
+    if let Some(glb_scene) = assets.scene.clone() {
+        let mut entity_commands = commands.spawn((
+            WorldAssetRoot(glb_scene),
+            Transform {
+                translation: spawn,
+                rotation: Quat::IDENTITY,
+                scale: Vec3::splat(1.0),
+            },
+            GlobalTransform::default(),
+            Visibility::default(),
+            Player,
+            PlayerBody,
+            CombatStats::default(),
+            VerticalVelocity::default(),
+            team,
+            NetworkCharacterChoice(character),
+            NetworkAvatar(avatar.clone()),
+            NormalizeModelScale::for_player_model(),
+            Name::new(format!("Player-{}", team.as_str())),
+        ));
+        if let Some(gltf) = assets.gltf.clone() {
+            entity_commands.insert(ModelScaleSource {
+                gltf,
+                key: model_scale_key(character, avatar.as_deref()),
+            });
+        }
+    } else {
+        let player_transform = Transform::from_translation(spawn);
+        commands.spawn((
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(assets.material.clone()),
+            player_transform,
+            Player,
+            PlayerBody,
+            CombatStats::default(),
+            VerticalVelocity::default(),
+            team,
+            NetworkCharacterChoice(character),
+            NetworkAvatar(avatar),
+            Name::new(format!("Player-{}", team.as_str())),
+        ));
+    }
+}
+
+/// VRM avatars (staged as glTF) often use single-sided materials with winding that
+/// makes the body cull its front faces when loaded by the standard glTF loader — the
+/// model looks inside-out / mostly invisible. Force their materials double-sided so
+/// the whole mesh renders. Scoped to VRM-derived characters (the legacy Paco model
+/// and every roster avatar, which are all VRM-staged GLBs) to leave other models
+/// untouched. Idempotent: each material asset is patched once.
+pub(crate) fn force_vrm_models_double_sided(
+    roots: Query<
+        (Entity, &NetworkCharacterChoice, Option<&NetworkAvatar>),
+        With<NormalizeModelScale>,
+    >,
+    children_query: Query<&Children>,
+    material_handles: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut patched: Local<std::collections::HashSet<bevy::asset::AssetId<StandardMaterial>>>,
+) {
+    let vrm_roots = roots
+        .iter()
+        .filter(|(_, choice, avatar)| {
+            let wears_roster_avatar = avatar.is_some_and(|avatar| avatar.0.is_some());
+            choice.0 == CharacterChoice::Paco || wears_roster_avatar
+        })
+        .map(|(root, _, _)| root);
+    for root in vrm_roots {
+        for descendant in children_query.iter_descendants(root) {
+            let Ok(handle) = material_handles.get(descendant) else {
+                continue;
+            };
+            let id = handle.0.id();
+            if patched.contains(&id) {
+                continue;
+            }
+            if let Some(mut material) = materials.get_mut(&handle.0) {
+                material.double_sided = true;
+                material.cull_mode = None;
+                patched.insert(id);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sdk_character_keeps_every_variant_and_wire_id() {
+        assert_eq!(
+            CharacterChoice::ALL.len(),
+            ekza_bevy_sdk::EkzaCharacter::ALL.len()
+        );
+        for (choice, sdk) in CharacterChoice::ALL
+            .into_iter()
+            .zip(ekza_bevy_sdk::EkzaCharacter::ALL)
+        {
+            assert_eq!(sdk_character(choice), sdk);
+            assert_eq!(sdk.slug(), choice.slug());
+            assert_eq!(sdk.as_str(), choice.as_str());
+            assert_eq!(
+                serde_json::to_string(&sdk).unwrap(),
+                serde_json::to_string(&choice).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn prematch_admission_cannot_spawn_through_the_legacy_fallback() {
+        let mut session = crate::net::ClientSession::admitted_for_test();
+        session.set_joined_prematch_for_test(true);
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Models3d)
+            .insert_resource(session)
+            .insert_resource(TeamSelection {
+                team: Some(Team::Green),
+                ..default()
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<LightingSettings>()
+            .init_resource::<CameraState>()
+            .init_resource::<MapLayout>()
+            .add_systems(Startup, setup_scene)
+            .add_systems(Update, spawn_local_player_on_team);
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Player>().iter(app.world()).count(),
+            0
+        );
+        // Preserve the deliberately negotiated legacy/offline fallback.
+        app.world_mut()
+            .resource_mut::<crate::net::ClientSession>()
+            .set_joined_prematch_for_test(false);
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Player>().iter(app.world()).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn removed_avatar_request_falls_back_without_loading_the_disputed_model() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_resource::<AvatarAssetCache>()
+            .insert_resource(PlayerModelCatalog::default())
+            .add_systems(Update, |mut resolver: PlayerModelResolver| {
+                assert_eq!(
+                    resolver.resolve(CharacterChoice::Cube, Some("el-bueno")),
+                    (None, None)
+                );
+            });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<AvatarAssetCache>()
+                .handles
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn models3d_scene_bootstraps_offline_with_primitive_legacy_fallbacks() {
+        // No AssetServer or SDK transport exists: scene setup must remain offline.
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Models3d)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<LightingSettings>()
+            .add_systems(Startup, setup_scene);
+        app.update();
+        let catalog = app.world().resource::<PlayerModelCatalog>();
+        for choice in [
+            CharacterChoice::Cube,
+            CharacterChoice::Ipfs,
+            CharacterChoice::Toka,
+            CharacterChoice::Wang,
+        ] {
+            assert_eq!(catalog.handles_for(sdk_character(choice)), (None, None));
+        }
+        let assets = app.world().resource::<PlayerAssets>();
+        assert!(assets.scene.is_none());
+        assert!(assets.gltf.is_none());
+        assert!(
+            app.world()
+                .resource::<Assets<Mesh>>()
+                .contains(&assets.mesh)
+        );
+    }
+
+    fn camera_app(mode: PlayerVisualMode) -> App {
+        let mut app = App::new();
+        app.insert_resource(mode)
+            .init_resource::<CameraState>()
+            .add_systems(Startup, setup_main_camera);
+        app.update();
+        app
+    }
+
+    #[test]
+    fn sprite2d_startup_has_exactly_one_orthographic_camera_and_no_3d_scene() {
+        let mut app = camera_app(PlayerVisualMode::Sprite2d);
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, Or<(With<Hdr>, With<Bloom>, With<ColorGrading>)>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera2d>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera3d>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&DirectionalLight>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut().query::<&Mesh3d>().iter(app.world()).count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&WorldAssetRoot>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        let projection = app
+            .world_mut()
+            .query::<(&MainCamera, &Projection)>()
+            .single(app.world())
+            .unwrap()
+            .1;
+        assert!(matches!(projection, Projection::Orthographic(_)));
+    }
+
+    #[test]
+    fn models3d_startup_is_mutually_exclusive() {
+        let mut app = camera_app(PlayerVisualMode::Models3d);
+        let (bloom, tonemapping) = app
+            .world_mut()
+            .query_filtered::<(&Bloom, &Tonemapping), (With<MainCamera>, With<Hdr>)>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(*tonemapping, Tonemapping::TonyMcMapface);
+        assert!(bloom.prefilter.threshold >= 1.0);
+        assert!(bloom.intensity > 0.0 && bloom.intensity <= 0.15);
+        assert!(bloom.low_frequency_boost <= 0.15);
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera3d>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera2d>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        let projection = app
+            .world_mut()
+            .query::<(&MainCamera, &Projection)>()
+            .single(app.world())
+            .unwrap()
+            .1;
+        assert!(matches!(projection, Projection::Perspective(_)));
+    }
+}
