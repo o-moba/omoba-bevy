@@ -65,7 +65,7 @@ jobs:
           cache-dependency-path: portal/package-lock.json
       - name: Build the current Account API and seed executable
         working-directory: game
-        run: cargo build --locked -p omoba-account-api --example seed-local-portal
+        run: cargo build --locked -p omoba-account-api --bin omoba-account-api --example seed-local-portal
       - name: Install portal dependencies
         working-directory: portal
         run: npm ci
