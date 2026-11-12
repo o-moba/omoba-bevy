@@ -33,6 +33,16 @@ def compact_load(value):
     return {key: item for key, item in value.items() if key != "workers"}
 
 
+def historical_load(value):
+    """Ignore the additive worker preference introduced after this archive."""
+    result = dict(value)
+    result["workers"] = [
+        {key: item for key, item in worker.items() if key != "preference"}
+        for worker in value["workers"]
+    ]
+    return result
+
+
 def resource_summary(rows):
     result = {"samples": len(rows), "observed_seconds": rows[-1]["at"] - rows[0]["at"]}
     for role in ("server", "generator"):
@@ -99,7 +109,7 @@ with tempfile.TemporaryDirectory(prefix="omoba-linux-capacity-verify-") as tempo
         assert compact_load(measured) == expected["server_load"]
         assert resource_summary(report["resources"]) == expected["resources"]
         if expected["status"] == "PASS":
-            assert measured == report["server_load"]
+            assert historical_load(measured) == report["server_load"]
             assert compact_load(measured) == wrapper["server_load"]
             assert report["input"]["all_peers_within_2_5_percent"] is True
             assert report["durable_rosters"]["human_seats"] == clients

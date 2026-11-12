@@ -1,1 +1,0 @@
-PASS: clippy-driver --test --emit=metadata -Wclippy::all -Dwarnings, with exact workspace-specific allow levels from Cargo.toml. Earlier run omitted those existing levels and was rejected; no unrelated production lint was changed.

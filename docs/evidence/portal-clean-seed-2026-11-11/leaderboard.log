@@ -1,5 +1,0 @@
-
-> omoba-player-portal@0.1.0 test:leaderboard
-> node tests/leaderboard.e2e.mjs
-
-PASS leaderboard ordering, opt-out and mandatory seasonal progress {"entries":2,"placement":"Калибровка 1/20"}

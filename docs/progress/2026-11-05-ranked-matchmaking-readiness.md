@@ -6,6 +6,42 @@ players. Review method and the full list of findings: [the plan](../plans/ranked
 (eight reviewers, two-lens verification, a completeness critic; 68 confirmed
 findings). Decision record: ADR-027.
 
+## Evidence externalization and Git-size guard — 2026-11-12
+
+The complete 1,321-file evidence snapshot at source HEAD
+`dad1e4f68f7301fdfd7001dc0705abfc75a87605` is preserved as a **private draft
+evidence asset**, not a game release:
+[`omoba-ranked-evidence-dad1e4f6.tar.gz`](https://github.com/o-moba/omoba-bevy-archive/releases/tag/untagged-1cb018532e3fa86c9d6c).
+The archive is 59,321,682 bytes with SHA-256
+`5f163c6d8bb3acc97f13cbe028116a1881950017cba790896137b70d86c5cea8`.
+The downloaded archive matched both values, and the retained
+[restore helper](../evidence/restore.py) independently downloaded and verified it.
+
+A total of 1,059 bulky payload files are removed from the main Git index but remain
+in the local working tree and external archive. The 265 retained evidence files are
+concise Markdown conclusions, 18 recomputing verifiers, manifests and JSON summaries
+within explicit size limits. [The archive manifest and policy](../evidence/README.md)
+describe restoration and prohibit forcing restored payloads back into Git. Restore
+completed with 1,059 payloads and skipped tracked documents; all 18 verifiers pass
+normally and with `python3 -S` (36/36), and all 4 new policy tests pass. Evidence
+additions in the staged PR diff fall by 173,455 lines, about 91%. The historical
+Linux verifier now ignores only the newer additive worker `preference` field when
+recomputing its old report; historical measurements are unchanged.
+
+The complete scripts suite was also run with the project interpreter
+`/opt/homebrew/bin/python3.13`: 697 tests, **one failure and 8 skips**, not green.
+The remaining failure is `test_sync_ui.UiAssetsTest.test_installed_assets_match_the_manifest_and_the_budget`:
+the installed manifest differs from the adjacent local UI handoff. No asset sync was
+run and no unrelated code was changed. No baseline was run, so the failure is not
+formally classified as pre-existing. The earlier managed-Python attempt additionally
+could not execute temporary ffmpeg/PostgreSQL/SFTP helpers because its interpreter
+path contains spaces; those 13 errors disappear with the project interpreter.
+
+This migration is **staged locally only**: no commit or push has updated PR #148.
+Original findings remain 62 done / 5 partial / 1 open and RU remains **NO SHIP**.
+Independent review, isolated RU capacity/uplink, WAN/fault/recovery, physical
+devices and exact-package acceptance remain open.
+
 ## Lobby identity and clean-seed review follow-up — 2026-11-11
 
 The Lobby roster now keeps the existing public `nickname#NNNN` tag in a separate

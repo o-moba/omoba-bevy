@@ -5,6 +5,19 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Externalize bulky Ranked evidence without deleting the local proof: a private
+  draft asset in `o-moba/omoba-bevy-archive` preserves all 1,321 evidence files
+  from `dad1e4f6` (59,321,682 bytes; SHA-256
+  `5f163c6d8bb3acc97f13cbe028116a1881950017cba790896137b70d86c5cea8`).
+  Remove 1,059 payloads from the Git index while retaining 265 concise reports,
+  verifiers, manifests and small summaries. Add a hash-checked restore helper and
+  an index policy with 4 passing tests; all 18 retained verifiers pass in normal
+  and `python3 -S` modes (36/36), and tracked evidence additions fall by about
+  91%. With project Python 3.13, the 697-test scripts suite still has one local
+  UI-handoff manifest mismatch and 8 skips; no baseline was run, so this is not
+  recorded as a pre-existing failure or a green full suite. The migration is
+  staged locally and does not change RU NO SHIP or any external release gate.
+
 - Confirm final continuation candidate `a7cd574b` on its own workflows: CI
   43016841080 passes all seven jobs and Release 43016841500 passes macOS, Windows,
   Linux and Android. Keep independent human review, isolated RU capacity/uplink,

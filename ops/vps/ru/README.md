@@ -760,10 +760,12 @@ four-arena receive gate and is not a multi-arena 20 Hz capacity oracle.
    [data.md](../../../docs/architecture/data.md)). `ru_host.py bootstrap --apply`
    and `ship` remain separate reviewed/owner-controlled deployment actions.
 5. Remove every owned process, disposable database and role, and verify the
-   ordinary services are still active. Keep the selected reports, summaries,
-   worker metric logs, source/binary hashes and a recomputing verifier in
-   `docs/evidence/`; do not archive private keys, DSNs or raw identity-rich bot
-   logs. The exact dev fixture and cleanup record are in the evidence packet above.
+   ordinary services are still active. Keep concise conclusions, small summaries,
+   source/binary hashes and a recomputing verifier in `docs/evidence/`; store raw
+   reports, worker metric logs and archived sources in the external evidence
+   archive described by [its README](../../../docs/evidence/README.md). Do not
+   archive private keys, DSNs or raw identity-rich bot logs. The exact dev fixture
+   and cleanup record are in the evidence packet above.
 
 `test_public_mvp.mjs --scenario=capacity-wait` still checks the full-pool path end
 to end: with one arena busy, a second vs Bots player sees its place in line and

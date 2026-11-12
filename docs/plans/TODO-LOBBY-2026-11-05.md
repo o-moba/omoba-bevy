@@ -13,6 +13,16 @@ Branches: game `feat/ranked-matchmaking-readiness` (this repo, PR into `dev`), p
 
 ### Подтверждено на этом срезе
 
+- **Evidence-миграция подготовлена локально, не меняет release gates.** Полный
+  архив 1 321 файла с `dad1e4f6` хранится как private draft asset в
+  `o-moba/omoba-bevy-archive`, размер и SHA-256 проверены после скачивания.
+  Из Git index убраны 1 059 bulky payloads, оставлены 265 кратких документов,
+  verifier’ов, manifests и малых JSON; restore и 36/36 verifier runs PASS.
+  [Политика хранения](../evidence/README.md) и 4/4 policy tests запрещают повторное
+  добавление мусора. Общий scripts suite на проектном Python 3.13 не зелёный:
+  697 tests, одно несовпадение локального UI-handoff manifest и 8 skips; baseline
+  не запускался, asset sync не выполнялся. Изменения staged, но не закоммичены и
+  не запушены. **NO SHIP и 62/5/1 не меняются.**
 - **Итоговый continuation candidate получил собственные полные проверки.** На
   `a7cd574b9accc211c5c4f09033f2e0661163ec61` [CI 43016841080](https://github.com/o-moba/omoba-bevy/actions/runs/43016841080)
   полностью SUCCESS 7/7, [Release 43016841500](https://github.com/o-moba/omoba-bevy/actions/runs/43016841500)

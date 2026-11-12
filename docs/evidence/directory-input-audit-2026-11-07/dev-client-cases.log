@@ -1,7 +1,0 @@
-2026-11-06T22:50:11.1740694Z test game_directory::config::tests::input_audit_bounds_stream_reads_and_never_echoes_private_or_io_details ... ok
-2026-11-06T22:50:11.1741989Z test game_directory::config::tests::input_audit_uses_the_real_trust_parser_without_certifying_the_binary ... ok
-2026-11-06T22:50:11.1746161Z test game_directory::config::tests::operator_audit_bad_arguments_never_fall_through_or_read_unrelated_stdin ... ok
-2026-11-06T22:50:11.1748743Z test game_directory::config::tests::operator_input_command_requires_explicit_contour_and_returns_public_audit ... ok
-2026-11-06T22:50:21.0832150Z test result: ok. 1625 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 11.86s
-2026-11-06T22:50:21.1136297Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-2026-11-06T22:50:23.3989707Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

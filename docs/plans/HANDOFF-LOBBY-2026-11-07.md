@@ -1,5 +1,35 @@
 # OMOBA — передача следующему агенту, 2026-11-07
 
+## Evidence вынесены из основного Git — 2026-11-12
+
+Полный снимок 1 321 evidence-файла с `dad1e4f68f7301fdfd7001dc0705abfc75a87605`
+сохранён как **private draft evidence asset**, не game release:
+[архив и загрузка](https://github.com/o-moba/omoba-bevy-archive/releases/tag/untagged-1cb018532e3fa86c9d6c).
+Размер 59 321 682 байта, SHA-256
+`5f163c6d8bb3acc97f13cbe028116a1881950017cba790896137b70d86c5cea8`.
+Скачанный архив совпал по размеру и хешу; `docs/evidence/restore.py --check-only`
+тоже независимо скачал и принял его. Точная идентичность записана в
+[ARCHIVE.json](../evidence/ARCHIVE.json).
+
+Из Git index убраны 1 059 bulky payload-файлов, локально они сохранены. В Git
+остаются 265 кратких README, 18 verifier’ов, manifests и малые JSON. Восстановление
+вернуло 1 059 payloads, не перезаписывая tracked documents; verifier’ы прошли
+36/36 в обычном и `python3 -S` режимах. [Политика и restore](../evidence/README.md)
+плюс `scripts/evidence_policy.py` не дают снова добавить logs, sources, images,
+архивы и большие JSON; 4/4 policy tests PASS. Добавляемые evidence-строки в staged
+diff сократились на 173 455, примерно на 91%.
+
+Полный scripts suite с `/opt/homebrew/bin/python3.13`: **697 tests, 1 failure,
+8 skipped**, не зелёный. Остаётся несовпадение installed UI manifest с соседним
+local handoff в `test_sync_ui`; asset sync не запускался, посторонний код не менялся.
+Baseline не запускался, поэтому formally pre-existing это не доказано. Не выдавать
+это за регрессию evidence-миграции или за успешный полный gate.
+
+Пакет **staged локально, без commit/push**; GitHub PR #148 пока не обновлён. После
+явного разрешения владельца закоммитить, запушить и дождаться собственных CI 7/7 и
+Release 4/4. Исходные 68 = 62 done / 5 partial / 1 open и **RU NO SHIP** не меняются;
+все внешние release gates ниже остаются открыты.
+
 ## Два замечания ревью — 2026-11-11
 
 Leaderboard закрыт строгим [clean-seed run 43012620207](https://github.com/o-moba/omoba-bevy/actions/runs/43012620207):
@@ -536,8 +566,10 @@ deploy/drain/rollback tooling. Они пока review-only. Для C4 испол
   Проверка payload: python3 docs/evidence/terminal-spool-replay-2026-11-07/verify_payload.py.
   Она сравнивает committed данные; не выдавать её за новый live run.
 - Не делать `git add .agent` целиком: другие fixture/state могут содержать ключи.
-  Публиковать только проверенные обезличенные evidence; новые evidence dirs
-  игнорируются Git, добавлять выборочно `git add -f docs/evidence/<packet>`.
+  Публиковать только проверенные обезличенные evidence. Внешний архив создавать по
+  `docs/evidence/README.md`; в Git выборочно добавлять только разрешённые краткие
+  документы, verifier’ы и малые summaries. Не делать `git add -f` для restored
+  payload; перед commit запускать `python3 scripts/evidence_policy.py`.
 - Перед любыми dev VPS/domain/Vercel действиями читать `ekza-registry/docs/dev-contour.md`
   на `dev`. Никакого production из dev-работы. main/releases/production — владелец.
 
