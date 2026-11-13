@@ -88,7 +88,7 @@ pub(super) struct StandardStatus;
 pub(super) fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands
         .spawn((
-            Button,
+            Button::default(),
             InteractButton,
             Node {
                 position_type: PositionType::Absolute,

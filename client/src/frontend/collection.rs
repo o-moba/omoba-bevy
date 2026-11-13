@@ -715,7 +715,7 @@ fn spawn_collection(
                 ))
                 .with_children(|column| {
                     column.spawn((
-                        Button,
+                        Button::default(),
                         ImageNode::new(image),
                         Node {
                             // Height-driven so the clip buttons and the
@@ -770,7 +770,7 @@ fn spawn_avatar_tile(
         selected,
     };
     grid.spawn((
-        Button,
+        Button::default(),
         Node {
             width: Val::Px(if phone { 96.0 } else { 124.0 }),
             height: Val::Px(if phone { 116.0 } else { 146.0 }),
@@ -2107,7 +2107,7 @@ mod tests {
         harness::spawn_ui(app.world_mut(), |grid| {
             for slug in ["first", "second"] {
                 grid.spawn((
-                    Button,
+                    Button::default(),
                     ButtonStyle::new(ButtonKind::Tile),
                     BackgroundColor(theme::TILE),
                     UiAction(CollectionAction::Select(slug.into())),

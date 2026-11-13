@@ -444,7 +444,7 @@ fn spawn_equipment_plate(commands: &mut Commands) {
     commands
         .spawn((
             // A Button keeps world clicks off the plate.
-            Button,
+            Button::default(),
             game::hud_plate(false),
             HudRegion::Equipment,
             ZIndex(12),
@@ -478,7 +478,7 @@ fn spawn_equipment_plate(commands: &mut Commands) {
                         let slot = game::item_slot(slots, None, None, form);
                         slots.commands().entity(slot).insert((
                             // Hover shows the item tooltip.
-                            Button,
+                            Button::default(),
                             EquipmentSlot(index),
                             Name::new(format!("InventorySlot-{index}")),
                         ));
@@ -798,7 +798,7 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                                 TextColor(ui::IVORY),
                             ));
                             row.spawn((
-                                Button,
+                                Button::default(),
                                 Node {
                                     padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
                                     ..default()
@@ -842,7 +842,7 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                             for definition in shop::items() {
                                 cards
                                     .spawn((
-                                        Button,
+                                        Button::default(),
                                         Node {
                                             width: Val::Px(264.0),
                                             height: Val::Px(150.0),

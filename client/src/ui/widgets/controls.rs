@@ -542,7 +542,7 @@ pub(crate) fn slider(
     let mut parts = KitParts::default();
     let thumb = size::SLIDER_THUMB.at(form);
     let mut row = parent.spawn((
-        Button,
+        Button::default(),
         Pressable::default(),
         Node {
             min_height: Val::Px(if form == Form::Phone {
@@ -897,7 +897,7 @@ pub(crate) fn cycle_row<T: UiActionT, M: Component>(
             let mut parts = KitParts::default();
             let mut chevrons = [Entity::PLACEHOLDER; 2];
             let mut control = row.spawn((
-                Button,
+                Button::default(),
                 Pressable::default(),
                 Node {
                     width: Val::Px(CYCLE_W.at(form)),

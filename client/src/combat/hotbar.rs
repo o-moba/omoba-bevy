@@ -122,7 +122,7 @@ pub(super) fn setup_combat_ui(
     commands
         .spawn((
             // A Button keeps world clicks off the plate between the slots.
-            Button,
+            Button::default(),
             game::hud_plate(false),
             HudRegion::AbilityBar,
             ZIndex(12),

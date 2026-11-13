@@ -1815,7 +1815,10 @@ fn desktop_mouse_select_attack_ground_and_ui_are_distinct() {
     );
     assert!(!app.world().resource::<PendingCast>().is_pending());
     app.world_mut().resource_mut::<BasicAttackState>().cancel();
-    let ui = app.world_mut().spawn((Button, Interaction::Hovered)).id();
+    let ui = app
+        .world_mut()
+        .spawn((Button::default(), Interaction::Hovered))
+        .id();
     app.update();
     assert!(app.world().resource::<BasicAttackState>().order.is_none());
     app.world_mut().despawn(ui);

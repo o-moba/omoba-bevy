@@ -422,7 +422,7 @@ fn spawn_card_screen(
                         .with_children(|row| {
                             for (index, (name, color)) in theme::ACCENTS.iter().enumerate() {
                                 row.spawn((
-                                    Button,
+                                    Button::default(),
                                     Node {
                                         width: Val::Px(if phone { 74.0 } else { 46.0 }),
                                         height: Val::Px(if phone { 74.0 } else { 46.0 }),

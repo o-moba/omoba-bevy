@@ -446,7 +446,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
         ))
         .with_children(|overlay| {
             overlay.spawn((
-                Button,
+                Button::default(),
                 Node {
                     position_type: PositionType::Absolute,
                     width: Val::Percent(100.0),
@@ -503,7 +503,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                 }
                             });
                             row.spawn((
-                                Button,
+                                Button::default(),
                                 button_node(64.0),
                                 BackgroundColor(ui::TILE),
                                 BorderColor::all(ui::EDGE),

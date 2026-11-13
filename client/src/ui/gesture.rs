@@ -141,8 +141,8 @@ pub(crate) fn logical_ui_rect(
         transform.translation / dpi,
         node.size() * transform.to_scale_angle_translation().0.abs() / dpi,
     );
-    if let Some(clip) = clip {
-        rect = rect.intersect(Rect::from_corners(clip.clip.min / dpi, clip.clip.max / dpi));
+    if let Some(clip) = clip.and_then(super::calculated_clip_rect) {
+        rect = rect.intersect(Rect::from_corners(clip.min / dpi, clip.max / dpi));
     }
     rect
 }

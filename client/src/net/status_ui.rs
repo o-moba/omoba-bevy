@@ -56,7 +56,7 @@ pub(in crate::net) fn setup_connection_status_ui(mut commands: Commands) {
             ));
             parent
                 .spawn((
-                    Button,
+                    Button::default(),
                     Node {
                         display: Display::None,
                         width: Val::Px(120.0),

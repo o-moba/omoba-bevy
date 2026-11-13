@@ -130,7 +130,7 @@ fn spawn_toggle_button<L: Component>(
     }));
     commands
         .spawn((
-            Button,
+            Button::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(left),

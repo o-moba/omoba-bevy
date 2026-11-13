@@ -218,7 +218,7 @@ fn phone_button(
 ) {
     parent
         .spawn((
-            Button,
+            Button::default(),
             Node {
                 min_width: Val::Px(48.0),
                 height: Val::Px(44.0),

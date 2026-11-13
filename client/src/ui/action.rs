@@ -71,7 +71,7 @@ mod tests {
         app.add_ui_action::<Probe>();
         let button = app
             .world_mut()
-            .spawn((Button, UiAction(Probe::Go), Interaction::None))
+            .spawn((Button::default(), UiAction(Probe::Go), Interaction::None))
             .id();
         app.update();
         let count = |app: &mut App| {

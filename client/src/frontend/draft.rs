@@ -511,7 +511,7 @@ pub(super) fn action_button<T: UiActionT>(
     };
     parent
         .spawn((
-            Button,
+            Button::default(),
             Node {
                 width: Val::Px(width),
                 min_width: Val::Px(width),
@@ -1174,7 +1174,7 @@ fn render_draft(
                                                 };
                                                 tiles
                                                     .spawn((
-                                                        Button,
+                                                        Button::default(),
                                                         Node {
                                                             width: Val::Px(84.0),
                                                             height: Val::Px(78.0),

@@ -660,12 +660,12 @@ pub(crate) fn paint_focus_ring(
         .and_then(|entity| buttons.get(entity).ok())
         .and_then(|(node, transform, clip, offset)| {
             let mut rect = super::focus::node_rect(node, transform);
-            if let Some(clip) = clip {
-                rect = rect.intersect(clip.clip);
+            if let Some(clip) = clip.and_then(super::calculated_clip_rect) {
+                rect = rect.intersect(clip);
             }
             let scale = node.inverse_scale_factor();
             let offset = offset.map_or(border::FOCUS_OFFSET, |offset| offset.0);
-            let corner = node.border_radius().top_left * scale;
+            let corner = node.border_radius().top_left.x * scale;
             (!rect.is_empty() && rect.min.is_finite() && rect.max.is_finite()).then(|| {
                 (
                     Rect::from_corners(rect.min * scale, rect.max * scale),
@@ -755,7 +755,7 @@ pub(crate) fn paint_preview_rings(
         }
         let offset = offset.map_or(border::FOCUS_OFFSET, |offset| offset.0);
         // The control's own corner (pills stay round); `radius.md` otherwise.
-        let corner = match node.border_radius.top_left {
+        let corner = match node.border_radius.top_left.x {
             Val::Px(corner) if corner > 0.0 => corner,
             _ => radius::MD,
         };
@@ -784,7 +784,7 @@ pub(crate) fn button_bundle<T: UiActionT>(
 ) -> impl Bundle {
     let style = ButtonStyle::new(kind);
     (
-        Button,
+        Button::default(),
         node,
         BorderColor::all(Color::NONE),
         BackgroundColor(style.idle_color()),
@@ -804,7 +804,7 @@ pub(crate) fn plate_button<T: UiActionT>(
     parts: KitParts,
 ) -> impl Bundle {
     (
-        Button,
+        Button::default(),
         Node {
             border: UiRect::all(Val::Px(border::HAIRLINE)),
             border_radius: BorderRadius::all(Val::Px(radius::MD)),
@@ -1370,7 +1370,7 @@ mod tests {
         let primary = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Primary),
             ))
@@ -1378,7 +1378,7 @@ mod tests {
         let team = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Team(Team::Blue)),
             ))
@@ -1386,7 +1386,7 @@ mod tests {
         let owned = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Secondary),
                 ImageNode::default(),
@@ -1395,7 +1395,7 @@ mod tests {
         let tile = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Tile),
             ))
@@ -1441,7 +1441,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Tile),
                 KitSkin::Tab { rail: true },

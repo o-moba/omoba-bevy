@@ -2957,7 +2957,7 @@ mod tests {
             .spawn((Window::default(), PrimaryWindow))
             .id();
         app.world_mut().spawn((
-            Button,
+            Button::default(),
             Node::default(),
             UiAction(PauseAction::Audio(AudioButton::Mute)),
             Interaction::Pressed,
@@ -3254,7 +3254,7 @@ mod tests {
         let button = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 Node::default(),
                 UiAction(PauseAction::Exit),
                 Interaction::Pressed,
@@ -3303,9 +3303,10 @@ mod tests {
         // A clipped-away button cannot receive a new tap through the scroll panel.
         app.world_mut()
             .entity_mut(button)
-            .insert(bevy::ui::CalculatedClip {
-                clip: Rect::from_corners(Vec2::ZERO, Vec2::splat(10.0)),
-            });
+            .insert(bevy::ui::CalculatedClip::default().with_rect(
+                Rect::from_corners(Vec2::ZERO, Vec2::splat(10.0)),
+                &UiGlobalTransform::IDENTITY,
+            ));
         app.world_mut()
             .write_message(event(3, TouchPhase::Started, center));
         app.world_mut()

@@ -420,7 +420,7 @@ pub(super) fn update_tactical_hud(
                             row_gap: Val::Px(if phone { 2.0 } else { 3.0 }),
                             ..default()
                         },
-                        Button,
+                        Button::default(),
                         Interaction::None,
                         AlliedPortrait(p.player_id),
                         crate::ui::TestId::new(format!("AllyCamera-{}", p.player_id)),

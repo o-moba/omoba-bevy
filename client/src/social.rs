@@ -1189,7 +1189,7 @@ fn button(parent: &mut ChildSpawnerCommands, title: &str, action: SocialAction, 
     let compact = matches!(name, "SocialOpenChat" | "SocialOpenWheel");
     parent
         .spawn((
-            Button,
+            Button::default(),
             Node {
                 min_height: Val::Px(44.0),
                 min_width: Val::Px(44.0),
@@ -1374,7 +1374,7 @@ fn render_phone_chat(
                 })
                 .with_children(|p| {
                     p.spawn((
-                        Button,
+                        Button::default(),
                         Node {
                             height: Val::Px(48.0),
                             min_width: Val::Px(0.0),
@@ -1791,7 +1791,7 @@ fn render(
                     let id = &social.wheel_ids[index];
                     let point = center + choice_offset(index, scale);
                     p.spawn((
-                        Button,
+                        Button::default(),
                         Node {
                             position_type: PositionType::Absolute,
                             left: Val::Px(point.x - 29.0 * scale),

@@ -263,7 +263,7 @@ fn setup_minimap_ui(
     commands
         .spawn((
             // Block world clicks on the decorative frame as well as the map.
-            Button,
+            Button::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5),

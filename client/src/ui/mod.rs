@@ -27,6 +27,34 @@ pub(crate) use test_id::TestId;
 
 use crate::platform::UiProfile;
 
+/// World-space bounds of all inherited clipping rectangles. An empty result
+/// means no clipping; a fully clipped node produces an empty rectangle.
+pub(crate) fn calculated_clip_rect(clip: &CalculatedClip) -> Option<Rect> {
+    match clip {
+        CalculatedClip::FullyClipped => Some(Rect::default()),
+        CalculatedClip::Rects(rects) if rects.is_empty() => None,
+        CalculatedClip::Rects(rects) => rects.iter().fold(None, |bounds, clip| {
+            let local_to_world = clip.world_to_clip_local.inverse();
+            let rect = clip.rect;
+            let corners = [
+                rect.min,
+                Vec2::new(rect.max.x, rect.min.y),
+                rect.max,
+                Vec2::new(rect.min.x, rect.max.y),
+            ];
+            let mut min = Vec2::splat(f32::INFINITY);
+            let mut max = Vec2::splat(f32::NEG_INFINITY);
+            for corner in corners {
+                let point = local_to_world.transform_point2(corner);
+                min = min.min(point);
+                max = max.max(point);
+            }
+            let bounds_rect = Rect::from_corners(min, max);
+            Some(bounds.map_or(bounds_rect, |bounds: Rect| bounds.intersect(bounds_rect)))
+        }),
+    }
+}
+
 /// The compile-target interface family, resolved once at startup. Systems
 /// read this instead of calling `platform::ui_profile()`; `MobileControls
 /// .enabled` stays the runtime copy the gameplay HUD already uses.

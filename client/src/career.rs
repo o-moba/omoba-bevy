@@ -1085,7 +1085,7 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
     });
     parent
         .spawn((
-            Button,
+            Button::default(),
             // This compact control owns its native rounded fill and border.
             // Do not layer a second textured slab inside its padded content.
             crate::ui::widgets::NoSlab,
@@ -2740,7 +2740,7 @@ fn render(
                                 selected,
                             };
                             p.spawn((
-                                Button,
+                                Button::default(),
                                 style,
                                 UiAction(action),
                                 TestId::new(name),

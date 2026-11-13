@@ -12,12 +12,7 @@ use crate::sprite::PlayerVisualMode;
 use crate::targeting::BasicAttackState;
 use crate::team::CharacterChoice;
 use crate::world2d::render_xy_to_simulation_xz;
-use bevy::{
-    input::mouse::MouseButton,
-    math::{Dir3, primitives::InfinitePlane3d},
-    prelude::*,
-    window::PrimaryWindow,
-};
+use bevy::{input::mouse::MouseButton, math::Dir3, prelude::*, window::PrimaryWindow};
 use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
 
 use super::JUMP_DURATION;

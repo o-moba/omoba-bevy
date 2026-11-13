@@ -612,7 +612,7 @@ fn a_contact_must_name_a_clip_and_lie_inside_it() {
 
 #[test]
 fn embedded_alias_preserves_curves_with_safe_runtime_ids_and_rejects_partial_remaps() {
-    use bevy::{animation::animated_field, math::curve::UnevenSampleAutoCurve};
+    use bevy::{animation::animated_field, curve::UnevenSampleAutoCurve};
     let rig = rig("agnes");
     let motion = motion();
     let (_, animated_nodes) = retarget::retarget_all(&rig, &motion).unwrap();

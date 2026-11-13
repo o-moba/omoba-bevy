@@ -1,5 +1,9 @@
 //! Browser-local renderer for the real OMOBA practice authority.
 //! No socket, account, identity key, career write, or simulated online session.
+
+// Keep the legacy UI interaction semantics during the Bevy 0.20 engine upgrade.
+#![allow(deprecated)]
+
 use bevy::{camera::ScalingMode, prelude::*};
 use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
 use shared::{HeroClass, clock::Instant, map::Team, wire::*};
@@ -349,7 +353,7 @@ fn setup(
         .with_children(|parent| {
             for (i, class) in CLASSES.into_iter().enumerate() {
                 parent.spawn((
-                    Button,
+                    Button::default(),
                     ClassButton(i),
                     Node {
                         padding: UiRect::axes(px(10), px(12)),
@@ -368,7 +372,7 @@ fn setup(
                 ));
             }
             parent.spawn((
-                Button,
+                Button::default(),
                 PauseButton,
                 Node {
                     padding: UiRect::axes(px(10), px(12)),
@@ -384,7 +388,7 @@ fn setup(
                 )],
             ));
             parent.spawn((
-                Button,
+                Button::default(),
                 RestartButton,
                 Node {
                     padding: UiRect::axes(px(10), px(12)),

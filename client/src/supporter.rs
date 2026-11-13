@@ -1570,7 +1570,7 @@ fn panel_scroll() -> ScrollArea {
 fn button(parent: &mut ChildSpawnerCommands, label: String, action: Action, enabled: bool) {
     parent
         .spawn((
-            Button,
+            Button::default(),
             Node {
                 min_height: Val::Px(38.),
                 padding: UiRect::axes(Val::Px(12.), Val::Px(7.)),

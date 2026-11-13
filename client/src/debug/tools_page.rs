@@ -624,7 +624,7 @@ mod tests {
         let open_button = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 UiAction(PauseAction::OpenPractice),
                 Node::default(),
                 Visibility::Inherited,
@@ -636,7 +636,7 @@ mod tests {
         let dummy_button = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 UiAction(PracticeAction::SpawnDummy),
                 Interaction::None,
                 BackgroundColor(theme::TILE),

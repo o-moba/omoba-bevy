@@ -349,8 +349,8 @@ pub(crate) fn navigate_focus(
             // Clipped out of sight is fine inside a scroll area (focus
             // scrolls it into view); anywhere else it is not a candidate.
             let mut shown = rect;
-            if let Some(clip) = clip {
-                shown = shown.intersect(clip.clip);
+            if let Some(clip) = clip.and_then(super::calculated_clip_rect) {
+                shown = shown.intersect(clip);
             }
             if let Some(viewport) = viewport {
                 shown = shown.intersect(viewport);
@@ -551,7 +551,7 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                Button,
+                Button::default(),
                 UiAction(probe),
                 Node::default(),
                 InheritedVisibility::VISIBLE,
@@ -687,9 +687,10 @@ mod tests {
         );
         app.world_mut()
             .entity_mut(low)
-            .insert(bevy::ui::CalculatedClip {
-                clip: Rect::new(0.0, 0.0, 300.0, 100.0),
-            });
+            .insert(bevy::ui::CalculatedClip::default().with_rect(
+                Rect::new(0.0, 0.0, 300.0, 100.0),
+                &UiGlobalTransform::IDENTITY,
+            ));
         app.update();
         assert_eq!(focused(&app), Some(top));
         nav(&mut app, FocusNav::Down);
