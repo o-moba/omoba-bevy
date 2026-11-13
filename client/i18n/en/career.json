@@ -26,6 +26,7 @@
   "career.unrated.allocated_bots": "Bots filled open seats, so this match is unrated.",
   "career.unrated.server_interrupted": "The server stopped before the match finished, so this match is unrated.",
   "career.unrated.casual_queue": "Casual PvP matches never change rating.",
+  "career.unrated.not_completed": "The match did not finish normally, so it is unrated.",
   "career.queue.waiting": "Finding a fair match · {compatible}/{needed} compatible players · {elapsed}\n{hint}",
   "career.queue.hint_newcomer": "New players are matched with other newcomers.",
   "career.queue.hint_rating": "Waiting for players with similar experience and rating.",
@@ -47,7 +48,7 @@
   "career.team.winners": "{team} · Winners",
   "career.team.defeated": "{team} · Defeated",
   "career.profile.title": "Your profile",
-  "career.profile.progress": "Career level {level} · {xp} XP\nRating {rating} · {rated} rated matches\n{wins} wins · {losses} losses · {played} matches played",
+  "career.profile.progress": "Career level {level} · {xp} XP\nRating {rating} · {rated} rated matches\n{wins} wins · {losses} losses · {played} matches played\nLeaves / AFK: {abandons}",
   "career.profile.newcomer": "Newcomer matchmaking",
   "career.profile.connecting": "Connecting your profile…",
   "career.profile.unavailable": "Saved progress is not available yet. Connect to a server that supports profiles.",
@@ -108,5 +109,10 @@
   "career.button.back_to_friends": "Back to friends",
   "career.button.details": "Details",
   "career.button.previous": "Previous",
-  "career.button.older": "Older"
+  "career.button.older": "Older",
+  "career.player.progress_abandoned": "{rating} · +{xp} career XP · Left / AFK",
+  "career.unrated.abandoned_reaped": "The match ended because no active players remained. Proven leaving and AFK penalties still apply.",
+  "career.unrated.duration_capped": "The match reached its time limit. No leaving or AFK penalties apply.",
+  "career.result.remade": "Remade",
+  "career.unrated.remake": "Early team remake; no ordinary match awards."
 }

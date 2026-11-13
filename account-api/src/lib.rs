@@ -5,6 +5,7 @@ pub mod class_builds;
 pub mod crypto;
 pub mod devices;
 pub mod ekza_library;
+pub mod game_directory;
 pub mod moderation;
 pub mod read;
 pub mod social;
@@ -43,8 +44,10 @@ pub const SOCIAL_REGISTRATION_MIGRATION: &str =
 /// Portal schema 9 (LR-67): YooKassa supporter donations and Hero tier points.
 /// Number 8 is reserved for LR-20 feedback (launch-readiness section 7).
 pub const YOOKASSA_MIGRATION: &str = include_str!("../migrations/009_yookassa_supporter.sql");
+/// Portal schema 11 (LR-47): the leaderboard listing opt-out.
+pub const LEADERBOARD_MIGRATION: &str = include_str!("../migrations/011_leaderboard.sql");
 /// Every portal schema version this build serves, in order.
-pub const PORTAL_SCHEMA: [i32; 9] = [1, 2, 3, 4, 5, 6, 7, 9, 10];
+pub const PORTAL_SCHEMA: [i32; 10] = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11];
 #[derive(Clone)]
 pub struct Config {
     pub origin: String,
@@ -126,9 +129,10 @@ pub fn game_error(message: String) -> Error {
 }
 
 fn validate_portal_schema(versions: &[i32]) -> Result<()> {
-    // Recognition reads require migration 6, social sign-in migration 7 and the
-    // Hero tier reads migration 9, including existing endpoints. Reject an old
-    // deployment at startup instead of failing later.
+    // Recognition reads require migration 6, social sign-in migration 7, the
+    // Hero tier reads migration 9 and the settings reads migration 11, including
+    // existing endpoints. Reject an old deployment at startup instead of failing
+    // later.
     if versions != PORTAL_SCHEMA {
         return Err(Error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -254,6 +258,7 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
         (7, SOCIAL_MIGRATION),
         (9, YOOKASSA_MIGRATION),
         (10, SOCIAL_REGISTRATION_MIGRATION),
+        (11, LEADERBOARD_MIGRATION),
     ] {
         let applied: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM portal.schema_version WHERE version=$1)",
@@ -281,7 +286,11 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 pub fn router(app: App) -> Router {
+    router_with_game_directory(app, game_directory::DirectorySource::default())
+}
+pub fn router_with_game_directory(app: App, directory: game_directory::DirectorySource) -> Router {
     Router::new()
+        .merge(game_directory::routes(directory))
         .route(
             "/health/live",
             get(|| async { Json(json!({"status":"alive"})) }),
@@ -563,6 +572,10 @@ async fn dispatch(
             app.rate(&session.profile_id, "search", 30).await?;
             accounts::search(app, &session, query).await
         }
+        ("GET", "leaderboard") => {
+            app.rate(&session.profile_id, "leaderboard", 30).await?;
+            accounts::leaderboard(app, &session, query).await
+        }
         ("GET", "me/sessions") => auth::sessions(app, &session).await,
         ("DELETE", "me/social/vk") => social::unlink(app, &session).await,
         ("POST", "auth/logout") => auth::logout(app, &session).await,
@@ -594,8 +607,9 @@ mod schema_tests {
     use super::*;
 
     #[test]
-    fn runtime_requires_complete_schema_ten_before_serving_existing_routes() {
-        assert!(validate_portal_schema(&[1, 2, 3, 4, 5, 6, 7, 9, 10]).is_ok());
+    fn runtime_requires_complete_schema_eleven_before_serving_existing_routes() {
+        assert!(validate_portal_schema(&PORTAL_SCHEMA).is_ok());
+        assert!(validate_portal_schema(&[1, 2, 3, 4, 5, 6, 7, 9, 10, 11]).is_ok());
         for old_or_unknown in [
             vec![1, 2, 3],
             vec![1, 2, 3, 4],
@@ -604,7 +618,8 @@ mod schema_tests {
             vec![1, 2, 3, 4, 5, 6, 7],
             vec![1, 2, 3, 5, 6, 7, 9],
             vec![1, 2, 3, 4, 5, 6, 7, 9],
-            vec![1, 2, 3, 4, 5, 6, 7, 9, 10, 11],
+            vec![1, 2, 3, 4, 5, 6, 7, 9, 10],
+            vec![1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12],
         ] {
             let error = validate_portal_schema(&old_or_unknown).unwrap_err();
             assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);

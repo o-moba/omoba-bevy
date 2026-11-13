@@ -94,6 +94,12 @@ pub(crate) struct CapacityReport {
     pub longest_wait_secs: u64,
     /// Busy periods since the lobby started.
     pub busy_periods: u64,
+    /// Operator maintenance acknowledgement; old reports cannot acknowledge a
+    /// requested operation, even when they happen to say occupied=0.
+    #[serde(default)]
+    pub draining: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drain_operation_id: Option<String>,
 }
 
 /// The lobby at the end of one scheduling pass.
@@ -174,6 +180,8 @@ impl CapacityMetric {
             busy_since_ms: self.busy_since.map(|(_, ms)| ms),
             longest_wait_secs: longest,
             busy_periods: self.periods,
+            draining: false,
+            drain_operation_id: None,
         };
         let log = event.map(|event| {
             self.last_log = Some(now);

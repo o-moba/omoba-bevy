@@ -18,8 +18,42 @@ impl Plugin for FrontendWidgetsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             PostUpdate,
-            adapt_phone_menu_readability.before(bevy::ui::UiSystems::Layout),
+            (
+                adapt_phone_menu_readability.before(bevy::ui::UiSystems::Layout),
+                fit_single_line_labels
+                    .after(crate::i18n::I18nSystems::Font)
+                    .before(bevy::ui::UiSystems::Layout),
+            ),
         );
+    }
+}
+
+#[derive(Component)]
+pub(super) struct FittedLabel;
+
+/// The initial single-line glyph budget is only an estimate: W and other wide letters
+/// can exceed it. Use the production shaper's previous layout to elide before
+/// this frame's layout, retaining the readable font size and real profile name.
+fn fit_single_line_labels(
+    mut names: Query<(&mut Text, &bevy::text::TextLayoutInfo, &ComputedNode), With<FittedLabel>>,
+) {
+    for (mut text, layout, node) in &mut names {
+        if node.size().x <= 2.0 || layout.glyphs.is_empty() {
+            continue;
+        }
+        let ink_right = layout
+            .glyphs
+            .iter()
+            .map(|g| g.position.x + g.atlas_info.rect.width() * 0.5)
+            .fold(0.0_f32, f32::max);
+        if layout.size.x.max(ink_right) <= node.size().x - 2.0 {
+            continue;
+        }
+        let mut prefix = text.0.strip_suffix('…').unwrap_or(&text.0).to_owned();
+        if prefix.pop().is_some() {
+            prefix.push('…');
+            text.0 = prefix;
+        }
     }
 }
 

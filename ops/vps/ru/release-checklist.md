@@ -16,6 +16,37 @@ local debug build.
 profile's names in [scripts/markets.py](../../../scripts/markets.py), the only place
 they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 
+## Current pre-release snapshot — 2026-11-11
+
+This is a readiness snapshot for the fully verified continuation game baseline
+`a7cd574b9accc211c5c4f09033f2e0661163ec61` and portal baseline
+`84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41`, **not a release result**. No RU version
+has been selected and no S3/S4/S10 deployment or publication has been authorized.
+The current decision is **NO SHIP**. `OPEN` means no acceptable evidence for this
+exact RU release; it does not mean a check failed. Replace this snapshot with the
+filled result template only when executing an authorized release.
+
+| Rows | State | What is already known / what is still required |
+| --- | --- | --- |
+| S1 | OPEN | Baseline `a7cd574b` passed its own CI 43016841080 (7/7) and Release 43016841500 (4/4). The owner-required local `make check` on the final selected release commit is not recorded; subsequent documentation commits do not transfer this baseline to another SHA |
+| S2 | OPEN | Four-platform PR packaging is evidence of buildability, not `make release-ru` output in `dist/v<version>-ru/` with its contract and hashes |
+| S3–S4 | OPEN | Exact server/portal bundles have not been shipped or accepted on the RU host; owner-controlled action |
+| S5–S9 | OPEN | No current RU host status, external preflight, lobby/worker compatibility or reboot result for this candidate |
+| S10–S11 | OPEN | No authorized GitHub RU release/catalog/IPFS publication or Russian-network download/hash/count check |
+| S12 | OPEN | No current RU monitor/probe/test-alert acceptance for this candidate |
+| P1–P9, all four platforms | OPEN | Existing unit, browser and loopback tests do not replace fresh-player scenarios on exact published RU packages; Android requires a listed physical Vulkan device |
+
+Additional launch blockers outside those rows: independent human review of PR148/33;
+isolated actual/identical RU-host stepped and sustained capacity with actual cgroup
+usage and uplink/network overhead; WAN/multi-host/fault and public trust/directory
+provisioning; independent off-host recovery with measured RPO/RTO; owner decisions
+for C2/C4; legal/provider/signing/catalog gates. The shared-dev mixed30s control
+reached 549.64 MiB summed process RSS (not PSS/cgroup usage), so the historical
+500 MiB lobby limit and 16-arena setting remain unvalidated. See
+[exact workload evidence](../../../docs/evidence/linux-capacity-workloads-2026-11-10/README.md),
+[current portal loopback evidence](../../../docs/evidence/portal-loopback-2026-11-10/README.md)
+and [current handoff](../../../docs/plans/HANDOFF-LOBBY-2026-11-07.md).
+
 ## 1. Server and build gate (once per release)
 
 | # | Check | How | Pass when |
@@ -52,9 +83,12 @@ For Android use a Vulkan device from the published minimum list (LR-25).
 
 ## 3. Decision
 
-- Any FAIL in S1–S8, S10–S12 or P1–P9 blocks the announcement. Fix and rerun the affected
-  rows, or roll back (`ru_host.py rollback`, [README › Rollback](README.md#rollback)).
-- Record N/A only with the reason and the owner's approval.
+- Any FAIL in S1–S12 or P1–P9 blocks the announcement. This includes S9 whenever
+  `reboot-check` is applicable: record its PASS and `seconds_to_ready` before sign-off.
+  Fix and rerun the affected rows, or roll back (`ru_host.py rollback`,
+  [README › Rollback](README.md#rollback)).
+- Record N/A only with the reason and the owner's approval; for S9, explicitly record
+  why this is neither a new host nor a kit change. No applicable row may be omitted.
 - The owner signs off the result file in `docs/progress/`.
 
 ## Result template

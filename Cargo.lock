@@ -2082,6 +2082,7 @@ dependencies = [
  "ed25519-dalek",
  "ekza-bevy-sdk",
  "getrandom 0.3.4",
+ "jni",
  "omoba-passport",
  "serde",
  "serde_json",
@@ -3194,6 +3195,7 @@ name = "harness"
 version = "0.45.0"
 dependencies = [
  "ed25519-dalek",
+ "getrandom 0.3.4",
  "serde",
  "serde_json",
  "shared",
@@ -5469,9 +5471,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.25"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "822ee9188ac4ec04a2f0531e55d035fb2de73f18b41a63c70c2712503b6fb13c"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "once_cell",
  "ring",
@@ -5696,6 +5698,7 @@ name = "shared"
 version = "0.45.0"
 dependencies = [
  "bevy",
+ "flate2",
  "serde",
  "serde_json",
 ]

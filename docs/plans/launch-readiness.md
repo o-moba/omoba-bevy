@@ -188,7 +188,7 @@ Area: legal (152-FZ) · **blocker** · S · owner
   - Either file a cross-border notice or state that no RU personal data leaves Russia. Check off-site backups, Pinata, and Vercel/Supabase analytics on RU-facing pages.
 - **Acceptance:**
   - [ ] The registry entry is linked in the owner checklist.
-  - [ ] The operator's name, address and support e-mail appear in the policy and in the RU portal footer.
+  - [ ] The operator's name, address and support e-mail appear in the policy and in the RU portal footer. Support e-mail provided: `prostosobolev@gmail.com` (2026-11-05); the RU privacy policy and user agreement are published as edition 1 on 2026-11-05 (owner-approved, without counsel review). The RKN operator notice has not been filed yet.
   - [ ] The cross-border position is recorded.
 - **Depends on:** —
 
@@ -537,13 +537,13 @@ Area: feedback · **major** · M · code
 Area: community/support · **major** · S · owner
 - **Now:**
   - The community runs on Discord (5 channels) plus a Telegram channel marked "needs-setup" (`community/projects/omoba/project.json`; `community/destinations.json:31-36`).
-  - There is no VK community, RU Telegram or support e-mail.
+  - There is no VK community or RU Telegram. The support e-mail is `prostosobolev@gmail.com` (owner, 2026-11-05).
   - Nothing is linked from the client (`client/i18n/ru`) or the RU portal (`market-web/src/components/portal.tsx:224`; `market-web/src/lib/navigation.mjs:65-80`).
 - **Requirement:**
   - A VK group with news, rules and a feedback topic.
   - A Russian Telegram channel and chat.
   - At least one moderator.
-  - A support e-mail that someone answers.
+  - A support e-mail that someone answers. Provided: `prostosobolev@gmail.com` (2026-11-05), in the game's About and the RU README.
   - Per-market community and support URLs in Home and Settings, the portal footer and sidebar, and the README (plumbing in LR-06). RU surfaces do not link Discord.
   - A dated launch plan committed in the community hub:
     - open-beta framing
@@ -590,7 +590,7 @@ Area: landing/portal/packages · **major** · M · code (the owner approves the 
   - [ ] The RU landing is indexed (Yandex Webmaster) with ru hreflang, and its claims match the current RU release. Code done (2026-10-24): omoba-web's RU guest home is indexable in production with a canonical link and `hreflang="ru"`; it counts the hero classes from the game's catalog snapshot, names the map and the LR-08 modes as the game does and lists the RU catalog's downloads. Needs the RU host, then the owner adds the site to Yandex Webmaster.
   - [x] RU landing and portal tests assert that `/donate`, wallets, "Ekza" and "crypto" are absent. omoba-web `tests/ru-landing.e2e.mjs` (ten RU pages, text and links) and `tests/landing.test.mjs`.
   - [x] With `OMOBA_MARKET=ru`, `/` renders the guest home when signed out and `/me` when signed in. `tests/ru-landing.e2e.mjs`.
-  - [x] `scripts/test_release.py` asserts the RU README is in Russian and includes the support e-mail, policy URLs and age sign. The real support e-mail waits for the owner (LR-21); until then `build` prints a note and the README names the portal.
+  - [x] `scripts/test_release.py` asserts the RU README is in Russian and includes the support e-mail, policy URLs and age sign. The support e-mail (`prostosobolev@gmail.com`) is set since 2026-11-05; the community still waits for the owner (LR-21), and until then `build` prints a note.
   - [x] The RU Linux player tarball has no `omoba-account-api`. The RU servers are the separate bundle `release.py build server --market ru` (`ops/vps/ru/README.md#server-bundle`), the only file `ru_host.py ship` accepts.
   - [x] The global landing and README are unchanged. The omoba.io landing is not touched; the global and dev READMEs are pinned byte for byte in `scripts/test_release.py`.
   - [x] A public `/delete` page (section 7, rules for LR-22; O-15). Code done (2026-10-25): omoba-web serves `omoba.ru/delete` without sign-in, in ru, en and zh, from the portal's legal table (portal-only `delete`, like `offer`; global and cn 404). It describes the manual e-mail procedure of the privacy draft (subject, nickname with tag, owner check, device keys refused once confirmed, erasure within 30 days, anonymised results); the address is a placeholder until LR-21. `tests/ru-landing.e2e.mjs`, `tests/market-profiles.e2e.mjs`, `tests/legal.test.mjs`. Needs owner: the support e-mail, counsel's check with the policy (LR-04), the URL in Play's Data safety form (LR-69).
@@ -1290,13 +1290,17 @@ Area: netcode · **major** · M (L if delta encoding is needed) · code
 - **Now:**
   - Each recipient gets a full-world JSON snapshot every 50 ms (`server/src/snapshot.rs:16,39-70`).
   - Packets are split into 1200-byte fragments, and losing one fragment loses the whole snapshot (`shared/src/transport.rs:11-18`).
-  - There is no compression or delta encoding.
+  - Protocol16 now selectively compresses world JSON with the approved pinned
+    flate2/zlib codec; both sizes stay bounded and control packets remain plain.
+    Delta encoding and final WAN/budget acceptance remain open.
   - 5v5 snapshots "can exceed 8 KiB" (`docs/progress/2026-09-05-3d-readiness-audit.md:74`). The resulting ~160 KB/s per player is an estimate; nobody has measured it.
   - No WAN test has been run (`docs/progress/2026-09-22-public-mvp.md:131-134`), and the HUD shows no ping or loss.
   - The MTU-safe framing should be kept.
 - **Requirement:**
   - A declared per-player budget (e.g. ≤ 40 KB/s).
-  - zstd compression first; delta encoding if the budget is still missed.
+  - Owner-approved lossless world compression (flate2=1.1.0/zlib), preserving
+    exact personalized bytes and the1200-byte frame budget. Consider delta
+    encoding if the declared budget is still missed.
   - A netem WAN test.
   - Ping and loss in the HUD, with a warning.
   - The host's egress fits the plan.
@@ -1491,19 +1495,19 @@ Area: bot fill · **major** · L · code
 Area: ranked integrity · **major** · L · code+ops (owner sets thresholds)
 - **Now:**
   - A fresh install gets a fresh newcomer profile at 1000 (`career-store/src/career_store.rs:276-319`).
-  - Ranked has no gate, and the docs disclaim smurf prevention (`docs/match-progression.md:85-91,155-156`).
+  - C6 now enforces ten completed public matches with an authoritative counter (core schema9). Remakes, interruptions, custom/offline practice and proved personal AFK/leaves do not qualify. This limits immediate Ranked entry; it does not establish smurf prevention.
   - The matchmaker rejects only duplicate ids (`career-store/src/matchmaking.rs:110-124`), with no same-IP rule.
   - Receipts are immutable, and there is no void-match path or ranked ban (`account-api/src/main.rs:13`; `server/src/bin/migrate-career.rs` only).
 - **Requirement:**
-  - Ranked unlocks at the owner's chosen level or match count. In RU it also needs a linked VK ID, one per profile (O-3).
+  - Owner decision2026-11-06 (O-3): Ranked unlocks after ten completed public matches. Linking VK is optional; it must not be an eligibility condition in RU or another market.
   - Same-IP profiles are never on opposing teams in a rated match, and same-IP pairs are flagged.
   - A periodic anomaly report lists suspicious pairs.
   - An operator CLI writes a compensating "voided" record that reverts rating, XP and W/L in one transaction, with an audit row.
   - A ranked ban is applied through the LR-15 sanctions.
   - RUNBOOK gets a section.
 - **Acceptance:**
-  - [ ] Below the threshold, the player sees "Ranked unlocks at level N".
-  - [ ] The RU build requires VK for Ranked (test).
+  - [x] Below ten completions, Home displays completed-public progress and disables Ranked; native state tests pass. Fresh affected-screen visual acceptance remains C6.
+  - [x] Real public-protocol acceptance denies Ranked at0/9 and permits it after a real tenth standard-map completion without VK (CI42083864979 and later18-stage repeats).
   - [ ] A matchmaker test shows a same-IP pair never on opposing teams.
   - [ ] The anomaly report finds a seeded colluding pair.
   - [ ] Voiding a match restores all 10 participants exactly.
@@ -1791,21 +1795,42 @@ Area: secrets · **major** · M · ops+code
 
 #### LR-53 — Ranked ladder presentation: tiers, placement, seasons, cross-play data
 Area: rating model · **minor** · L · code+owner
+- **Status:** software acceptance verified; production season rollover/rollout remains separate.
 - **Now:**
-  - Rating is a bare i32 with K=32 and no tiers or placement (`shared/src/career.rs:9-10,153-182`; `docs/match-progression.md:143-146`).
-  - There is one lifetime rating and no seasons (`001_career.sql:5`).
-  - Matches record no input type or platform (`server/src/match_service.rs:15-25`).
+  - Schema10 stores distinct seasonal placement/counters and immutable allocation
+    identity. K=48 for the first20 games of each season, then32; lifetime/XP/
+    public eligibility are preserved. Explicit atomic close archives, awards
+    eligible badges and resets toward1000. Production application is separate.
+  - Profile/archive API and current-season ladder reads pass actual PostgreSQL
+    privacy/runtime-role tests. Portal fa4dc7f tier/badge/archive UI passes unit,
+    type/build and focused RU browser fixtures. Native Home/profile/friend badges
+    and scoped calibration/promotion/demotion notices are implemented. Four new
+    helper/system tests execute in CI; one stale Home expectation is repaired.
+    Six RU native pixel checks pass; native e8 executes all1578 client cases.
+    Server-clock availability now drives an explicit disabled interseason Home
+    action;193 shared/498 server cases and RU native test-target clippy PASS.
+    New Home execution, expired pixels and visible coherent demotion notice
+    now PASS. RU/EN own/friend/visited badges and portal badges are inspected;
+    exact images/source hashes are preserved in the ranked evidence pack. Core236d1c13 full7-job/18-stage CI and independent exact
+    all-ten seasonal-game verification PASS; local669 PG and18 public stages PASS.
+  - Native signed movement records declared touch/mouse/mixed/unknown controls per participant; no platform/device identifier is collected. Durable checkpoints and a bounded win-rate comparison are implemented (see `docs/ranked-input-statistics.md`).
 - **Requirement:**
   - `tier(rating, rated_matches)` with owner-set thresholds.
   - A provisional K and "Calibrating i/N".
   - Tier badges on every profile surface, plus a promotion/demotion banner.
   - A seasons table and a close-season command (soft reset plus archive).
   - The input type stored per participant, and a cross-play policy (O-18).
+  - Owner decisions2026-11-06:20 placement games; Bronze0–999, Silver1000–1499,
+    Gold1500–1999, Platinum2000–2499, Diamond2500–2999, Master3000+.
+    Seasons last90 days; archive results and award a seasonal badge; soft reset
+    `1000 + (old_rating - 1000) / 2`. Applying a production reset requires a
+    separate owner action. Touch/mouse share one queue; retain input type for
+    comparison rather than splitting queues.
 - **Acceptance:**
-  - [ ] Unit tests cover tier boundaries.
-  - [ ] Badges show in RU and EN.
-  - [ ] Closing a season archives and soft-resets in one transaction.
-  - [ ] A win-rate-by-input query exists.
+  - [x] Unit tests cover tier boundaries.
+  - [x] Badges show in RU and EN (native own/friend/visited plus scoped portal checks; RU852x393 and EN852x393 evidence in `docs/evidence/ranked-2026-11-06`).
+  - [x] Closing a season archives and soft-resets in one transaction (local schema10 PG/operator proof; production application remains separate).
+  - [x] A win-rate-by-input query exists (bounded completed Ranked sample, four groups, wins and sample counts).
 - **Depends on:** LR-08, LR-47, O-5
 
 #### LR-54 — History and statistics polish
@@ -2071,9 +2096,9 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 |---|---|---|
 | O-1 | Is Ranked available at launch or only later? At low population: a minimum-population gate, ranked hours, a smaller ranked format, or wider rating windows? (Bots are never rated.) | LR-08, LR-35 |
 | O-2 | Should bots fill Casual PvP, and after how long (30 s today)? Should Casual merge cohorts or wait longer while other humans are online? | LR-08, LR-36 |
-| O-3 | Ranked entry gate: what career level or match count, and must the player link VK ID in RU? | LR-37 |
+| O-3 | Decided: Ranked opens after10 completed public matches, without mandatory VK. Server admission and native gate implemented; actual tenth-public/noVK journey passed prior full CI. | LR-37 |
 | O-4 | Ranked parties: solo/duo only, or full premade against premade? | LR-55 |
-| O-5 | Seasons: when, how long, soft-reset formula, rewards? Tier thresholds and placement count? | LR-53 |
+| O-5 | Decided2026-11-06:20 placements; Bronze<1000/Silver<1500/Gold<2000/Platinum<2500/Diamond<3000/Master3000+;90-day seasons, half-distance reset toward1000, archived results and seasonal badge. Production reset is separate. Local schema10 storage/atomic close/operator and669 full PostgreSQL tests pass; approved roles and profile/archive/seasonal-ladder API are implemented. Portal presentation passes focused tests/build/RU browser fixtures. Native presentation/notices compile under strict clippy; current execution/visual/full public/CI and deployment/rollback gates remain pending. | LR-53 |
 | O-6 | Online bot difficulty: keep Elite for all, or easier for newcomers' first matches? Should Server bot match offer a level picker? | LR-43 |
 | O-7 | Launch hero roster: which of the 17 classes are allowed in public and ranked play? | LR-45, LR-58 |
 | O-8 | Match length target, max duration, the minute from which surrender is allowed, map tier preset for casual and bot play | LR-11, LR-34 |
@@ -2086,7 +2111,7 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 | O-15 | Account deletion: self-service at launch, or a manual e-mail procedure first? Does the target store require in-app deletion? | LR-42, LR-04 |
 | O-16 | Hosting: one VPS vs separate web and game IPs, provider with UDP anti-DDoS, host city, budget for more capacity | LR-01, LR-09, LR-51 |
 | O-17 | Are custom/private matches in the first public release? | LR-56 |
-| O-18 | Ranked cross-play between touch and mouse players | LR-53 |
+| O-18 | Decided2026-11-06: one Ranked queue for touch and mouse; retain participant input type for statistics. Signed native metadata, durable seat evidence and bounded anonymous query implemented; local checks pass. Full committed CI remains pending. | LR-53 |
 | O-19 | Consent model for attaching logs and crash data to feedback and crash reports | LR-20, LR-29 |
 | O-20 | When does the global market launch? This decides when the directory and global hostname work (D0/D1) is needed | LR-57 |
 | O-21 | Production app identity for the one app per platform. Default: a new id (for example `io.omoba.game`) chosen before the first public listing, before any IAP product is created and before the first public RU APK. Changing it later means a new app, lost reviews and new product ids. Android: own key uploaded to Play App Signing. | LR-68, LR-69, LR-24, LR-50 |
@@ -2114,7 +2139,7 @@ single, documented setting the owner can change later.
 | --- | --- | --- |
 | O-1 | **Ranked at launch**: humans-only 5v5, rated, never bot-filled. The searching screen shows how many players search in the queue; after 5 minutes it offers switching to Casual without losing the place in Ranked. | LR-08, `docs/match-progression.md` |
 | O-2 | **Casual PvP**: unrated, awards XP, groups every human in the queue regardless of rating or newcomer cohort, then bot-fills after 30 s. **vs Bots** stays a separate choice. | LR-08 |
-| O-3 | No ranked entry gate beyond the existing newcomer and eligibility rules (LR-37 later). | LR-08 |
+| O-3 | Owner update 2026-11-06: Ranked opens after 10 completed public matches; linking VK is not mandatory. This supersedes the previous no-entry-gate launch default. C6 software/public acceptance passes; native visual and other LR-37 integrity requirements remain open. | LR-08, LR-37 |
 | O-6, O-7 | Online bot difficulty and the hero roster stay as they are (LR-43, LR-45 later). | — |
 | O-8 | Hard match cap **45 minutes**. A capped or abandoned match settles as **Interrupted** (unrated, never counted twice), reusing the existing semantics. | LR-11, LR-12 |
 | O-9 | **RU chat off** at launch: a server-wide chat switch (`OMOBA_CHAT=off` in the RU lobby unit); reactions/emotes stay. Turning it on later needs the owner's legal check (ОРИ, 149-FZ). | LR-15, LR-41 |
@@ -2125,7 +2150,7 @@ single, documented setting the owner can change later.
 | O-16 | One RU VPS runs PostgreSQL, the lobby and workers, the Account API, the portal and the download host behind Caddy. | LR-01, LR-23 |
 | O-19 | Feedback and crash reports attach logs only when the player ticks a box (off by default). | LR-20 |
 | — | **RU landing** = the RU portal's guest home at `omoba.ru` (hosted in Russia, no foreign analytics); the omoba.io landing is not changed for M0. | LR-22 |
-| — | **Legal texts**: Russian drafts of the privacy policy and user agreement ship with a visible "проект" banner and version `0-draft`; the owner replaces them with the counsel-approved texts (LR-04) before publication. | LR-04, LR-06 |
+| — | **Legal texts**: the Russian privacy policy and user agreement are published as edition 1 (version `1`) on 2026-11-05, owner-approved without counsel review; a later counsel-reviewed edition gets a new version and asks every player again (LR-04). | LR-04, LR-06 |
 | — | **Age category**: plumbing with the RU value `12+` as a placeholder the owner confirms with counsel before publication (with chat off). | LR-07 |
 | — | **Release label**: «Открытая бета». | LR-23 |
 | — | **Owner notifications** (feedback, alerts): one Telegram bot configured on the RU host (`OMOBA_TELEGRAM_BOT_TOKEN`, `OMOBA_TELEGRAM_CHAT_ID`); without it, notifications go to the journal only. | LR-17, LR-20 |

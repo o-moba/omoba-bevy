@@ -17,5 +17,6 @@
   "searching.match.waiting": "Players found · {humans}/{needed}\n{policy} · waiting {elapsed}s",
   "searching.match.allocating": "Match found · preparing the arena…",
   "searching.match.assigned": "Match found · connecting to your team…",
-  "searching.match.failed": "Could not start the match: {code}\nCancel and try again."
+  "searching.match.failed": "Could not start the match: {code}\nCancel and try again.",
+  "searching.status.resumed": "Search was paused. Updating your search…"
 }

@@ -50,5 +50,17 @@
   "pause.render.show_fps": "Показывать FPS",
   "pause.tips.enabled": "Подсказки для новичка",
   "pause.tips.hint": "Советы при загрузке и справка в первом матче. Справку всегда можно открыть вручную.",
-  "pause.button.practice": "Отладка"
+  "pause.button.practice": "Отладка",
+  "pause.vote.remake": "Ремейк матча",
+  "pause.vote.surrender": "Сдаться",
+  "pause.vote.active": "{kind} · {name} · За {yes}/{required} · Против {no} · {seconds} с",
+  "pause.vote.voted_yes": "Вы проголосовали за",
+  "pause.vote.voted_no": "Вы проголосовали против",
+  "pause.vote.yes": "За",
+  "pause.vote.no": "Против",
+  "pause.vote.cooldown": "Следующее голосование команды через {seconds} с",
+  "pause.vote.too_early": "доступно через {seconds} с",
+  "pause.vote.window_closed": "первые 3 минуты уже прошли",
+  "pause.vote.no_absent_teammate": "нужен союзник, отсутствующий 90 секунд",
+  "pause.vote.unavailable": "{kind} · {reason}"
 }

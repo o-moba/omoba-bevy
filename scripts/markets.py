@@ -135,12 +135,13 @@ MARKETS = {
                  release_label="Открытая бета",
                  # Hero Supporter donations through YooKassa on the RU portal only.
                  payment_providers=("yookassa",),
-                 # Drafts (LR-04) until the counsel-approved texts bring a new version; support
-                 # and community wait for the owner (LR-21); 12+ is a placeholder (LR-07).
-                 legal=Legal(version="0-draft",
+                 # Edition 1 published 2026-11-05 (LR-04; a new edition brings a new version);
+                 # the community waits for the owner (LR-21); 12+ is a placeholder (LR-07).
+                 legal=Legal(version="1",
                              privacy="https://omoba.ru/privacy",
                              terms="https://omoba.ru/terms",
                              source="https://github.com/o-moba/omoba-bevy/tree/v{version}-ru",
+                             support_email="prostosobolev@gmail.com",
                              age_rating="12+"),
                  player_readme="ru"),
     "cn": Market("cn", {"ekza": False, "supporter": False, "vk_sign_in": False}, "zh-Hans", "cn",

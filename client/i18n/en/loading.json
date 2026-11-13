@@ -30,5 +30,6 @@
   "loading.tip.objective": "Destroy the towers in one lane, then the enemy main tower. Follow your minions.",
   "loading.tip.previous": "‹",
   "loading.tip.next": "›",
-  "loading.tip.counter": "Tip {current} / {total}"
+  "loading.tip.counter": "Tip {current} / {total}",
+  "loading.waiting_players": "Waiting for: {names}"
 }

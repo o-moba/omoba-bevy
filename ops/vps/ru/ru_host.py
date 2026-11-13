@@ -237,7 +237,11 @@ COMMON_UNIT_RULES = {"Unit.StartLimitIntervalSec": "0", "Unit.OnFailure": ON_FAI
 UNIT_RULES = {
     "lobby": {"Service.User": USER, "Service.Group": USER, "Service.WorkingDirectory": STATE,
               "Service.EnvironmentFile": ENV_PATHS["lobby"], "Service.ExecStart": CURRENT + "/omoba-server",
-              "Service.ReadWritePaths": STATE},
+              "Service.ReadWritePaths": STATE,
+              # A lobby stop or restart signals the lobby only: live match workers keep
+              # running and the next lobby adopts them from their manifests (README
+              # "Install and update").
+              "Service.KillMode": "process", "Service.SendSIGHUP": "no"},
     "account-api": {"Service.User": USER, "Service.Group": USER,
                     "Service.EnvironmentFile": ENV_PATHS["account-api"],
                     "Service.ExecStart": CURRENT + "/omoba-account-api"},
@@ -663,6 +667,28 @@ def fill_env(text: str, fill: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def missing_env_keys(text: str, example: str) -> list[str]:
+    """The example's settings, in its order, that `text` lacks (a host file older than the kit)."""
+    have = parse_env(text)[0]
+    return [key for key in parse_env(example)[0] if key not in have]
+
+
+def append_env(text: str, example: str, keys) -> str:
+    """`text` with the example's lines for `keys` appended, after a line saying where they came
+    from; existing lines, comments and order kept."""
+    lines = {}
+    for raw in example.splitlines():
+        stripped = raw.strip()
+        key, sep, _ = stripped.partition("=")
+        if sep and not stripped.startswith(("#", ";")):
+            lines[key.strip()] = stripped
+    added = [lines[key] for key in keys if key in lines]
+    if not added:
+        return text
+    return (text.rstrip("\n") + "\n# Added by ru_host.py bootstrap from the kit's example (README).\n"
+            + "\n".join(added) + "\n")
+
+
 def with_password(url: str, password: str) -> str:
     parts = urlsplit(url)
     netloc = f"{parts.username}:{password}@{parts.hostname}" + (f":{parts.port}" if parts.port else "")
@@ -958,6 +984,7 @@ SELECT json_build_object(
   'icu', EXISTS (SELECT 1 FROM pg_collation WHERE collname = '{ICU_COLLATION}'),
   'listen', current_setting('listen_addresses'),
   'port', current_setting('port')::int,
+  'max_connections', current_setting('max_connections')::int,
   'roles', (SELECT coalesce(json_object_agg(rolname, rolcanlogin), '{{}}'::json) FROM pg_roles
             WHERE rolname IN ('{DB_OWNER}', '{DB_GAME}', '{DB_PORTAL}')),
   'database_owner', (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '{DB_NAME}'));
@@ -1014,7 +1041,21 @@ def validate_grants(grants) -> str:
     return grants
 
 
-def postgres_problems(state: dict | None) -> list[str]:
+# PostgreSQL connections besides the match workers' one each: the lobby's pool (4), the
+# Account API's (8), psql/backups/monitoring and the superuser reserve. README "Arena
+# capacity" (LR-09); docs/architecture/data.md.
+CONNECTION_HEADROOM = 32
+
+
+def connections_needed(lobby_unit: str) -> int:
+    """PostgreSQL max_connections the lobby unit's arena capacity needs: capacity + headroom."""
+    first, last = arena_ports(lobby_unit)
+    return last - first + 1 + CONNECTION_HEADROOM
+
+
+def postgres_problems(state: dict | None, needed: int | None = None) -> list[str]:
+    """Every reason PostgreSQL is not ready; `needed`: the max_connections the lobby unit's
+    capacity needs (None: not checked)."""
     if state is None:
         return ["PostgreSQL does not answer the local superuser (runuser -u postgres -- psql)"]
     problems = []
@@ -1027,6 +1068,10 @@ def postgres_problems(state: dict | None) -> list[str]:
         problems.append(f"PostgreSQL listen_addresses is {printable(state.get('listen'))}; it must be loopback only")
     if state.get("port") != DB_PORT:
         problems.append(f"PostgreSQL listens on port {state.get('port')}, not {DB_PORT}")
+    if needed is not None and state.get("max_connections") is not None and int(state["max_connections"]) < needed:
+        problems.append(f"PostgreSQL max_connections is {state['max_connections']}; the lobby unit's arena "
+                        f"capacity needs at least {needed} (one per match worker + {CONNECTION_HEADROOM}): "
+                        f"set it in a postgresql conf.d drop-in and restart the cluster (README \"Arena capacity\")")
     owner = state.get("database_owner")
     if owner not in (None, DB_OWNER):
         problems.append(f"database {DB_NAME} exists and is owned by {printable(owner)}, not {DB_OWNER}")
@@ -1553,6 +1598,12 @@ class Host:
         state = self.pg_state()
         return bool(state and state.get("schema") and state.get("database_owner") == DB_OWNER)
 
+    def connections_needed(self, payload: dict) -> int | None:
+        """max_connections for the lobby unit the payload carries, else the installed one; None
+        when there is neither (a host before bootstrap)."""
+        unit = (payload.get("units") or {}).get("lobby") or self.read(unit_path("lobby"))
+        return connections_needed(unit) if unit else None
+
     def running_matches(self) -> list:
         """Match worker PIDs: every omoba-server of the RU user except the lobby itself."""
         lobby = self.main_pid(unit_name("lobby")) if self.active(unit_name("lobby")) else 0
@@ -1590,8 +1641,9 @@ class Host:
         # PostgreSQL
         state = self.pg_state() if "postgresql" not in missing else None
         facts["postgres"] = None if state is None else {key: state.get(key) for key in
-                                                        ("version", "icu", "listen", "port", "database_owner", "schema")}
-        problems += postgres_problems(state)
+                                                        ("version", "icu", "listen", "port", "max_connections",
+                                                         "database_owner", "schema")}
+        problems += postgres_problems(state, self.connections_needed(payload))
         if state is not None:
             if state.get("database_owner") is None:
                 problems.append(f"database {DB_NAME} does not exist (bootstrap creates it)")
@@ -1754,7 +1806,7 @@ class Host:
                   if not os.path.isdir(self.p(path))]
         if "postgresql" not in missing:
             state = self.pg_state()
-            problems += postgres_problems(state)
+            problems += postgres_problems(state, self.connections_needed(payload))
             if state and state.get("database_owner") is None:
                 would.append(f"create roles {', '.join(DB_ROLES)} and database {DB_NAME} (C.UTF-8, owner {DB_OWNER})")
         else:
@@ -1830,7 +1882,7 @@ class Host:
         done += self.ensure_users_and_dirs()
         done += self.ensure_node(payload.get("node"))
         state = self.pg_state()
-        problems = postgres_problems(state)
+        problems = postgres_problems(state, self.connections_needed(payload))
         if problems:
             raise Refused("PostgreSQL: " + "; ".join(problems))
         done += self.ensure_env_files(examples, payload["expected_ip"], payload.get("vkid"))
@@ -1953,7 +2005,8 @@ class Host:
         return done + [f"{NODE_CURRENT} -> system (/usr/bin/node)"]
 
     def ensure_env_files(self, examples: dict, expected_ip: str, vkid: str | None) -> list:
-        """Write each env file from its example when missing; afterwards only fill placeholders.
+        """Write each env file from its example when missing; afterwards only fill placeholders
+        and append the settings the example gained since (their example values, at the end).
         A generated secret is never replaced (OMOBA_SOCIAL_SECRET keys every VK identity)."""
         done = []
         for kind in KINDS:
@@ -1961,11 +2014,15 @@ class Host:
             if current is None and os.path.lexists(self.p(ENV_PATHS[kind])):
                 raise Refused(f"{ENV_PATHS[kind]} exists and is not a regular file")
             base = current if current is not None else examples[kind]
+            added = [] if current is None else missing_env_keys(current, examples[kind])
+            if added:
+                base = append_env(base, examples[kind], added)
             fill = placeholder_fill(parse_env(base)[0], expected_ip, vkid)
-            if current is None or fill:
+            if current is None or fill or added:
                 self._write_secret(ENV_PATHS[kind], fill_env(base, fill))
-                done.append(("write " if current is None else "fill ") + f"{ENV_PATHS[kind]}"
-                            + (f" ({', '.join(sorted(fill))})" if fill else ""))
+                verb = "write " if current is None else "add " if added else "fill "
+                changed = sorted({*fill, *added})
+                done.append(verb + ENV_PATHS[kind] + (f" ({', '.join(changed)})" if changed else ""))
         return done
 
     def ensure_database(self, state: dict) -> list:
@@ -2299,7 +2356,7 @@ class Host:
         problems = []
         for kind in SERVER_KINDS:
             problems += self.env_file_report(kind, payload)[0]
-        problems += postgres_problems(self.pg_state())
+        problems += postgres_problems(self.pg_state(), self.connections_needed(payload))
         for kind in SERVER_KINDS:
             if self.read(unit_path(kind)) is None and kind not in (payload.get("units") or {}):
                 problems.append(f"{unit_path(kind)} is not installed (bootstrap)")
@@ -2690,13 +2747,21 @@ class Host:
 
 
 def encode_payload(payload: dict) -> str:
-    return base64.b64encode(json.dumps(payload, sort_keys=True).encode()).decode()
+    """The whole payload travels in one argv entry (128 KiB on Linux): compressed, base64."""
+    return base64.b64encode(zlib.compress(json.dumps(payload, sort_keys=True).encode(), 9)).decode()
 
 
 def decode_payload(raw: str) -> dict:
     if not PAYLOAD.fullmatch(raw):
         raise Refused("payload is not base64")
-    return json.loads(base64.b64decode(raw))
+    inflater = zlib.decompressobj()
+    try:
+        data = inflater.decompress(base64.b64decode(raw), 1 << 22)
+    except zlib.error:
+        raise Refused("payload is not a compressed payload") from None
+    if inflater.unconsumed_tail:
+        raise Refused("payload is too large")
+    return json.loads(data)
 
 
 REMOTE_MODES = ("status", "preflight", "bootstrap", "stage", "activate", "rollback", "boot-id")

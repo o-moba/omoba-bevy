@@ -317,7 +317,7 @@ This section owns the workflow mechanics: triggers, jobs and the release draft. 
 
 | Job | What it does |
 |---|---|
-| desktop | Matrix: macos-14, windows-latest, ubuntu-22.04. `core.autocrlf false` keeps asset hashes matching. Runs `release.py build <platform> --out dist --contour …` |
+| desktop | Matrix: macos-15, windows-latest, ubuntu-22.04. `core.autocrlf false` keeps asset hashes matching. Runs `release.py build <platform> --out dist --contour …` |
 | android | Java 17, SDK `platforms;android-35`, `build-tools;35.0.0`, an arm64 APK, and the optional `OMOBA_ANDROID_KEYSTORE_BASE64` secret. On PRs it also builds the OMOBA Dev APK |
 | draft | Not run on PRs. Runs with `if: !cancelled()` (release.yml:158), so it still creates or updates the draft when a desktop or Android job failed, and the draft can then hold a partial package set. It applies the tag/contour guard, collects `.zip`/`.tar.gz`/`.apk`, writes `SHA256SUMS.txt` and notes, then runs `gh release create --draft --prerelease` or `upload --clobber`. No Rust |
 
@@ -327,7 +327,7 @@ More release.yml behaviour:
 - `contour=dev` builds the dev desktop packages and the dev APK, not iOS.
 - Global market only. Artifacts are kept 3 days.
 
-**[ios-check.yml](../../.github/workflows/ios-check.yml).** Triggers: weekly cron (Mon 04:41 UTC) and `workflow_dispatch`. It runs on `macos-latest` (release.yml pins macos-14): `cargo check -p client --target aarch64-apple-ios --locked`, deployment target 15.0. It is not a PR gate because macOS runners are slow and scarce.
+**[ios-check.yml](../../.github/workflows/ios-check.yml).** Triggers: weekly cron (Mon 04:41 UTC) and `workflow_dispatch`. It runs on `macos-latest` (release.yml pins macos-15): `cargo check -p client --target aarch64-apple-ios --locked`, deployment target 15.0. It is not a PR gate because macOS runners are slow and scarce.
 
 **[bot-sim.yml](../../.github/workflows/bot-sim.yml).** Trigger: `workflow_dispatch` with inputs `rounds`, `pairings` and `tune`. It runs the full bot-difficulty matrix and uploads the report JSON as an artifact.
 

@@ -88,6 +88,39 @@ impl Default for TeamSelection {
     }
 }
 
+impl TeamSelection {
+    /// A public queue has its own draft. Carry a valid preferred presentation
+    /// from the profile card into that draft without asking for a first pick.
+    pub(crate) fn queue_from_card(
+        &mut self,
+        card: &crate::frontend::card::ProfileCard,
+    ) -> NetworkCommand {
+        let available = crate::passport::selectable_avatars();
+        self.hero_class = card.main_class;
+        self.avatar = card
+            .showcase_avatar
+            .as_ref()
+            .filter(|slug| available.iter().any(|a| &a.slug == *slug))
+            .or_else(|| {
+                self.avatar
+                    .as_ref()
+                    .filter(|slug| available.iter().any(|a| &a.slug == *slug))
+            })
+            .cloned()
+            .or_else(|| available.first().map(|a| a.slug.clone()));
+        // A committed join enables local actor admission. The allocation's
+        // server-assigned team replaces this placeholder on the first snapshot.
+        self.team = Some(Team::Green);
+        NetworkCommand::JoinPrematch {
+            handheld: self.handheld.clone(),
+            character: self.character,
+            hero_class: self.hero_class,
+            avatar: self.avatar.clone(),
+            sprite_character: Some(self.sprite_character.clone()),
+        }
+    }
+}
+
 /// Thumbnail image handles for the avatar grid, keyed by slug.
 #[derive(Resource, Default)]
 pub struct AvatarThumbnails(pub HashMap<String, Handle<Image>>);

@@ -17,6 +17,13 @@ use super::{GameState, TargetId};
 
 #[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
+    MatchVote {
+        server_epoch: u64,
+        match_id: u64,
+        generation: u64,
+        kind: shared::match_vote::Kind,
+        action: shared::match_vote::Action,
+    },
     TakeoverVote {
         player_id: u64,
         generation: u64,
@@ -86,13 +93,41 @@ pub enum NetworkCommand {
 #[derive(Resource)]
 pub(in crate::net) struct LocalStateSendTimer(pub(in crate::net) Timer);
 
+/// Survives a short movement target being consumed before the next 20 Hz send.
+#[derive(Component)]
+pub(crate) struct LatchedMovementInput;
+
+pub(crate) fn latch_movement_input(
+    mut commands: Commands,
+    players: Query<Entity, (With<Player>, With<crate::domain::MovementTarget>)>,
+    input: Res<crate::input_context::GameplayInputContext>,
+) {
+    if input.gameplay_allowed() {
+        for player in &players {
+            commands.entity(player).insert(LatchedMovementInput);
+        }
+    }
+}
+
 pub(in crate::net) fn send_local_state(
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     time: Res<Time>,
     mut timer: ResMut<LocalStateSendTimer>,
     mut commands: MessageReader<NetworkCommand>,
+    mut entity_commands: Commands,
     channels: Option<Res<NetworkChannels>>,
     client_session: Res<ClientSession>,
-    player_query: Query<(&Transform, Option<&PlayerUtility>), With<Player>>,
+    player_query: Query<
+        (
+            Entity,
+            &Transform,
+            Option<&PlayerUtility>,
+            Has<crate::domain::MovementTarget>,
+            Has<LatchedMovementInput>,
+        ),
+        With<Player>,
+    >,
+    input: Option<Res<crate::input_context::GameplayInputContext>>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -119,19 +154,36 @@ pub(in crate::net) fn send_local_state(
         return;
     }
 
-    let Ok((player_transform, utility)) = player_query.single() else {
+    let Ok((entity, player_transform, utility, movement_target, latched_input)) =
+        player_query.single()
+    else {
         return;
     };
 
     let (yaw, _pitch, _roll) = player_transform.rotation.to_euler(EulerRot::YXZ);
     let packet = ClientPacket::Transform {
+        input_kind: mobile
+            .as_ref()
+            .map_or(shared::ranked::InputKind::Unknown, |controls| {
+                if controls.enabled {
+                    shared::ranked::InputKind::Touch
+                } else {
+                    shared::ranked::InputKind::Mouse
+                }
+            }),
+        input_active: latched_input
+            || (movement_target && input.as_ref().is_none_or(|input| input.gameplay_allowed())),
         dash_sequence: utility.map_or(0, |u| u.state.dash_sequence),
         x: player_transform.translation.x,
         y: player_transform.translation.y,
         z: player_transform.translation.z,
         yaw,
     };
-    let _ = channels.outgoing.try_send(packet);
+    if channels.outgoing.try_send(packet).is_ok() {
+        entity_commands
+            .entity(entity)
+            .remove::<LatchedMovementInput>();
+    }
 }
 
 fn social_requires_signature(
@@ -161,6 +213,7 @@ pub(in crate::net) fn send_network_commands(
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
     mut social_client: Option<ResMut<crate::social::SocialClient>>,
     mut match_service: Option<ResMut<crate::match_service::MatchServiceClient>>,
+    directory: Option<Res<super::directory::DirectoryRouting>>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -179,6 +232,11 @@ pub(in crate::net) fn send_network_commands(
         });
     }
     for command in command_events.read() {
+        if directory.as_ref().is_some_and(|directory| {
+            directory.rejects(command, &client_session, match_service.as_deref())
+        }) {
+            continue;
+        }
         if client_session.is_offline()
             && matches!(
                 command,
@@ -261,6 +319,28 @@ pub(in crate::net) fn send_network_commands(
                     && let Some(social) = social_client.as_mut()
                 {
                     social.request_failed(*request_id, error);
+                }
+            }
+            NetworkCommand::MatchVote {
+                server_epoch,
+                match_id,
+                generation,
+                kind,
+                action,
+            } => {
+                if client_session.join_confirmed()
+                    && !client_session.is_offline()
+                    && snapshot.as_ref().is_some_and(|s| {
+                        s.meta.server_epoch == *server_epoch && s.meta.match_id == *match_id
+                    })
+                {
+                    let _ = channels.outgoing.try_send(ClientPacket::MatchVote {
+                        server_epoch: *server_epoch,
+                        match_id: *match_id,
+                        generation: *generation,
+                        kind: *kind,
+                        action: *action,
+                    });
                 }
             }
             NetworkCommand::TakeoverVote {
@@ -607,6 +687,171 @@ mod tests {
             received.try_recv().is_err(),
             "pre-admission strike cannot leave the client"
         );
+    }
+
+    #[test]
+    fn a_short_tap_survives_consumed_target_and_is_cleared_only_after_send() {
+        use bevy::ecs::system::RunSystemOnce;
+        let (outgoing, received) = crossbeam_channel::unbounded();
+        let (_, incoming) = crossbeam_channel::unbounded();
+        let (_, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .init_resource::<Time>()
+            .init_resource::<crate::input_context::GameplayInputContext>()
+            .insert_resource(LocalStateSendTimer(Timer::from_seconds(
+                0.05,
+                TimerMode::Repeating,
+            )))
+            .insert_resource(NetworkChannels {
+                gameplay_signer: Default::default(),
+                outgoing,
+                incoming,
+                signals,
+            })
+            .insert_resource(ClientSession::admitted_for_test())
+            .add_systems(Update, send_local_state);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                crate::domain::MovementTarget { target: Vec3::X },
+            ))
+            .id();
+        app.world_mut()
+            .run_system_once(latch_movement_input)
+            .unwrap();
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<crate::domain::MovementTarget>();
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(10));
+        app.update();
+        assert!(received.try_recv().is_err());
+        assert!(
+            app.world()
+                .entity(entity)
+                .contains::<LatchedMovementInput>()
+        );
+        app.world_mut()
+            .resource_mut::<crate::input_context::GameplayInputContext>()
+            .modal_open = true;
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(50));
+        app.update();
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            ClientPacket::Transform {
+                input_kind: shared::ranked::InputKind::Unknown,
+                input_active: true,
+                ..
+            }
+        ));
+        assert!(
+            !app.world()
+                .entity(entity)
+                .contains::<LatchedMovementInput>()
+        );
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(50));
+        app.update();
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            ClientPacket::Transform {
+                input_active: false,
+                ..
+            }
+        ));
+        // The same live sender reports a control switch without a new join.
+        for enabled in [true, false] {
+            {
+                let mut controls = app
+                    .world_mut()
+                    .get_resource_or_init::<crate::mobile_controls::MobileControls>();
+                controls.enabled = enabled;
+            }
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+            let ClientPacket::Transform { input_kind, .. } = received.try_recv().unwrap() else {
+                panic!()
+            };
+            assert_eq!(
+                input_kind,
+                if enabled {
+                    shared::ranked::InputKind::Touch
+                } else {
+                    shared::ranked::InputKind::Mouse
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn movement_intent_is_distinct_from_reflected_server_pose_and_blocked_modal_input() {
+        let (outgoing, received) = crossbeam_channel::unbounded();
+        let (_, incoming) = crossbeam_channel::unbounded();
+        let (_, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .init_resource::<Time>()
+            .init_resource::<crate::input_context::GameplayInputContext>()
+            .insert_resource(LocalStateSendTimer(Timer::from_seconds(
+                0.05,
+                TimerMode::Repeating,
+            )))
+            .insert_resource(NetworkChannels {
+                gameplay_signer: Default::default(),
+                outgoing,
+                incoming,
+                signals,
+            })
+            .insert_resource(ClientSession::admitted_for_test())
+            .add_systems(Update, send_local_state);
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::from_xyz(1.0, 0.5, 2.0),
+                PlayerUtility::default(),
+            ))
+            .id();
+        for (moving, modal) in [(false, false), (true, false), (true, true), (false, false)] {
+            // Received authoritative motion alone cannot claim physical input.
+            app.world_mut()
+                .get_mut::<Transform>(player)
+                .unwrap()
+                .translation
+                .x += 1.0;
+            if moving {
+                app.world_mut()
+                    .entity_mut(player)
+                    .insert(crate::domain::MovementTarget {
+                        target: Vec3::new(10.0, 0.5, 2.0),
+                    });
+            } else {
+                app.world_mut()
+                    .entity_mut(player)
+                    .remove::<crate::domain::MovementTarget>();
+            }
+            app.world_mut()
+                .resource_mut::<crate::input_context::GameplayInputContext>()
+                .modal_open = modal;
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(60));
+            app.update();
+            let ClientPacket::Transform { input_active, .. } = received.try_recv().unwrap() else {
+                panic!("expected a transform")
+            };
+            assert_eq!(input_active, moving && !modal);
+            assert!(received.try_recv().is_err());
+        }
     }
 
     #[test]

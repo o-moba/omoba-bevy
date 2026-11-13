@@ -27,7 +27,9 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 12;
+// Protocol16 changes only snapshot transport: bounded lossless world envelopes.
+// Reviewed all strict/tolerant variant lists; no JSON enum variant changes.
+const POLICY_PROTOCOL_VERSION: u16 = 16;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;
@@ -66,7 +68,9 @@ macro_rules! wire_enums {
 
 wire_enums! {
     crate::compatibility::CompatibilityDatagram => Strict [CompatibilityProbe, CompatibilityReport],
-    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Interact, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem, TakeoverVote],
+    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Interact, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem, TakeoverVote, MatchVote],
+    crate::match_vote::Kind => Strict [Remake, Surrender],
+    crate::match_vote::Action => Strict [Start, Yes, No],
     crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
     crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
@@ -74,7 +78,7 @@ wire_enums! {
     // where it used to send nothing (a probe at the endpoint ceiling), and an
     // older client drops a datagram it cannot decode, so it still sees silence.
     crate::public_transport::PublicServerDatagram => Strict [TransportChallenge, ServerFull],
-    crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
+    crate::career::CareerRequest => Strict [FindMatch, ReadyMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
     crate::utility::UtilityAction => Strict [Dash, Haste, Recall, CancelRecall],
     crate::map::Team => Strict [Green, Blue],
     crate::HeroClass => Tolerant [Warrior, Mage, Ranger, Cleric, Warden, Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard, Adventurer],
@@ -96,10 +100,10 @@ wire_enums! {
     crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant, Rose, Jade, Azure, Crimson, PrismI, PrismII, PrismIII],
     crate::handheld::HandheldSelection => Strict [ClassDefault, Unequipped, Item],
     crate::career::FriendAction => Strict [Request, Accept, Reject, Cancel, Remove],
-    crate::career::CareerAction => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, CancelQueue],
+    crate::career::CareerAction => Strict [FindMatch, ReadyMatch, SupporterStatus, EquipSupporterAura, Social, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, CancelQueue],
     crate::protocol::wire::TargetKind => Strict [Player, Minion, Structure, Neutral],
     crate::prematch::PrematchAction => Strict [Select, Lock, Loaded],
-    crate::match_service::MatchServiceView => Strict [Idle, Waiting, Allocating, Assigned, Failed],
+    crate::match_service::MatchServiceView => Strict [Idle, Waiting, ReadyCheck, Allocating, Assigned, Failed],
     crate::career::QueueView => Strict [Idle, Waiting, Selected, Playing, Full],
     crate::shop::ItemId => Strict [EmberBlade, SwiftGrip, TrailBoots, VitalityGem, FocusCharm, GuardianCrest, CritShard, SiphonStone, WindrunnerBoots, DuelistEdge, VampiricFang, ArcaneFocus, Bulwark, TempestBlade, Bloodreaver, AetherCrown],
     crate::PlayerActionKind => Tolerant [Attack, Cast, None],
@@ -119,18 +123,24 @@ wire_enums! {
     crate::prematch::Role => Strict [Solo, Jungle, Mid, Carry, Support],
     crate::social::SocialTeam => Strict [Green, Blue],
     crate::social::SocialEventKind => Strict [Chat, Reaction],
-    crate::career::MatchOutcome => Strict [Completed, Abandoned, Interrupted],
+    crate::career::MatchOutcome => Strict [Completed, Abandoned, Interrupted, Remade],
     crate::shop::PurchaseError => Strict [Unavailable, Dead, OutsideBase, InsufficientGold, AlreadyOwned, InventoryFull, UnknownItem],
     crate::career::FriendPresence => Strict [Offline, Online, Playing],
     crate::sandbox::BotBehavior => Strict [Stationary, Flee, Attack, Fight],
     crate::protocol::wire::CharacterChoice => Strict [Ipfs, Toka, Wang, Cube, Paco],
     // LR-15: `CareerView.sanctions`, `SocialView.mute`; tolerant so a later kind is additive.
     crate::moderation::SanctionKind => Tolerant [ChatMute, MatchmakingBan, RankedBan, AccountBan, NameReset, Unknown],
+    crate::ranked::Tier => Tolerant [Bronze, Silver, Gold, Platinum, Diamond, Master, Unknown],
+    crate::ranked::InputKind => Tolerant [Touch, Mouse, Mixed, Unknown],
 }
 
 /// Serde enums in `shared` that the UDP protocol does not carry, and why.
 /// They are versioned by their own contract (HTTP API, data file).
 const NOT_UDP_WIRE: &[(&str, &str)] = &[
+    (
+        "LobbyStatus",
+        "Version1 signed HTTPS directory only; never part of a UDP gameplay datagram",
+    ),
     (
         "CompatibilityIssue",
         "local client diagnosis and operator JSON, not a UDP field",
@@ -295,6 +305,14 @@ fn tolerant_enums_decode_an_unknown_value() {
         serde_json::from_str::<crate::moderation::SanctionKind>(FUTURE).unwrap(),
         crate::moderation::SanctionKind::Unknown
     );
+    assert_eq!(
+        serde_json::from_str::<crate::ranked::Tier>(FUTURE).unwrap(),
+        crate::ranked::Tier::Unknown
+    );
+    assert_eq!(
+        serde_json::from_str::<crate::ranked::InputKind>(FUTURE).unwrap(),
+        crate::ranked::InputKind::Unknown
+    );
     let tolerant: Vec<&str> = WIRE_ENUMS
         .iter()
         .filter(|(_, decoding, _)| *decoding == Decoding::Tolerant)
@@ -310,7 +328,9 @@ fn tolerant_enums_decode_an_unknown_value() {
             "CombatEntityKind",
             "ProjectileStyle",
             "MinionKind",
-            "SanctionKind"
+            "SanctionKind",
+            "Tier",
+            "InputKind"
         ],
         "a tolerant enum needs an unknown-value case above"
     );

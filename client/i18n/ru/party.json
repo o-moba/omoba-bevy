@@ -1,0 +1,14 @@
+{
+  "party.error.not_online": "Игрок уже не в сети.",
+  "party.error.self_invite": "Нельзя пригласить самого себя.",
+  "party.error.already_member": "Игрок уже в вашей группе.",
+  "party.error.party_full": "Группа заполнена.",
+  "party.error.no_invite": "Приглашение истекло.",
+  "party.error.not_leader": "Только лидер может это сделать.",
+  "party.error.no_party": "Вы не в группе.",
+  "party.error.invite_declined": "Игрок отклонил приглашение. Повторите через минуту.",
+  "party.error.invite_rate": "Слишком много приглашений. Подождите минуту.",
+  "party.error.unknown": "Сервер не принял команду.",
+  "party.notice.lobby_restarted": "Соединение с лобби восстановлено, группа распущена.",
+  "party.notice.search_restarted": "Соединение с лобби восстановлено. Поиск начат заново."
+}

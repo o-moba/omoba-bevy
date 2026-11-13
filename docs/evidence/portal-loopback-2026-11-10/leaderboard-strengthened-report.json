@@ -1,0 +1,59 @@
+{
+  "status": "PASS",
+  "scope": "Strengthened leaderboard browser regression, not RU production acceptance",
+  "game_baseline_commit": "550d2827f6c47730fdc992ede23d3a4eff224711",
+  "portal_baseline_commit": "ff8f50165bdce761425e27369d6fff7d8fd250ea",
+  "portal_production_code_changed": false,
+  "entries": 2,
+  "ratings": [
+    {
+      "nickname": "Portal Ranger#1737",
+      "rating": 1351,
+      "rank": 1
+    },
+    {
+      "nickname": "Portal Rival#0009",
+      "rating": 900,
+      "rank": 2
+    }
+  ],
+  "placement": {
+    "lifetime_rated_matches": 20,
+    "season_rated_matches": 1,
+    "visible_text": "Калибровка 1/20"
+  },
+  "checks": [
+    "At least two entries with distinct ratings are mandatory",
+    "Rating, seasonal-count and profile-id API ordering is asserted",
+    "DOM row order equals API order",
+    "Own row and rank are present",
+    "No MMR jargon or raw codes",
+    "No horizontal overflow at 390 px",
+    "Settings opt-out hides the profile and explains the state",
+    "Second profile must have lifetime experience and seasonal placement below 20",
+    "Exact visible current-season placement text is mandatory and recorded"
+  ],
+  "portal_unit_tests": {
+    "passed": 257,
+    "expected_skips": 3,
+    "failed": 0
+  },
+  "portal_typecheck": "PASS",
+  "source_sha256": {
+    "account-api/examples/seed-local-portal.rs": "f489d8710348b76d50b70d38ca19896590d1f3735f9de6dbacacedb76d043532",
+    "tests/leaderboard.e2e.mjs": "bfa32e4f76a3c63a0399a9e9719119417a0744b63a4b6d3b8194e163d82c35de",
+    "ops/vps/ru/release-checklist.md": "3b019d24b2fed260d186f5e6e319077ec49096d964ae9c1dfa51f9848092a6ec"
+  },
+  "binary_sha256": {
+    "omoba-account-api": "b44e44ade776d698724be72753aa2a7abe1c3afe8ee82f0ef8ead31fcaa3c323",
+    "previous-seed-local-portal": "330ea72580c00356dd84989d17d2c08040d4c1510231124300232404faf0a9ed"
+  },
+  "fixture": "Fresh disposable database and role on loopback PostgreSQL; existing RU Account API and previous seed binary; after projection completed, explicit SQL established two eligible ratings and a third profile after the registration trigger. Database, role and owned processes were removed.",
+  "seed_verification_boundary": "The edited seed fixture passed targeted cargo check before its counter setup was moved ahead of settlement to remove the projection race; current source passed cargo fmt --check afterwards. Its committed SHA still requires CI and a fresh executable run when the local disk guard permits linking.",
+  "limitations": [
+    "Loopback synthetic fixture only; not production accounts or organic matchmaking",
+    "Browser emulation at 390 px; not a physical device",
+    "No WAN, isolated RU host, deployment or capacity acceptance",
+    "S9 documentation policy was corrected; no RU reboot was performed"
+  ]
+}

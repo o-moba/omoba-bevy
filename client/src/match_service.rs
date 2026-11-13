@@ -28,6 +28,7 @@ pub(crate) struct MatchServiceClient {
     pub allocation: Option<MatchAllocation>,
     pub active: bool,
     request_id: u64,
+    ready_answer: Option<(String, bool)>,
     last_request: Option<Instant>,
     /// The lock-in that started the current search: Play again queues it
     /// again after an allocated match (DECISIONS R7.4).
@@ -44,6 +45,16 @@ pub(crate) struct MatchServiceClient {
     /// This Ranked search took the offer to also search Casual PvP (LR-08,
     /// owner default O-1); every `FindMatch` of the search carries it.
     also_casual: bool,
+    /// Why the current search started on its own (`queue.requeue.*`): the
+    /// searching screen says so above the queue status. Cleared when the
+    /// player leaves the queue or locks in afresh.
+    notice: Option<&'static str>,
+    /// The notice of a queued re-search, handed to the search that its
+    /// lock-in starts (`intercept_join`).
+    pending_notice: Option<&'static str>,
+    /// Automatic re-searches since the player's own lock-in; bounded by
+    /// [`MAX_AUTO_REQUEUES`] so a worker that keeps failing cannot loop.
+    auto_requeues: u8,
 }
 
 /// The offer to also search Casual PvP on a Ranked search, as the searching
@@ -61,19 +72,41 @@ pub(crate) enum CasualOffer {
     Searching,
 }
 
-/// A queued "Play again": the lobby to return to and the lock-in to send.
+/// A queued re-search ("Play again", or a worker lost before its match
+/// started): the lobby to return to and the lock-in to send.
 #[derive(Clone, Debug)]
 pub(crate) struct Requeue {
     lobby: String,
     join: NetworkCommand,
     since: Instant,
+    /// What the searching screen says about the re-search, if anything.
+    notice: Option<&'static str>,
 }
 
 /// How long a Play again waits for the lobby (reconnect + career view)
 /// before it gives up and leaves the player on Home.
 pub(crate) const REQUEUE_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Automatic re-searches one lock-in may start before the client gives up and
+/// leaves the player on Home: a worker that fails three times in a row is a
+/// server incident, not something to retry for the player forever.
+const MAX_AUTO_REQUEUES: u8 = 3;
+
+/// The notice of a re-search after a worker rejected the join or vanished
+/// before its match started.
+const WORKER_LOST_NOTICE: &str = "queue.requeue.worker_lost";
+
 impl MatchServiceClient {
+    /// Refresh the same search after device sleep without changing FIFO identity
+    /// or consent. An allocated handoff must keep its worker state instead.
+    pub(crate) fn refresh_after_resume(&mut self) -> bool {
+        if !self.active || self.allocation.is_some() {
+            return false;
+        }
+        self.last_request = None;
+        true
+    }
+
     pub(crate) fn restore_resume(&mut self, saved: &crate::net::recovery::SavedResume) {
         self.allocation = Some(saved.allocation.clone());
         self.lobby_addr = Some(saved.lobby.clone());
@@ -88,6 +121,10 @@ impl MatchServiceClient {
         });
         self.last_queue_join = self.pending_join.clone();
         self.last_request = None;
+    }
+
+    pub(crate) fn queue_request_is_active(&self, request_id: u64) -> bool {
+        self.active && self.request_id == request_id
     }
 
     pub fn intercept_join(
@@ -106,6 +143,12 @@ impl MatchServiceClient {
             self.request_id = self.request_id.saturating_add(1);
             self.last_request = None;
             self.also_casual = false;
+            // A queued re-search carries its notice; the player's own lock-in
+            // starts a clean search and a new automatic-retry budget.
+            self.notice = self.pending_notice.take();
+            if self.notice.is_none() {
+                self.auto_requeues = 0;
+            }
         }
         self.active = true;
         self.pending_join = Some(command.clone());
@@ -119,6 +162,27 @@ impl MatchServiceClient {
     /// lobby. `false` when this is not an allocated match started from the
     /// queue (nothing to repeat).
     pub fn request_requeue(&mut self) -> bool {
+        self.queue_again(None)
+    }
+
+    /// The allocated worker rejected the join or vanished before its match
+    /// started: the lobby re-queues the remaining humans with their queue
+    /// age, and this client queues the same lock-in again once it is back on
+    /// the lobby, telling the player why. `false` once the automatic budget
+    /// is spent (the player then lands on Home) or when there is nothing to
+    /// repeat.
+    pub(crate) fn requeue_after_lost_worker(&mut self) -> bool {
+        if self.auto_requeues >= MAX_AUTO_REQUEUES {
+            return false;
+        }
+        let queued = self.queue_again(Some(WORKER_LOST_NOTICE));
+        if queued {
+            self.auto_requeues = self.auto_requeues.saturating_add(1);
+        }
+        queued
+    }
+
+    fn queue_again(&mut self, notice: Option<&'static str>) -> bool {
         let (Some(_), Some(lobby), Some(join)) = (
             self.allocation.as_ref(),
             self.lobby_addr.clone(),
@@ -130,8 +194,23 @@ impl MatchServiceClient {
             lobby,
             join,
             since: Instant::now(),
+            notice,
         });
         true
+    }
+
+    /// Why the current search started on its own, as a `queue.requeue.*`
+    /// key, while it is still searching.
+    pub(crate) fn notice(&self) -> Option<&'static str> {
+        (self.active && self.allocation.is_none())
+            .then_some(self.notice)
+            .flatten()
+    }
+
+    /// A search that started on its own after a lost worker (test fixtures only).
+    #[cfg(test)]
+    pub(crate) fn set_worker_lost_notice_for_test(&mut self) {
+        self.notice = Some(WORKER_LOST_NOTICE);
     }
 
     pub fn is_searching(&self) -> bool {
@@ -145,6 +224,31 @@ impl MatchServiceClient {
             && view.match_service_request_id == Some(self.request_id))
         .then_some(view.match_service.as_ref())
         .flatten()
+    }
+
+    pub(crate) fn ready_check<'a>(&self, view: &'a CareerView) -> Option<(&'a str, bool)> {
+        match self.answer(view)? {
+            MatchServiceView::ReadyCheck {
+                check_id,
+                accepted,
+                remaining_secs,
+                ..
+            } if *remaining_secs > 0 => {
+                let pending = self
+                    .ready_answer
+                    .as_ref()
+                    .is_some_and(|(id, _)| id == check_id);
+                Some((check_id, *accepted || pending))
+            }
+            _ => None,
+        }
+    }
+    /// Called only by an explicit click on the current check. Never reused for a new roster.
+    pub(crate) fn respond_ready(&mut self, view: &CareerView, accepted: bool) {
+        if let Some((id, false)) = self.ready_check(view) {
+            self.ready_answer = Some((id.to_owned(), accepted));
+            self.last_request = None;
+        }
     }
 
     /// The running match that still holds this player's seat, as the lobby
@@ -252,14 +356,47 @@ impl MatchServiceClient {
         }
         let destination = allocation.and(self.lobby_addr.take());
         self.active = false;
+        self.ready_answer = None;
         self.resume_scope = None;
         self.resuming = false;
         self.also_casual = false;
         self.pending_join = None;
         self.last_request = None;
         self.lobby_addr = None;
+        self.notice = None;
         destination
     }
+}
+
+/// The match of this snapshot ran (or ended): a lost worker is then a seat
+/// to reclaim, not a match that never started.
+fn match_started(snapshot: &GameStateSnapshot) -> bool {
+    matches!(
+        snapshot.state,
+        crate::net::GameState::Running | crate::net::GameState::Victory { .. }
+    )
+}
+
+/// The allocated worker is gone before its match started: it rejected the
+/// join (or the join budget ran out), its transport stayed lost for the
+/// pre-start window, or it never answered the connection at all (the wait
+/// budget tore the unjoined transport down). The lobby has already marked
+/// that allocation Failed and re-queued the other humans.
+fn worker_lost_before_start(
+    allocation: &MatchAllocation,
+    session: &ClientSession,
+    snapshot: &GameStateSnapshot,
+) -> bool {
+    session.server_addr() == allocation.endpoint
+        && !match_started(snapshot)
+        && (snapshot
+            .prematch
+            .as_ref()
+            .is_some_and(|p| p.error.as_deref() == Some("allocation_cancelled_or_expired"))
+            || session.join_blocked()
+            || session.reconnect_expired_before_start()
+            || (session.state() == crate::net::ClientConnectionState::Disconnected
+                && !session.has_committed_join()))
 }
 
 pub(crate) struct MatchServicePlugin;
@@ -348,10 +485,26 @@ fn update_match_service(
         // A terminal receipt ends gameplay even when its durable save is pending.
         // Keep the transport for receipt updates, but never rejoin this round.
         if career.view.last_result.as_ref().is_some_and(|result| {
-            result.server_epoch == snapshot.meta.server_epoch
+            result.gameplay_started
+                && result.server_epoch == snapshot.meta.server_epoch
                 && result.match_id == snapshot.meta.match_id
         }) {
             session.abandon_join();
+            return;
+        }
+        if worker_lost_before_start(allocation, &session, &snapshot) {
+            // Back to the lobby with a clean client, and the same lock-in
+            // again (the lobby kept the queue age of everyone it re-queued).
+            // Dropping the dead join here keeps the shell from treating the
+            // rejection as a picker return in the same frame.
+            flow.requeue_after_lost_worker();
+            flow.pending_join = None;
+            // This is recovery, not the player's Cancel action. The session
+            // shell sends CancelQueue only for an active search; do not turn
+            // a rejected handoff into a Ranked dodge at a still-live worker.
+            flow.active = false;
+            session.abandon_join();
+            session_ui.write(SessionUiCommand::LeaveMatch);
             return;
         }
         if session.server_addr() == allocation.endpoint
@@ -388,13 +541,35 @@ fn update_match_service(
         .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(2))
     {
         flow.last_request = Some(now);
-        requests.write(NetworkCommand::Career(
-            shared::career::CareerRequest::FindMatch {
-                request_id: flow.request_id,
-                preference: flow.preference,
-                also_casual: flow.also_casual,
-            },
-        ));
+        let ready = match flow.answer(&career.view) {
+            Some(MatchServiceView::ReadyCheck {
+                check_id,
+                accepted: false,
+                ..
+            }) => flow
+                .ready_answer
+                .as_ref()
+                .filter(|(id, _)| id == check_id)
+                .cloned(),
+            _ => None,
+        };
+        if let Some((check_id, accepted)) = ready {
+            requests.write(NetworkCommand::Career(
+                shared::career::CareerRequest::ReadyMatch {
+                    request_id: flow.request_id,
+                    check_id,
+                    accepted,
+                },
+            ));
+        } else {
+            requests.write(NetworkCommand::Career(
+                shared::career::CareerRequest::FindMatch {
+                    request_id: flow.request_id,
+                    preference: flow.preference,
+                    also_casual: flow.also_casual,
+                },
+            ));
+        }
     }
 }
 
@@ -416,9 +591,17 @@ fn resume_requeue(
         return;
     };
     let screen = screen.map_or(AppScreen::Home, |screen| *screen.get());
-    if requeue.since.elapsed() > REQUEUE_TIMEOUT
-        || !matches!(screen, AppScreen::PostMatch | AppScreen::Home)
-    {
+    if requeue.since.elapsed() > REQUEUE_TIMEOUT {
+        flow.requeue = None;
+        return;
+    }
+    // An automatic return is requested while Searching/Draft/Loading is
+    // still visible. Keep its lock-in until LeaveMatch clears the allocation
+    // and the session shell brings the player back to Home.
+    if flow.allocation.is_some() {
+        return;
+    }
+    if !matches!(screen, AppScreen::PostMatch | AppScreen::Home) {
         flow.requeue = None;
         return;
     }
@@ -428,6 +611,7 @@ fn resume_requeue(
     let Some(requeue) = flow.requeue.take() else {
         return;
     };
+    flow.pending_notice = requeue.notice;
     requests.write(requeue.join);
     if let Some(next) = next.as_mut() {
         next.set(AppScreen::Searching);
@@ -492,8 +676,28 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
             capacity_wait,
             searching,
             capacity_line,
+            party_gathering,
             ..
         } => {
+            if let Some(gathering) = party_gathering {
+                return if gathering.missing.is_empty() {
+                    trf(
+                        "queue.party_wait",
+                        &[
+                            ("count", &gathering.needed),
+                            ("seconds", &gathering.remaining_secs),
+                        ],
+                    )
+                } else {
+                    trf(
+                        "queue.party_wait_named",
+                        &[
+                            ("names", &gathering.missing.join(", ")),
+                            ("seconds", &gathering.remaining_secs),
+                        ],
+                    )
+                };
+            }
             if *capacity_wait {
                 return capacity_text(capacity_line.as_ref());
             }
@@ -526,6 +730,24 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
                 None => waiting,
             }
         }
+        MatchServiceView::ReadyCheck {
+            accepted,
+            accepted_count,
+            needed,
+            remaining_secs,
+            ..
+        } => trf(
+            if *accepted {
+                "queue.ready.accepted"
+            } else {
+                "queue.ready.found"
+            },
+            &[
+                ("count", accepted_count),
+                ("needed", needed),
+                ("seconds", remaining_secs),
+            ],
+        ),
         MatchServiceView::Allocating => tr("searching.match.allocating").into(),
         MatchServiceView::Assigned {
             in_match: Some(state),
@@ -579,6 +801,31 @@ pub(crate) fn in_match_text(state: InMatch) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn device_resume_refreshes_the_same_queue_and_preserves_explicit_consent() {
+        let mut flow = MatchServiceClient {
+            active: true,
+            request_id: 42,
+            ready_answer: Some(("accepted-before-sleep".into(), true)),
+            last_request: Some(Instant::now()),
+            ..default()
+        };
+        assert!(flow.refresh_after_resume());
+        assert!(flow.last_request.is_none());
+        assert_eq!(flow.request_id, 42);
+        assert_eq!(
+            flow.ready_answer,
+            Some(("accepted-before-sleep".into(), true))
+        );
+        flow.allocation = Some(allocation());
+        flow.last_request = Some(Instant::now());
+        assert!(!flow.refresh_after_resume());
+        assert!(flow.last_request.is_some());
+        flow.allocation = None;
+        flow.active = false;
+        assert!(!flow.refresh_after_resume());
+    }
+
     #[test]
     fn cancellation_discards_pending_handoff() {
         let mut flow = MatchServiceClient {
@@ -683,6 +930,7 @@ mod tests {
                 lobby: "127.0.0.1:4000".into(),
                 join: lock_in(),
                 since: Instant::now(),
+                notice: None,
             }),
             ..default()
         };
@@ -713,6 +961,7 @@ mod tests {
                 lobby: "127.0.0.1:4000".into(),
                 join: lock_in(),
                 since: Instant::now(),
+                notice: None,
             }),
             ..default()
         };
@@ -799,6 +1048,9 @@ mod tests {
             })
             .add_systems(Update, update_match_service);
         let result = MatchResult {
+            ranked_season_id: None,
+            gameplay_started: true,
+            end_reason: None,
             result_id: "abandoned".into(),
             server_epoch: 7,
             match_id: 1,
@@ -922,6 +1174,237 @@ mod tests {
         );
         assert!(app.world_mut().resource_mut::<Messages<SessionUiCommand>>().drain()
             .any(|command| matches!(command, SessionUiCommand::ConnectAllocated(endpoint) if endpoint == next_allocation.endpoint)));
+    }
+
+    /// The app and client state right after the lobby's handoff: searching
+    /// from `lobby`, allocated `allocation()`, connected to its worker with the
+    /// lock-in sent.
+    fn allocated_app(session: ClientSession) -> App {
+        let lobby_view = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        let mut flow = MatchServiceClient::default();
+        assert!(flow.intercept_join(&lobby_view, "127.0.0.1:4000", &lock_in()));
+        flow.allocation = Some(allocation());
+        flow.pending_join = None;
+        let mut session = session;
+        session.set_server_addr_for_test(allocation().endpoint);
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<crate::frontend::AppScreen>()
+            .init_resource::<CareerClient>()
+            .init_resource::<CareerIdentity>()
+            .init_resource::<ClientSessionId>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .insert_resource(flow)
+            .insert_resource(session)
+            .add_systems(Update, (update_match_service, resume_requeue).chain());
+        app
+    }
+
+    fn leave_requested(app: &mut App) -> bool {
+        app.world_mut()
+            .resource_mut::<Messages<SessionUiCommand>>()
+            .drain()
+            .any(|command| matches!(command, SessionUiCommand::LeaveMatch))
+    }
+
+    /// A worker that rejects the join, never answers, or stays lost for the
+    /// pre-start window before its match ran: the client drops the dead join,
+    /// leaves through the shell's cleanup and, back on the lobby, sends the
+    /// same lock-in with the "a player did not connect" notice.
+    #[test]
+    fn a_worker_lost_before_the_match_started_queues_the_same_lock_in_again() {
+        use crate::frontend::AppScreen;
+        use crate::net::ClientConnectionState;
+        let rejected = || {
+            let mut session = ClientSession::queued_for_test();
+            session.reject_for_test(shared::protocol::JoinRejection::MatchFull);
+            session
+        };
+        let never_answered = || {
+            let mut session = ClientSession::default();
+            session.set_state_for_test(ClientConnectionState::Disconnected);
+            session
+        };
+        let lost = || ClientSession::lost_before_start_for_test(true);
+        for (name, session) in [
+            ("rejected", rejected()),
+            ("never answered", never_answered()),
+            ("transport lost", lost()),
+        ] {
+            let mut app = allocated_app(session);
+            app.update();
+            assert!(leave_requested(&mut app), "{name}: leaves the worker");
+            let session = app.world().resource::<ClientSession>();
+            assert!(!session.has_committed_join(), "{name}");
+            assert!(!session.join_blocked(), "{name}");
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert!(
+                !flow.active,
+                "{name}: automatic return must not send CancelQueue"
+            );
+            assert!(flow.pending_join.is_none(), "{name}");
+            let requeue = flow.requeue.clone().expect("the re-search is queued");
+            assert_eq!(requeue.lobby, "127.0.0.1:4000", "{name}");
+            assert_eq!(requeue.notice, Some(WORKER_LOST_NOTICE), "{name}");
+            assert!(
+                matches!(requeue.join, NetworkCommand::JoinPrematch { .. }),
+                "{name}"
+            );
+        }
+
+        // The whole way back: LeaveMatch returns to the lobby, the lobby
+        // offers matchmaking on Home, the lock-in goes out once and the new
+        // search carries the notice until the player leaves it.
+        let mut app = allocated_app(rejected());
+        app.update();
+        assert!(leave_requested(&mut app));
+        {
+            let mut flow = app.world_mut().resource_mut::<MatchServiceClient>();
+            assert_eq!(
+                flow.take_return_to_lobby().as_deref(),
+                Some("127.0.0.1:4000")
+            );
+            assert!(flow.requeue.is_some(), "survives the return");
+            assert_eq!(flow.notice(), None, "not searching yet");
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            *session = ClientSession::default();
+            session.set_state_for_test(ClientConnectionState::Connected);
+            session.set_server_addr_for_test("127.0.0.1:4000");
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .view
+                .match_service = Some(MatchServiceView::Idle);
+        }
+        app.update();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppScreen>>().get(),
+            AppScreen::Searching
+        );
+        let joins: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .filter(|command| matches!(command, NetworkCommand::JoinPrematch { .. }))
+            .collect();
+        assert_eq!(joins.len(), 1, "the same lock-in, once");
+        let view = app.world().resource::<CareerClient>().view.clone();
+        let mut flow = app.world_mut().resource_mut::<MatchServiceClient>();
+        assert!(flow.intercept_join(&view, "127.0.0.1:4000", &joins[0]));
+        assert_eq!(flow.notice(), Some(WORKER_LOST_NOTICE));
+        assert!(flow.is_searching());
+        // Cancelling the search drops the notice; a fresh lock-in never has one.
+        flow.take_return_to_lobby();
+        assert_eq!(flow.notice(), None);
+        assert!(flow.intercept_join(&view, "127.0.0.1:4000", &lock_in()));
+        assert_eq!(flow.notice(), None);
+    }
+
+    #[test]
+    fn automatic_requeue_survives_the_old_screen_until_the_shell_returns_home() {
+        use crate::frontend::AppScreen;
+        for screen in [AppScreen::Searching, AppScreen::Draft, AppScreen::Loading] {
+            let mut app = allocated_app(ClientSession::lost_before_start_for_test(true));
+            app.world_mut()
+                .resource_mut::<NextState<AppScreen>>()
+                .set(screen);
+            app.update();
+            assert!(leave_requested(&mut app), "{screen:?}");
+            app.update();
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert!(
+                flow.requeue.is_some(),
+                "{screen:?}: keep the re-search during cleanup"
+            );
+            assert!(
+                !flow.active,
+                "{screen:?}: no cancellation on an automatic return"
+            );
+        }
+    }
+
+    /// A worker that ran (or finished) is a seat to reclaim, not a match that
+    /// never started: no automatic re-search, the long reconnect stands. A
+    /// resume of a saved seat keeps its own return path.
+    #[test]
+    fn a_lost_worker_after_the_match_started_is_not_requeued() {
+        let mut session = ClientSession::queued_for_test();
+        session.reject_for_test(shared::protocol::JoinRejection::MatchFull);
+        let mut app = allocated_app(session);
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = crate::net::GameState::Running;
+        app.update();
+        assert!(!leave_requested(&mut app));
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .requeue
+                .is_none()
+        );
+        assert!(app.world().resource::<ClientSession>().has_committed_join());
+
+        // Reconnecting within the pre-start window: still waiting.
+        let mut app = allocated_app(ClientSession::lost_before_start_for_test(false));
+        app.update();
+        assert!(!leave_requested(&mut app));
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .requeue
+                .is_none()
+        );
+
+        // A saved resume whose join is refused returns without a re-search.
+        let mut session = ClientSession::queued_for_test();
+        session.reject_for_test(shared::protocol::JoinRejection::MatchFull);
+        let mut app = allocated_app(session);
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .resume_scope = Some((7, 2));
+        app.update();
+        assert!(leave_requested(&mut app));
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .requeue
+                .is_none()
+        );
+    }
+
+    /// Automatic re-searches are bounded per lock-in: a worker that keeps
+    /// failing leaves the player on Home instead of looping.
+    #[test]
+    fn automatic_requeues_are_bounded_per_lock_in() {
+        let lobby_view = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        let mut flow = MatchServiceClient::default();
+        assert!(flow.intercept_join(&lobby_view, "127.0.0.1:4000", &lock_in()));
+        for _ in 0..MAX_AUTO_REQUEUES {
+            flow.allocation = Some(allocation());
+            assert!(flow.requeue_after_lost_worker());
+            flow.take_return_to_lobby();
+            let requeue = flow.requeue.take().unwrap();
+            flow.pending_notice = requeue.notice;
+            assert!(flow.intercept_join(&lobby_view, "127.0.0.1:4000", &requeue.join));
+            assert_eq!(flow.notice(), Some(WORKER_LOST_NOTICE));
+        }
+        flow.allocation = Some(allocation());
+        assert!(!flow.requeue_after_lost_worker(), "budget spent");
+        assert!(flow.requeue.is_none());
+        // Play again is not automatic and always allowed.
+        assert!(flow.request_requeue());
+        // The player's own lock-in starts a new budget.
+        flow.take_return_to_lobby();
+        flow.requeue = None;
+        assert!(flow.intercept_join(&lobby_view, "127.0.0.1:4000", &lock_in()));
+        flow.allocation = Some(allocation());
+        assert!(flow.requeue_after_lost_worker());
     }
 
     fn in_match(ends_within_secs: Option<u64>) -> MatchServiceView {
@@ -1066,6 +1549,80 @@ mod tests {
         assert!(!app.world().resource::<MatchServiceClient>().active);
     }
 
+    #[test]
+    fn maintenance_keeps_the_same_search_and_never_reuses_old_consent() {
+        let lobby = "127.0.0.1:4000";
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test(lobby);
+        let mut app = App::new();
+        app.insert_resource(session)
+            .insert_resource(CareerIdentity::authenticated_for_test(lobby, 9, "seat-a"))
+            .insert_resource(ClientSessionId("seat-a".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(9, 1, 1),
+                ..default()
+            })
+            .insert_resource(MatchServiceClient {
+                active: true,
+                request_id: 77,
+                preference: MatchPreference::Casual,
+                pending_join: Some(lock_in()),
+                ready_answer: Some(("cancelled-by-maintenance".into(), true)),
+                ..default()
+            })
+            .init_resource::<CareerClient>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(Update, update_match_service);
+        app.world_mut().resource_mut::<CareerClient>().view = CareerView {
+            match_service_request_id: Some(77),
+            match_service: Some(MatchServiceView::Failed {
+                code: "server_draining".into(),
+            }),
+            ..default()
+        };
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<MatchServiceClient>()
+                .last_request = None;
+            app.update();
+            let commands = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect::<Vec<_>>();
+            assert!(matches!(
+                commands.as_slice(),
+                [NetworkCommand::Career(
+                    shared::career::CareerRequest::FindMatch { request_id: 77, .. }
+                )]
+            ));
+            assert!(
+                app.world_mut()
+                    .resource_mut::<Messages<SessionUiCommand>>()
+                    .drain()
+                    .next()
+                    .is_none()
+            );
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert!(flow.is_searching() && flow.allocation.is_none());
+            assert!(
+                flow.ready_check(&app.world().resource::<CareerClient>().view)
+                    .is_none()
+            );
+        }
+        app.world_mut().resource_mut::<MatchServiceClient>().active = false;
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
     /// The allocation this player left, while the lobby still hands it out
     /// before its match runs, reads as closing, never as connecting.
     #[test]
@@ -1158,6 +1715,7 @@ mod tests {
             casual_offer_after_secs: Some(300),
             also_casual: false,
             capacity_line: None,
+            party_gathering: None,
         });
         assert!(text.contains("3/10"));
         assert!(text.contains("no bots"));
@@ -1179,6 +1737,7 @@ mod tests {
                 casual_offer_after_secs: Some(300),
                 also_casual,
                 capacity_line: None,
+                party_gathering: None,
             }),
             ..default()
         }
@@ -1334,6 +1893,86 @@ mod tests {
             assert_eq!(queue_badge(MatchPreference::BotPractice, false), bots);
             assert!(!status_text(&party).contains("ranked_party_cohort"));
         }
+        // Every code the lobby answers a search with has its own text in every
+        // language (never the generic "could not start: <code>" line), as do
+        // the re-search notice, the prematch reset codes and the unrated
+        // reason the career store sends.
+        const LOBBY_CODES: [&str; 15] = [
+            "ranked_party_cohort",
+            "ranked_locked",
+            "ranked_season_ended",
+            "arena_limit",
+            "practice_cooldown",
+            "queue_full",
+            "already_queued",
+            "allocation_cancelled_or_expired",
+            "profile_has_another_session",
+            "worker_spawn_failed",
+            "lobby_busy",
+            "dodge_cooldown",
+            "party_member_left",
+            "capacity_busy",
+            "server_draining",
+        ];
+        const OTHER_KEYS: [&str; 5] = [
+            WORKER_LOST_NOTICE,
+            "draft.error.roster_changed",
+            "draft.error.loading_timeout",
+            "draft.error.start_timeout",
+            "career.unrated.not_completed",
+        ];
+        for locale in ["en", "ru", "zh-Hans"] {
+            let id = LocaleId::parse(locale).unwrap();
+            app.world_mut().resource_mut::<Locale>().set(id);
+            for code in LOBBY_CODES {
+                let key = format!("queue.failed.{code}");
+                let text = crate::i18n::lookup_in(id, &key)
+                    .unwrap_or_else(|| panic!("{locale} lacks {key}"));
+                assert!(!text.is_empty(), "{locale} {key}");
+                let shown = status_text(&MatchServiceView::Failed { code: code.into() });
+                assert_eq!(shown, text, "{locale} {key}");
+                assert!(!shown.contains(code), "{locale} {key} shows the code");
+            }
+            for key in OTHER_KEYS {
+                assert!(
+                    crate::i18n::lookup_in(id, key).is_some_and(|text| !text.is_empty()),
+                    "{locale} lacks {key}"
+                );
+            }
+        }
+        // The codes that keep retrying on their own say so; the ones that need
+        // the player's hand do not pretend to retry (Russian, the launch language).
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        for code in [
+            "queue_full",
+            "already_queued",
+            "worker_spawn_failed",
+            "lobby_busy",
+            "capacity_busy",
+            "server_draining",
+        ] {
+            let text = status_text(&MatchServiceView::Failed { code: code.into() });
+            assert!(
+                text.contains("Повторяем") || text.contains("Продолжаем поиск"),
+                "{code}: {text}"
+            );
+        }
+        assert!(
+            status_text(&MatchServiceView::Failed {
+                code: "allocation_cancelled_or_expired".into()
+            })
+            .contains("Ищем матч снова")
+        );
+        for code in [
+            "dodge_cooldown",
+            "party_member_left",
+            "profile_has_another_session",
+        ] {
+            let text = status_text(&MatchServiceView::Failed { code: code.into() });
+            assert!(!text.contains("Повторяем"), "{code}: {text}");
+        }
     }
     /// The searching status follows the active language.
     #[test]
@@ -1354,6 +1993,7 @@ mod tests {
             casual_offer_after_secs: None,
             also_casual: false,
             capacity_line: None,
+            party_gathering: None,
         };
         let failed = MatchServiceView::Failed {
             code: "no_capacity".into(),
@@ -1397,6 +2037,7 @@ mod tests {
             casual_offer_after_secs: None,
             also_casual: false,
             capacity_line: line,
+            party_gathering: None,
         }
     }
 
@@ -1480,6 +2121,93 @@ mod tests {
         assert!(
             !MatchServiceClient::default().offers_offline(&full),
             "not searching"
+        );
+    }
+    #[test]
+    fn ready_is_explicit_and_an_answer_cannot_accept_another_roster() {
+        let lobby = "127.0.0.1:4000";
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .init_resource::<CareerClient>()
+            .insert_resource(CareerIdentity::authenticated_for_test(lobby, 9, "seat-a"))
+            .insert_resource(ClientSessionId("seat-a".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(9, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, update_match_service);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test(lobby);
+        app.insert_resource(session);
+        app.insert_resource(MatchServiceClient {
+            active: true,
+            ..default()
+        });
+        let ready = |id: &str, accepted| CareerView {
+            match_service_request_id: Some(0),
+            match_service: Some(MatchServiceView::ReadyCheck {
+                check_id: id.into(),
+                preference: MatchPreference::Ranked,
+                accepted,
+                accepted_count: u32::from(accepted),
+                needed: 10,
+                remaining_secs: 15,
+            }),
+            ..default()
+        };
+        let sent = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter_map(|c| match c {
+                    NetworkCommand::Career(shared::career::CareerRequest::ReadyMatch {
+                        check_id,
+                        accepted,
+                        ..
+                    }) => Some((check_id, accepted)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        app.world_mut().resource_mut::<CareerClient>().view = ready("first", false);
+        app.update();
+        assert!(
+            sent(&mut app).is_empty(),
+            "a found match never auto-accepts"
+        );
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .respond_ready(&ready("first", false), true);
+        app.update();
+        assert_eq!(sent(&mut app), [("first".into(), true)]);
+        assert_eq!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .ready_check(&ready("first", false)),
+            Some(("first", true))
+        );
+        app.world_mut().resource_mut::<CareerClient>().view = ready("second", false);
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .last_request = None;
+        app.update();
+        assert!(sent(&mut app).is_empty(), "a new roster needs a new click");
+        assert_eq!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .ready_check(&ready("second", false)),
+            Some(("second", false))
+        );
+        let mut stale = ready("second", false);
+        stale.match_service_request_id = Some(99);
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .respond_ready(&stale, true);
+        assert_eq!(
+            app.world().resource::<MatchServiceClient>().ready_answer,
+            Some(("first".into(), true))
         );
     }
 }

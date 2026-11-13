@@ -1,0 +1,75 @@
+{
+  "source_parent": "b3c74bd1d92c7db8f87d50e5ff8fcb5332285837",
+  "status": "PASS local1000/120s measured20Hz; latency/WAN/RU remain open",
+  "files": {
+    "stages-before-buffer-build.json.gz": {
+      "source_path": "stages-before-buffer-build.json",
+      "raw_bytes": 36788,
+      "raw_sha256": "98c6d70ba56e0edcd507df8c219180d1d8a31dd25a8c4b9499cd9e1648a3001c",
+      "gzip_sha256": "d75be7e8e6fca18d64652420137d7bd81102ef68eb8629baa24e6a7ef83f60c1"
+    },
+    "build.json.gz": {
+      "source_path": "build.json",
+      "raw_bytes": 36888,
+      "raw_sha256": "894c85d3243f60bba2372f6296a4ccea29b7ece631f3ad071bbe52af90be2143",
+      "gzip_sha256": "0dd49122a9bc14682c00276835f0f047c4ac8887c8dc18d2cd9e57b6a83b1f9f"
+    },
+    "clippy-checks.json.gz": {
+      "source_path": "clippy-checks.json",
+      "raw_bytes": 46102,
+      "raw_sha256": "6b289e43ded45a20a24b78a5967326fd4d048a6f83ea14bc4bcd76e3c49920d2",
+      "gzip_sha256": "f1deaff765d9f16675637f112fba708b4cc5750703f651c3d531861ccb36ce79"
+    },
+    "library-tests.log.gz": {
+      "source_path": "library-tests.log",
+      "raw_bytes": 3684,
+      "raw_sha256": "7d1aff1178e314e396b3e3f32918d56df577bdf5fc3c9b44a0a906aaf7e0a639",
+      "gzip_sha256": "679aec793f1986525cb2a3167417651cd8e32cd9c8f6ba31a8a342fbfd95428f"
+    },
+    "live-v6--isolated-summary.json.gz": {
+      "source_path": "live-v6/isolated-summary.json",
+      "raw_bytes": 18101,
+      "raw_sha256": "372176c7fcbb3e0e64818deb844403666f4cabe21ab29d97804602a102451d25",
+      "gzip_sha256": "24efa9ece79787fd7e7a3c2cf7b1c6ecad640afcfdbda78fd9a90f86cf767b22"
+    },
+    "live-v6--instrumented-1000--report.json.gz": {
+      "source_path": "live-v6/instrumented-1000/report.json",
+      "raw_bytes": 10689392,
+      "raw_sha256": "074ec1830b7ba6502ba0cc92c904aea35d7cde35b481dbd1ef9632121552d4b1",
+      "gzip_sha256": "928969d3222fb7257085aa8e08bd0b3860283df3dabb478767cf5cc15b118823"
+    },
+    "live-v7--isolated-summary.json.gz": {
+      "source_path": "live-v7/isolated-summary.json",
+      "raw_bytes": 29194,
+      "raw_sha256": "3fe9857eaa5c0dd381229598dd6ef38736daba315d08af6901687a69be9d6d59",
+      "gzip_sha256": "e6070c8e3a20ec5fe7f9864368a23be6d494a1b6e2b8bff7e7b2f78f1c37d08e"
+    },
+    "live-v7--instrumented-10--report.json.gz": {
+      "source_path": "live-v7/instrumented-10/report.json",
+      "raw_bytes": 116445,
+      "raw_sha256": "cd5d390f953f1bac544ce5e9d2259a109dfcb8a1098d5b24651ecc38b5e12129",
+      "gzip_sha256": "d7900354c3278e2aa90b1aaf61817c5de6c0247a272afe863c95f28c2be05288"
+    },
+    "live-v7--instrumented-1000--report.json.gz": {
+      "source_path": "live-v7/instrumented-1000/report.json",
+      "raw_bytes": 10734857,
+      "raw_sha256": "4cb9864aad34325046eff8c5ad34af86de7b7ea1f82962c60c8fdec2e100d733",
+      "gzip_sha256": "b86356e4ba3522cb42fd1dfe74dd2b01d05841f00c97ad197b7484a58105c477"
+    }
+  },
+  "checks": {
+    "harness_library": 41,
+    "real_udp": 4,
+    "python_capacity_lifecycle": 25,
+    "strict_clippy": 4
+  },
+  "current_source_sha256": {
+    "harness/src/cadence.rs": "1802a3b7c4b50cc1a6b8100de7a5e83cd559c325e796d3e5bb0aef2d47513466",
+    "harness/src/lib.rs": "c79a38fabcca563111c64374f38a5434fe5ce90041c901d6898f1641804b4e8a",
+    "harness/src/bin/bots.rs": "e367bb20023abb170176dad664f9007916d5de14e7f574f745ebc46d98116f71",
+    "harness/src/public_client.rs": "8cdd4848a51779f3ef57ec63b3ee6487fae653b2277e38f0e583a2ef4d1debf4",
+    "harness/src/telemetry.rs": "3b595c76ba6dcc67c928d477c527ede4cd475ae7ee992dd6590751d41c7f2d1d",
+    "scripts/public_playing_capacity.py": "0c577c37860b0d3542a3d21eb2b108c41e7e636d9b84b83b03318e6885b37c96",
+    "scripts/test_public_playing_capacity.py": "b21d3deee8bc2770c53c1566776faa353323fd9d55f4b0f9eb3be406d887c233"
+  }
+}

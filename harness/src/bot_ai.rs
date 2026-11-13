@@ -414,7 +414,8 @@ pub fn class_for_bot(index: usize) -> HeroClass {
         HeroClass::Mage,
         HeroClass::Ranger,
         HeroClass::Cleric,
-    ][(index / 2) % 4]
+        HeroClass::Warden,
+    ][(index / 2) % 5]
 }
 
 /// Midgame teams rally through an open lane, or the weakest remaining tower.
@@ -941,6 +942,15 @@ mod tests {
         }
         assert_eq!(class_for_bot(2), HeroClass::Mage);
         assert_eq!(class_for_bot(6), HeroClass::Cleric);
+        let mut classes = Vec::new();
+        for seat in 0..5 {
+            let class = class_for_bot(seat * 2);
+            assert!(
+                !classes.contains(&class),
+                "five-player teams need five unique classes"
+            );
+            classes.push(class);
+        }
     }
 
     #[test]

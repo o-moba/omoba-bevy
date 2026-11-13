@@ -38,11 +38,13 @@ pub fn apply(
     }
     match packet {
         Transform {
+            input_active: _,
             x,
             y,
             z,
             yaw,
             dash_sequence,
+            ..
         } => {
             world.ensure_connected(addr, now);
             let terrain = crate::skills::advanced::terrain(world, now);

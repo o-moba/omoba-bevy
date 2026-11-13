@@ -10,6 +10,7 @@ from qa_account_fixture import prepare_capture_account
 import argparse
 import copy
 import json
+from snapshot_payload import decode_snapshot_payload
 import math
 import os
 from pathlib import Path
@@ -86,7 +87,7 @@ class CombatObserver(SnapshotObserver):
                 del self.pending[key]
                 if len(data) != total:
                     raise RuntimeError("Incomplete observer frame reconstruction")
-            packet = json.loads(data)
+            packet = json.loads(decode_snapshot_payload(data))
             if packet.get("type") == "snapshot":
                 self.joined = any(player["id"] == packet.get("your_id")
                                   for player in packet.get("players", []))

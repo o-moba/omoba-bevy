@@ -3,6 +3,7 @@
 
 use crate::clock::Instant;
 pub use crate::protocol::PROTOCOL_VERSION;
+use flate2::{Compress, Compression, Decompress, FlushCompress, FlushDecompress, Status};
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt,
@@ -14,6 +15,8 @@ pub const MAX_SNAPSHOT_BYTES: usize = 65_507;
 pub const MAX_ASSEMBLIES: usize = 4;
 pub const ASSEMBLY_TTL: Duration = Duration::from_secs(2);
 const MAGIC: &[u8; 4] = b"OMB1";
+const COMPRESSED_MAGIC: &[u8; 4] = b"OMZ1";
+const COMPRESSION_HEADER: usize = 8;
 const HEADER: usize = 30;
 const CHUNK: usize = MAX_DATAGRAM_BYTES - HEADER;
 const MAX_FRAGMENTS: usize = MAX_SNAPSHOT_BYTES.div_ceil(CHUNK);
@@ -24,6 +27,7 @@ pub enum TransportError {
     Header,
     Version,
     Conflict,
+    Compression,
 }
 
 impl fmt::Display for TransportError {
@@ -33,10 +37,78 @@ impl fmt::Display for TransportError {
             Self::Header => "invalid snapshot fragment header",
             Self::Version => "unsupported snapshot framing version",
             Self::Conflict => "conflicting snapshot fragments",
+            Self::Compression => "invalid compressed snapshot",
         })
     }
 }
 impl std::error::Error for TransportError {}
+
+/// Losslessly compress world JSON only when it saves both10% and64 bytes.
+/// Career/social/control packets may keep using the ordinary frame encoder.
+pub fn encode_world_snapshot(
+    payload: &[u8],
+    server_epoch: u64,
+    snapshot_tick: u64,
+) -> Result<Vec<Vec<u8>>, TransportError> {
+    if payload.is_empty() || payload.len() > MAX_SNAPSHOT_BYTES {
+        return Err(TransportError::Size);
+    }
+    if server_epoch == 0 {
+        return Err(TransportError::Header);
+    }
+    if payload.len() >= 1024 {
+        // Fixed input-sized output: incompressible data falls back to plain
+        // framing without ever growing a buffer past the original budget.
+        let mut compressed = vec![0; payload.len()];
+        let mut codec = Compress::new(Compression::fast(), true);
+        let status = codec
+            .compress(payload, &mut compressed, FlushCompress::Finish)
+            .map_err(|_| TransportError::Compression)?;
+        let size = codec.total_out() as usize;
+        let envelope_size = size + COMPRESSION_HEADER;
+        if status == Status::StreamEnd
+            && codec.total_in() as usize == payload.len()
+            && envelope_size + 64 <= payload.len()
+            && envelope_size * 10 <= payload.len() * 9
+        {
+            compressed.truncate(size);
+            let mut envelope = Vec::with_capacity(envelope_size);
+            envelope.extend_from_slice(COMPRESSED_MAGIC);
+            envelope.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            envelope.extend_from_slice(&compressed);
+            return encode_snapshot(&envelope, server_epoch, snapshot_tick);
+        }
+    }
+    encode_snapshot(payload, server_epoch, snapshot_tick)
+}
+
+fn decode_snapshot_payload(payload: Vec<u8>) -> Result<Vec<u8>, TransportError> {
+    if !payload.starts_with(COMPRESSED_MAGIC) {
+        return Ok(payload);
+    }
+    if payload.len() <= COMPRESSION_HEADER {
+        return Err(TransportError::Compression);
+    }
+    let expected = u32::from_le_bytes(payload[4..8].try_into().unwrap()) as usize;
+    if expected == 0 || expected > MAX_SNAPSHOT_BYTES {
+        return Err(TransportError::Size);
+    }
+    let compressed = &payload[COMPRESSION_HEADER..];
+    // The single extra byte detects length lies without unbounded expansion.
+    let mut plain = vec![0; expected + 1];
+    let mut codec = Decompress::new(true);
+    let status = codec
+        .decompress(compressed, &mut plain, FlushDecompress::Finish)
+        .map_err(|_| TransportError::Compression)?;
+    if status != Status::StreamEnd
+        || codec.total_in() as usize != compressed.len()
+        || codec.total_out() as usize != expected
+    {
+        return Err(TransportError::Compression);
+    }
+    plain.truncate(expected);
+    Ok(plain)
+}
 
 pub fn encode_snapshot(
     payload: &[u8],
@@ -180,6 +252,7 @@ impl SnapshotAssembler {
         for part in assembly.parts {
             payload.extend_from_slice(&part.unwrap());
         }
+        let payload = decode_snapshot_payload(payload)?;
         self.completed.push_back(key);
         if self.completed.len() > 16 {
             self.completed.pop_front();
@@ -232,7 +305,7 @@ mod tests {
         let payload = br#"{"protocol_version":1,"players":[]}"#;
         let current = encode_snapshot(payload, 7, 1).unwrap().remove(0);
         let mut old = current.clone();
-        old[4..6].copy_from_slice(&1_u16.to_le_bytes());
+        old[4..6].copy_from_slice(&(PROTOCOL_VERSION - 1).to_le_bytes());
         let mut assembler = SnapshotAssembler::default();
         let now = Instant::now();
         assert_eq!(assembler.push(&old, now), Err(TransportError::Version));
@@ -265,5 +338,119 @@ mod tests {
             Err(TransportError::Version)
         );
         assert!(assembler.push(b"OMB1", now).is_err());
+    }
+}
+
+#[cfg(test)]
+mod compression_tests {
+    use super::*;
+    fn finish(frames: &[Vec<u8>]) -> Result<Option<Vec<u8>>, TransportError> {
+        let mut assembler = SnapshotAssembler::default();
+        let now = Instant::now();
+        let mut result = None;
+        for frame in frames.iter().rev() {
+            if let Some(bytes) = assembler.push(frame, now)? {
+                result = Some(bytes);
+            }
+        }
+        Ok(result)
+    }
+    fn envelope(raw: &[u8]) -> Vec<u8> {
+        let frames = encode_world_snapshot(raw, 1, 1).unwrap();
+        let mut bytes = Vec::new();
+        for f in frames {
+            bytes.extend_from_slice(&f[HEADER..]);
+        }
+        bytes
+    }
+    #[test]
+    fn compressed_roundtrip_bounds_and_plain_fallback() {
+        for size in [1, 1023, 1024, 1170, 8193, MAX_SNAPSHOT_BYTES] {
+            let raw = vec![b'x'; size];
+            let frames = encode_world_snapshot(&raw, 2, 3).unwrap();
+            assert!(frames.iter().all(|f| f.len() <= MAX_DATAGRAM_BYTES));
+            assert_eq!(finish(&frames).unwrap(), Some(raw.clone()));
+            let body = envelope(&raw);
+            assert_eq!(body.starts_with(COMPRESSED_MAGIC), size >= 1024);
+        }
+        assert!(encode_world_snapshot(&[], 1, 1).is_err());
+        assert!(encode_world_snapshot(&vec![0; MAX_SNAPSHOT_BYTES + 1], 1, 1).is_err());
+        assert!(encode_world_snapshot(b"x", 0, 1).is_err());
+        let mut seed = 17u64;
+        let raw = (0..MAX_SNAPSHOT_BYTES)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect::<Vec<_>>();
+        assert!(!envelope(&raw).starts_with(COMPRESSED_MAGIC));
+        assert_eq!(
+            finish(&encode_world_snapshot(&raw, 3, 4).unwrap()).unwrap(),
+            Some(raw)
+        );
+    }
+    #[test]
+    fn malformed_compressed_streams_never_emit_partial_plaintext() {
+        let raw = vec![b'x'; MAX_SNAPSHOT_BYTES];
+        let good = envelope(&raw);
+        assert!(good.starts_with(COMPRESSED_MAGIC));
+        for n in 4..good.len() {
+            assert!(
+                decode_snapshot_payload(good[..n].to_vec()).is_err(),
+                "truncation {n}"
+            );
+        }
+        for length in [0, 1, raw.len() - 1, raw.len() + 1, u32::MAX as usize] {
+            let mut bad = good.clone();
+            bad[4..8].copy_from_slice(&(length as u32).to_le_bytes());
+            assert!(decode_snapshot_payload(bad).is_err());
+        }
+        let mut trailing = good.clone();
+        trailing.push(0);
+        assert!(decode_snapshot_payload(trailing).is_err());
+        let mut joined = good.clone();
+        joined.extend_from_slice(&good[8..]);
+        assert!(decode_snapshot_payload(joined).is_err());
+        for i in 8..good.len() {
+            let mut bad = good.clone();
+            bad[i] ^= 1;
+            if let Ok(out) = decode_snapshot_payload(bad) {
+                assert_eq!(out, raw, "modified stream changed plaintext");
+            }
+        }
+        // Invalid compressed snapshots leave no fragments and cannot emit data.
+        let mut bad = good.clone();
+        bad[4..8].copy_from_slice(&1u32.to_le_bytes());
+        assert!(finish(&encode_snapshot(&bad, 1, 2).unwrap()).is_err());
+    }
+    #[test]
+    fn compressed_fragment_drop_duplicate_and_epoch_behavior() {
+        // Repeating pseudo-random blocks still compress to several fragments.
+        let mut seed = 27u64;
+        let block = (0..4096)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect::<Vec<_>>();
+        let raw = block.repeat(8);
+        let frames = encode_world_snapshot(&raw, 6, 7).unwrap();
+        assert!(frames.len() > 1 && frames.len() < raw.len().div_ceil(CHUNK));
+        let mut a = SnapshotAssembler::default();
+        let now = Instant::now();
+        for f in frames.iter().skip(1) {
+            assert!(a.push(f, now).unwrap().is_none());
+            assert!(a.push(f, now).unwrap().is_none());
+        }
+        assert!(a.retained_bytes() <= MAX_SNAPSHOT_BYTES);
+        assert_eq!(a.push(&frames[0], now).unwrap(), Some(raw));
+        for f in &frames {
+            assert!(a.push(f, now).unwrap().is_none());
+        }
+        assert_eq!(a.retained_bytes(), 0);
     }
 }

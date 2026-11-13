@@ -1,0 +1,64 @@
+{
+  "source_parent": "f0e4b7d4685a3a05f9c9fd2f65e415a8d5658bb6",
+  "status": "REJECTED large v1; nonblocking v2 prepared, NOT RUN",
+  "files": {
+    "blocking-build.json.gz": {
+      "source_path": "blocking-build.json",
+      "raw_bytes": 36690,
+      "raw_sha256": "253f81555511691e5e4424340e6975686e7655a31bfc8968d72edb20e594bd79",
+      "gzip_sha256": "32e49cb193b9cda43b5bb94af083ff6982ff4ca8cd17c778ba882e0198b733fd"
+    },
+    "build.json.gz": {
+      "source_path": "build.json",
+      "raw_bytes": 36690,
+      "raw_sha256": "74f885483c383d3f53c7c256b2df7b97366929638b89f4ad0f49f6c2e6f223ed",
+      "gzip_sha256": "88a24d0af16be5812c9db4eb4157f856da91b02d127ccab37e09d260bdf4cb64"
+    },
+    "live-v1--isolated-summary.json.gz": {
+      "source_path": "live-v1/isolated-summary.json",
+      "raw_bytes": 21123,
+      "raw_sha256": "524b39098a396e4b44237d33c2367fd45c8e3bd6b105a92db8f74676c547e6c4",
+      "gzip_sha256": "c700274807f81fa1f781f007a7980f7bac9f674208c919026b206bf6b2bc2d2e"
+    },
+    "live-v1--instrumented-10--report.json.gz": {
+      "source_path": "live-v1/instrumented-10/report.json",
+      "raw_bytes": 57464,
+      "raw_sha256": "cce1230e4b541e410f1676ee2cbae24ffa537eb38392c9c5e54ef0712824c32d",
+      "gzip_sha256": "7fa7e0646ce94f924eb7eb182eeb22f94303214e8ab10ec0e3c764df409e7eeb"
+    },
+    "live-v1--instrumented-1000--report.json.gz": {
+      "source_path": "live-v1/instrumented-1000/report.json",
+      "raw_bytes": 5191473,
+      "raw_sha256": "1474144168605e69bb03d6e360a20429cad88b155b687e5eb8228aa5d793f80b",
+      "gzip_sha256": "704110477a397f6870279d7f5b248456e140825b4fffd228cf06eec9356610b3"
+    }
+  },
+  "current_source_sha256": {
+    "harness/src/bin/bots.rs": "fd89edd23fe3887cae142cb6e823d7dbbacb15c076c39599b34065fcda9051ca",
+    "harness/src/bot.rs": "899a3e91bec6cffac76b277e4e981d45adf0131e6ba6f4a783824d91f61c0d97",
+    "harness/src/public_client.rs": "d5365b2513cb1703a44766caf43abf81b264860ea9c0e2702c87c302c624774f",
+    "harness/tests/transport_stats.rs": "ccc9d57b5778f0a7ceebb899e489189b049deffda49bce7628fd6e0e87b7a0ab",
+    "scripts/public_playing_capacity.py": "be5d57505a4867daffaa8aeca57ed34f9e3249ae55d33220a1a2925308a24517",
+    "scripts/test_public_playing_capacity.py": "7215ebff1c189163e6a842aebf4541312b61d0f79e398a3a1eca44bfcc93764e"
+  },
+  "checks": {
+    "harness_library": {
+      "passed": 36,
+      "failed": 0
+    },
+    "real_udp_transport": {
+      "passed": 4,
+      "failed": 0
+    },
+    "python_capacity_and_lifecycle": {
+      "passed": 23,
+      "failed": 0
+    },
+    "cli_invalid_cases": 5,
+    "strict_clippy_targets": {
+      "passed": 4,
+      "failed": 0
+    },
+    "diff_check": "PASS"
+  }
+}

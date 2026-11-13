@@ -84,12 +84,32 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Server-observed participation, independent of the terminal connection flag.
+/// An abandoned seat stays abandoned after reclaim; a short reconnect does not.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Participation {
+    pub connected_ms: u64,
+    pub disconnected_ms: u64,
+    pub afk_ms: u64,
+    pub abandoned: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParticipantResult {
+    /// Declared controls observed for this seat; legacy receipts stay unknown.
+    #[serde(default, skip_serializing_if = "crate::ranked::InputKind::is_unknown")]
+    pub input_kind: crate::ranked::InputKind,
     pub player_id: u64,
     // Preserve rc6 JSON receipts exactly when this additive human default is absent.
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_bot: bool,
+    // Omission preserves old durable receipts and older snapshot consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participation: Option<Participation>,
     pub profile_id: Option<String>,
     pub nickname: String,
     pub team: Team,
@@ -110,10 +130,25 @@ pub enum MatchOutcome {
     Completed,
     Abandoned,
     Interrupted,
+    Remade,
+}
+
+fn legacy_gameplay_started() -> bool {
+    true
+}
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MatchResult {
+    /// Frozen Ranked allocation season; omitted by pre-season receipts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranked_season_id: Option<u64>,
+    /// Durable allocation is not proof that gameplay began. Aborted drafts
+    /// settle for recovery/auditing without entering player career totals.
+    #[serde(default = "legacy_gameplay_started", skip_serializing_if = "is_true")]
+    pub gameplay_started: bool,
     pub result_id: String,
     pub server_epoch: u64,
     pub match_id: u64,
@@ -126,10 +161,33 @@ pub struct MatchResult {
     pub winner: Option<Team>,
     pub rated: bool,
     pub unrated_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
     pub participants: Vec<ParticipantResult>,
     /// True only after durable transaction acknowledgement.
     #[serde(default)]
     pub saved: bool,
+}
+
+impl MatchResult {
+    /// Personal result can differ from the team's victory after a proved leave.
+    /// Legacy disconnection alone never changes a historical winning receipt.
+    pub fn participant_won(&self, participant: &ParticipantResult) -> Option<bool> {
+        let abandoned = participant.participation.is_some_and(|p| p.abandoned);
+        if self.outcome == MatchOutcome::Completed {
+            self.winner
+                .map(|winner| winner == participant.team && !abandoned)
+        } else if (self.outcome == MatchOutcome::Remade
+            || (self.outcome == MatchOutcome::Interrupted
+                && self.unrated_reason.as_deref() == Some("abandoned_reaped")))
+            && abandoned
+            && participant.rating.is_some()
+        {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -151,6 +209,13 @@ pub struct MatchSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProfileSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranked: Option<crate::ranked::SeasonProfile>,
+    /// Completed approved public games, excluding this player's proved abandons.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub completed_public_matches: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub abandons: u32,
     pub profile_id: String,
     pub nickname: String,
     pub rating: i32,
@@ -163,6 +228,9 @@ pub struct ProfileSummary {
 impl ProfileSummary {
     pub fn new(profile_id: String, nickname: String) -> Self {
         Self {
+            ranked: None,
+            completed_public_matches: 0,
+            abandons: 0,
             profile_id,
             nickname,
             rating: INITIAL_RATING,
@@ -173,13 +241,23 @@ impl ProfileSummary {
             progression_xp: 0,
         }
     }
+    pub fn placement_matches(&self) -> u32 {
+        self.ranked
+            .as_ref()
+            .map_or(self.rated_matches, |season| season.rated_matches)
+    }
     pub fn newcomer(&self) -> bool {
-        self.rated_matches < NEWCOMER_MATCHES
+        self.placement_matches() < NEWCOMER_MATCHES
+    }
+    pub fn ranked_unlocked(&self) -> bool {
+        self.completed_public_matches >= RANKED_REQUIRED_PUBLIC_MATCHES
     }
     pub fn level(&self) -> u64 {
         1 + self.progression_xp / 1000
     }
 }
+
+pub const RANKED_REQUIRED_PUBLIC_MATCHES: u32 = 10;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -266,6 +344,12 @@ pub enum CareerAction {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         also_casual: bool,
     },
+    /// Explicit answer to this immutable roster's 15-second ready check.
+    ReadyMatch {
+        request_id: u64,
+        check_id: String,
+        accepted: bool,
+    },
     SupporterStatus {
         request_id: u64,
     },
@@ -334,6 +418,12 @@ pub enum CareerRequest {
         /// See [`CareerAction::FindMatch`].
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         also_casual: bool,
+    },
+    /// Explicit answer to this immutable roster's 15-second ready check.
+    ReadyMatch {
+        request_id: u64,
+        check_id: String,
+        accepted: bool,
     },
     SupporterStatus {
         request_id: u64,
@@ -408,6 +498,15 @@ impl CareerRequest {
                 preference: *preference,
                 also_casual: *also_casual,
             },
+            Self::ReadyMatch {
+                request_id,
+                check_id,
+                accepted,
+            } => CareerAction::ReadyMatch {
+                request_id: *request_id,
+                check_id: check_id.clone(),
+                accepted: *accepted,
+            },
             Self::SupporterStatus { request_id } => CareerAction::SupporterStatus {
                 request_id: *request_id,
             },
@@ -468,6 +567,15 @@ impl CareerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CareerView {
+    /// Signed-in profile's season window evaluated by the server's UTC clock.
+    /// Advisory UI hint; allocation/store validation remains authoritative.
+    /// Missing for legacy peers, guests or unrefreshed authorization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranked_season_open: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_vote: Option<crate::match_vote::View>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub afk_control: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub takeovers: Vec<crate::match_service::TakeoverSeatView>,
     pub match_service: Option<crate::match_service::MatchServiceView>,
@@ -501,10 +609,26 @@ pub struct CareerView {
     /// Additive: older peers ignore it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sanctions: Vec<crate::moderation::Sanction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub play_cooldown: Option<PlayCooldown>,
+}
+
+/// Durable fair-play cooldown, shared by every lobby using this career store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayCooldown {
+    /// Unix seconds, rounded up so a fractional second never opens early.
+    pub until: i64,
+    pub strikes: u32,
 }
 
 /// Stable codes of [`CareerView::error_code`].
 pub mod error_code {
+    pub const PROFILE_HAS_ANOTHER_SESSION: &str = "profile_has_another_session";
+    pub const ALLOCATION_CANCELLED_OR_EXPIRED: &str = "allocation_cancelled_or_expired";
+    pub const DODGE_COOLDOWN: &str = "dodge_cooldown";
+    pub const PLAY_COOLDOWN: &str = "play_cooldown";
+    pub const RANKED_LOCKED: &str = "ranked_locked";
+    pub const RANKED_SEASON_ENDED: &str = "ranked_season_ended";
     /// A new device key from a network that created today's share of new
     /// profiles (LR-16).
     pub const NEW_PROFILE_LIMIT: &str = "new_profile_limit";
@@ -628,7 +752,24 @@ mod tests {
         });
         let participant: ParticipantResult = serde_json::from_value(original.clone()).unwrap();
         assert!(!participant.is_bot);
+        assert_eq!(participant.input_kind, crate::ranked::InputKind::Unknown);
+        assert!(participant.participation.is_none());
         assert_eq!(serde_json::to_value(&participant).unwrap(), original);
+
+        let mut tracked = participant.clone();
+        tracked.disconnected = true;
+        tracked.participation = Some(Participation {
+            connected_ms: 120_000,
+            disconnected_ms: 5_000,
+            afk_ms: 0,
+            abandoned: false,
+        });
+        assert_eq!(
+            serde_json::from_slice::<ParticipantResult>(&serde_json::to_vec(&tracked).unwrap())
+                .unwrap(),
+            tracked,
+            "a short final disconnect is independent of abandon history"
+        );
 
         let old_result = serde_json::json!({
             "result_id": "rc6-receipt", "server_epoch": 1, "match_id": 2,
@@ -638,7 +779,51 @@ mod tests {
             "unrated_reason": "dev", "participants": [original], "saved": false
         });
         let result: MatchResult = serde_json::from_value(old_result.clone()).unwrap();
-        assert_eq!(serde_json::to_value(result).unwrap(), old_result);
+        assert_eq!(serde_json::to_value(&result).unwrap(), old_result);
+        for (outcome, reason, abandoned, rated_penalty, expected) in [
+            (MatchOutcome::Completed, None, false, false, Some(true)),
+            (MatchOutcome::Completed, None, true, true, Some(false)),
+            (
+                MatchOutcome::Interrupted,
+                Some("abandoned_reaped"),
+                true,
+                true,
+                Some(false),
+            ),
+            (
+                MatchOutcome::Interrupted,
+                Some("abandoned_reaped"),
+                true,
+                false,
+                None,
+            ),
+            (
+                MatchOutcome::Interrupted,
+                Some("server_interrupted"),
+                true,
+                true,
+                None,
+            ),
+        ] {
+            let mut personal = result.clone();
+            personal.outcome = outcome;
+            personal.unrated_reason = reason.map(str::to_owned);
+            let p = &mut personal.participants[0];
+            p.disconnected = true;
+            p.participation = abandoned.then_some(Participation {
+                abandoned,
+                ..Default::default()
+            });
+            p.rating = rated_penalty.then_some(RatingChange {
+                before: 1000,
+                after: 968,
+                delta: -32,
+            });
+            assert_eq!(
+                personal.participant_won(&personal.participants[0]),
+                expected
+            );
+        }
 
         let mut bot = participant;
         bot.is_bot = true;
@@ -671,6 +856,13 @@ mod tests {
         );
         let view: CareerView = serde_json::from_str("{}").unwrap();
         assert_eq!(view.response_id, None);
+        assert_eq!(view.ranked_season_open, None);
+        let hint: CareerView = serde_json::from_str(r#"{"ranked_season_open":false}"#).unwrap();
+        assert_eq!(hint.ranked_season_open, Some(false));
+        assert_eq!(
+            serde_json::to_value(hint).unwrap()["ranked_season_open"],
+            false
+        );
         let view = CareerView {
             response_id: Some(42),
             ..CareerView::default()
@@ -710,5 +902,26 @@ mod tests {
         b = a.clone();
         b.server_epoch = 2;
         assert_ne!(a.signing_bytes(), b.signing_bytes());
+    }
+}
+
+#[cfg(test)]
+mod ranked_eligibility_tests {
+    use super::*;
+    #[test]
+    fn legacy_profile_defaults_to_locked_and_ten_completions_unlock_without_identity_link() {
+        let mut profile = ProfileSummary::new("a".repeat(64), "Player".into());
+        let legacy = serde_json::to_value(&profile).unwrap();
+        assert!(legacy.get("completed_public_matches").is_none());
+        let decoded: ProfileSummary = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.completed_public_matches, 0);
+        assert!(!decoded.ranked_unlocked());
+        profile.completed_public_matches = 9;
+        assert!(!profile.ranked_unlocked());
+        profile.completed_public_matches = 10;
+        assert!(profile.ranked_unlocked());
+        let roundtrip: ProfileSummary =
+            serde_json::from_slice(&serde_json::to_vec(&profile).unwrap()).unwrap();
+        assert_eq!(roundtrip, profile);
     }
 }

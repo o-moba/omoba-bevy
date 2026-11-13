@@ -1,0 +1,44 @@
+{
+  "status": "PASS",
+  "scope": "synthetic Account API, real owned production Next/Chrome; presentation only, not PostgreSQL or physical device",
+  "source_parent": "e5a622506d59326e00fb6a148e71e5c9705ed5c2",
+  "source_sha256": {
+    "src/components/portal.tsx": "f374b83ab8a73507276825eb7ef48647b1069f0ea9eaba6666f90a18cd6aba6b",
+    "src/lib/i18n.ts": "81635966274daa5fd6f773e3a3262f16141a2e2f81762fdf438c0dcb5873f3c6",
+    "tests/interrupted-ranked.e2e.mjs": "754896b06b8c4c2d2c6d4c69a05acabae6ef4b06f90db102484c7a99c5b98df9"
+  },
+  "existing_build_id": "cXg9w8JXK-rWNS5Sgwql2",
+  "existing_server_sha256": "fe70887431d4500ee71fa188ef7285f30c881a49070783c658546ffee71ff44b",
+  "locale": "ru",
+  "viewport": [
+    390,
+    844
+  ],
+  "checks": [
+    "rated:true/rating:null interrupted history keeps dash and neutral result",
+    "interrupted Ranked detail retains singular ranked tag and no winning side",
+    "missing personal rating award stays dash rather than zero"
+  ],
+  "screenshots": [
+    {
+      "name": "phone-history.png",
+      "sha256": "38158d43c740992a88a3bd43acd9bdca6da99435a4c715436b7eff702f35eb27"
+    },
+    {
+      "name": "phone-match.png",
+      "sha256": "0e3788a46a37afb65cdabb81b1fa31f2ba7ec0ec149b54b6781091d536d4f57d"
+    }
+  ],
+  "errors": [],
+  "unexpected_api_routes": [],
+  "web_test_commit": "f868fa4641d74899d5c5844def5fd078281fd9a7",
+  "manual_pixels": "Both unmodified screenshots inspected: interrupted neutral history with dash; single-match singular Ranked tag, no winner and personal rating dash. No general viewport certificate.",
+  "unit_tests": {
+    "total": 260,
+    "passed": 257,
+    "failed": 0,
+    "expected_skips": 3
+  },
+  "build_limit": "Reused the existing RU production build; this run did not rebuild or independently attest its source-to-bundle relation. Render behavior and current source predicates are checked separately. Not a fresh release-build gate.",
+  "rejected_attempt": "Initial selector .result did not exist; test-only locator corrected to .outcome-label. Initial run failed and is not counted as acceptance."
+}

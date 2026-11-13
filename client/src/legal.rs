@@ -991,7 +991,7 @@ mod tests {
             record,
             Acceptance {
                 region: "ru".into(),
-                doc_version: "0-draft".into(),
+                doc_version: "1".into(),
                 accepted_at: 1_761_350_400,
             }
         );
@@ -999,12 +999,12 @@ mod tests {
         assert!(LegalConsent::for_test(ru(), Some(file.clone())).accepted());
         // A new document version asks again; accepting replaces the record.
         let mut bumped = ru();
-        bumped.legal.version = Some("1");
+        bumped.legal.version = Some("2");
         let mut consent = LegalConsent::for_test(bumped, Some(file.clone()));
         assert!(!consent.accepted());
         assert!(accept_now(&mut consent));
         let record: Acceptance = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        assert_eq!(record.doc_version, "1");
+        assert_eq!(record.doc_version, "2");
         assert!(!LegalConsent::for_test(ru(), Some(file.clone())).accepted());
         // Another region's record, a broken or an oversized file is no acceptance.
         let other = Region { id: "cn", ..ru() };
@@ -1013,7 +1013,7 @@ mod tests {
         assert!(!LegalConsent::for_test(ru(), Some(file.clone())).accepted());
         let mut big = serde_json::to_vec(&Acceptance {
             region: "ru".into(),
-            doc_version: "0-draft".into(),
+            doc_version: "1".into(),
             accepted_at: 1,
         })
         .unwrap();
@@ -1184,11 +1184,11 @@ mod tests {
         ] {
             assert!(harness::find(app.world_mut(), id).is_some(), "{id}");
         }
-        // Support and community are not provided yet: not on the card.
+        // The community is not provided yet: not on the card.
         assert!(harness::find(app.world_mut(), "LegalCommunityVk").is_none());
         assert_eq!(
             text_of(&mut app, "LegalCardVersion").as_deref(),
-            Some("Documents version: 0-draft")
+            Some("Documents version: 1")
         );
         assert!(continue_disabled(&mut app));
         // A press on the disabled Continue changes nothing.
@@ -1270,7 +1270,10 @@ mod tests {
             text_of(&mut app, "AboutBuild"),
             Some(format!("Build: {}", crate::build_info::label()))
         );
-        assert!(text_of(&mut app, "AboutSupport").is_none());
+        assert_eq!(
+            text_of(&mut app, "AboutSupport").as_deref(),
+            Some("Support: prostosobolev@gmail.com")
+        );
         harness::press(app.world_mut(), "AboutSource");
         app.update();
         assert_eq!(
@@ -1318,7 +1321,7 @@ mod tests {
         );
         assert_eq!(
             text_of(&mut app, "LegalCardVersion").as_deref(),
-            Some("Версия документов: 0-draft")
+            Some("Версия документов: 1")
         );
         let language = harness::find(app.world_mut(), "LegalLanguageValue").unwrap();
         assert_eq!(app.world().get::<Text>(language).unwrap().0, "Русский");

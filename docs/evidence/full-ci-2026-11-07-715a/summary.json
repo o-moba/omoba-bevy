@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "source_commit": "715a81173ac919cb48fd65d7df510c3f6daf4d72",
+  "run_id": 42295758507,
+  "job_ids": [
+    128160433757,
+    128160434026,
+    128160434051,
+    128160434131,
+    128160434159,
+    128160434229,
+    128160434231
+  ],
+  "all_seven_jobs": "success",
+  "dev_client": {
+    "passed": 1621,
+    "failed": 0,
+    "ignored": 1
+  },
+  "artifact": {
+    "id": 13544587390,
+    "bytes": 501164,
+    "sha256": "383d5f5a0b766abe64f4dac560fa300c2673d66c0ebe3737705a569c0e3fddff"
+  },
+  "public_journey_stages": 18,
+  "native_directory_regressions": 11,
+  "scope": "Loopback PostgreSQL, fixture provider identities, AI gameplay; no production/RU/WAN/device/native-pixel certification"
+}

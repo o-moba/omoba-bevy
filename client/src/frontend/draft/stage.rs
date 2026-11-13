@@ -188,7 +188,7 @@ pub(crate) fn spawn_team_stage(
                                 } else {
                                     player.nickname.clone()
                                 };
-                                for (text, ink, size) in [
+                                for (line, (text, ink, size)) in [
                                     (
                                         identity.as_str(),
                                         theme::IVORY,
@@ -223,11 +223,43 @@ pub(crate) fn spawn_team_stage(
                                         },
                                         if compact { 9.0 } else { 10.0 },
                                     ),
-                                ] {
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                {
+                                    let size: f32 = size;
+                                    // Menu typography raises phone labels to its
+                                    // readable minimum. Budget at that actual
+                                    // size, not the smaller design size, so a
+                                    // centred line never loses its beginning.
+                                    let measured_size = if compact {
+                                        size.max(theme::metric::PHONE_LABEL_MIN)
+                                    } else {
+                                        size
+                                    };
+                                    let fitted = super::super::lobby::plate_name(
+                                        text,
+                                        plate_width,
+                                        measured_size,
+                                    );
                                     plate.spawn((
-                                        widgets::label(text, size, ink),
+                                        widgets::label(fitted, size, ink),
                                         TextLayout::justify(Justify::Center)
                                             .with_linebreak(LineBreak::NoWrap),
+                                        Node {
+                                            // A content-sized node shrinks together with
+                                            // the elided text and eventually leaves only
+                                            // an ellipsis. Keep the plate's full width
+                                            // stable for the actual-glyph fitter.
+                                            width: Val::Percent(100.0),
+                                            min_width: Val::Px(0.0),
+                                            ..default()
+                                        },
+                                        widgets::FittedLabel,
+                                        Name::new(format!(
+                                            "PrematchStageText-{}-{line}",
+                                            player.player_id
+                                        )),
                                         Pickable::IGNORE,
                                     ));
                                 }
@@ -266,6 +298,7 @@ mod tests {
             })
             .collect();
         let mut prematch = PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 30_000,

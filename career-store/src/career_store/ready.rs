@@ -1,0 +1,630 @@
+//! Durable consent, separate from match results. All operations lock sorted
+//! profiles before check rows. No gameplay/15-second wait holds a transaction.
+use super::*;
+use shared::{career::PlayCooldown, match_service::MatchPreference};
+
+pub const OWNED_ELSEWHERE: &str = shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION;
+pub const CLOSED: &str = shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED;
+const WINDOW_MS: i64 = 15_000;
+const HEARTBEAT_MS: i64 = 3_000;
+const HANDOFF_MS: i64 = 90_000;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Maintenance {
+    pub reconciled: u32,
+    pub pruned: u32,
+    pub deferred: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Seat {
+    pub profile_id: String,
+    pub session_id: String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    Forming,
+    Open,
+    Approved,
+    Cancelled,
+    Expired,
+    Consumed,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Member {
+    pub seat: Seat,
+    pub accepted: bool,
+    pub dodged: bool,
+    pub event_id: String,
+    pub observed_at_ms: Option<i64>,
+    pub cooldown: Option<PlayCooldown>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub check_id: String,
+    pub preference: MatchPreference,
+    pub phase: Phase,
+    pub deadline_ms: i64,
+    pub opened_at_ms: Option<i64>,
+    pub members: Vec<Member>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Answer {
+    pub seat: Seat,
+    pub accepted: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Action {
+    Answers(Vec<Answer>),
+    Publish,
+    Poll,
+    Answer {
+        profile_id: String,
+        session_id: String,
+        accepted: bool,
+    },
+    /// Privileged server maintenance/failure, never a player's decline.
+    Cancel,
+}
+struct Check {
+    owner: String,
+    queue: String,
+    state: String,
+    deadline: i64,
+    opened: Option<i64>,
+    live: i64,
+    count: i32,
+}
+fn valid_check(id: &str) -> StoreResult<()> {
+    if id.len() != 32
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("Invalid ready identity.".into());
+    }
+    Ok(())
+}
+fn queue_name(queue: MatchPreference) -> &'static str {
+    match queue {
+        MatchPreference::Ranked => "humans_only",
+        MatchPreference::Casual => "quick",
+        MatchPreference::BotPractice => "bot_practice",
+    }
+}
+async fn now(tx: &mut Transaction<'_, Postgres>) -> StoreResult<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint")
+            .fetch_one(&mut **tx)
+            .await?,
+    )
+}
+async fn check(tx: &mut Transaction<'_, Postgres>, id: &str) -> StoreResult<Check> {
+    let row = sqlx::query("SELECT * FROM career_ready_checks WHERE check_id=$1 FOR UPDATE")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(CLOSED)?;
+    Ok(Check {
+        owner: row.try_get("owner_id")?,
+        queue: row.try_get("queue")?,
+        state: row.try_get("state")?,
+        deadline: row.try_get("deadline_ms")?,
+        opened: row.try_get("opened_at_ms")?,
+        live: row.try_get("live_until_ms")?,
+        count: row.try_get("member_count")?,
+    })
+}
+async fn members(tx: &mut Transaction<'_, Postgres>, id: &str) -> StoreResult<Vec<Member>> {
+    let rows=sqlx::query("SELECT m.*,CASE WHEN p.cooldown_until>clock_timestamp() THEN ceil(extract(epoch FROM p.cooldown_until))::bigint END AS until,p.strikes FROM career_ready_members m LEFT JOIN career_queue_penalties p USING(profile_id) WHERE check_id=$1 ORDER BY profile_id")
+        .bind(id).fetch_all(&mut **tx).await?;
+    rows.into_iter()
+        .map(|r| {
+            let until: Option<i64> = r.try_get("until")?;
+            Ok(Member {
+                seat: Seat {
+                    profile_id: r.try_get("profile_id")?,
+                    session_id: r.try_get("session_id")?,
+                },
+                accepted: r.try_get("accepted")?,
+                dodged: r.try_get("dodged")?,
+                event_id: r.try_get("dodge_event_id")?,
+                observed_at_ms: r.try_get("dodge_observed_ms")?,
+                cooldown: until
+                    .map(|until| {
+                        Ok::<_, StoreError>(PlayCooldown {
+                            until,
+                            strikes: u32::try_from(r.try_get::<i32, _>("strikes")?)
+                                .map_err(|_| "Invalid queue strikes.")?,
+                        })
+                    })
+                    .transpose()?,
+            })
+        })
+        .collect()
+}
+async fn snapshot(tx: &mut Transaction<'_, Postgres>, id: &str) -> StoreResult<Snapshot> {
+    let c = check(tx, id).await?;
+    Ok(Snapshot {
+        check_id: id.into(),
+        preference: match c.queue.as_str() {
+            "humans_only" => MatchPreference::Ranked,
+            "quick" => MatchPreference::Casual,
+            "bot_practice" => MatchPreference::BotPractice,
+            _ => return Err("Invalid ready queue.".into()),
+        },
+        phase: match c.state.as_str() {
+            "forming" => Phase::Forming,
+            "open" => Phase::Open,
+            "approved" => Phase::Approved,
+            "cancelled" => Phase::Cancelled,
+            "expired" => Phase::Expired,
+            "consumed" => Phase::Consumed,
+            _ => return Err("Invalid ready state.".into()),
+        },
+        deadline_ms: c.deadline,
+        opened_at_ms: c.opened,
+        members: members(tx, id).await?,
+    })
+}
+async fn ids(tx: &mut Transaction<'_, Postgres>, id: &str) -> StoreResult<Vec<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT profile_id FROM career_ready_members WHERE check_id=$1 ORDER BY profile_id",
+    )
+    .bind(id)
+    .fetch_all(&mut **tx)
+    .await?)
+}
+/// Expand existing claims before locking, then verify no previously unseen
+/// check appeared while acquiring locks. A concurrent change refuses/retries;
+/// it never locks new profiles out of order or assumes absent ownership.
+async fn lock_profiles(
+    tx: &mut Transaction<'_, Postgres>,
+    requested: &[String],
+) -> StoreResult<Vec<String>> {
+    let checks:Vec<String>=sqlx::query_scalar("SELECT DISTINCT check_id FROM career_ready_claims WHERE profile_id=ANY($1) ORDER BY check_id")
+        .bind(requested).fetch_all(&mut **tx).await?;
+    let mut all = requested.to_vec();
+    let more: Vec<String> =
+        sqlx::query_scalar("SELECT profile_id FROM career_ready_members WHERE check_id=ANY($1)")
+            .bind(&checks)
+            .fetch_all(&mut **tx)
+            .await?;
+    all.extend(more);
+    all.sort();
+    all.dedup();
+    let locked:Vec<String>=sqlx::query_scalar("SELECT profile_id FROM career_profiles WHERE profile_id=ANY($1) ORDER BY profile_id FOR UPDATE")
+        .bind(&all).fetch_all(&mut **tx).await?;
+    if locked != all {
+        return Err("Ready participant profile is missing.".into());
+    }
+    let current:Vec<String>=sqlx::query_scalar("SELECT DISTINCT check_id FROM career_ready_claims WHERE profile_id=ANY($1) ORDER BY check_id")
+        .bind(requested).fetch_all(&mut **tx).await?;
+    if current.iter().any(|id| !checks.contains(id)) {
+        return Err("Ready ownership changed. Retry shortly.".into());
+    }
+    // No profile locks may be acquired after this point.
+    for id in &checks {
+        check(tx, id).await?;
+    }
+    Ok(checks)
+}
+async fn close(
+    tx: &mut Transaction<'_, Postgres>,
+    id: &str,
+    state: &str,
+    excluded: &[String],
+    observed: i64,
+) -> StoreResult<()> {
+    for m in members(tx, id).await? {
+        if excluded.contains(&m.seat.profile_id) && !m.dodged {
+            super::queue_discipline::record_in_tx(tx, &m.event_id, &m.seat.profile_id, observed)
+                .await?;
+            sqlx::query("UPDATE career_ready_members SET dodged=true,dodge_observed_ms=$3 WHERE check_id=$1 AND profile_id=$2")
+                .bind(id).bind(&m.seat.profile_id).bind(observed).execute(&mut **tx).await?;
+        }
+    }
+    sqlx::query(
+        "UPDATE career_ready_checks SET state=$2,updated_at=clock_timestamp() WHERE check_id=$1",
+    )
+    .bind(id)
+    .bind(state)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM career_ready_claims WHERE check_id=$1")
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+async fn reconcile(tx: &mut Transaction<'_, Postgres>, id: &str, at: i64) -> StoreResult<()> {
+    let c = check(tx, id).await?;
+    if !matches!(c.state.as_str(), "forming" | "open" | "approved") {
+        return Ok(());
+    }
+    let roster = members(tx, id).await?;
+    if roster.len() != c.count as usize {
+        return close(tx, id, "cancelled", &[], at).await;
+    }
+    if at < c.deadline {
+        return Ok(());
+    }
+    if c.state == "open" && c.live >= c.deadline {
+        let excluded: Vec<_> = roster
+            .iter()
+            .filter(|m| !m.accepted)
+            .map(|m| m.seat.profile_id.clone())
+            .collect();
+        close(tx, id, "expired", &excluded, c.deadline).await
+    } else {
+        // An unpublished candidate, failed owner or failed worker handoff is a
+        // server fault. A lease that died before the deadline proves no dodge.
+        close(tx, id, "cancelled", &[], at).await
+    }
+}
+
+impl CareerStore {
+    /// Authenticated, read-only preflight of the actual matchmaking SQL contract.
+    /// Unlike a listening-port check this detects schema/role/replica failures
+    /// before any player's first ready or discipline write. Never returns IDs.
+    pub async fn matchmaking_available(&self) -> Result<bool, String> {
+        sqlx::query_scalar(
+            "SELECT NOT pg_is_in_recovery() AND current_setting('transaction_read_only')='off' \
+             AND (SELECT array_agg(version ORDER BY version) FROM career_schema_version)=$1 \
+             AND (SELECT bool_and(has_table_privilege(t,p)) FROM (VALUES \
+             ('career_profiles','SELECT'),('career_profiles','UPDATE'), \
+             ('career_matches','SELECT'),('career_matches','INSERT'),('career_matches','UPDATE'), \
+             ('career_participants','SELECT'),('career_participants','INSERT'), \
+             ('career_active_profiles','SELECT'),('career_active_profiles','INSERT'),('career_active_profiles','DELETE'), \
+             ('career_ready_checks','SELECT'),('career_ready_checks','INSERT'),('career_ready_checks','UPDATE'), \
+             ('career_ready_members','SELECT'),('career_ready_members','INSERT'),('career_ready_members','UPDATE'), \
+             ('career_ready_claims','SELECT'),('career_ready_claims','INSERT'),('career_ready_claims','DELETE'), \
+             ('career_queue_dodge_events','SELECT'),('career_queue_dodge_events','INSERT'), \
+             ('career_queue_penalties','SELECT'),('career_queue_penalties','INSERT'),('career_queue_penalties','UPDATE'), \
+             ('career_play_penalties','SELECT'),('career_ranked_seasons','SELECT'), \
+             ('career_ranked_allocations','SELECT'),('career_ranked_allocations','INSERT')) AS required(t,p)) \
+             AND has_function_privilege('career_prune_closed_ready(integer)','EXECUTE')",
+        )
+        .bind(SCHEMA_VERSIONS.as_slice())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|_| "Matchmaking storage preflight is unavailable.".into())
+    }
+
+    /// Reconcile at most128 expired checks, then remove at most that many closed
+    /// receipts older than7 days. Existing admissions remain the Resume authority.
+    /// Queue-dodge identities/history are never removed by this operation.
+    pub async fn maintain_ready(&self, batch: u32) -> Result<Maintenance, String> {
+        if !(1..=128).contains(&batch) {
+            return Err("Invalid ready maintenance batch.".into());
+        }
+        retry(|| self.maintain_ready_inner(batch)).await
+    }
+
+    async fn maintain_ready_inner(&self, batch: u32) -> StoreResult<Maintenance> {
+        // No row lock before the normal sorted participant locks. Concurrent
+        // answer/admission paths keep their existing transaction/lock ordering.
+        let candidates: Vec<String> = sqlx::query_scalar(
+            "SELECT check_id FROM career_ready_checks WHERE state IN ('forming','open','approved') AND deadline_ms <= floor(extract(epoch FROM statement_timestamp())*1000)::bigint ORDER BY deadline_ms,check_id LIMIT $1",
+        )
+        .bind(i64::from(batch))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut result = Maintenance::default();
+        for id in candidates {
+            match self.reconcile_ready_for_maintenance(&id).await {
+                Ok(true) => result.reconciled += 1,
+                Ok(false) => {}
+                Err(_) => result.deferred += 1,
+            }
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET LOCAL statement_timeout='500ms'")
+            .execute(&mut *tx)
+            .await?;
+        let pruned: i32 = sqlx::query_scalar("SELECT career_prune_closed_ready($1)")
+            .bind(batch as i32)
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        result.pruned = u32::try_from(pruned).map_err(|_| "Invalid ready prune count.")?;
+        Ok(result)
+    }
+
+    async fn reconcile_ready_for_maintenance(&self, id: &str) -> StoreResult<bool> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET LOCAL lock_timeout='50ms'")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("SET LOCAL statement_timeout='500ms'")
+            .execute(&mut *tx)
+            .await?;
+        let roster = ids(&mut tx, id).await?;
+        lock_profiles(&mut tx, &roster).await?;
+        let c = check(&mut tx, id).await?;
+        let at = now(&mut tx).await?;
+        let expired =
+            matches!(c.state.as_str(), "forming" | "open" | "approved") && c.deadline <= at;
+        reconcile(&mut tx, id, at).await?;
+        tx.commit().await?;
+        Ok(expired)
+    }
+
+    /// Reserve immutable consent ownership before exposing a found match. A
+    /// separate Publish starts the actual15-second window, never a retry.
+    pub async fn ready_reserve(
+        &self,
+        id: &str,
+        preference: MatchPreference,
+        seats: Vec<Seat>,
+    ) -> Result<Snapshot, String> {
+        retry(|| self.ready_reserve_inner(id, preference, seats.clone())).await
+    }
+    async fn ready_reserve_inner(
+        &self,
+        id: &str,
+        preference: MatchPreference,
+        seats: Vec<Seat>,
+    ) -> StoreResult<Snapshot> {
+        valid_check(id)?;
+        if seats.is_empty() || seats.len() > 10 || (preference.rated() && seats.len() != 10) {
+            return Err("Invalid ready roster size.".into());
+        }
+        let mut expected = seats.clone();
+        expected.sort_by(|a, b| a.profile_id.cmp(&b.profile_id));
+        let mut sessions = HashSet::new();
+        for seat in &expected {
+            check_id(&seat.profile_id)?;
+            if seat.session_id.is_empty()
+                || seat.session_id.len() > 64
+                || !seat
+                    .session_id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                || !sessions.insert(&seat.session_id)
+            {
+                return Err("Invalid ready session.".into());
+            }
+        }
+        if expected
+            .windows(2)
+            .any(|p| p[0].profile_id == p[1].profile_id)
+        {
+            return Err("Duplicate ready profile.".into());
+        }
+        let requested: Vec<_> = expected.iter().map(|s| s.profile_id.clone()).collect();
+        let mut tx = self.pool.begin().await?;
+        let previous = lock_profiles(&mut tx, &requested).await?;
+        let at = now(&mut tx).await?;
+        for old in previous {
+            reconcile(&mut tx, &old, at).await?;
+        }
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM career_ready_checks WHERE check_id=$1)",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if exists {
+            let c = check(&mut tx, id).await?;
+            let actual: Vec<_> = members(&mut tx, id)
+                .await?
+                .into_iter()
+                .map(|m| m.seat)
+                .collect();
+            if c.owner != self.owner || c.queue != queue_name(preference) || actual != expected {
+                return Err("Ready identity conflicts with its immutable owner/roster.".into());
+            }
+            let view = snapshot(&mut tx, id).await?;
+            tx.commit().await?;
+            return Ok(view);
+        }
+        let owned:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_ready_claims WHERE profile_id=ANY($1)) OR EXISTS(SELECT 1 FROM career_active_profiles WHERE profile_id=ANY($1))")
+                .bind(&requested).fetch_one(&mut *tx).await?;
+        if owned {
+            tx.commit().await?;
+            return Err(OWNED_ELSEWHERE.into());
+        }
+        if let Err(error) = Self::check_queue_discipline(&mut tx, &requested).await {
+            tx.commit().await?;
+            return Err(error);
+        }
+        let play_blocked:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_play_penalties WHERE profile_id=ANY($1) AND cooldown_until>clock_timestamp())")
+                .bind(&requested).fetch_one(&mut *tx).await?;
+        if play_blocked {
+            tx.commit().await?;
+            return Err(shared::career::error_code::PLAY_COOLDOWN.into());
+        }
+        sqlx::query("INSERT INTO career_ready_checks(check_id,owner_id,queue,member_count,state,deadline_ms,live_until_ms) VALUES($1,$2,$3,$4,'forming',$5,$6)")
+                .bind(id).bind(&self.owner).bind(queue_name(preference)).bind(seats.len() as i32).bind(at+WINDOW_MS).bind(at).execute(&mut *tx).await?;
+        for seat in &expected {
+            sqlx::query(
+                "INSERT INTO career_ready_members(check_id,profile_id,session_id) VALUES($1,$2,$3)",
+            )
+            .bind(id)
+            .bind(&seat.profile_id)
+            .bind(&seat.session_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query("INSERT INTO career_ready_claims(profile_id,check_id) VALUES($1,$2)")
+                .bind(&seat.profile_id)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        let view = snapshot(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(view)
+    }
+    /// The trusted owning lobby alone publishes, heartbeats, records a bound
+    /// signed answer, or cancels for maintenance. Missing/late answers never
+    /// turn into acceptance; retries cannot reset the deadline or event IDs.
+    pub async fn ready_update(&self, id: &str, action: Action) -> Result<Snapshot, String> {
+        retry(|| self.ready_update_inner(id, action.clone())).await
+    }
+    async fn ready_update_inner(&self, id: &str, action: Action) -> StoreResult<Snapshot> {
+        valid_check(id)?;
+        let mut tx = self.pool.begin().await?;
+        let requested = ids(&mut tx, id).await?;
+        lock_profiles(&mut tx, &requested).await?;
+        let c = check(&mut tx, id).await?;
+        if c.owner != self.owner {
+            return Err(OWNED_ELSEWHERE.into());
+        }
+        let at = now(&mut tx).await?;
+        if matches!(action, Action::Cancel) {
+            if matches!(c.state.as_str(), "forming" | "open" | "approved") {
+                close(&mut tx, id, "cancelled", &[], at).await?;
+            }
+        } else {
+            // Validate the entire bounded batch before any timeout or vote
+            // side effect; callers preserve signed response order per seat.
+            let answers = match &action {
+                Action::Answer {
+                    profile_id,
+                    session_id,
+                    accepted,
+                } => vec![Answer {
+                    seat: Seat {
+                        profile_id: profile_id.clone(),
+                        session_id: session_id.clone(),
+                    },
+                    accepted: *accepted,
+                }],
+                Action::Answers(answers) => {
+                    if answers.is_empty() || answers.len() > 10 {
+                        return Err("Invalid ready answer batch.".into());
+                    }
+                    answers.clone()
+                }
+                _ => Vec::new(),
+            };
+            let roster = members(&mut tx, id).await?;
+            let mut seen = HashSet::new();
+            for answer in &answers {
+                if !seen.insert(&answer.seat.profile_id)
+                    || !roster.iter().any(|m| m.seat == answer.seat)
+                {
+                    return Err("Ready response does not belong to this seat.".into());
+                }
+            }
+            reconcile(&mut tx, id, at).await?;
+            let c = check(&mut tx, id).await?;
+            match &action {
+                Action::Publish if c.state == "forming" => {
+                    sqlx::query("UPDATE career_ready_checks SET state='open',deadline_ms=$2,live_until_ms=$3,opened_at_ms=$4,updated_at=clock_timestamp() WHERE check_id=$1")
+                            .bind(id).bind(at+WINDOW_MS).bind(at+HEARTBEAT_MS).bind(at).execute(&mut *tx).await?;
+                }
+                Action::Poll if c.state == "open" => {
+                    sqlx::query("UPDATE career_ready_checks SET live_until_ms=$2,updated_at=clock_timestamp() WHERE check_id=$1")
+                            .bind(id).bind(at+HEARTBEAT_MS).execute(&mut *tx).await?;
+                }
+                Action::Answer { .. } | Action::Answers(_)
+                    if c.state == "open"
+                        || (c.state == "approved" && answers.iter().any(|a| !a.accepted)) =>
+                {
+                    let first_no = answers.iter().position(|a| !a.accepted);
+                    let yes: Vec<_> = answers
+                        .iter()
+                        .take(first_no.unwrap_or(answers.len()))
+                        .map(|a| a.seat.profile_id.clone())
+                        .collect();
+                    if !yes.is_empty() {
+                        sqlx::query("UPDATE career_ready_members SET accepted=true WHERE check_id=$1 AND profile_id=ANY($2)")
+                            .bind(id).bind(&yes).execute(&mut *tx).await?;
+                    }
+                    if let Some(index) = first_no {
+                        close(
+                            &mut tx,
+                            id,
+                            "cancelled",
+                            std::slice::from_ref(&answers[index].seat.profile_id),
+                            at,
+                        )
+                        .await?;
+                    } else if members(&mut tx, id).await?.iter().all(|m| m.accepted) {
+                        sqlx::query("UPDATE career_ready_checks SET state='approved',deadline_ms=$2,updated_at=clock_timestamp() WHERE check_id=$1")
+                            .bind(id).bind(at+HANDOFF_MS).execute(&mut *tx).await?;
+                    } else {
+                        sqlx::query("UPDATE career_ready_checks SET live_until_ms=$2,updated_at=clock_timestamp() WHERE check_id=$1")
+                            .bind(id).bind(at+HEARTBEAT_MS).execute(&mut *tx).await?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let view = snapshot(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(view)
+    }
+    /// Any host may reconcile a dead/expired claim, but only the owning live
+    /// host may continue it. The returned penalty and released claims commit
+    /// together, closing the asynchronous outbox/host-switch gap.
+    pub async fn ready_queue_access(&self, profile: &str) -> Result<(), String> {
+        retry(|| self.ready_queue_access_inner(profile)).await
+    }
+    async fn ready_queue_access_inner(&self, profile: &str) -> StoreResult<()> {
+        check_id(profile)?;
+        let mut tx = self.pool.begin().await?;
+        let checks = lock_profiles(&mut tx, &[profile.into()]).await?;
+        let at = now(&mut tx).await?;
+        for id in &checks {
+            reconcile(&mut tx, id, at).await?;
+        }
+        let owner:Option<String>=sqlx::query_scalar("SELECT r.owner_id FROM career_ready_claims c JOIN career_ready_checks r USING(check_id) WHERE c.profile_id=$1")
+                .bind(profile).fetch_optional(&mut *tx).await?;
+        let blocked = owner.is_some_and(|o| o != self.owner);
+        // Reconciliation must commit even when the subsequent search is
+        // refused. Returning an error inside this transaction would pardon
+        // a missed answer by rolling back its durable event.
+        tx.commit().await?;
+        if blocked {
+            Err(OWNED_ELSEWHERE.into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Called only after new allocation's participant profile locks, inside its
+/// transaction. Existing admissions/recovery return before this guard.
+pub(super) async fn admit(
+    tx: &mut Transaction<'_, Postgres>,
+    result_id: &str,
+    profiles: &[String],
+    required: bool,
+    rated: bool,
+) -> StoreResult<()> {
+    let claims:Vec<String>=sqlx::query_scalar("SELECT DISTINCT check_id FROM career_ready_claims WHERE profile_id=ANY($1) ORDER BY check_id")
+        .bind(profiles).fetch_all(&mut **tx).await?;
+    if claims.iter().any(|id| id != result_id) {
+        return Err(OWNED_ELSEWHERE.into());
+    }
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_ready_checks WHERE check_id=$1)")
+            .bind(result_id)
+            .fetch_one(&mut **tx)
+            .await?;
+    if !exists {
+        return if required { Err(CLOSED.into()) } else { Ok(()) };
+    } // Standalone/legacy allocation, no shared claim.
+    let c = check(tx, result_id).await?;
+    let seats = ids(tx, result_id).await?;
+    if c.state != "approved"
+        || (required && rated && c.queue != "humans_only")
+        || (required && c.queue == "humans_only" && (seats.len() != 10 || profiles.len() != 10))
+        || now(tx).await? >= c.deadline
+        || profiles.is_empty()
+        || profiles.iter().any(|p| !seats.contains(p))
+        || seats.len() != c.count as usize
+    {
+        return Err(CLOSED.into());
+    }
+    sqlx::query("UPDATE career_ready_checks SET state='consumed',updated_at=clock_timestamp() WHERE check_id=$1")
+        .bind(result_id).execute(&mut **tx).await?;
+    sqlx::query("DELETE FROM career_ready_claims WHERE check_id=$1")
+        .bind(result_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}

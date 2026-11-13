@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "scope": "Exact new source grants/SQL under temporary NOLOGIN role in owned local PG18.6; existing baseline profile/schema privileges supplied; all changes rolled back, not a production role rollout",
+  "allowed": [
+    "profile row lock",
+    "append/deduplicate queue event",
+    "insert/update queue penalty",
+    "read active cooldown"
+  ],
+  "denied": [
+    "update event ledger",
+    "delete event ledger"
+  ],
+  "remaining": {
+    "roles": 0,
+    "profiles": 0,
+    "events": 0
+  }
+}

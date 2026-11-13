@@ -7,7 +7,7 @@ license = "AGPL-3.0-only"
 
 [dependencies]
 common = { path = "../common" }
-tokio = { version = "1.49.0", features = ["rt", "time", "sync", "macros"] }
+tokio = { version = "1.49.0", features = ["rt", "time", "sync", "macros", "signal"] }
 ed25519-dalek = "2.2.0"
 getrandom = "0.3.4"
 ekza-bevy-sdk.workspace = true

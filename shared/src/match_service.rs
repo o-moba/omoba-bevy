@@ -75,6 +75,17 @@ pub enum MatchServiceView {
         /// without it show the plain capacity wait.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capacity_line: Option<CapacityLine>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        party_gathering: Option<PartyGathering>,
+    },
+    /// No worker exists until every human has explicitly accepted.
+    ReadyCheck {
+        check_id: String,
+        preference: MatchPreference,
+        accepted: bool,
+        accepted_count: u32,
+        needed: u32,
+        remaining_secs: u64,
     },
     Allocating,
     Assigned {
@@ -90,6 +101,14 @@ pub enum MatchServiceView {
     Failed {
         code: String,
     },
+}
+
+/// A bounded wait for party members who have not joined this search yet.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PartyGathering {
+    pub missing: Vec<String>,
+    pub needed: u32,
+    pub remaining_secs: u64,
 }
 
 /// A ready roster's place in the line for a free arena (LR-09).
@@ -284,6 +303,7 @@ mod tests {
             casual_offer_after_secs: offer,
             also_casual,
             capacity_line: None,
+            party_gathering: None,
         };
         let plain = serde_json::to_string(&waiting(None, None, false)).unwrap();
         for field in ["searching", "casual_offer_after_secs", "also_casual"] {
@@ -331,6 +351,7 @@ mod tests {
             casual_offer_after_secs: None,
             also_casual: false,
             capacity_line,
+            party_gathering: None,
         };
         let plain = serde_json::to_string(&waiting(None)).unwrap();
         assert!(!plain.contains("capacity_line"), "{plain}");

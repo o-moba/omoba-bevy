@@ -1,0 +1,36 @@
+{
+  "status": "PASS",
+  "reports": [
+    {
+      "scope": "lobby",
+      "epoch_matches": true,
+      "sql_ready": true,
+      "journal_ready": true,
+      "staged_dodges": 0,
+      "legacy_floors": 0,
+      "unpersisted_results": 0,
+      "blocked": false
+    },
+    {
+      "scope": "worker",
+      "epoch_matches": true,
+      "sql_ready": true,
+      "journal_ready": true,
+      "staged_dodges": 0,
+      "legacy_floors": 0,
+      "unpersisted_results": 0,
+      "blocked": false
+    },
+    {
+      "scope": "worker",
+      "epoch_matches": true,
+      "sql_ready": true,
+      "journal_ready": true,
+      "staged_dodges": 0,
+      "legacy_floors": 0,
+      "unpersisted_results": 0,
+      "blocked": false
+    }
+  ],
+  "scope": "retained raw actual process reports after the accepted probe; authoritative Running/freshness assertions execute before process cleanup"
+}

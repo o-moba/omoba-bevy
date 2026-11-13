@@ -1,0 +1,171 @@
+{
+  "status": "PASS",
+  "run_id": "18c6a33399",
+  "checks": [
+    "real ru_backup combines signed encrypted logical SFTP backup with the new physical/WAL pipeline",
+    "actual host-helper config/full-backup/live-check path executes with sanitized environment",
+    "actual career10/portal11 physical backup encrypted and stored through strict-host-key SFTP",
+    "named-point recovery returns exact post-base rating1024/history1",
+    "latest archive recovery returns exact post-base rating1048/history2",
+    "real ru_backup monthly drill verifies the signed logical snapshot and isolated physical target recovery",
+    "actual host-helper isolated named-target drill proves source system/schema/replay and cleans its scratch cluster",
+    "missing post-base encrypted WAL refuses target recovery instead of returning stale data",
+    "corrupt encrypted post-base WAL refuses target recovery",
+    "wrong SFTP host pin refuses repository access",
+    "actual minute-check CLI alerts in its own journal while preserving logical backup metadata",
+    "actual host-helper records archive outage and health refuses inherited success",
+    "unreachable SFTP archive fails health rather than certifying freshness",
+    "actual full-backup retention keeps three completed bases and expires the older fourth only after success",
+    "real incomplete PITR still uploads independent signed logical backup while refusing combined success",
+    "actual repaired minute-check CLI resolves its own alert without changing backup metadata",
+    "real complete backup health requires archive/base/drill and actual secrets escrow together",
+    "actual host-helper health recovers only after a successful repaired-archive check"
+  ],
+  "scope": "Disposable two-container encrypted SFTP/PG18 recovery only; not real off-host/RU deployment, production RPO, physical UI or played-game evidence",
+  "source_parent": "715a81173ac919cb48fd65d7df510c3f6daf4d72",
+  "fixture": "Direct SQL synthetic rating/history receipts with actual career/portal migrations",
+  "wal_segment_mib": 1,
+  "image_id": "sha256:72480ba0c6fdec4e512e402ff728f25d1eb633512f3891a62fd6cca1822c550e",
+  "postgres": "postgres (PostgreSQL) 18.6",
+  "pgbackrest": "pgBackRest 2.58.0",
+  "schema": {
+    "career": 10,
+    "portal": 11
+  },
+  "system_identifier": "7705183126021607467",
+  "kit_backup": {
+    "ok": true,
+    "at": "2026-11-06T22:05:53Z",
+    "label": "20261106-220551F",
+    "backup_at": "2026-11-06T22:05:53Z",
+    "system_id": "7705183126021607467",
+    "cipher": "aes-256-cbc",
+    "type": "full"
+  },
+  "logical_backup": {
+    "name": "omoba-ru-20261106T220550Z-manual.tar.gpg",
+    "schema_versions": {
+      "portal": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ],
+      "career": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    }
+  },
+  "base_snapshot": {
+    "rating": 1000,
+    "rated_matches": 20,
+    "matches_played": 20,
+    "history": 0
+  },
+  "backup_labels": [
+    "20261106-220551F"
+  ],
+  "repository_cipher": "aes-256-cbc",
+  "target_lsn": "0/1200F48",
+  "post_base_segment": "000000010000000000000012",
+  "point": {
+    "expected": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1
+    },
+    "actual": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1
+    }
+  },
+  "latest": {
+    "expected": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2
+    },
+    "actual": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2
+    }
+  },
+  "kit_drill": {
+    "ok": true,
+    "started_at": "2026-11-06T22:06:00Z",
+    "target": "omoba_pitr_41153497b83041cdaed36e389bc0a106",
+    "target_lsn": "0/18E2F78",
+    "system_id": "7705183126021607467",
+    "replay_lsn": "0/18E2F78",
+    "schema_versions": {
+      "career": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "portal": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ]
+    },
+    "finished_at": "2026-11-06T22:06:03Z",
+    "cleanup_complete": true
+  },
+  "wrong_sftp_pin": {
+    "exit_code": 0,
+    "status_codes": [
+      99
+    ],
+    "rejected": true
+  },
+  "retained_full_labels": [
+    "20261106-220624F",
+    "20261106-220628F",
+    "20261106-220631F"
+  ],
+  "incomplete_pitr": {
+    "combined_success": false,
+    "logical_archive_preserved": true
+  },
+  "root_health": {
+    "ok": true,
+    "codes": []
+  },
+  "owned_containers_network_removed": true
+}

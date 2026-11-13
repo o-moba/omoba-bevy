@@ -50,5 +50,17 @@
   "pause.render.show_fps": "Show FPS counter",
   "pause.tips.enabled": "Beginner tips",
   "pause.tips.hint": "Show loading advice and the first-match guide. You can always open Help manually.",
-  "pause.button.practice": "Debug tools"
+  "pause.button.practice": "Debug tools",
+  "pause.vote.remake": "Remake match",
+  "pause.vote.surrender": "Surrender",
+  "pause.vote.active": "{kind} · {name} · Yes {yes}/{required} · No {no} · {seconds}s",
+  "pause.vote.voted_yes": "You voted yes",
+  "pause.vote.voted_no": "You voted no",
+  "pause.vote.yes": "Vote yes",
+  "pause.vote.no": "Vote no",
+  "pause.vote.cooldown": "Next team vote in {seconds}s",
+  "pause.vote.too_early": "available in {seconds}s",
+  "pause.vote.window_closed": "the first 3 minutes have passed",
+  "pause.vote.no_absent_teammate": "requires a teammate absent for 90 seconds",
+  "pause.vote.unavailable": "{kind} · {reason}"
 }

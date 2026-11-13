@@ -69,6 +69,34 @@ to register at all; the QA plugins come last, so their
 production values. Frame order comes from the system sets below, never from
 the group order.
 
+The focused `OMOBA_FAIR_PLAY_QA_OUTPUT=<directory>` harness accepts one
+`OMOBA_FAIR_PLAY_QA_SCENE`: `taken`, `party-restart`, `search-restart`,
+`remake-menu`, `remake-prompt`, `surrender-prompt`, `remade-result` or
+`surrender-result`. It removes its transport and supplies labelled synthetic
+session/views to the production renderer. Class-tab activation and the party
+epoch-change toast use their real client paths. `fair-play.png` is captured only
+with the expected visible localized text and fitting required controls (vote
+targets at least44px); `qa-summary.json` records the scope. Missing state/text,
+readback, color pixels or output fails. Use isolated returning-user settings and
+no live server. This is presentation proof, separate from real public gameplay,
+account/consent, keep-awake/haptics or physical-phone acceptance. Select one
+language/viewport and only the changed cases; this does not enable a full matrix.
+
+Desktop fair-play and Creator Loop QA may additionally set
+`OMOBA_QA_OFFSCREEN=1`. Before DefaultPlugins build, it disables Winit/OS-window
+creation; its first QA plugin supplies a virtual primary window at the selected
+`OMOBA_QA_WIDTH`/`OMOBA_QA_HEIGHT` (default852×393, scale1), and a60Hz schedule
+runner. Production main camera/UI render into an image; avatar/party preview
+image targets remain separate. Their existing screenshot commands capture that
+image and retain all text/root/modal/geometry/color-readback gates. Creator Loop
+keeps the selected virtual dimensions instead of imposing its1280×720 desktop
+window. No desktop pixels, focus or OS lock/power settings are read/changed by
+this mode. It needs a supported harness and fails on mobile or an invalid flag;
+a normal run without the flag follows the same DefaultPlugins/window path.
+It is viewport/rendering evidence, not physical-device, OS-window/input,
+keep-awake/haptic or real-match evidence. An opt-in fair-play fixture remains
+synthetic even though it uses production rendering.
+
 QA harnesses live in `client/src/qa/` behind the `qa` cargo feature. It is on
 by default, so `cargo run -p client`, packaging, the mobile builds and the
 capture scripts compile them as before. Each harness is dormant unless its

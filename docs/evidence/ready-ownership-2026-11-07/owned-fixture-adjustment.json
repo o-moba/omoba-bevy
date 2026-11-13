@@ -1,0 +1,5 @@
+{
+  "scope": "Only task-owned local PostgreSQL fixture; uncommitted schema12 evolved before first source commit; no deployed schema12 exists in this task",
+  "sql": "BEGIN; ALTER TABLE public.career_ready_checks ADD COLUMN opened_at_ms BIGINT CHECK (opened_at_ms >= 0); COMMIT;",
+  "reason": "Record authoritative opened_at_ms for exact15000ms verification without wall-clock scheduling assertions"
+}

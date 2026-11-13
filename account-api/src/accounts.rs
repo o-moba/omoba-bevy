@@ -1,32 +1,40 @@
 //! Account privacy and browser mutations. Receipts and effects commit together.
 use crate::auth::Session;
+use crate::read::parameters;
 use crate::*;
 use serde::Deserialize;
 use shared::career::{FriendAction, normalize_nickname, valid_profile_id};
 
 async fn settings(app: &App, id: &str) -> Result<Value> {
-    sqlx::query(
-        "INSERT INTO portal.profile_settings(profile_id) VALUES($1) ON CONFLICT DO NOTHING",
-    )
-    .bind(id)
-    .execute(&app.pool)
-    .await?;
     let row = sqlx::query("SELECT * FROM portal.profile_settings WHERE profile_id=$1")
         .bind(id)
-        .fetch_one(&app.pool)
+        .fetch_optional(&app.pool)
         .await?;
+    let row = match row {
+        Some(row) => row,
+        None => {
+            // Most account refreshes are reads. Create defaults only on the
+            // first visit, tolerating another replica creating them at once.
+            sqlx::query(
+                "INSERT INTO portal.profile_settings(profile_id) VALUES($1) ON CONFLICT DO NOTHING",
+            )
+            .bind(id)
+            .execute(&app.pool)
+            .await?;
+            sqlx::query("SELECT * FROM portal.profile_settings WHERE profile_id=$1")
+                .bind(id)
+                .fetch_one(&app.pool)
+                .await?
+        }
+    };
     Ok(
-        json!({"public_profile_enabled":row.try_get::<bool,_>("public_profile_enabled")?,"public_stats_enabled":row.try_get::<bool,_>("public_stats_enabled")?,"discoverable":row.try_get::<bool,_>("discoverable")?,"locale":row_text(&row,"locale")?,"timezone":row_text(&row,"timezone")?,"version":row.try_get::<i64,_>("version")?.to_string()}),
+        json!({"public_profile_enabled":row.try_get::<bool,_>("public_profile_enabled")?,"public_stats_enabled":row.try_get::<bool,_>("public_stats_enabled")?,"discoverable":row.try_get::<bool,_>("discoverable")?,"leaderboard_listed":row.try_get::<bool,_>("leaderboard_listed")?,"locale":row_text(&row,"locale")?,"timezone":row_text(&row,"timezone")?,"version":row.try_get::<i64,_>("version")?.to_string()}),
     )
 }
 pub async fn me(app: &App, s: &Session) -> Result<Value> {
-    let profile = app
-        .career
-        .profile(&s.profile_id)
-        .await
-        .map_err(game_error)?;
+    let profile = player(app, Some(s), &s.profile_id).await?["profile"].clone();
     Ok(
-        json!({"profile":profile_dto(&profile),"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id},"social":social::linked(app,&s.profile_id).await?}),
+        json!({"profile":profile,"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id},"social":social::linked(app,&s.profile_id).await?}),
     )
 }
 pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
@@ -35,11 +43,16 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
     }
     let actor = s.map(|s| s.profile_id.as_str()).unwrap_or("");
     // Access flags and public fields come from one MVCC snapshot, avoiding privacy TOCTOU.
-    let row=sqlx::query("SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.matches_played,p.wins,p.losses,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact,
-        coalesce(pref.recognition_visible,false) AS supporter_visible,credit.months_supported,credit.hero_until
+    let row=sqlx::query("SELECT p.*,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact,
+        coalesce(pref.recognition_visible,false) AS supporter_visible,credit.months_supported,credit.hero_until,history.entries AS ranked_archive
         FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id)
         LEFT JOIN portal.supporter_preferences pref USING(profile_id)
         CROSS JOIN LATERAL (SELECT count(*) AS months_supported,max(valid_until) FILTER (WHERE valid_from<=$3 AND valid_until>$3) AS hero_until FROM portal.supporter_grants g WHERE g.profile_id=p.profile_id AND g.revoked_at IS NULL) credit
+        CROSS JOIN LATERAL (SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.season_id DESC),'[]'::jsonb) AS entries FROM (
+          SELECT ar.season_id,se.started_at_ms,se.ends_at_ms,ar.rating,ar.rated_matches,ar.wins,ar.losses,ar.completed_matches,ar.badge
+          FROM career_ranked_archives ar JOIN career_ranked_seasons se USING(season_id)
+          WHERE ar.profile_id=p.profile_id ORDER BY ar.season_id DESC LIMIT 10
+        ) a) history
         WHERE p.profile_id=$2")
         .bind(actor).bind(id).bind(now()).fetch_optional(&app.pool).await?.ok_or_else(forbidden)?;
     let contact: bool = row.try_get("contact")?;
@@ -49,7 +62,19 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
     let mut p = json!({"profile_id":id,"nickname":row_text(&row,"nickname")?});
     if contact || row.try_get::<bool, _>("stats")? {
         p["rating"] = json!(row.try_get::<i32, _>("rating")?);
-        for field in ["rated_matches", "matches_played", "wins", "losses"] {
+        p["ranked"] = json!(CareerStore::ranked_profile_from_row(&row).map_err(game_error)?);
+        p["ranked_archive"] = row.try_get::<Value, _>("ranked_archive")?;
+        if actor == id {
+            p["completed_public_matches"] =
+                json!(row.try_get::<i64, _>("completed_public_matches")?);
+        }
+        for field in [
+            "rated_matches",
+            "matches_played",
+            "wins",
+            "losses",
+            "abandons",
+        ] {
             p[field] = json!(row.try_get::<i64, _>(field)?);
         }
         let xp = row_text(&row, "xp")?;
@@ -87,7 +112,7 @@ pub async fn friends(app: &App, s: &Session) -> Result<Value> {
     )
 }
 pub async fn search(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> {
-    let q = crate::read::parameters(raw)?;
+    let q = parameters(raw)?;
     if q.len() != 1 {
         return Err(invalid());
     }
@@ -124,6 +149,86 @@ pub async fn search(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> 
     }
     Ok(json!({"players":players}))
 }
+fn ladder_ranked(row: &sqlx::postgres::PgRow) -> Result<shared::ranked::SeasonProfile> {
+    let mut ranked = CareerStore::ranked_profile_from_row(row).map_err(game_error)?;
+    // Listing the current rating does not publish private historical awards.
+    ranked.latest_badge = None;
+    Ok(ranked)
+}
+
+/// The current-season rating ladder and caller's position under the same filter.
+pub async fn leaderboard(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> {
+    let q = parameters(raw)?;
+    if q.keys().any(|k| k != "limit") {
+        return Err(invalid());
+    }
+    let limit = q
+        .get("limit")
+        .map(|v| v.parse::<i64>())
+        .transpose()
+        .map_err(|_| invalid())?
+        .unwrap_or(100);
+    if !(1..=100).contains(&limit) {
+        return Err(invalid());
+    }
+    // Use this season's calibration and tie-break count, matching the schema10
+    // partial index. Lifetime totals remain separate response fields.
+    // A profile without a settings row is listed.
+    let eligible = |profile: &str, settings: &str| {
+        format!(
+            "{profile}.season_rated_matches>={} AND coalesce({settings}.leaderboard_listed,true)",
+            shared::career::NEWCOMER_MATCHES
+        )
+    };
+    let top = format!(
+        "SELECT p.* FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id) WHERE {} ORDER BY p.rating DESC,p.season_rated_matches DESC,p.profile_id LIMIT $1",
+        eligible("p", "s")
+    );
+    // The caller's rank counts the listed, eligible profiles ordered strictly
+    // before it: higher rating, then more rated matches, then a smaller id.
+    let mine = format!(
+        "SELECT me.*,coalesce(s.leaderboard_listed,true) AS listed,CASE WHEN {} THEN (SELECT count(*)+1 FROM career_profiles o LEFT JOIN portal.profile_settings os USING(profile_id) WHERE {} AND (o.rating>me.rating OR (o.rating=me.rating AND (o.season_rated_matches>me.season_rated_matches OR (o.season_rated_matches=me.season_rated_matches AND o.profile_id<me.profile_id))))) END AS rank FROM career_profiles me LEFT JOIN portal.profile_settings s USING(profile_id) WHERE me.profile_id=$1",
+        eligible("me", "s"),
+        eligible("o", "os")
+    );
+    // Both statements read one MVCC snapshot, so the rank matches the entries.
+    let mut tx = app.pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let rows = sqlx::query(&top).bind(limit).fetch_all(&mut *tx).await?;
+    let me = sqlx::query(&mine)
+        .bind(&s.profile_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(forbidden)?;
+    tx.commit().await?;
+    let mut entries = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        entries.push(json!({
+            "rank": index as i64 + 1,
+            "profile_id": row_text(row, "profile_id")?,
+            "nickname": row_text(row, "nickname")?,
+            "rating": row.try_get::<i32, _>("rating")?,
+            "rated_matches": row.try_get::<i64, _>("rated_matches")?,
+            "ranked": ladder_ranked(row)?,
+            "wins": row.try_get::<i64, _>("wins")?,
+            "losses": row.try_get::<i64, _>("losses")?,
+        }));
+    }
+    Ok(json!({
+        "entries": entries,
+        "me": {
+            "rank": me.try_get::<Option<i64>, _>("rank")?,
+            "rating": me.try_get::<i32, _>("rating")?,
+            "rated_matches": me.try_get::<i64, _>("rated_matches")?,
+            "ranked": ladder_ranked(&me)?,
+            "listed": me.try_get::<bool, _>("listed")?,
+        },
+        "min_rated_matches": shared::career::NEWCOMER_MATCHES,
+        "data_as_of": timestamp(&app.pool, now()).await?,
+    }))
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Nickname {
@@ -142,6 +247,7 @@ struct Preferences {
     public_profile_enabled: bool,
     public_stats_enabled: bool,
     discoverable: bool,
+    leaderboard_listed: bool,
     locale: String,
     timezone: String,
     expected_version: String,
@@ -245,8 +351,8 @@ pub async fn mutate(
             .bind(&s.profile_id)
             .execute(&mut *tx)
             .await?;
-            let changed=sqlx::query("UPDATE portal.profile_settings SET public_profile_enabled=$2,public_stats_enabled=$3,discoverable=$4,locale=$5,timezone=$6,version=version+1 WHERE profile_id=$1 AND version=$7")
-                .bind(&s.profile_id).bind(p.public_profile_enabled).bind(p.public_stats_enabled).bind(p.discoverable).bind(p.locale).bind(p.timezone).bind(version).execute(&mut *tx).await?.rows_affected();
+            let changed=sqlx::query("UPDATE portal.profile_settings SET public_profile_enabled=$2,public_stats_enabled=$3,discoverable=$4,locale=$5,timezone=$6,leaderboard_listed=$8,version=version+1 WHERE profile_id=$1 AND version=$7")
+                .bind(&s.profile_id).bind(p.public_profile_enabled).bind(p.public_stats_enabled).bind(p.discoverable).bind(p.locale).bind(p.timezone).bind(version).bind(p.leaderboard_listed).execute(&mut *tx).await?.rows_affected();
             if changed != 1 {
                 return Err(conflict());
             }

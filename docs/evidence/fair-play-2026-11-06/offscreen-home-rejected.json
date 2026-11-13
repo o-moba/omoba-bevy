@@ -1,0 +1,16 @@
+{
+  "status": "failed",
+  "scene": "PartyRestart",
+  "screen": "Home",
+  "reason": "state/visible-text/readback deadline",
+  "frames": 3906,
+  "visible_labels": [
+    "50 FPS",
+    "QA FIXTURE · synthetic state · no live match",
+    "v0.45.0 · Debug · ru"
+  ],
+  "binary_sha256": "d8d0bf61d3492371542f532566b8ef96601706d58b8fc2bed64dce3e710e56b3",
+  "screen_locked_at_launch": true,
+  "accepted_screenshot": false,
+  "scope": "Home fixture missing underlying content, not a framebuffer-method failure; retained as a failed attempt"
+}
