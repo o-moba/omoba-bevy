@@ -1,0 +1,12 @@
+[
+  {
+    "pid": 86983,
+    "role": "lobby",
+    "process_group": 86983
+  },
+  {
+    "pid": 86984,
+    "role": "generator",
+    "process_group": 86984
+  }
+]

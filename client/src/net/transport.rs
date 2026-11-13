@@ -79,6 +79,8 @@ pub(in crate::net) fn spawn_network_transport(
     client_session.server_contract = None;
     client_session.server_update = None;
     client_session.compatibility_issue = None;
+    client_session.directory_notice = None;
+    client_session.directory_update_url = None;
     client_session.snapshot_order = SnapshotOrder::default();
     client_session.server_addr_display.clone_from(&server_addr);
     if !client_session.ephemeral_endpoint {

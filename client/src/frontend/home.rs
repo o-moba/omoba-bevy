@@ -23,16 +23,22 @@ use crate::ui::{Activated, Pressable, UiActionAppExt, UiSet};
 
 pub struct HomeScreenPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct HomeViews;
+
 impl Plugin for HomeScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<HomeAction>()
+            .init_resource::<HomePortal>()
             .add_systems(OnEnter(AppScreen::Home), (spawn_home_backdrop, spawn_home))
             .add_systems(Update, layout_home_chrome.run_if(in_state(AppScreen::Home)))
             .add_systems(
                 Update,
-                (home_actions, refresh_home)
+                (home_actions, leaderboard_actions, refresh_home)
                     .chain()
+                    .in_set(HomeViews)
                     .after(UiSet::Dispatch)
+                    .before(crate::net::ClientNetPipeline::SendCommands)
                     .run_if(in_state(AppScreen::Home)),
             );
     }
@@ -44,12 +50,14 @@ enum HomeAction {
     /// elsewhere.
     Play,
     Resume,
+    Retry,
     Ranked,
     BotPractice,
     OfflinePractice,
     Card,
     Collection,
     History,
+    Leaderboard,
     Profile,
     Party,
     Help,
@@ -69,6 +77,69 @@ enum HomeAction {
 
 #[derive(Component)]
 struct HomeRoot;
+
+#[derive(Resource)]
+struct HomePortal {
+    origin: Result<String, String>,
+    open: fn(&str) -> Result<(), String>,
+    opened: Option<String>,
+}
+
+impl Default for HomePortal {
+    fn default() -> Self {
+        Self {
+            origin: omoba_passport::web_account::WebAccountApi::from_env().map(|api| api.origin),
+            open: crate::platform::open_external_url,
+            opened: None,
+        }
+    }
+}
+
+fn leaderboard_actions(
+    mut activated: MessageReader<Activated<HomeAction>>,
+    mut portal: ResMut<HomePortal>,
+    mut toasts: MessageWriter<kit::surfaces::ToastRequest>,
+) {
+    for Activated { action, .. } in activated.read() {
+        if *action != HomeAction::Leaderboard {
+            continue;
+        }
+        let result = portal.origin.clone().and_then(|origin| {
+            let link = format!("{}/leaderboard", origin.trim_end_matches('/'));
+            portal.opened = Some(link.clone());
+            (portal.open)(&link)
+        });
+        if let Err(error) = result {
+            warn!("Leaderboard did not open: {error}");
+            toasts.write(kit::surfaces::ToastRequest {
+                kind: kit::surfaces::ToastKind::Warning,
+                text: tr("home.leaderboard.error").to_owned(),
+            });
+        }
+    }
+}
+
+fn rating_line(profile: Option<&shared::career::ProfileSummary>) -> String {
+    let Some(profile) = profile else {
+        return tr("home.rating.pending").to_owned();
+    };
+    trf(
+        if profile.newcomer() {
+            "home.rating.newcomer"
+        } else {
+            "home.rating.rated"
+        },
+        &[
+            ("rating", &profile.rating),
+            (
+                "tier",
+                &crate::career::ranked::tier_name(shared::ranked::Tier::for_rating(profile.rating)),
+            ),
+            ("played", &profile.placement_matches()),
+            ("total", &shared::career::NEWCOMER_MATCHES),
+        ],
+    )
+}
 
 #[derive(Component)]
 enum HomeChrome {
@@ -118,12 +189,31 @@ fn layout_home_chrome(
                 }
             }
             HomeChrome::BuildInfo => {
-                node.left = Val::Px(24.0 / scale);
-                node.right = Val::Px(24.0 / scale);
-                node.bottom = Val::Px((footer_gutter + 6.0) / scale);
+                // The compact canvas uses the bottom row for navigation. Keep
+                // build identification in the gap between identity and utilities.
+                node.left = if compact {
+                    Val::Percent(44.0)
+                } else {
+                    Val::Px(24.0 / scale)
+                };
+                node.right = if compact {
+                    Val::Percent(20.0)
+                } else {
+                    Val::Px(24.0 / scale)
+                };
+                node.top = if compact {
+                    Val::Px(16.0 / scale)
+                } else {
+                    Val::Auto
+                };
+                node.bottom = if compact {
+                    Val::Auto
+                } else {
+                    Val::Px((footer_gutter + 6.0) / scale)
+                };
                 node.height = Val::Px(18.0 / scale);
                 if let Some(mut font) = font {
-                    font.font_size = (12.0 / scale).into();
+                    font.font_size = (if compact { 10.0 } else { 12.0 } / scale).into();
                 }
             }
         }
@@ -294,11 +384,15 @@ struct HomeSignature {
     resume_available: bool,
     nickname: String,
     rating: i32,
+    rated_matches: u32,
+    completed_public_matches: u32,
+    ranked_season_open: Option<bool>,
     matches: u32,
     wins: u32,
     losses: u32,
     connection: ClientConnectionState,
     compatibility_issue: Option<shared::compatibility::CompatibilityIssue>,
+    directory_notice: Option<crate::net::directory::DirectoryNotice>,
     card: ProfileCard,
     last_result: Option<String>,
     public_matchmaking: bool,
@@ -353,11 +447,15 @@ fn signature(
             |profile| profile.nickname.clone(),
         ),
         rating: profile.map_or(0, |profile| profile.rating),
+        rated_matches: profile.map_or(0, |profile| profile.placement_matches()),
+        completed_public_matches: profile.map_or(0, |profile| profile.completed_public_matches),
+        ranked_season_open: career.view.ranked_season_open,
         matches: profile.map_or(0, |profile| profile.matches_played),
         wins: profile.map_or(0, |profile| profile.wins),
         losses: profile.map_or(0, |profile| profile.losses),
         connection: session.state(),
         compatibility_issue: session.compatibility_issue,
+        directory_notice: session.directory_notice,
         card: card.clone(),
         public_matchmaking: career.view.match_service.is_some(),
         last_result: career
@@ -404,6 +502,9 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
     use crate::net::CompatibilityVerdict;
+    if let Some(notice) = session.directory_notice {
+        return (notice.short_message(), theme::GOLD);
+    }
     match session.compatibility_verdict() {
         Some(CompatibilityVerdict::Unverified) => {
             return (
@@ -668,7 +769,8 @@ fn spawn_home(
                 &career.nickname,
                 &thumbnails,
                 if phone
-                    && (party_line.invite.is_some() || update_banner.is_some() || protect_banner)
+                    && (party_line.invite.is_some() || update_banner.is_some() || protect_banner
+                        || required.is_some() || session.compatibility_issue.is_some() || session.directory_notice.is_some())
                 {
                     None
                 } else {
@@ -823,6 +925,7 @@ fn spawn_home(
                 if !can_resume
                     && !download
                     && (required.is_some()
+                        || session.directory_notice.is_some()
                         || !matches!(session.state(), ClientConnectionState::Connected))
                 {
                     column.commands().entity(play).insert(Pressable {
@@ -830,25 +933,12 @@ fn spawn_home(
                         ..default()
                     });
                 }
-                if let Some((latest, link)) = &required {
-                    spawn_update_required(column, latest.as_deref(), *link, phone, unit);
-                } else if session.compatibility_issue.is_some() {
-                    column.spawn((
-                        widgets::label(
-                            crate::net::link_status(&session)
-                                .detail()
-                                .unwrap_or_default(),
-                            if phone { 10.0 * unit } else { 13.0 },
-                            color::TEXT_DANGER,
-                        ),
-                        Node {
-                            width: Val::Percent(100.0),
-                            padding: UiRect::all(Val::Px(4.0 * unit)),
-                            ..default()
-                        },
-                        BackgroundColor(theme::PANEL),
-                        Name::new("HomeCompatibilityDetail"),
-                    ));
+                if !phone {
+                    if let Some((latest, link)) = &required {
+                        spawn_update_required(column, latest.as_deref(), *link, false, unit);
+                    } else if session.compatibility_issue.is_some() || session.directory_notice.is_some() {
+                        spawn_compatibility_detail(column, &session, false, unit);
+                    }
                 }
                 if !phone {
                     let mode = party_line.party.as_ref().and_then(|(_, leader, leads)| {
@@ -894,18 +984,41 @@ fn spawn_home(
                                 ("queue.ranked", HomeAction::Ranked, "HomeRanked"),
                                 ("queue.bots", HomeAction::BotPractice, "HomeBotPractice"),
                             ] {
+                                let label = if action == HomeAction::Ranked && career.view.ranked_season_open == Some(false) {
+                                    tr("home.ranked.between_seasons").to_owned()
+                                } else if action == HomeAction::Ranked {
+                                    career.view.profile.as_ref().map_or_else(
+                                        || tr(label).to_owned(),
+                                        |p| if p.ranked_unlocked() {
+                                            trf("home.ranked.rating", &[("rating", &p.rating)])
+                                        } else {
+                                            trf("home.ranked.locked", &[("played", &p.completed_public_matches), ("total", &shared::career::RANKED_REQUIRED_PUBLIC_MATCHES)])
+                                        },
+                                    )
+                                } else {
+                                    tr(label).to_owned()
+                                };
                                 let button = kit::spawn_button(
                                     row,
                                     secondary((row_width - gap) / 2.0),
-                                    tr(label),
-                                    TextStyle::new(TextRole::Button),
+                                    label,
+                                    if phone {
+                                        // Two lines must fit the compact half-row,
+                                        // including the locked Ranked progress.
+                                        TextStyle::new(TextRole::Button)
+                                            .sized(Metric::new(14.0, 14.0))
+                                    } else {
+                                        TextStyle::new(TextRole::Button)
+                                    },
                                     ButtonKind::Secondary,
                                     None,
                                     action,
                                     id.into(),
                                     (),
                                 );
-                                if !session.is_connected() {
+                                if !session.is_connected() || required.is_some() || session.compatibility_issue.is_some() || session.directory_notice.is_some()
+                                    || (action == HomeAction::Ranked && (career.view.ranked_season_open == Some(false) || career.view.profile.as_ref().is_none_or(|p| !p.ranked_unlocked())))
+                                {
                                     row.commands().entity(button).insert(Pressable {
                                         disabled: true,
                                         ..default()
@@ -1009,7 +1122,26 @@ fn spawn_home(
                 }
             });
 
-            if let Some((party_id, from)) = &party_line.invite {
+            if phone && (required.is_some() || session.compatibility_issue.is_some() || session.directory_notice.is_some()) {
+                // Long admission/update copy has its own left-hand slot. It
+                // cannot displace Offline practice onto the bottom navigation.
+                root.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(63.0 * unit), top: Val::Px(84.0 * unit),
+                        width: Val::Px(300.0 * unit),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                    Name::new("HomeAdmissionNotice"),
+                )).with_children(|notice| {
+                    if let Some((latest, link)) = &required {
+                        spawn_update_required(notice, latest.as_deref(), *link, true, unit);
+                    } else {
+                        spawn_compatibility_detail(notice, &session, true, unit);
+                    }
+                });
+            } else if let Some((party_id, from)) = &party_line.invite {
                 spawn_invite_banner(root, *party_id, from, phone, platform.is_mobile(), fit);
             } else if let Some(version) = &update_banner {
                 spawn_update_banner(root, version, phone, platform.is_mobile(), fit);
@@ -1102,6 +1234,23 @@ fn spawn_home_identity(
                         .entity(account)
                         .insert(kit::controls::icon_button_node(account_side, radius::PILL));
                 });
+            kit::spawn_button(
+                column,
+                Node {
+                    width: Val::Px(332.0),
+                    height: Val::Px(home_control_size(44.0, mobile, fit)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                tr("home.button.leaderboard"),
+                TextStyle::new(TextRole::Button),
+                ButtonKind::Secondary,
+                Some(Icon::NavUsers),
+                HomeAction::Leaderboard,
+                "HomeLeaderboard".into(),
+                (),
+            );
             if let Some(last) = last_match {
                 column
                     .spawn((
@@ -1132,21 +1281,24 @@ fn spawn_home_identity(
     let name = profile.map_or(fallback_nickname, |profile| profile.nickname.as_str());
     let level = profile.map_or(1, shared::career::ProfileSummary::level);
     root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(63.0 * unit),
-            top: Val::Px(10.0 * unit),
-            width: Val::Px(300.0 * unit),
-            height: Val::Px(48.0 * unit),
-            padding: UiRect::axes(Val::Px(space::S8 * unit), Val::Px(space::S4 * unit)),
-            column_gap: Val::Px(space::S8 * unit),
-            align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(border::HAIRLINE)),
-            border_radius: BorderRadius::all(Val::Px(radius::PILL)),
-            ..default()
-        },
-        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
-        BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
+        kit::plate_button(
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(63.0 * unit),
+                top: Val::Px(10.0 * unit),
+                width: Val::Px(300.0 * unit),
+                height: Val::Px(64.0 * unit),
+                padding: UiRect::axes(Val::Px(space::S8 * unit), Val::Px(space::S4 * unit)),
+                column_gap: Val::Px(space::S8 * unit),
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                ..default()
+            },
+            HomeAction::Leaderboard,
+            "HomeLeaderboard",
+            default(),
+        ),
         Name::new("HomeIdentity"),
     ))
     .with_children(|chip| {
@@ -1170,14 +1322,31 @@ fn spawn_home_identity(
         if let Some(image) = portrait {
             avatar.insert(ImageNode::new(image));
         }
-        chip.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            min_width: Val::Px(0.0),
-            ..default()
-        })
+        chip.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                min_width: Val::Px(0.0),
+                flex_grow: 1.0,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            Name::new("HomeIdentityText"),
+        ))
         .with_children(|text| {
-            text.spawn(widgets::heading(name, 16.0));
+            text.spawn((
+                widgets::heading(
+                    super::lobby::plate_name(name, 212.0 * unit, theme::metric::PHONE_HEADING_MIN),
+                    16.0,
+                ),
+                TextLayout::new(Justify::Left, bevy::text::LineBreak::NoWrap),
+                Node {
+                    max_width: Val::Percent(100.0),
+                    ..default()
+                },
+                Name::new("HomeNickname"),
+                widgets::FittedLabel,
+            ));
             text.spawn(widgets::label(
                 &format!(
                     "{} · {}",
@@ -1193,7 +1362,12 @@ fn spawn_home_identity(
                 11.0,
                 accent,
             ));
+            text.spawn((
+                widgets::label(rating_line(profile), 11.0, theme::GOLD),
+                Name::new("HomeRating"),
+            ));
         });
+        chip.spawn(kit::icon_node(Icon::NavChevronRight, 16.0, theme::GOLD));
     });
     if let Some(last) = last_match {
         root.spawn((
@@ -1201,7 +1375,7 @@ fn spawn_home_identity(
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(63.0 * unit),
-                top: Val::Px(64.0 * unit),
+                top: Val::Px(72.0 * unit),
                 width: Val::Px(260.0 * unit),
                 height: Val::Px(40.0 * unit),
                 padding: UiRect::horizontal(Val::Px(space::S12 * unit)),
@@ -1259,6 +1433,8 @@ fn queue_of(action: HomeAction) -> shared::match_service::MatchPreference {
 fn home_actions(
     mut next: ResMut<NextState<AppScreen>>,
     mut career: ResMut<CareerClient>,
+    card: Res<ProfileCard>,
+    mut selection: ResMut<crate::team::TeamSelection>,
     mut requests: MessageWriter<NetworkCommand>,
     mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
     session: Res<ClientSession>,
@@ -1275,7 +1451,41 @@ fn home_actions(
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
     for Activated { action, .. } in activated.read() {
+        if matches!(
+            action,
+            HomeAction::Play | HomeAction::Ranked | HomeAction::BotPractice
+        ) && (session.compatibility_issue.is_some()
+            || session.directory_notice.is_some()
+            || update
+                .as_ref()
+                .and_then(|u| u.offer(&session))
+                .is_some_and(|offer| matches!(offer, crate::update::UpdateOffer::Required { .. })))
+        {
+            // A stale activation cannot bypass a newly required update. Resume
+            // keeps its owning-worker compatibility checks; offline stays usable.
+            continue;
+        }
+        if *action == HomeAction::Ranked && career.view.ranked_season_open == Some(false) {
+            career.view.error = Some(shared::career::error_code::RANKED_SEASON_ENDED.into());
+            career.view.error_code = Some(shared::career::error_code::RANKED_SEASON_ENDED.into());
+            continue;
+        }
+        if *action == HomeAction::Ranked
+            && career.view.match_service.is_some()
+            && career
+                .view
+                .profile
+                .as_ref()
+                .is_none_or(|p| !p.ranked_unlocked())
+        {
+            career.view.error = Some(shared::career::error_code::RANKED_LOCKED.into());
+            career.view.error_code = Some(shared::career::error_code::RANKED_LOCKED.into());
+            continue;
+        }
         match action {
+            HomeAction::Retry => {
+                session_ui.write(crate::net::SessionUiCommand::Retry);
+            }
             HomeAction::Resume => {
                 session_ui.write(crate::net::SessionUiCommand::ResumeMatch);
                 next.set(AppScreen::Searching);
@@ -1316,11 +1526,17 @@ fn home_actions(
                 }
 
                 matchmaking.preference = queue_of(*action);
-                next.set(AppScreen::HeroSelect);
+                if career.view.match_service.is_some() && !session.is_offline() {
+                    requests.write(selection.queue_from_card(&card));
+                    next.set(AppScreen::Searching);
+                } else {
+                    next.set(AppScreen::HeroSelect);
+                }
             }
             HomeAction::Card => next.set(AppScreen::Card),
             HomeAction::Collection => next.set(AppScreen::Collection),
             HomeAction::History => crate::career::open_history_modal(&mut career, &mut requests),
+            HomeAction::Leaderboard => {}
             HomeAction::Profile => career.open_profile_modal(),
             HomeAction::Help => {
                 if let Some(help) = help.as_deref_mut() {
@@ -1503,6 +1719,49 @@ fn spawn_protect_banner(parent: &mut ChildSpawnerCommands, phone: bool, mobile: 
     );
 }
 
+fn spawn_compatibility_detail(
+    parent: &mut ChildSpawnerCommands,
+    session: &ClientSession,
+    phone: bool,
+    unit: f32,
+) {
+    parent.spawn((
+        widgets::label(
+            crate::net::link_status(session)
+                .detail()
+                .unwrap_or_default(),
+            if phone { 10.0 * unit } else { 13.0 },
+            color::TEXT_DANGER,
+        ),
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(if phone { 8.0 } else { 4.0 } * unit)),
+            ..default()
+        },
+        BackgroundColor(theme::PANEL),
+        Name::new("HomeCompatibilityDetail"),
+    ));
+    if session.directory_notice.is_some() && crate::net::link_status(session).can_retry() {
+        kit::spawn_button(
+            parent,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(if phone { 44.0 * unit } else { 36.0 }),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            tr("net.retry"),
+            TextStyle::new(TextRole::Button),
+            ButtonKind::Secondary,
+            None,
+            HomeAction::Retry,
+            "HomeDirectoryRetry".into(),
+            (),
+        );
+    }
+}
+
 /// "Update required" under the update button: what happened and, when there
 /// is no download link, where the update comes from (the App Store or
 /// TestFlight on iPhone, otherwise the official site).
@@ -1571,7 +1830,7 @@ fn spawn_choice_banner(
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(if phone { 68.0 } else { 178.0 - button_height }),
+                top: Val::Px(if phone { 84.0 } else { 178.0 - button_height }),
                 left: Val::Px(if phone { 63.0 } else { HOME_INSET }),
                 width: Val::Px(if phone { 230.0 } else { 380.0 }),
                 height: Val::Px(66.0 + button_height),
@@ -1795,8 +2054,16 @@ mod tests {
             }
             assert_eq!(node.bottom, Val::Px(52.0 / scale));
             let footer = app.world().get::<Node>(footer).unwrap();
-            assert_eq!(footer.left, footer.right);
-            assert_eq!(footer.bottom, Val::Px(26.0 / scale));
+            if size.y < 600.0 {
+                assert_eq!(footer.top, Val::Px(16.0 / scale));
+                assert_eq!(footer.bottom, Val::Auto);
+                assert_eq!(footer.left, Val::Percent(44.0));
+                assert_eq!(footer.right, Val::Percent(20.0));
+            } else {
+                assert_eq!(footer.top, Val::Auto);
+                assert_eq!(footer.left, footer.right);
+                assert_eq!(footer.bottom, Val::Px(26.0 / scale));
+            }
             assert_eq!(footer.height, Val::Px(18.0 / scale));
             assert_eq!(
                 node.display,
@@ -1847,6 +2114,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
@@ -1885,6 +2153,7 @@ mod tests {
                 .init_resource::<CareerClient>()
                 .init_resource::<ClientSession>()
                 .init_resource::<ProfileCard>()
+                .init_resource::<crate::team::TeamSelection>()
                 .init_resource::<AvatarThumbnails>()
                 .init_resource::<crate::party::PartyClient>()
                 .insert_resource(ActiveConnection::for_contour(contour, None))
@@ -1921,6 +2190,8 @@ mod tests {
                 .init_resource::<ClientSession>()
                 .init_resource::<crate::match_service::MatchServiceClient>()
                 .init_resource::<crate::mobile_ui::ServerEntry>()
+                .init_resource::<ProfileCard>()
+                .init_resource::<crate::team::TeamSelection>()
                 .insert_resource(ActiveConnection::for_contour(contour, None))
                 .add_message::<NetworkCommand>()
                 .add_message::<crate::net::SessionUiCommand>()
@@ -1953,6 +2224,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .init_resource::<crate::match_service::MatchServiceClient>()
@@ -2022,6 +2294,7 @@ mod tests {
                 .init_resource::<CareerClient>()
                 .init_resource::<ClientSession>()
                 .init_resource::<ProfileCard>()
+                .init_resource::<crate::team::TeamSelection>()
                 .init_resource::<AvatarThumbnails>()
                 .init_resource::<crate::party::PartyClient>()
                 .init_resource::<crate::match_service::MatchServiceClient>()
@@ -2040,6 +2313,10 @@ mod tests {
             app.world_mut()
                 .resource_mut::<ClientSession>()
                 .set_state_for_test(ClientConnectionState::Connected);
+            let mut qualified =
+                shared::career::ProfileSummary::new("a".repeat(64), "Qualified".into());
+            qualified.completed_public_matches = 10;
+            app.world_mut().resource_mut::<CareerClient>().view.profile = Some(qualified);
             app.add_systems(Startup, spawn_home);
             app.update();
             app
@@ -2059,8 +2336,13 @@ mod tests {
             texts.join(" ")
         };
         for (locale, casual, ranked, bots) in [
-            ("en", "CASUAL PVP", "Ranked", "vs Bots"),
-            ("ru", "ОБЫЧНЫЙ PVP", "Рейтинговый", "Против ботов"),
+            ("en", "CASUAL PVP", "Ranked\nRating 1000", "vs Bots"),
+            (
+                "ru",
+                "ОБЫЧНЫЙ PVP",
+                "Рейтинговый\nРейтинг 1000",
+                "Против ботов",
+            ),
         ] {
             let mut app = home(locale, true);
             assert_eq!(text_of(&mut app, "HomePlay"), casual, "{locale}");
@@ -2081,8 +2363,12 @@ mod tests {
             ("HomeBotPractice", MatchPreference::BotPractice),
             ("HomePlay", MatchPreference::Casual),
         ] {
-            // Each press leaves Home for hero select.
+            // Public queues commit a preferred presentation and go straight to search.
             let mut app = home("en", true);
+            app.world_mut().resource_mut::<ProfileCard>().main_class = shared::HeroClass::Mage;
+            app.world_mut()
+                .resource_mut::<crate::team::TeamSelection>()
+                .handheld = shared::handheld::HandheldSelection::Unequipped;
             harness::press(app.world_mut(), id);
             app.update();
             assert_eq!(
@@ -2091,6 +2377,26 @@ mod tests {
                     .preference,
                 queue,
                 "{id}"
+            );
+            assert!(matches!(
+                *app.world().resource::<NextState<AppScreen>>(),
+                NextState::Pending(AppScreen::Searching)
+            ));
+            let sent: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect();
+            assert!(
+                matches!(
+                    &sent[..],
+                    [NetworkCommand::JoinPrematch {
+                        hero_class: shared::HeroClass::Mage,
+                        handheld: shared::handheld::HandheldSelection::Unequipped,
+                        ..
+                    }]
+                ),
+                "one public join from {id}"
             );
         }
         // No public lobby: one Play button, no queues to pick.
@@ -2113,6 +2419,7 @@ mod tests {
             }),
             invites: Vec::new(),
             online: Vec::new(),
+            error: None,
         };
         harness::press(leader.world_mut(), "HomeRanked");
         leader.update();
@@ -2147,6 +2454,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
@@ -2219,6 +2527,7 @@ mod tests {
             .init_resource::<CareerClient>()
             .insert_resource(session)
             .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .init_resource::<crate::match_service::MatchServiceClient>()
@@ -2233,6 +2542,123 @@ mod tests {
                 (home_actions, refresh_home).chain().after(UiSet::Dispatch),
             );
         app
+    }
+
+    #[test]
+    fn required_catalog_blocks_every_new_queue_and_stale_activation_but_keeps_offline() {
+        use crate::ui::test_id::harness;
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        session.server_contract = Some(shared::compatibility::ReleaseContract::current());
+        let mut update =
+            crate::update::ClientUpdate::for_test(Some("https://portal.example"), || Ok(vec![]));
+        update.require_for_test("999.0.0");
+        let mut app = update_home(update, session);
+        let mut profile = shared::career::ProfileSummary::new("a".repeat(64), "Player".into());
+        profile.completed_public_matches = 10;
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view.profile = Some(profile);
+            career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
+        }
+        app.update();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<ClientSession>()
+                .compatibility_issue
+                .is_none(),
+            "catalog minimum alone must enforce the update"
+        );
+        for (id, action) in [
+            ("HomeRanked", HomeAction::Ranked),
+            ("HomeBotPractice", HomeAction::BotPractice),
+        ] {
+            let source = harness::find(app.world_mut(), id).unwrap();
+            assert!(app.world().get::<Pressable>(source).unwrap().disabled);
+            app.world_mut().write_message(Activated { action, source });
+        }
+        app.world_mut().write_message(Activated {
+            action: HomeAction::Play,
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert!(matches!(
+            *app.world().resource::<NextState<AppScreen>>(),
+            NextState::Unchanged
+        ));
+        harness::press(app.world_mut(), "HomeOfflinePractice");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::net::SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, crate::net::SessionUiCommand::StartOffline))
+        );
+        assert!(matches!(
+            *app.world().resource::<NextState<AppScreen>>(),
+            NextState::Pending(AppScreen::HeroSelect)
+        ));
+    }
+
+    #[test]
+    fn directory_policy_blocks_stale_queue_actions_and_offers_retry_without_blocking_offline() {
+        use crate::net::directory::DirectoryNotice;
+        use crate::ui::test_id::harness;
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        session.directory_notice = Some(DirectoryNotice::Maintenance);
+        let mut app = update_home(
+            crate::update::ClientUpdate::for_test(None, || Ok(vec![])),
+            session,
+        );
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .match_service = Some(shared::match_service::MatchServiceView::Idle);
+        app.update();
+        app.update();
+        assert!(harness::find(app.world_mut(), "HomeDirectoryRetry").is_some());
+        for (id, action) in [
+            ("HomePlay", HomeAction::Play),
+            ("HomeRanked", HomeAction::Ranked),
+            ("HomeBotPractice", HomeAction::BotPractice),
+        ] {
+            let source = harness::find(app.world_mut(), id).unwrap();
+            assert!(app.world().get::<Pressable>(source).unwrap().disabled);
+            app.world_mut().write_message(Activated { action, source });
+        }
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        harness::press(app.world_mut(), "HomeDirectoryRetry");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::net::SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, crate::net::SessionUiCommand::Retry))
+        );
+        harness::press(app.world_mut(), "HomeOfflinePractice");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::net::SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, crate::net::SessionUiCommand::StartOffline))
+        );
     }
 
     /// LR-18 acceptance: a fresh install is asked to protect its progress
@@ -2326,6 +2752,229 @@ mod tests {
             .iter(app.world())
             .find(|(found, _)| found.as_str() == name)
             .map(|(_, text)| text.0.clone())
+    }
+
+    #[test]
+    fn phone_home_updates_placement_and_opens_its_trusted_ladder() {
+        if crate::i18n::testing::isolated(
+            "frontend::home::tests::phone_home_updates_placement_and_opens_its_trusted_ladder",
+        ) {
+            return;
+        }
+        use crate::ui::test_id::harness;
+        use kit::surfaces::ToastRequest;
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        let mut app = update_home(
+            crate::update::ClientUpdate::for_test(None, || Ok(vec![])),
+            session,
+        );
+        app.insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+            .insert_resource(HomePortal {
+                origin: Ok("https://portal.example/".into()),
+                open: |_| Ok(()),
+                opened: None,
+            })
+            .add_message::<ToastRequest>()
+            .add_systems(Update, leaderboard_actions.after(UiSet::Dispatch));
+        app.world_mut().spawn((
+            Window {
+                resolution: (852, 393).into(),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(crate::i18n::LocaleId::parse("ru").unwrap());
+        let mut profile = shared::career::ProfileSummary::new("test".into(), "Игрок".into());
+        profile.rating = 1199;
+        profile.rated_matches = 19;
+        profile.completed_public_matches = 10;
+        let mut career = app.world_mut().resource_mut::<CareerClient>();
+        career.view.profile = Some(profile);
+        career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1199 · Калибровка 19/20")
+        );
+        let button = harness::find(app.world_mut(), "HomeRanked").unwrap();
+        assert!(
+            app.world()
+                .get::<Children>(button)
+                .unwrap()
+                .iter()
+                .filter_map(|e| app.world().get::<Text>(e))
+                .any(|t| t.0.contains("1199"))
+        );
+        for count in [0, 9, 10] {
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .view
+                .profile
+                .as_mut()
+                .unwrap()
+                .completed_public_matches = count;
+            app.update();
+            app.update();
+            let button = harness::find(app.world_mut(), "HomeRanked").unwrap();
+            let disabled = app
+                .world()
+                .get::<Pressable>(button)
+                .is_some_and(|p| p.disabled);
+            assert_eq!(disabled, count < 10);
+            let label = app
+                .world()
+                .get::<Children>(button)
+                .unwrap()
+                .iter()
+                .filter_map(|e| app.world().get::<Text>(e))
+                .map(|t| t.0.as_str())
+                .collect::<String>();
+            let expected = if count < 10 {
+                format!("{count}/10")
+            } else {
+                "1199".to_owned()
+            };
+            assert!(label.contains(&expected));
+        }
+        harness::press(app.world_mut(), "HomeLeaderboard");
+        app.update();
+        assert_eq!(
+            app.world().resource::<HomePortal>().opened.as_deref(),
+            Some("https://portal.example/leaderboard")
+        );
+        // Only the count changes: the render signature must still refresh.
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .profile
+            .as_mut()
+            .unwrap()
+            .rated_matches = 20;
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1199 · Серебро")
+        );
+        app.world_mut().resource_mut::<HomePortal>().origin = Err("test unavailable".into());
+        harness::press(app.world_mut(), "HomeLeaderboard");
+        app.update();
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<ToastRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].text, tr("home.leaderboard.error"));
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            let profile = career.view.profile.as_mut().unwrap();
+            profile.rating = 1200;
+            profile.rated_matches = 40;
+            profile.matches_played = 40;
+            let start = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            profile.ranked = Some(shared::ranked::SeasonProfile {
+                season_id: 2,
+                started_at_ms: start,
+                ends_at_ms: start + shared::ranked::SEASON_DURATION_MS,
+                rated_matches: 0,
+                wins: 0,
+                losses: 0,
+                completed_matches: 0,
+                latest_badge: None,
+            });
+        }
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1200 · Калибровка 0/20")
+        );
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            let profile = career.view.profile.as_mut().unwrap();
+            profile.rating = 1500;
+            profile.ranked.as_mut().unwrap().rated_matches = 20;
+        }
+        app.update();
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeRating").as_deref(),
+            Some("Рейтинг 1500 · Золото")
+        );
+        // Only the authoritative hint changes; neither local time nor the
+        // seasonal/lifetime counters decide whether the server window is open.
+        for open in [Some(false), Some(true), None] {
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .view
+                .ranked_season_open = open;
+            app.update();
+            app.update();
+            let button = harness::find(app.world_mut(), "HomeRanked").unwrap();
+            let disabled = app
+                .world()
+                .get::<Pressable>(button)
+                .is_some_and(|p| p.disabled);
+            assert_eq!(disabled, open == Some(false));
+            let label = app
+                .world()
+                .get::<Children>(button)
+                .unwrap()
+                .iter()
+                .filter_map(|e| app.world().get::<Text>(e))
+                .map(|t| t.0.as_str())
+                .collect::<String>();
+            assert!(label.contains(if open == Some(false) {
+                "Межсезонье"
+            } else {
+                "1500"
+            }));
+        }
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .ranked_season_open = Some(false);
+        app.update();
+        app.update();
+        let target = harness::find(app.world_mut(), "HomeRanked").unwrap();
+        // A stale activation from before a rebuild must be refused as well.
+        app.world_mut().write_message(Activated {
+            action: HomeAction::Ranked,
+            source: target,
+        });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<CareerClient>()
+                .view
+                .error_code
+                .as_deref(),
+            Some(shared::career::error_code::RANKED_SEASON_ENDED)
+        );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        harness::press(app.world_mut(), "HomePlay");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .any(|m| matches!(m, NetworkCommand::JoinPrematch { .. })),
+            "Casual remains available"
+        );
     }
 
     /// LR-14 acceptance: on a mismatch an outdated RU game shows «Требуется
@@ -2515,6 +3164,8 @@ mod tests {
             .init_state::<AppScreen>()
             .init_resource::<CareerClient>()
             .init_resource::<ClientSession>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<crate::team::TeamSelection>()
             .init_resource::<crate::match_service::MatchServiceClient>()
             .add_message::<NetworkCommand>()
             .add_message::<crate::net::SessionUiCommand>()

@@ -3,6 +3,7 @@
 //! `PauseAction`, the kit recognizes clicks and taps and paints the buttons,
 //! and the systems here only consume `Activated<PauseAction>`.
 // i18n-strict
+mod match_votes;
 use bevy::{
     app::AppExit,
     prelude::*,
@@ -64,6 +65,7 @@ pub(crate) enum PauseMenuSet {
 
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
+        match_votes::configure(app);
         app.init_resource::<PauseMenuState>()
             .init_resource::<SelectedSettingsTab>()
             .init_resource::<AudioSettings>()
@@ -1084,6 +1086,7 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                             Name::new("PauseMenuMainSection"),
                         ))
                         .with_children(|main| {
+                            match_votes::spawn(main);
                             main.spawn((
                                 Text::new(tr("pause.hint.online")),
                                 theme::role_text(TextRole::Caption),

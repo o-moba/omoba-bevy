@@ -22,3 +22,22 @@ final class OmobaLinkDelegate: NSObject, UIApplicationDelegate {
 public func omobaUniversalLinksPrepare() {
     _ = NSStringFromClass(OmobaLinkDelegate.self)
 }
+
+// UIKit effects always run on its main queue. The OS only honors the idle
+// override for the foreground app; manual locking/backgrounding still works.
+@_cdecl("omoba_attention_keep_awake")
+public func omobaAttentionKeepAwake(_ enabled: Int32) {
+    DispatchQueue.main.async {
+        UIApplication.shared.isIdleTimerDisabled = enabled != 0
+    }
+}
+
+@_cdecl("omoba_attention_match_found")
+public func omobaAttentionMatchFound() {
+    DispatchQueue.main.async {
+        guard UIApplication.shared.applicationState == .active else { return }
+        let feedback = UINotificationFeedbackGenerator()
+        feedback.prepare()
+        feedback.notificationOccurred(.success)
+    }
+}

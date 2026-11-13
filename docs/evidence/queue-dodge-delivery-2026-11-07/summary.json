@@ -1,0 +1,42 @@
+{
+  "status": "PASS scoped native verification; full current Cargo/engine CI pending",
+  "source_sha256": {
+    "server/src/career_backend.rs": "f8328369dc1a5ccd9eadcfc4a57f989cd8fef10b76741d084ee164fcfa3cf5af",
+    "server/src/career_backend_resilience_tests.rs": "9cee979e717541423d4d8aa040a631194f2e9f74155c3567f6cabe9e88014e9b",
+    "server/src/career_port.rs": "f463941e9443358c9ea93b4ddd6e912b23c98d1653e07511b7d0a86dc8c002e4",
+    "server/src/match_service.rs": "cf9f9ec2b8fc4d781dc30add2aea77fb0f6317a217145855b7cd8e473f5c3006",
+    "server/src/career_dodge_tests.rs": "ea9a4f918c4841e5d738e6a1551eb220626af6ddf4d0de8dace6eef7cd445b0f",
+    "server/src/queue_dodge_outbox.rs": "9d26d1e9494c108c76888fdb54481c2d5326e67f2154bb5b07ea9464b6ae8a02",
+    "server/src/queue_dodge_outbox_tests.rs": "8dc65f36257da290b6b86c70f02e953c11ae184450608650ede00f314abfa6cb",
+    "account-api/ops/grants.sql": "f7144d09bf6b9ab47b71fb738ee01c6195affed28a339803a4e86fc99722f7ef",
+    "career-store/src/career_store/queue_discipline.rs": "b4eb80eec0740f133ad110e7a5e9b57514f9742762d28be47ef76dabeb9bd490"
+  },
+  "tests": {
+    "native_backend_complete": {
+      "passed": 60,
+      "failed": 0,
+      "ignored": 0
+    },
+    "non_database": {
+      "passed": 53,
+      "failed": 0,
+      "ignored": 7
+    },
+    "new_actual_postgres_worker_cases": 3,
+    "new_journal_units": 16,
+    "new_backend_ack_units": 5,
+    "clippy": "PASS warnings denied with existing workspace allowances",
+    "format_and_diff": "PASS",
+    "grants": "PASS rolled-back temporary NOLOGIN role; no production role rollout"
+  },
+  "excluded": [
+    "Engine/MatchService execution: new/extended tests await fresh standard CI",
+    "Cross-host queue cooldown reads, final start fence, ready ownership/deadlines, legacy floor reconciliation",
+    "Actual RU, physical clients, schema11 recovery drill, new typed-journal operational monitoring"
+  ],
+  "rejected_attempts": [
+    "backend-v1: cleanup FK order failed; corrected keys-before-profile transaction; only three exact owned failed-run profiles removed and verified absent",
+    "backend-v4: test pattern shadowed boolean with Event; corrected receipt binding; final v5 and complete60 passed"
+  ],
+  "artifact_location": ".agent/codex-ranked-readiness/queue-delivery (about17MiB); dependencies in existing Orico cache read-only; no new Cargo target or Bevy build"
+}

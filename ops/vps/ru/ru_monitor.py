@@ -23,7 +23,13 @@ the host's one Telegram bot and the alert thresholds.
   OMOBA_ALERT_WORKER_STALE_SECONDS (300) while the lobby runs;
 - players waiting for a free arena for OMOBA_ALERT_CAPACITY_WAIT_SECONDS (120) or longer:
   every arena busy while a ready roster waits, as the lobby reports it in
-  <match root>/capacity.json (LR-09).
+  <match root>/capacity.json (LR-09);
+- terminal career receipts pending for 5 min in lobby/worker outboxes, unreadable
+  receipts or an incomplete bounded scan (active checkpoints do not alert);
+- typed queue-dodge events pending for5 min or a corrupt/incomplete journal,
+  without reporting event/profile identities;
+- authenticated career-storage readiness and pre-persistence blockers from
+  required live-process health reports (not just an open PostgreSQL port).
 
 Every problem goes to the journal; with the bot, also to Telegram: at once, then a
 reminder every OMOBA_ALERT_REPEAT_MINUTES (60) while it lasts (every
@@ -43,6 +49,7 @@ import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -58,6 +65,18 @@ PLACEHOLDER = "CHANGE_ME"
 STATE_DIR = "/var/lib/omoba-ru-monitor"            # StateDirectory= of its units
 MATCH_ROOT = "/var/lib/omoba-ru/matches"           # OMOBA_MATCH_ROOT of the lobby unit
 CAPACITY_REPORT = MATCH_ROOT + "/capacity.json"    # the lobby's arena report (server/src/capacity.rs)
+LOBBY_OUTBOX = "/var/lib/omoba-ru/lobby-outbox"
+SETTLEMENT_STALE_SECONDS = 300
+MAX_OUTBOX_RECORDS = 16384
+MAX_QUEUE_JOURNAL_ENTRIES = 16384
+MAX_QUEUE_EVENT_BYTES = 1024
+# Match queue_dodge_outbox.rs:4096 receipts and at most8193 scanned entries.
+MAX_QUEUE_EVENTS_PER_JOURNAL = 4096
+MAX_QUEUE_ENTRIES_PER_JOURNAL = 2 * MAX_QUEUE_EVENTS_PER_JOURNAL + 1
+OUTBOX_CLOCK_SKEW_SECONDS = 5
+STORAGE_HEALTH_STALE_SECONDS = 60
+STORAGE_BLOCKED_SECONDS = 120
+STORAGE_PROBE_STALE_SECONDS = 30
 CAPACITY_FRESH_SECONDS = 120                        # the lobby rewrites it every 5 s
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -189,11 +208,33 @@ def gib(size: int) -> str:
     return f"{size / (1 << 30):.1f}"
 
 
+def read_regular_json(path, limit):
+    """Bound reads even if a file changes after scandir; never follow a leaf link."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    with os.fdopen(os.open(path, flags), "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise ValueError("receipt is not a bounded regular file")
+        data = source.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("receipt grew beyond the read bound")
+    return json.loads(data.decode("utf-8"))
+
+
+def observed_seconds(value, now):
+    if type(value) is not int or not 0 <= value <= 2**63 - 1:
+        raise ValueError("invalid receipt observation time")
+    seconds = value / 1000
+    if seconds > now + OUTBOX_CLOCK_SKEW_SECONDS:
+        raise ValueError("receipt observation is ahead of the host clock")
+    return seconds
+
+
 def label(code: str) -> str:
     """What a problem code is about, for the "resolved" message."""
     kind, _, subject = code.partition(":")
     return {"unit": subject, "disk": f"free disk on {subject}", "worker": f"match worker {subject[:8]}",
-            "postgres": "PostgreSQL", "capacity": "arena capacity"}.get(
+            "postgres": "PostgreSQL", "capacity": "arena capacity", "settlement": "match result settlement", "queue-dodge": "matchmaking penalty delivery", "career": "career storage availability"}.get(
         kind, "alerts.env" if kind == "config" else code)
 
 
@@ -432,6 +473,248 @@ class Monitor:
                  f"players waiting (the longest {facts['longest_wait_secs']} s); check CPU and memory, then "
                  f"raise OMOBA_MATCH_CAPACITY (README.md, \"Arena capacity\")", repeat)], facts
 
+    def outbox_roots(self):
+        from itertools import islice
+        roots = [Path(self.p(LOBBY_OUTBOX))]
+        match_root = Path(self.p(MATCH_ROOT))
+        try:
+            if match_root.is_symlink():
+                return roots, True
+            with os.scandir(match_root) as entries:
+                workers = list(islice((e for e in entries if ALLOCATION.fullmatch(e.name)
+                                      and e.is_dir(follow_symlinks=False)), MAX_WORKER_DIRS + 1))
+            roots.extend(Path(e.path) / "outbox" for e in workers[:MAX_WORKER_DIRS])
+            limited = len(workers) > MAX_WORKER_DIRS
+        except FileNotFoundError:
+            limited = False
+        except OSError:
+            limited = True
+        return roots, limited
+
+    def settlement_problems(self) -> tuple[list, dict]:
+        """Only terminal results age; retries cannot refresh their original time."""
+        roots, limited = self.outbox_roots()
+        stale, unreadable, scanned, oldest = 0, 0, 0, 0
+        for root in roots:
+            if root.is_symlink():
+                unreadable += 1
+                continue
+            try:
+                with os.scandir(root) as entries:
+                    for entry in entries:
+                        if not entry.name.endswith(".json") or not entry.is_file(follow_symlinks=False):
+                            continue
+                        scanned += 1
+                        if scanned > MAX_OUTBOX_RECORDS:
+                            limited = True
+                            break
+                        try:
+                            info = entry.stat(follow_symlinks=False)
+                            if info.st_size > 1024 * 1024:
+                                raise ValueError("receipt too large")
+                            record = read_regular_json(entry.path, 1024 * 1024)
+                            if not isinstance(record, dict) or record.get("kind") not in ("Start", "Checkpoint", "Settle", "Rejected"):
+                                raise ValueError("unknown outbox record")
+                            result = record.get("result")
+                            if not isinstance(result, dict):
+                                raise ValueError("invalid result envelope")
+                            if record["kind"] not in ("Settle", "Rejected"):
+                                continue
+                            now = self.now()
+                            ended = observed_seconds(result.get("ended_at_ms", 0), now)
+                            origin = min(info.st_mtime, ended) if ended else info.st_mtime
+                            if origin > now + OUTBOX_CLOCK_SKEW_SECONDS:
+                                raise ValueError("receipt file is ahead of the host clock")
+                            age = max(0, int(now - origin))
+                            if age >= SETTLEMENT_STALE_SECONDS:
+                                stale += 1
+                                oldest = max(oldest, age)
+                        except (OSError, ValueError):
+                            unreadable += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                unreadable += 1
+            if limited:
+                break
+        facts = {"stale": stale, "unreadable": unreadable, "scan_limited": limited,
+                 "scanned": min(scanned, MAX_OUTBOX_RECORDS), "oldest_seconds": oldest}
+        if not stale and not unreadable and not limited:
+            return [], facts
+        repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60
+        text = (f"match result outbox needs attention: {stale} terminal receipts pending for at least "
+                f"5 min (oldest {oldest // 60} min), {unreadable} unreadable, scan limited={limited}; "
+                f"check PostgreSQL and career worker errors; preserve outboxes before recovery")
+        return [("settlement:outbox", text, repeat)], facts
+
+    def queue_dodge_problems(self) -> tuple[list, dict]:
+        """Typed penalty journals are not MatchResult envelopes or played games."""
+        roots, limited = self.outbox_roots()
+        pending, stale, unreadable, scanned, oldest = 0, 0, 0, 0, 0
+        capacity_exceeded = False
+        for outbox in roots:
+            root = outbox / "queue-dodges"
+            if outbox.is_symlink() or root.is_symlink():
+                unreadable += 1
+                continue
+            try:
+                root_entries, root_pending = 0, 0
+                with os.scandir(root) as entries:
+                    for entry in entries:
+                        scanned += 1
+                        root_entries += 1
+                        if root_entries > MAX_QUEUE_ENTRIES_PER_JOURNAL:
+                            limited, capacity_exceeded = True, True
+                            break
+                        if scanned > MAX_QUEUE_JOURNAL_ENTRIES:
+                            limited = True
+                            break
+                        if entry.name.startswith(".") and entry.name.endswith(".tmp"):
+                            continue
+                        if entry.name == ".lock" and entry.is_file(follow_symlinks=False):
+                            continue
+                        try:
+                            if not re.fullmatch(r"[0-9a-f]{32}\.json", entry.name):
+                                raise ValueError("unknown journal entry")
+                            if not entry.is_file(follow_symlinks=False):
+                                raise ValueError("invalid journal file")
+                            info = entry.stat(follow_symlinks=False)
+                            event = read_regular_json(entry.path, MAX_QUEUE_EVENT_BYTES)
+                            if (not isinstance(event, dict)
+                                    or set(event) != {"version", "event_id", "profile_id", "observed_at_ms"}
+                                    or type(event["version"]) is not int or event["version"] != 1
+                                    or event["event_id"] != entry.name[:-5]
+                                    or not isinstance(event["profile_id"], str)
+                                    or not re.fullmatch(r"[0-9a-f]{64}", event["profile_id"])):
+                                raise ValueError("invalid typed penalty receipt")
+                            now = self.now()
+                            observed = observed_seconds(event["observed_at_ms"], now)
+                            age = max(0, int(now - min(info.st_mtime, observed)))
+                            pending += 1
+                            root_pending += 1
+                            if root_pending > MAX_QUEUE_EVENTS_PER_JOURNAL:
+                                limited, capacity_exceeded = True, True
+                                break
+                            if age >= SETTLEMENT_STALE_SECONDS:
+                                stale += 1
+                                oldest = max(oldest, age)
+                        except (OSError, ValueError):
+                            unreadable += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                unreadable += 1
+            if limited:
+                break
+        facts = {"pending": pending, "stale": stale, "unreadable": unreadable,
+                 "scan_limited": limited, "scanned": min(scanned, MAX_QUEUE_JOURNAL_ENTRIES),
+                 "oldest_seconds": oldest, "capacity_exceeded": capacity_exceeded}
+        if not stale and not unreadable and not limited:
+            return [], facts
+        repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60
+        text = (f"matchmaking penalty delivery needs attention: {pending} pending, {stale} older than "
+                f"5 min (oldest {oldest // 60} min), {unreadable} unreadable, scan limited={limited}, "
+                f"journal capacity exceeded={capacity_exceeded}; "
+                f"check PostgreSQL and career worker errors; preserve queue journals before recovery")
+        return [("queue-dodge:journal", text, repeat)], facts
+
+    def storage_health_problems(self, lobby):
+        """Required live-process reports expose failure before any durable receipt."""
+        facts = dict(checked=0, blocked=0, persistent=0, missing=0, stale=0,
+                     unreadable=0, scan_limited=False, critical_replies=0,
+                     closed_reply_receivers=0)
+        up = self.active_seconds(lobby)
+        if lobby.get("ActiveState") != "active" or up is None or up < STORAGE_BLOCKED_SECONDS:
+            facts["skipped"] = "the lobby is not running or started recently"
+            return [], facts
+        roots, facts["scan_limited"] = self.outbox_roots()
+        now = self.now()
+        expected_keys = {"version", "updated_ms", "server_epoch", "probe_checked_ms", "sql_ready",
+                         "journal_ready", "staged_dodges", "legacy_floors", "unpersisted_results",
+                         "critical_replies", "reply_receiver_closed", "blocked_since_ms"}
+        for root in roots:
+            epoch, grace_until = None, 0
+            try:
+                if root.is_symlink() or (root / "health").is_symlink():
+                    raise ValueError("linked health root")
+                if root != Path(self.p(LOBBY_OUTBOX)):
+                    try:
+                        status = read_regular_json(root.parent / "status.json", 65536)
+                    except FileNotFoundError:
+                        continue  # retained terminal outbox, not a known live process
+                    if not isinstance(status, dict):
+                        raise ValueError("invalid worker state")
+                    if status.get("phase") in ("finished", "failed"):
+                        continue
+                    if status.get("phase") not in LIVE_PHASES:
+                        raise ValueError("unknown worker phase")
+                    epoch = status.get("server_epoch")
+                    if type(epoch) is not int or not 0 < epoch <= 2**64 - 1:
+                        raise ValueError("invalid worker epoch")
+                    try:
+                        manifest = read_regular_json(root.parent / "manifest.json", 65536)
+                        deadline = observed_seconds(manifest.get("join_deadline_ms"), now + 120)
+                        grace_until = deadline + STORAGE_BLOCKED_SECONDS
+                    except FileNotFoundError:
+                        pass
+                try:
+                    report = read_regular_json(root / "health/status.json", 4096)
+                except FileNotFoundError:
+                    if epoch is not None and now < grace_until:
+                        continue
+                    facts["missing"] += 1
+                    continue
+                facts["checked"] += 1
+                if (not isinstance(report, dict) or set(report) != expected_keys
+                        or type(report["version"]) is not int or report["version"] != 2
+                        or report["server_epoch"] != epoch
+                        or (epoch is not None and type(report["server_epoch"]) is not int)
+                        or type(report["sql_ready"]) is not bool
+                        or type(report["journal_ready"]) is not bool
+                        or type(report["reply_receiver_closed"]) is not bool):
+                    raise ValueError("invalid health contract")
+                updated = observed_seconds(report["updated_ms"], now)
+                counts = [report[k] for k in ("staged_dodges", "legacy_floors", "unpersisted_results", "critical_replies")]
+                if any(type(n) is not int or not 0 <= n <= 2**32 - 1 for n in counts):
+                    raise ValueError("invalid pending counts")
+                if report["critical_replies"] > 256:
+                    raise ValueError("critical reply budget exceeded")
+                facts["critical_replies"] += report["critical_replies"]
+                facts["closed_reply_receivers"] += int(report["reply_receiver_closed"])
+                probe = report["probe_checked_ms"]
+                if probe is not None:
+                    probe = observed_seconds(probe, now)
+                    if probe > updated + OUTBOX_CLOCK_SKEW_SECONDS:
+                        raise ValueError("probe ahead of report")
+                if report["sql_ready"] and probe is None:
+                    raise ValueError("SQL readiness without a probe")
+                blocked = (not report["sql_ready"] or not report["journal_ready"]
+                           or report["reply_receiver_closed"] or any(counts))
+                since = report["blocked_since_ms"]
+                if (since is None) != (not blocked):
+                    raise ValueError("inconsistent blocked interval")
+                if blocked:
+                    since = observed_seconds(since, now)
+                    if since > updated:
+                        raise ValueError("blocked interval ahead of report")
+                    facts["blocked"] += 1
+                    facts["persistent"] += int(now - since >= STORAGE_BLOCKED_SECONDS)
+                if (now - updated > STORAGE_HEALTH_STALE_SECONDS
+                        or (probe is not None and now - probe > STORAGE_PROBE_STALE_SECONDS)):
+                    facts["stale"] += 1
+            except (OSError, ValueError, AttributeError):
+                facts["unreadable"] += 1
+        if not any(facts[k] for k in ("persistent", "missing", "stale", "unreadable", "scan_limited")):
+            return [], facts
+        repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60
+        text = (f"career storage needs attention: {facts['persistent']} blocked for at least2 min, "
+                f"{facts['missing']} missing, {facts['stale']} stale, {facts['unreadable']} unreadable "
+                f"process reports, scan limited={facts['scan_limited']}, "
+                f"critical replies={facts['critical_replies']}, closed reply receivers={facts['closed_reply_receivers']}; "
+                "check reply backpressure, schema/runtime grants, "
+                "PostgreSQL and outbox storage; preserve recovery receipts")
+        return [("career:storage", text, repeat)], facts
+
     def check(self) -> dict:
         problems, warnings, facts = [], [], {}
         for text in self.cfg.problems:
@@ -445,6 +728,12 @@ class Monitor:
         more, facts["workers"] = self.worker_problems(facts["units"].get(LOBBY, {}))
         problems += more
         more, facts["capacity"] = self.capacity_problems(facts["units"].get(LOBBY, {}))
+        problems += more
+        more, facts["settlements"] = self.settlement_problems()
+        problems += more
+        more, facts["queue_dodges"] = self.queue_dodge_problems()
+        problems += more
+        more, facts["career_storage"] = self.storage_health_problems(facts["units"].get(LOBBY, {}))
         problems += more
         if not self.cfg.telegram()[0]:
             warnings.append(f"no Telegram bot in {self.cfg.path}: alerts reach the journal only")

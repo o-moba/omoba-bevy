@@ -1,0 +1,58 @@
+{
+  "status": "PASS scoped native/store proof; integration and fresh full CI remain open",
+  "schema": {
+    "career": 12,
+    "portal": 11
+  },
+  "source_sha256": {
+    "career-store/migrations/postgres/012_ready_ownership.sql": "450894081a890073d5c6946858381a8f3d60de127c7fcbc5288fb857992ae323",
+    "career-store/src/career_store.rs": "11838602f16cac460bde0c1166a9e1c011b9f72852d4a30d65ec9ad172a6fa2a",
+    "career-store/src/career_store/ready.rs": "8b1c40345b97176943694c97d1339c4cba9438cf7be5066767c69318724dfcd5",
+    "career-store/src/career_store/ready_tests.rs": "4d495cd92355f62963a93664eb8f6aff56dd7fdbd955f289489ca3e2c3399c6d",
+    "career-store/src/career_store/queue_discipline.rs": "8d52b55cf9f56b95d2b2ae1445c7fb7e38a78577ba097066600509110190631c",
+    "career-store/src/career_store_tests.rs": "264e0f4d2ac85a2a5a9eaf0b143783702cac600de8df70fa5742b475588e7833",
+    "career-store/src/career_store/seasons_tests.rs": "4921bd8417157074f461597eeeb2d336f6042ab1465aee7760e4a85167e49577",
+    "account-api/ops/grants.sql": "caf261022f7b675fb18d6cb073cb43aea1dbb5849c905e4033bcc68cb57c213f",
+    "shared/src/career.rs": "54734c33eb9eb7511e895dd1520c6829192bbdce9e3ed64920e355a7e8778fb5",
+    "server/src/career_backend.rs": "b2b9637791f8fcafb7dcbf4dfeb0a68f8c6b097294f4d615ccaaa869460ac5e2",
+    "server/src/career_backend_resilience_tests.rs": "b5c2d2e7106b2f924accada6f4c4b44a84b273e1c8d4f2551c6bab9503c77419",
+    "server/src/career_dodge_tests.rs": "239dd7c15f64edae5810578a6d09d4c2521ff1501658ebcba19b175e1e972668",
+    "server/src/career_runtime.rs": "1f838552c4dbf0654666cba2e9a66b4f429685bbf95176092d372c0ff78c00b0",
+    "client/src/career.rs": "e11e2a7c321cd9aaf9aa776ad380fafabab8d4f99dedd42f971f54c1a27b79fb"
+  },
+  "tests": {
+    "new_ready_postgres_cases": 9,
+    "store_all": {
+      "passed": 81,
+      "failed": 0,
+      "ignored": 0
+    },
+    "backend_all": {
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0
+    },
+    "new_actual_worker_case": 1,
+    "clippy": "PASS store/backend test targets with existing workspace allowances",
+    "format_and_diff": "PASS"
+  },
+  "invariants": [
+    "Reserve immutable profile/session membership before Publish; publish stores exact15000ms interval; retry never resets it",
+    "Only owning CareerStore identity can publish/answer/heartbeat/cancel; every answer binds profile plus session",
+    "Sorted profile locks precede check row locks, never hold SQL transaction across consent wait; no global queue mutex",
+    "Healthy deadline resolution charges only missing answers; forming/failed owner and failed handoff release without fabricated dodges",
+    "Stable SQL-generated per-seat event ID; event/penalty/claim-release share one transaction; ordinary access and immutable allocation recovery remain separate",
+    "Existing shared claim blocks another new start; a known check requires unanimous approval and matching result ID before consumption",
+    "Restricted game role executes reserve/publish/answer/cancel; portal cannot read server-only ready tables"
+  ],
+  "activation": "Store contract/guards exist; lobby still does not call reserve/publish/answer/heartbeat. No claim of completed multi-host ready behavior.",
+  "remaining": [
+    "Wire bounded backend jobs and acknowledgements into lobby before publishing ready UI/starting worker; bind worker result ID to approved allocation/check ID",
+    "Use SQL snapshot for ready penalties; do not also emit a second local dodge event",
+    "Preserve15s, accepted FIFO, parties, maintenance, restart and Resume; actual signed two-lobby/fault proof",
+    "Fix is native-tested; full public party-leave rerun, engine/client execution/current pixels and standard PG16 gates pending",
+    "Legacy floor reconciliation, typed journal health/retention, schema12 real recovery, explicit release trust packaging, physical/capacity/RU acceptance",
+    "C2/C4 existing owner questions remain pending; proposals unapplied; no RU deploy"
+  ],
+  "disk": "13GiB root free at final check; no heavy Bevy build, third Cargo cache, cache deletion or new production dependency"
+}

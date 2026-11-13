@@ -27,6 +27,8 @@ use crate::ui::widgets::screen_button;
 use crate::ui::{Activated, UiActionAppExt, UiSet};
 
 pub struct SearchingScreenPlugin;
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct SearchingViews;
 
 impl Plugin for SearchingScreenPlugin {
     fn build(&self, app: &mut App) {
@@ -36,10 +38,15 @@ impl Plugin for SearchingScreenPlugin {
                 Update,
                 (
                     searching_actions,
-                    refresh_status,
-                    refresh_resume,
-                    refresh_queue,
-                    refresh_offline,
+                    (
+                        refresh_status,
+                        refresh_resume,
+                        refresh_queue,
+                        refresh_offline,
+                        refresh_ready,
+                    )
+                        .chain()
+                        .in_set(SearchingViews),
                 )
                     .chain()
                     .after(UiSet::Dispatch)
@@ -76,8 +83,16 @@ struct SearchingAlsoCasual;
 #[derive(Component)]
 struct SearchingOffline;
 
+#[derive(Component)]
+struct SearchingAccept;
+#[derive(Component)]
+struct SearchingDecline;
+#[derive(Component)]
+struct SearchingCancel;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SearchingAction {
+    Accept,
     Cancel,
     Resume,
     AlsoCasual,
@@ -155,13 +170,13 @@ fn spawn_searching(
                     width: Val::Px(620.0),
                     max_width: Val::Percent(92.0),
                     margin: UiRect::all(Val::Auto),
-                    padding: UiRect::all(Val::Px(40.0)),
+                    padding: UiRect::all(Val::Px(if platform.is_mobile() { 16.0 } else { 40.0 })),
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(12.0)),
                     flex_direction: FlexDirection::Column,
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
-                    row_gap: Val::Px(16.0),
+                    row_gap: Val::Px(if platform.is_mobile() { 8.0 } else { 16.0 }),
                     ..default()
                 },
                 BackgroundColor(theme::PANEL_OPAQUE),
@@ -206,6 +221,22 @@ fn spawn_searching(
                     SearchingOffer,
                     Name::new("SearchingOffer"),
                 ));
+                let accept = screen_button(
+                    body,
+                    Localized::new("queue.ready.accept"),
+                    ButtonKind::Primary,
+                    SearchingAction::Accept,
+                    "SearchingAccept",
+                );
+                body.commands().entity(accept).insert(SearchingAccept);
+                let decline = screen_button(
+                    body,
+                    Localized::new("queue.ready.decline"),
+                    ButtonKind::Secondary,
+                    SearchingAction::Cancel,
+                    "SearchingDecline",
+                );
+                body.commands().entity(decline).insert(SearchingDecline);
                 let also_casual = screen_button(
                     body,
                     Localized::new("queue.offer.accept"),
@@ -243,13 +274,14 @@ fn spawn_searching(
                     "SearchingResume",
                 );
                 body.commands().entity(resume).insert(SearchingResume);
-                screen_button(
+                let cancel = screen_button(
                     body,
                     Localized::new("common.cancel"),
                     ButtonKind::Secondary,
                     SearchingAction::Cancel,
                     "SearchingCancel",
                 );
+                body.commands().entity(cancel).insert(SearchingCancel);
             });
         });
 }
@@ -258,9 +290,16 @@ fn searching_actions(
     mut session_ui: MessageWriter<SessionUiCommand>,
     mut activated: MessageReader<Activated<SearchingAction>>,
     mut flow: Option<ResMut<MatchServiceClient>>,
+    career: Option<Res<CareerClient>>,
     mut next: Option<ResMut<NextState<AppScreen>>>,
 ) {
     for Activated { action, .. } in activated.read() {
+        if *action == SearchingAction::Accept {
+            if let (Some(flow), Some(career)) = (flow.as_deref_mut(), career.as_deref()) {
+                flow.respond_ready(&career.view, true);
+            }
+            continue;
+        }
         if *action == SearchingAction::AlsoCasual {
             // Keeps the Ranked place; the next FindMatch carries it (O-1).
             if let Some(flow) = flow.as_deref_mut() {
@@ -286,10 +325,38 @@ fn searching_actions(
             SearchingAction::Cancel => SessionUiCommand::LeaveMatch,
             // Back to the running match's seat (`net::recovery::resume_actions`).
             SearchingAction::Resume => SessionUiCommand::ResumeMatch,
-            SearchingAction::AlsoCasual | SearchingAction::OfflinePractice => {
+            SearchingAction::Accept
+            | SearchingAction::AlsoCasual
+            | SearchingAction::OfflinePractice => {
                 unreachable!("handled above")
             }
         });
+    }
+}
+
+fn refresh_ready(
+    career: Res<CareerClient>,
+    flow: Option<Res<MatchServiceClient>>,
+    mut buttons: Query<
+        (
+            &mut Node,
+            Option<&SearchingAccept>,
+            Option<&SearchingDecline>,
+            Option<&SearchingCancel>,
+        ),
+        Or<(
+            With<SearchingAccept>,
+            With<SearchingDecline>,
+            With<SearchingCancel>,
+        )>,
+    >,
+) {
+    let ready = flow.as_deref().and_then(|f| f.ready_check(&career.view));
+    for (mut node, accept, decline, cancel) in &mut buttons {
+        let show = (accept.is_some() && ready.is_some_and(|(_, answered)| !answered))
+            || (decline.is_some() && ready.is_some())
+            || (cancel.is_some() && ready.is_none());
+        node.display = if show { Display::Flex } else { Display::None };
     }
 }
 
@@ -334,7 +401,21 @@ fn refresh_status(
             // A matchmaking or ranked ban (LR-15), with its end.
             text
         } else {
-            crate::match_service::status_text(view)
+            let status = if matches!(view, shared::match_service::MatchServiceView::Failed { code } if code == shared::career::error_code::PLAY_COOLDOWN)
+            {
+                crate::career::play_cooldown_text(&career.view)
+            } else if matches!(view, shared::match_service::MatchServiceView::Failed { code } if code == shared::career::error_code::RANKED_LOCKED)
+            {
+                crate::career::ranked_locked_text(&career.view)
+            } else {
+                crate::match_service::status_text(view)
+            };
+            // A search the client started on its own (the found match never
+            // began) says why above the queue status.
+            match flow.as_deref().and_then(|flow| flow.notice()) {
+                Some(notice) => format!("{}\n{status}", tr(notice)),
+                None => status,
+            }
         }
     } else {
         status_text(&career.view.queue, &game.state, &session)
@@ -671,6 +752,55 @@ mod tests {
         );
     }
 
+    /// A search the client restarted after a found match never began says so
+    /// above the queue status, in the player's language.
+    #[test]
+    fn a_restarted_search_says_that_a_player_did_not_connect() {
+        if crate::i18n::testing::isolated(
+            "frontend::searching::tests::a_restarted_search_says_that_a_player_did_not_connect",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+            .insert_state(AppScreen::Searching)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .init_resource::<TeamSelection>()
+            .init_resource::<CareerClient>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<SessionUiCommand>()
+            .add_plugins(SearchingScreenPlugin);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        app.insert_resource(session);
+        let mut flow = MatchServiceClient::default();
+        flow.active = true;
+        flow.set_worker_lost_notice_for_test();
+        app.insert_resource(flow);
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .match_service = Some(MatchServiceView::Allocating);
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        app.update();
+        app.update();
+        let status = app
+            .world_mut()
+            .query_filtered::<&Text, With<SearchingStatus>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        assert_eq!(
+            status,
+            "Матч не начался: один из игроков не подключился. Ищем матч снова…\nМатч найден · подготовка арены…"
+        );
+    }
+
     /// LR-08: a Ranked search names its queue and rating, shows how many
     /// search it, and after five minutes offers to also search Casual PvP;
     /// taking the offer keeps the search and its Ranked place.
@@ -711,6 +841,7 @@ mod tests {
             casual_offer_after_secs: Some(300),
             also_casual,
             capacity_line: None,
+            party_gathering: None,
         };
         let answer = |app: &mut App, view| {
             let mut career = app.world_mut().resource_mut::<CareerClient>();
@@ -816,6 +947,7 @@ mod tests {
             casual_offer_after_secs: None,
             also_casual: false,
             capacity_line,
+            party_gathering: None,
         };
         let answer = |app: &mut App, view| {
             let mut career = app.world_mut().resource_mut::<CareerClient>();
@@ -923,5 +1055,83 @@ mod tests {
         harness::press(app.world_mut(), "SearchingCancel");
         app.update();
         assert!(sent(&mut app).is_empty());
+    }
+    #[test]
+    fn found_match_requires_a_visible_accept_button_and_shows_waiting_after_one_click() {
+        if crate::i18n::testing::isolated(
+            "frontend::searching::tests::found_match_requires_a_visible_accept_button_and_shows_waiting_after_one_click",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        use crate::ui::test_id::harness;
+        use shared::match_service::{MatchPreference, MatchServiceView};
+        let mut app = harness::kit_app();
+        app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+            .insert_state(AppScreen::Searching)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+            .init_resource::<TeamSelection>()
+            .init_resource::<CareerClient>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<SessionUiCommand>()
+            .add_plugins(SearchingScreenPlugin);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        app.insert_resource(session);
+        let mut flow = MatchServiceClient::default();
+        flow.active = true;
+        flow.preference = MatchPreference::Ranked;
+        app.insert_resource(flow);
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        let ready = |id: &str, accepted| shared::career::CareerView {
+            match_service_request_id: Some(0),
+            match_service: Some(MatchServiceView::ReadyCheck {
+                check_id: id.into(),
+                preference: MatchPreference::Ranked,
+                accepted,
+                accepted_count: 6,
+                needed: 10,
+                remaining_secs: 15,
+            }),
+            ..default()
+        };
+        app.world_mut().resource_mut::<CareerClient>().view = ready("first", false);
+        app.update();
+        app.update();
+        let shown = |app: &mut App, id| {
+            let e = harness::find(app.world_mut(), id).unwrap();
+            app.world().get::<Node>(e).unwrap().display != Display::None
+        };
+        assert!(shown(&mut app, "SearchingAccept"));
+        assert!(shown(&mut app, "SearchingDecline"));
+        assert!(!shown(&mut app, "SearchingCancel"));
+        let status = app
+            .world_mut()
+            .query_filtered::<&Text, With<SearchingStatus>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        assert!(status.contains("6/10") && status.contains("15"), "{status}");
+        harness::press(app.world_mut(), "SearchingAccept");
+        app.update();
+        assert!(
+            !shown(&mut app, "SearchingAccept"),
+            "one click disables duplicate acceptance while awaiting the server"
+        );
+        assert!(
+            app.world()
+                .resource::<Messages<SessionUiCommand>>()
+                .is_empty(),
+            "accepting does not leave or start a worker locally"
+        );
+        app.world_mut().resource_mut::<CareerClient>().view = ready("second", false);
+        app.update();
+        assert!(
+            shown(&mut app, "SearchingAccept"),
+            "a replacement roster needs a new explicit accept"
+        );
     }
 }

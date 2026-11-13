@@ -1,0 +1,18 @@
+{
+  "README.md": "1f0f904db338b6eccaa7071280119097a180c674cd73d96aff2fc24dd9b2363e",
+  "account-api.log": "a5ef125718e0f1536c4de5798b12ee5184fcf952df77eb4408765678714b823d",
+  "browser/hidden.png": "28833083e916926b80f41df830fdc90cdff2155984bcda904c54c840b5022d4e",
+  "browser/mobile.png": "d7698957704437e134945b844178314f616493c718edd5a971fcd233e73e98d1",
+  "browser/result.json": "d908587ff6010dc6fc55bfa2aed4bc6a3bae3f2c698edba0b59378d12a520ad8",
+  "build.log": "e6e9ea903f7be896cd130c876943ccbaa895becd59dad858bfc21cac965b8e4c",
+  "game-commit.txt": "ae17a3bedfb042448058235273030eaad646e901c142c919ecf93c3cc184ad08",
+  "leaderboard.log": "21449110f4c98fb837a2ffa8903fd1ce041f28326dc0e73dbf56f5f77b7f04ee",
+  "metadata.json": "1c20d29f046b4ffdfe7f07f56d1fa5ec3444f1990410e3ae0f06da56e0971944",
+  "portal-commit.txt": "edb9c6b7139b7ac2f9e713689e0254ec8f6511aff68c1616399dbe0d63fc764c",
+  "portal.log": "272a3d92d44d755cca9fdefb9e26509523e404827c8690983f9f0812c3088876",
+  "seed-result.json": "ab3b40e095d9fc0353b757126bdd2d4dfc2cd900e8fceff537a68bfb1b7d5093",
+  "source-and-binary-sha256.txt": "8f851db88f976cfdb41bb5734387fe8311ea92804f22c1ceab2298ba1eba1e79",
+  "typecheck.log": "dcf81c81ff8e4e8aefb9ec9fbd2580eaee6e39b52d2454a04b1b982f2fbc70e7",
+  "unit-tests.log": "3eb04211540df60936a233619699195fb616175053404a040b5c70655eda722a",
+  "verify.py": "7e6cf116ab8899026c84b869792e19c73e818bf6cba1bdcef52a0a379bc4c90e"
+}

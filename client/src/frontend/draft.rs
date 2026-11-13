@@ -1,8 +1,9 @@
 //! Shared pre-match choices. The server owns accepted selections and lock state.
 //!
 //! Text comes from the `draft` dictionary (hero, role and avatar names through
-//! `i18n::data`); the render key includes the locale generation. Server-authored
-//! draft errors stay English.
+//! `i18n::data`); the render key includes the locale generation. A server
+//! prematch error that is a stable code (`roster_changed`) shows its
+//! `draft.error.<code>` text; server-authored sentences stay English.
 // i18n-strict
 use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{
@@ -20,7 +21,7 @@ use crate::{
     persistence::ClientSessionId,
     team::{AvatarThumbnails, CharacterChoice},
     ui::{
-        Activated, TestId, UiAction, UiActionAppExt, UiSet,
+        Activated, Pressable, TestId, UiAction, UiActionAppExt, UiSet,
         action::UiActionT,
         theme::{self, ButtonKind},
         widgets::ButtonStyle,
@@ -191,7 +192,7 @@ fn sync_draft(
         state.namespace = Some(namespace);
         state.next_request_id = draft.last_request_id;
         state.choice = local.map(Choice::from);
-        state.notice = draft.error.clone();
+        state.notice = draft.error.as_deref().map(error_text);
     }
     let acknowledged = state
         .pending
@@ -202,7 +203,7 @@ fn sync_draft(
         if let Some(error) = &draft.error {
             state.choice = local.map(Choice::from);
             state.desired_lock = None;
-            state.notice = Some(error.clone());
+            state.notice = Some(error_text(error));
         }
     }
     state.next_request_id = state.next_request_id.max(draft.last_request_id);
@@ -262,6 +263,15 @@ fn draft_actions(
             DraftAction::Connect => crate::passport::connect_account(),
             DraftAction::Picker(tab) => state.picker_tab = *tab,
             DraftAction::Lock if draft.phase == PrematchPhase::Draft => {
+                let class = state
+                    .choice
+                    .as_ref()
+                    .map_or(local.hero_class, |c| c.hero_class);
+                if !local.locked && team_class_taken(&draft.players, game.your_id, class) {
+                    state.notice = Some(tr("draft.error.hero_taken").into());
+                    state.desired_lock = None;
+                    continue;
+                }
                 state.notice = None;
                 state.desired_lock = Some(!local.locked);
             }
@@ -281,6 +291,10 @@ fn draft_actions(
                 state.notice = None;
             }
             DraftAction::Class(class) => {
+                if team_class_taken(&draft.players, game.your_id, *class) {
+                    state.notice = Some(tr("draft.error.hero_taken").into());
+                    continue;
+                }
                 if let Some(choice) = &mut state.choice {
                     choice.pick_class(*class);
                 }
@@ -344,6 +358,15 @@ fn send_requests(
         if !local.locked
             && desired
                 .as_ref()
+                .is_some_and(|c| team_class_taken(&draft.players, game.your_id, c.hero_class))
+        {
+            state.desired_lock = None;
+            state.notice = Some(tr("draft.error.hero_taken").into());
+            return;
+        }
+        if !local.locked
+            && desired
+                .as_ref()
                 .is_some_and(|choice| *choice != Choice::from(local))
         {
             let choice = desired.unwrap();
@@ -389,6 +412,32 @@ fn send_requests(
     {
         writer.write(NetworkCommand::Prematch(request));
     }
+}
+
+/// A server prematch error as the footer shows it: a stable code
+/// (`roster_changed`, `loading_timeout`, `start_timeout`) in the player's
+/// language when the `draft` dictionary has it, otherwise the text as sent.
+pub(super) fn error_text(error: &str) -> String {
+    let code = !error.is_empty()
+        && error
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_');
+    code.then(|| crate::i18n::lookup(&format!("draft.error.{error}")))
+        .flatten()
+        .map_or_else(|| error.to_owned(), str::to_owned)
+}
+
+fn team_class_taken(players: &[DraftPlayer], local_id: u64, class: HeroClass) -> bool {
+    let Some(local) = players.iter().find(|p| p.player_id == local_id) else {
+        return false;
+    };
+    players.iter().any(|p| {
+        p.player_id != local_id
+            && p.team == local.team
+            && !p.is_bot
+            && p.locked
+            && p.hero_class == class
+    })
 }
 
 pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> String {
@@ -447,7 +496,7 @@ pub(super) fn action_button<T: UiActionT>(
     width: f32,
     primary: bool,
     selected: bool,
-) {
+) -> Entity {
     let style = if selected {
         ButtonStyle {
             kind: ButtonKind::Tile,
@@ -488,7 +537,8 @@ pub(super) fn action_button<T: UiActionT>(
         ))
         .with_children(|button| {
             button.spawn(widgets::label(label, 13.0, theme::IVORY));
-        });
+        })
+        .id()
 }
 
 pub(super) fn avatar_name(slug: Option<&str>) -> String {
@@ -981,15 +1031,31 @@ fn render_draft(
                             })
                             .with_children(|classes| {
                                 for class in HeroClass::ALL {
-                                    action_button(
+                                    let taken =
+                                        team_class_taken(&draft.players, game.your_id, class);
+                                    let label = if taken {
+                                        trf(
+                                            "draft.class_taken",
+                                            &[("hero", &data::hero_name(class))],
+                                        )
+                                    } else {
+                                        data::hero_name(class).to_owned()
+                                    };
+                                    let button = action_button(
                                         classes,
-                                        data::hero_name(class),
+                                        &label,
                                         DraftAction::Class(class),
                                         &format!("DraftClass-{}", class.id()),
                                         (picker_width - 12.0) / 4.0,
                                         false,
                                         choice.is_some_and(|c| c.hero_class == class),
                                     );
+                                    if taken {
+                                        classes.commands().entity(button).insert(Pressable {
+                                            disabled: true,
+                                            ..default()
+                                        });
+                                    }
                                 }
                             });
                         picker
@@ -1199,7 +1265,7 @@ fn render_draft(
                     },
                     Name::new("DraftNotice"),
                 ));
-                action_button(
+                let button = action_button(
                     footer,
                     if state.pending.is_some() {
                         tr("draft.button.syncing")
@@ -1214,6 +1280,16 @@ fn render_draft(
                     !locked,
                     false,
                 );
+                if !locked
+                    && choice.is_some_and(|c| {
+                        team_class_taken(&draft.players, game.your_id, c.hero_class)
+                    })
+                {
+                    footer.commands().entity(button).insert(Pressable {
+                        disabled: true,
+                        ..default()
+                    });
+                }
             });
         });
 }
@@ -1229,7 +1305,15 @@ fn update_selection_clock(
         return;
     };
     let value = if draft.remaining_ms == 0 {
-        tr("draft.timer.gathering").to_owned()
+        draft.join_remaining_ms.map_or_else(
+            || tr("draft.timer.gathering").to_owned(),
+            |ms| {
+                trf(
+                    "draft.timer.join_remaining",
+                    &[("seconds", &ms.div_ceil(1000))],
+                )
+            },
+        )
     } else {
         trf(
             "draft.timer.remaining",
@@ -1385,6 +1469,7 @@ mod tests {
         game.meta.server_epoch = 10;
         game.meta.match_id = 3;
         game.prematch = Some(shared::prematch::PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 4,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,
@@ -1714,6 +1799,58 @@ mod tests {
         );
     }
 
+    /// A prematch reset code shows its text in the player's language; a
+    /// server-authored sentence stays as sent.
+    #[test]
+    fn server_error_codes_are_localized_and_sentences_stay() {
+        if crate::i18n::testing::isolated(
+            "frontend::draft::tests::server_error_codes_are_localized_and_sentences_stay",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        assert_eq!(
+            error_text("roster_changed"),
+            "The roster changed. Check your team and lock in again."
+        );
+        assert_eq!(error_text("Selection unavailable"), "Selection unavailable");
+        assert_eq!(error_text("unknown_code"), "unknown_code");
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        assert_eq!(
+            error_text("loading_timeout"),
+            "Не все игроки загрузились вовремя. Подтвердите выбор снова или выйдите."
+        );
+        assert_eq!(
+            error_text("start_timeout"),
+            "Старт матча занял слишком долго. Подтвердите выбор снова или выйдите."
+        );
+        // The footer shows the code's text once the server answers with it.
+        let mut app = request_app();
+        app.world_mut()
+            .resource_mut::<DraftClient>()
+            .choice
+            .as_mut()
+            .unwrap()
+            .hero_class = HeroClass::Mage;
+        app.update();
+        let sent = drain_requests(&mut app);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.last_request_id = sent[0].request_id;
+            draft.error = Some("roster_changed".into());
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<DraftClient>().notice.as_deref(),
+            Some("Состав изменился. Проверьте команду и подтвердите выбор снова.")
+        );
+    }
+
     #[test]
     fn choice_retries_keep_the_same_id_and_rejection_restores_accepted_selection() {
         let mut app = request_app();
@@ -1837,7 +1974,7 @@ mod tests {
         assert!(state.pending.is_none() && state.namespace.is_none() && !state.wants_loaded);
     }
     #[test]
-    fn composition_warnings_are_advisory_and_do_not_impose_class_uniqueness() {
+    fn avatar_and_role_warnings_remain_advisory_for_unlocked_picks() {
         let player = |id| DraftPlayer {
             handheld: Default::default(),
             player_id: id,
@@ -1875,6 +2012,7 @@ mod tests {
             ..default()
         };
         game.prematch = Some(shared::prematch::PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,
@@ -1987,6 +2125,76 @@ mod tests {
         assert_eq!(plate[2], "中路");
         assert!(!plate.iter().any(|text| text == "Warrior" || text == "Mid"));
         assert!(!shown.iter().any(|text| text == "Assemble your team"));
+    }
+
+    #[test]
+    fn teammate_lock_disables_tiles_and_lock_and_rechecks_a_stale_press() {
+        use crate::ui::test_id::harness;
+        let (mut app, _) = draft_ui_app(crate::platform::UiProfile::Mobile, 852.0, 393.0);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let players = &mut game.prematch.as_mut().unwrap().players;
+            let mut teammate = players[0].clone();
+            teammate.player_id = 8;
+            teammate.nickname = "Teammate".into();
+            teammate.locked = true;
+            players.push(teammate);
+        }
+        app.world_mut().resource_mut::<DraftClient>().picker_tab = PickerTab::Classes;
+        app.update();
+        for id in ["DraftClass-warrior", "DraftLock"] {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            assert!(
+                app.world().get::<Pressable>(button).unwrap().disabled,
+                "{id}"
+            );
+        }
+        // An action queued before the latest roster arrived must be checked again.
+        for action in [DraftAction::Class(HeroClass::Warrior), DraftAction::Lock] {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
+        let state = app.world().resource::<DraftClient>();
+        assert_eq!(state.desired_lock, None);
+        assert_eq!(
+            state.choice.as_ref().unwrap().hero_class,
+            HeroClass::Warrior
+        );
+        assert_eq!(state.notice.as_deref(), Some(tr("draft.error.hero_taken")));
+        assert!(app.world().resource::<SentRequests>().0.is_empty());
+        // A bot or opposing mirror does not reserve a human's class.
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            game.prematch.as_mut().unwrap().players[1].is_bot = true;
+        }
+        app.update();
+        for id in ["DraftClass-warrior", "DraftLock"] {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            assert!(
+                !app.world().get::<Pressable>(button).unwrap().disabled,
+                "{id}"
+            );
+        }
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let player = &mut game.prematch.as_mut().unwrap().players[1];
+            player.is_bot = false;
+            player.team = shared::map::Team::Blue;
+        }
+        app.update();
+        assert!(!team_class_taken(
+            &app.world()
+                .resource::<GameStateSnapshot>()
+                .prematch
+                .as_ref()
+                .unwrap()
+                .players,
+            7,
+            HeroClass::Warrior
+        ));
     }
 
     #[test]

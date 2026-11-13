@@ -254,6 +254,7 @@ impl CareerIdentity {
                 "Sign in before using your profile." // i18n-allow
                     | "Account authorization could not be refreshed. Reconnect when the account service is available." // i18n-allow
                     | "This device was revoked. Authorize this device again from your account." // i18n-allow
+                    | "This device has been revoked." // i18n-allow
                     | shared::moderation::ACCOUNT_BANNED_TEXT
             )
         ) {
@@ -1115,6 +1116,7 @@ mod tests {
             "Sign in before using your profile.",
             "Account authorization could not be refreshed. Reconnect when the account service is available.",
             "This device was revoked. Authorize this device again from your account.",
+            "This device has been revoked.",
             shared::moderation::ACCOUNT_BANNED_TEXT,
         ] {
             let mut identity = identity();
@@ -1155,6 +1157,8 @@ mod tests {
                 auth_nonce: Some(challenge.nonce.clone()),
                 challenge: Some(challenge.clone()),
                 profile: Some(shared::career::ProfileSummary {
+                    ranked: None,
+                    completed_public_matches: 0,
                     profile_id: "b".repeat(64),
                     nickname: "小明".into(),
                     rating: 1000,
@@ -1162,6 +1166,7 @@ mod tests {
                     matches_played: 0,
                     wins: 0,
                     losses: 0,
+                    abandons: 0,
                     progression_xp: 0,
                 }),
                 ..default()

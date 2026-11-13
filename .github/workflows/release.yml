@@ -64,7 +64,7 @@ jobs:
       matrix:
         include:
           - platform: macos
-            runner: macos-14
+            runner: macos-15
           - platform: windows
             runner: windows-latest
           - platform: linux
@@ -95,6 +95,34 @@ jobs:
           if [ -n "$RELEASE_SERVER" ]; then args+=(--server "$RELEASE_SERVER"); fi
           if [ -n "$RELEASE_REGISTRY" ]; then args+=(--registry "$RELEASE_REGISTRY"); fi
           python scripts/release.py "${args[@]}"
+      - name: Build the exact-source RU macOS QA client
+        if: matrix.platform == 'macos' && github.event_name == 'pull_request'
+        env:
+          OMOBA_MARKET: ru
+        run: |
+          cargo build --locked -p client --bin client
+          shasum -a 256 target/debug/client
+      - name: Upload the exact-source RU macOS QA client
+        if: matrix.platform == 'macos' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-qa-client
+          path: target/debug/client
+          if-no-files-found: error
+          retention-days: 3
+      - name: Build the native Linux capacity generator and Ranked fixture
+        if: matrix.platform == 'linux' && github.event_name == 'pull_request'
+        run: cargo build --release --locked -p harness --bin bots -p omoba-career-store --example qualify-ranked-fixture
+      - name: Upload the native Linux capacity generator and Ranked fixture
+        if: matrix.platform == 'linux' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-capacity-bots
+          path: |
+            target/release/bots
+            target/release/examples/qualify-ranked-fixture
+          if-no-files-found: error
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         with:
           name: omoba-${{ matrix.platform }}

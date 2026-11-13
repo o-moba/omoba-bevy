@@ -177,7 +177,7 @@ impl Limits {
         limits.endpoints_per_ip = read(
             "OMOBA_LIMIT_ENDPOINTS_PER_IP",
             limits.endpoints_per_ip as u32,
-            512,
+            crate::public_transport::MAX_ENDPOINTS as u32,
         )? as usize;
         let n = &mut limits.new_profiles;
         n.per_source = read("OMOBA_LIMIT_NEW_PROFILES_PER_IP", n.per_source, 1_000_000)?;

@@ -5,6 +5,1034 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Externalize bulky Ranked evidence without deleting the local proof: a private
+  draft asset in `o-moba/omoba-bevy-archive` preserves all 1,321 evidence files
+  from `dad1e4f6` (59,321,682 bytes; SHA-256
+  `5f163c6d8bb3acc97f13cbe028116a1881950017cba790896137b70d86c5cea8`).
+  Remove 1,059 payloads from the Git index while retaining 265 concise reports,
+  verifiers, manifests and small summaries. Add a hash-checked restore helper and
+  an index policy with 4 passing tests; all 18 retained verifiers pass in normal
+  and `python3 -S` modes (36/36), and tracked evidence additions fall by about
+  91%. With project Python 3.13, the 697-test scripts suite still has one local
+  UI-handoff manifest mismatch and 8 skips; no baseline was run, so this is not
+  recorded as a pre-existing failure or a green full suite. The migration is
+  staged locally and does not change RU NO SHIP or any external release gate.
+
+- Confirm final continuation candidate `a7cd574b` on its own workflows: CI
+  43016841080 passes all seven jobs and Release 43016841500 passes macOS, Windows,
+  Linux and Android. Keep independent human review, isolated RU capacity/uplink,
+  WAN/fault/recovery, physical devices and exact-package acceptance open; RU remains
+  NO SHIP and no merge, deployment or rollout is authorized by these checks.
+
+- Keep Lobby roster identities distinguishable beside the kick action: the public
+  `#NNNN` tag is separate from the elided long nickname and cannot shrink away.
+  The RU Mobile 852×393 capture visually accepts visible `#1000`…`#1002`; QA state
+  retains exact tags through `#1004`, with the lower two outside the scroll
+  viewport. Pin native source/binary to `f8f68c3d` from Release 43010114221 and
+  archive 19 matching sources, 20 valid label geometries and a standard-library
+  verifier that passes normally and with `python3 -S`.
+
+- Close the clean-seed leaderboard review finding with accepted run 43012620207:
+  a fresh PostgreSQL 18-alpine service runs the current `seed-local-portal`
+  executable and strengthened browser test without manual SQL. The retained pack
+  independently proves 257 unit PASS / 0 FAIL / 3 expected skips, typecheck,
+  production RU build, ordered ratings 1031/985 and visible `Калибровка 1/20`, plus
+  own rank, opt-out and 390 px overflow. Rejected earlier workflow attempts and
+  their causes remain documented. This synthetic loopback result does not close
+  physical-device, WAN, RU-host, recovery or shipment gates.
+
+- Accept exact-source RU Mobile UI-2/UI-3 offscreen captures at 852×393.
+  Compatibility passes on `19c2616d`; its rejected widest-name Draft/Lobby
+  captures remain archived. On `5f314981`, stable nameplate width and fitted,
+  clipped roster labels keep all five Draft/Lobby prefixes and ellipses inside
+  their panels. The capture gate now rejects ellipsis-only labels and geometry
+  overflow. CI 42802254350 passes 7/7 and Release 42802254459 passes 4/4.
+  A standalone verifier recomputes three accepted captures, 41 label geometries
+  and two rejected captures in normal and `python -S` modes. This is synthetic
+  offscreen evidence, not physical C3/Vulkan/keep-awake/resume/haptics proof;
+  the later docs SHA still needs its own complete runs.
+
+- Make the standard-map Ranked victory rehearsal focus unprotected structures
+  through the existing loopback-only signed AI policy instead of waiting for a
+  potentially indefinite lane stalemate. No custom map, server-rule or rated
+  settlement change is introduced; the report distinguishes this AI policy from
+  a map override. CI run 42765496399 exposed the need for it: all ten clients
+  stayed connected until the authoritative 2700 s duration cap, while the prior
+  identical-code rehearsal won in 413.307 s. Twenty Python harness tests pass.
+  On `778da741`, CI 42777841623 passes 7/7 and Release 42777841887 passes 4/4:
+  the live standard-map rehearsal completes with Green winning in 118.213 s, one
+  saved rated result for ten active profiles and no map override. This closes the
+  observed CI failure; it does not close the separate RU-host and release gates.
+
+- Archive a hash-pinned ARM64 Docker capacity rehearsal on a 4 CPU / 4 GiB cgroup.
+  All four 30 s workload controls pass; Casual 600/60 sustains the unchanged input
+  gate for 300 s, 700/70 is snapshot-degraded and 800/80 fails at 13.9668–17.1602
+  sends/s with 707 signed sequence gaps and zero restarts in retained worker logs.
+  Two 500/50 long scenarios end in natural victories, not continuous-Running PASSes.
+  A standard-library verifier recomputes 458 payloads, 30 cgroup summaries and ten
+  selected runs from 43 archived sources in normal and `python -S` modes. Keep #13
+  and RU x86_64-host/uplink/WAN/SLA acceptance open; production limits are unchanged.
+
+- Strengthen the leaderboard browser regression: require multiple distinct ratings,
+  exact API/DOM ordering and mandatory visible seasonal placement. Add a third
+  synthetic fixture and remove the projection-counter race. Fresh loopback passes
+  with ratings 1351/900 and `Калибровка 1/20`; 257 unit tests / 3 skips and typecheck
+  pass. Make every applicable S1–S12 row, including S9 reboot, release-blocking.
+
+- Refresh the RU release TODO against game `550d2827` and portal `ff8f501`.
+  Record the green game workflows, verified historical archives, remaining
+  leaderboard test coverage and S9 checklist ambiguity. Specify the evidence
+  required for isolated host capacity, WAN, recovery, devices and release.
+
+- Repair the current portal fixtures: synthetic browser profiles now satisfy the
+  existing ten-public-completion Ranked admission fixture before real settlement,
+  and the leaderboard browser test checks current-season placement counts/copy.
+  On game `5cd10d83` and portal `ff8f501`, RU production Next plus real loopback
+  Account API/PostgreSQL passes7 signed-directory checks and5 leaderboard/privacy
+  groups;257 unit tests and typecheck also pass. Archive exact source/binary hashes
+  and limits. Physical-device,WAN,RU-host,trust provisioning and release gates stay open.
+
+- Record the current RU release decision as NO SHIP with a dated S1–S12/P1–P9
+  readiness matrix. Separate successful PR packaging and loopback evidence from
+  versioned RU packages,host/publication/device acceptance,human review,isolated
+  sustained capacity/uplink,WAN/trust,independent recovery and C2/C4 decisions.
+  Update the current handoff without changing production or the62/5/1 finding count.
+
+- Verify exact Release `73651bc6` binaries on the shared Linux dev VPS for
+  three instrumented30s workloads:10vsBots/10arenas,10Ranked/1arena and
+  30mixed/12arenas all PASS with19.9941–19.9991 sends/s,exact rosters and0
+  signed sequence gaps/restarts. Release42657406745 succeeds on all four
+  platforms and supplies the matching bots/Ranked fixture. Archive a19-source,
+  133-payload-file recomputing packet and final cleanup. Mixed summed process
+  RSS peaks at549.64MiB (not PSS/cgroup usage), so the historical500MiB RU
+  setting remains unvalidated; isolated RU-host/uplink/sustained gates stay open.
+
+- Generalize the native loopback capacity runner beyond Casual: add explicit
+  Casual, Ranked, vs Bots and equal-shard mixed workloads; account for one arena
+  per Casual/Ranked shard but ten per ten-client vs Bots shard; validate exact
+  rosters, manifests, worker ports and signed-human metric endpoints. Ranked and
+  mixed require disclosed synthetic prior Casual receipts in disposable
+  `omoba_test`, never an organic-eligibility or settlement claim. Package the
+  matching Release qualification helper with `linux-capacity-bots`. All 19
+  capacity,72 Release and14 rehearsal tests pass. Small live15s loopback smoke
+  runs pass for10vsBots/10arenas,10Ranked/1arena and30mixed/12arenas with exact
+  rosters,healthy workers and0 sequence gaps/restarts. Archive19-source selected
+  evidence with a standalone recomputing verifier. Sustained actual/identical
+  RU-host and uplink acceptance have not run; #13 remains open.
+
+- Pin the archived 1000-client server-load verifier to a complete 15-file
+  historical source snapshot, including `public_bots_rehearsal.py`; remove every
+  current-checkout import and source-hash fallback. Normal recomputation and a
+  sandbox with every current source replaced and both Python helpers raising on
+  import pass for the complete 10/30 s and 1000/120 s evidence.
+
+- Extend the native capacity runner to15–300s with13/13 Python tests PASS and
+  archive two300-second60-client/six-arena Linux runs. Uninstrumented PASS sustains
+  19.5349–19.6209 sends/s; instrumented FAIL is retained at19.4589–19.5355/s.
+  Reconstruct356001 gameplay transforms and0 sequence gaps/restarts from the
+  rejected run's worker logs. One A/B does not identify metrics as the cause:
+  server CPU is72.27% versus72.46% without them. Verify20 selected files,exact
+  sources/artifacts,population,input/wire/resources and metric absence. Keep
+  actual/identical RU host,vs Bots/mixed,uplink,WAN and SLA acceptance open;
+  production configuration is unchanged.
+
+- Measure native Linux capacity in independent signed20Hz Casual shards on the
+  shared2-vCPU dev VPS.40/4arenas and60/6arenas pass120s;60 clients send
+  19.733–19.802/s with0 sequence gaps,72.77% server CPU and297.70MiB peak RSS.
+  Retain80/8arenas FAIL at15.963–16.599/s with7 gaps. Identify the older
+  single-process Node receive gate as a generator artifact through A/B and native
+  controls. Archive43 selected files with exact source/binary binding and a
+  recomputing verifier. Mark the old16MiB/arena RU formula unvalidated; do not
+  change the16-arena unit,nftables or production settings. Long soak,real/
+  identical RU host,vs Bots/mixed,uplink,WAN and SLA acceptance remain open.
+
+- Add opt-in per-worker signed-dispatch, gameplay Transform, complete snapshot
+  send and world-broadcast histograms. The capacity runner now rejects missing/
+  malformed metrics and sequence gaps/restarts. Instrumented loopback1000/120s
+  PASS:19.834–20.000 sends/s per peer,2712856 gameplay transforms,0 gaps/restarts,
+  34.868ms mean latest-transform age at snapshot and73.596ms mean broadcast gap.
+  Archive observation-time metric lines with a recomputing verifier; retain the
+  exact per-command-ACK/WAN/RU/SLA limits.562 server and12 Python tests PASS.
+
+- Move Release macOS packages from the retired `macos-14` GitHub runner to
+  `macos-15`; the old label cancelled jobs before checkout. Keep Apple-silicon
+  packaging unchanged and require a fresh PR package build. Pin the portal's
+  ranked Next+Chrome harnesses to the RU market: typecheck,257 unit PASS/3
+  expected skips,RU/global builds and13 browser checks pass on portal `37e705c`.
+
+- Buffer each complete native BOT_SAMPLE line before stdout, preserving exact
+  JSON/escaping and partial-write/error behavior. Reproduced streamed telemetry
+  stalls (64.48ms mean) no longer prevent the measured20Hz input profile:1000
+  signed AI peers/100 Casual arenas sustain120s, each19.711–20.001 transforms/s
+  within the unchanged gate. Add prepare/sign/encode/send and telemetry timing;
+  retain original rejected diagnostics and open latency/WAN/RU/release gates.
+
+
+- Preserve actual nonblocking20Hz full-population rejections and add bounded
+  producer wall/send-gap histograms with soak-only baseline differences. Separate
+  receive, session and navigation timing; record rare loop stalls without
+  attributing them to packet loss or claiming RU/SLA acceptance. Reject occupied
+  local ports clearly before SQL/process startup.38 harness/4 UDP/25 Python and
+  4 strict Clippy checks pass; all owned fixtures/processes are cleaned up.
+
+
+- Add measured signed movement input to loopback native capacity probes, with
+  cached Running snapshots, truthful send counters and a strict per-peer20Hz
+  gate. Preserve a rejected1000-client120s attempt (18.16–19.30Hz), then prepare
+  bounded nonblocking polling with library/real-UDP/Python/CLI/Clippy checks.
+  The new live repetition has not run. Save a complete next-agent checkpoint,
+  all six open PRs and existing decisions/remaining UI/physical/WAN/RU gates.
+
+
+- Verify current signed1000-peer/100-arena Casual population for120s using an
+  explicit coherent opt1 headless graph and restricted PG18.6/schema13/11 roles:
+  zero observed auth resets, healthy final workers and complete owned cleanup.
+  Preserve actual12.73Hz received cadence/CPU/egress and keep20Hz input, latency,
+  real RU and release gates open. Clarify that shared bootstrap sequence gaps
+  are not packet-loss measurements. No production source/configuration changes.
+
+- Fix native AI probe receive deadlines: an idle20ms poll no longer blocks for
+  the fixed200ms socket timeout. Fence public Career replies by current epoch
+  and sequence, matching the native game client; retain genuine auth-loss
+  recovery and anonymous stale/reset counters. Two subsequent1000-client runs
+  remain rejected before soak; preserve pre-teardown worker/exit observations
+  and keep capacity open. No production gameplay/auth/schema/timer changes.
+
+- Add per-peer producer-tick diagnostics to signed native load probes, retain
+  soak baselines and pre-cleanup owned-process exit codes. Current10/100-client
+  controls pass; a new1000-client attempt fails before all-Running acceptance,
+  so capacity remains open. Preserve exact compressed reports and rejection;
+  no production gameplay, authority, dependency or RU configuration changes.
+  Fix test cleanup so a denied group signal cannot skip other owned children;
+  preserve an explicit incomplete-cleanup error after bounded cleanup attempts.
+
+- Prove real terminal-file replay through a physically restored PG16 database:
+  SIGTERM with SQL offline leaves an fsynced receipt absent from source SQL;
+  automatic recovery preserves its complete payload with only saved becoming
+  true. A second public worker redelivers identical bytes with one played credit,
+  no Elo/XP and ordinary recovery deadlines before new assignment. All22 isolated
+  stages PASS; no production binary, dependency or RU setting changes.
+
+- Verify the same raised-limit/current-worker physical restore path on PG16.15:
+ 22 stages PASS, same authenticated Resume/adoption and221.63s crash recovery
+ with one Interrupted credit and no Elo/XP. Wait for actual writable promotion
+ after connection readiness. Preserve a complete next-agent handoff and open-PR
+ inventory; terminal-spool, independent-storage/RU and remaining release gates
+ stay open.
+
+- Verify the current public worker against a physically restored schema13 on
+  PG18.6: same authenticated human/worker/epoch Resume, lobby adoption, then real
+  SIGKILL/recovery with one Interrupted history entry and no Elo/XP. Twenty-two
+  isolated stages PASS. Raised source limits exposed a C4 candidate defect; its
+  revised review-only patch preserves five numeric recovery dimensions instead
+  of hardcoding20 connections. Current composed unit suite:176 pass/1 optional
+  skip. PG16 raised-limit/native, terminal-spool replay and real-RU gates remain.
+
+- Verify current career13/portal11 physical/WAL recovery with actual runtime
+  grants on PostgreSQL16.15 and18.6:20 isolated checks each PASS. Named/latest
+  restoration preserves exact ready ownership, queue discipline and rating/history;
+  runtime privilege restrictions survive. The C4 helper remains a review-only
+  candidate. Actual worker replay, independent off-host/RU recovery and approved
+  integration/rollout remain required.
+
+- Bound critical Ready/Flush completion buffering to256 and retain exact work/
+  generation/results while the live receiver is full. Pause job intake with timed
+  async yielding; lease, SQL, probe and health work continue. Health report v2
+  exposes the backlog and known closed recipients. Reproduced lease starvation
+  fails before and passes after the fix; all575 actual server cases (16 real-PG),
+  strict native checks and116 monitor/host-tool cases PASS. Current signed15s/
+  ten-human Running and real worker SIGTERM/durable-shutdown proofs PASS. Current
+  complete CI and the remaining physical/load/RU gates stay required.
+
+- Publish anonymous live career-worker health before any durable receipt:
+  authenticated schema/primary/runtime-permission preflight, staged queue/floor
+  work and failed result writes. Monitor missing/stale/corrupt reports and
+  persistent blockers, binding live worker epochs and preserving startup grace.
+  Separate startup connection and result-delivery retry clocks so restored SQL
+  becomes available without restart. All101 real-PG store/570 complete server
+  cases and116 monitor/host-tool cases PASS. Strengthen ready-check proof through
+  ten-human Running and fresh actual lobby/worker health. New full CI remains open.
+
+- Add schema13 bounded ready-receipt maintenance. Reconcile expired ownership
+  with the existing exact dodge policy, and prune only closed receipts older
+  than7 days without claims/unfinished matches. Preserve Resume, history and
+  discipline deduplication. Use indexed lookups, short lock/statement limits and
+  one timed async lobby task after reconnect warmup. All100 real-PG store and564
+  complete server cases PASS; runtime ACL/temp-shadow/upgrade/concurrency proofs
+  PASS; the actual default300s lobby scheduler prunes its isolated fixture after
+  304.71s. Paired migration/grants, current full CI and RU recovery remain gates.
+
+- Preserve the age of pending match results across identical durable retries;
+  anchor terminal alerts to their original end time. Monitor typed queue-dodge
+  journals with bounded reads, capacity/corruption checks and anonymous counts.
+  Explicitly release journal ownership despite duplicated/inherited descriptors,
+  fixing the reproduced CI reopen failure. All564 actual server cases (13 real-PG)
+  and108 monitor/host-tool cases PASS; strict native checks PASS. Fresh full CI,
+  safe receipt retention and the remaining RU gates are still required.
+
+- Require committed ready consent on every public new admission, including a
+  spool whose SQL allocation is missing. Validate Ranked queue/full roster/current
+  eligibility, preserve existing Resume and keep recovered receipt evidence until
+  matching SQL authority is restored. All92 real-PG store/559 actual server cases
+  and strict native checks PASS; fresh full CI and RU release gates remain open.
+
+- Import persisted legacy matchmaking penalty floors before new lobby admission.
+  Merge exact source counter/deadline bounds without inventing historical events,
+  reviving expired time or weakening shared penalties after restart. All87 real-PG
+  store/555 actual server cases and strict native checks PASS. Add signed two-lobby
+  legacy/restart regression to the existing PostgreSQL harness. Full current CI
+  and the coordinated RU snapshot-import rollout remain required.
+
+- Activate SQL-acknowledged ready consent in the actual lobby: bounded batched
+  answers, committed unanimity, exact15s timeout and shared cross-lobby discipline.
+  Release a failed draft reservation only after the dodge commits, preserving the
+  replacement party/FIFO journey. All551 server/82 real-PG store cases and local
+  signed two-lobby, party-replacement and maintenance/restart journeys PASS.
+  Add the cross-lobby journey to the existing full PostgreSQL harness. Fresh full
+  CI, current client/physical, multi-host faults and RU release gates remain open.
+- Repair the parent client test E0716 using static queue translation keys
+  (ba4bba35); fresh CI must confirm client execution.
+
+- Add schema12 durable ready ownership/seat claims with immutable membership,
+  exact15s publication, bound responses, transactional missed-answer discipline
+  and fault cancellation. All81 PG store/64 native backend cases and strict
+  native Clippy PASS. Lobby consent jobs/ACK activation and real two-host proof
+  remain open. Fix the parent CI party-leave failure's typed refusal/request-ID
+  loss; full unchanged journey rerun and engine/client verification are pending.
+
+- Enforce shared queue-dodge cooldowns on fresh searches and new durable starts
+  under profile locks. Preserve ordinary access/existing allocation recovery;
+  permanently retire refused starts and late terminal retries. Reuse localized
+  dodge notices. All72 PG store/63 native backend cases and strict native Clippy
+  PASS after fixing the restricted-role fixture grants. Fresh engine/client CI,
+  shared ready ownership/legacy floors and actual two-host/RU gates remain open.
+
+- Wire stable queue-dodge events through a separate durable journal to shared SQL,
+  retaining producer state until exact commit ACK. Corrupt penalty state closes
+  new search; storage failure preserves ready players and FIFO. All60 native
+  backend tests (7 actual PG), strict native Clippy and source-grant ACL proof
+  PASS. Engine integration/current full CI, global access/start/ready fences,
+  legacy floors and two-host/RU acceptance remain required.
+
+- Add schema11 shared queue-dodge storage with idempotent receipts, profile
+  locking and observation-anchored existing cooldown escalation. Six new real
+  PG18.6 cases/all69 store tests, strict test-target clippy and formatting PASS.
+  Runtime delivery/access/ready/start integration and two-host proof remain open;
+  local lobbies are not yet protected by this new store. Owned fixture is now11;
+  schema11 real recovery and standard full CI remain required before release.
+
+- Verify1f39528a native public-input audit in dev-client CI: all4 new cases PASS,
+  total1625 pass,0 failures,1 ignored. Full run remains separate/pending.
+
+- Add a desktop operator public-directory input audit using the exact native
+  trust parser before account/network/UI initialization. Bound stdin to16KiB,
+  require explicit contour, sanitize errors and distinguish input validity from
+  actual compiled trust. Reject malformed audit arguments without starting the
+  game. Four regressions added; formatting PASS, execution/full CI pending.
+  Explicit package configuration and actual live multi-host/RU proof stay open.
+
+- Preserve the C2 host-drain/update/rollback review patch, composed on unapplied
+  C4.28 new fault/CLI cases PASS;184 combined tests,1 expected skip. Correct stale
+  restart acknowledgement and operation history; report late marker-removal
+  uncertainty with nonzero exit. Backup/migration/start/health/timeout failures
+  keep admission paused. Integration approval and actual RU acceptance remain.
+
+- Verify corrected715a8117 full CI: all7 jobs and18 public-journey stages PASS;
+  dev-client1621/0/1, including all11 directory cases and full CJK coverage.
+  Inspect exact artifact checksum, unanimous15s ready/FIFO and all10 AI-played
+  Ranked rating/public/season receipts. Physical/RU acceptance remains open.
+
+- Preserve a tested15-file C4 host-kit review patch without applying production
+  package/tooling changes: signed logical plus encrypted physical/WAL backup,
+  escrow, retention, minute health/alerts and isolated restore drill. Actual
+  PG16/18 combined rehearsals each18 PASS;156 unit tests,1 expected skip.
+  Include an SFTP unknown-link-count parser fix found by the actual upload.
+  Owner approval and independent-storage/RU recovery remain required.
+
+- Verify encrypted pgBackRest/SFTP recovery in two isolated local containers:
+  actual career10/portal11 tables, exact named-point/latest rating/history,
+  missing/corrupt post-base WAL rejection, structured wrong-host-pin refusal and
+  archive-outage detection. Seven checks PASS; owned containers/network removed.
+  Preserve exact runnable proof and rejected earlier attempts. This does not
+  install pgBackRest or change production backup tooling; C4 integration and
+  actual independent-storage/RU acceptance remain open.
+
+- Execute all11 native-directory regression cases in CI: PASS. The broader
+  dev-client run reports1620 PASS,1 FAIL,1 ignored because the shipped CJK font
+  lacks two new policy-message glyphs. Rebuild that subset from the same upstream
+  face, preserve old coverage and add兼/维 (+844bytes); update the asset manifest.
+  Exact production Rust cmap/dictionary and package-budget checks PASS locally.
+  Current full corrected-source CI and rendered pixels remain required.
+
+- Bind configured native directory routing to the legal/region startup gate,
+  background refresh and exact-IP UDP. Preserve original lobby/worker ownership
+  across Resume, returns, reconnects and temporary authority failures; bound saved
+  hint reads and defer worker joins until authority is current. Apply maintenance,
+  full, update and compatibility policy before new queue interception, preserving
+  existing FIFO/cancel/recovery. Add localized Home/loading notices and Retry;
+  offline practice remains available. Nine networking and two UI/update cases
+  added; both strict client clippy variants, formatting and packaging PASS.
+  Test execution/current full CI are pending. Public trust remains
+  unprovisioned; no deployed routing or RU readiness is claimed.
+
+- Verify a7116c00 dev-client CI:1610 PASS,0 FAIL,1 ignored, including all5
+  compiled-trust and4 current-authority Resume regressions; both strict clippy
+  variants, Android, Python, bot and headless jobs PASS. The general gate fails
+  rustfmt on the renamed environment-setting test; apply the exact formatter
+  correction. A fresh complete corrected-source gate is required. Directory
+  startup/runtime integration remains work in progress, not release acceptance.
+
+- Align the compiled directory trust setting with the existing scrubbed
+  OMOBA_DEFAULT_ namespace. Preserve the release guard: ambient public trust
+  cannot leak into a package, and packaging needs an explicit reviewed input.
+  All29 DevContour packaging checks PASS locally; workflows/tooling unchanged.
+
+- Prepare build-scoped public directory trust/fallback configuration and an
+  operator-only compiled-binary audit. Refuse malformed/missing-region input,
+  weak public keys and runtime environment replacement; keep scoped cache paths.
+  Add current-authority lookup for saved Resume: exact owning lobby/worker IPs,
+  no new selection/DNS or use of expired secondary authority. Nine new regressions
+  added; formatting/source review PASS, execution pending CI. Actual startup/
+  queue/Resume wiring and live keys remain required.
+
+- Accept sourcef144c8f7 full7-job/18-stage CI42273662478 after independently
+  checking the complete artifact/hash, ready15s, repaired party departure,
+  Casual handoff continuation and all10 natural Ranked profile awards. Default
+  map,466.798s played, ±24 Elo, actual XP/public/season credit; synthetic eligibility
+  prerequisites disclosed. Later directory candidates need their current gates.
+
+- Prove physical-base/WAL point-in-time and latest-archive recovery on isolated
+  PostgreSQL18 with actual career10/portal11 tables: post-base rating/history
+  fixtures recover exactly, missing WAL refuses target recovery. Five checks
+  PASS; all owned clusters/data cleaned. Preserve runnable exact proof and logs.
+  Encrypted off-host PITR tooling/installation remains open; no RU change.
+
+- Prepare the native D1 admission coordinator: bounded background anonymous fetch,
+  exact signed IP routing, durable cache/history, pinned fallback, maintenance/
+  update/full/compatibility decisions, party affinity and retained Resume address.
+  An observed newer policy fences older cache after a failed write in the running
+  process. Nine new targeted cases actually PASS in full dev-client CI1601/0/1,
+  with strict clippy/Android compilation PASS. Startup/queue/UI binding and live
+  trust/routing activation remain required; complete current gate is pending.
+
+- Verify the Home required-catalog guard in the full dev-client CI:1592 cases
+  PASS,0 FAIL,1 ignored, including stale primary/Ranked/vs-Bots activations while
+  offline practice remains available. Exact new UI pixels are still pending.
+
+- Close finding28 after focused actual RU portal rendering: interrupted Ranked
+  without an award stays neutral with a dash, detail retains singular Ranked tag,
+  and personal rating is never invented. Three browser checks and257 portal units
+  PASS; inspected exact images/source/build identifiers preserved. Original68
+  ledger now62 done,5 partial,1 open; RU/physical/current full gates remain.
+
+- Prepare shared actual-glyph fitting for Home/Lobby/Draft labels and a separate
+  phone Home admission/update notice slot so Offline practice stays above the
+  navigation. Guard every new Home queue action against a required catalog update,
+  including stale activations. Formatting PASS; Rust/visual acceptance pending
+  because root disk is below the20GiB build threshold.
+
+- Fence live public-probe UDP traffic by the current peer address/port before
+  decoding. An OS-reused endpoint could receive old lobby views and corrupt the
+  new worker context. Real3-socket regression, failing negative control,5 policy
+  tests and full ten-player party departure/replacement process PASS, including
+  20 forced old-lobby replays. Fresh full CI remains required.
+
+- Confirm the existing Ranked unique-draft CI entrypoint also passes its new
+  Casual handoff continuation in the same real local lobby/DB: all7 assertions
+  PASS. Disclosed Ranked prerequisites remain synthetic; fresh full CI pending.
+
+- Fit Home nicknames using actual production glyph/ink bounds while preserving
+  the readable font and full profile value. Maximum-width W case now fits197px
+  inside210px with intact ellipsis; ordinary name remains unchanged. Preserve
+  exact native evidence and correct an earlier false-negative ellipsis reading.
+  Save glyph diagnostics and optional synthetic nickname in the repository skill;
+  widest Draft/Lobby names and compatibility-failure hint layout remain pending.
+
+- Preserve a Casual/vs-Bots arena when one player cancels during lobby handoff:
+  durable exact-seat release intent, owning-worker ACK, bot replacement and
+  admission fencing through start/freeze races. Keep immutable manifests and
+  Ranked FIFO/dodge behavior.4 new regressions,502 normal server tests, strict
+  clippy and actual10-human PostgreSQL journey PASS; fresh full branch CI pending.
+
+- Accept corrected full7-job CI42243761726 at6a61a7ac for existing fair-play/C5
+  software readiness. It includes PostgreSQL journeys, full client/core, Android
+  and gameplay harness; it is separate from deployment and subsequent gates.
+
+- Verify actual local lobby-restart warnings on native Home/group and solo
+  Searching: wait for real new-epoch party/toast state, preserve inspected images,
+  close row45. Repeat public party admission on the new build; Draft text now fits
+  its slots (UI-2). Home rating fits, but one nickname end still clips (UI-1 partial).
+  Current full branch CI and RU/physical release requirements remain open.
+
+- Expose actual party/profile/toast observations and bounded Home labels to the
+  opt-in Creator Loop recorder. Exclude hidden/zero-size controls from its button
+  inventory. Save the event-driven restart recipe and broader UI source hashes
+  in the repository skill; no synthetic view is used to certify a real journey.
+
+- Bound mobile Home nicknames to one line and reserve enough identity-chip height
+  for the rating. Fit Draft identity/class/role/status lines to their own slots
+  using the actual readable phone font minimum. RU strict clippy PASS; native
+  long-name image acceptance remains pending, so UI-1/UI-2 stay open.
+
+- Verify real native public Home→search→15s ready-check→single Draft for solo
+  and a two-client party created by actual UI invitation. All10 human seats join
+  one worker, and the party stays on one team. Row65 functional acceptance and
+  exact evidence are preserved; two newly observed long-nickname layout defects
+  stay open, along with full CI and RU/physical release gates.
+
+- Explicitly release the signed-directory cache OS lock before closing its file.
+  A parallel fork can otherwise retain the shared lock and cause false CacheBusy
+  on the next read. Real inherited-descriptor regression passes30 repetitions;
+  removing the fix fails deterministically. All10 integrated directory cases,
+  RU strict clippy and full Linux dev-client suite1591/0/1 PASS. Complete branch
+  PostgreSQL/core gates remain required.
+
+- Allow the Fair Play harness to render the actual Home shell. The missing menu
+  came from world-only automation classification, not failed offscreen rendering.
+  Existing classification regression, strict RU clippy and native build PASS;
+  inspected RU852×393 Home/restarted-party warning is preserved. Real solo/party
+  admission remains a separate gate. Current CI client cache-lock failure is
+  recorded for investigation; the full branch gate is not green.
+
+- Preserve six inspected native offscreen fair-play images and exact source/
+  binary/PNG hashes: remake entry/availability, both44px vote prompts, real first-
+  match guide dismissal and coherent remake/surrender results. New Home fixture
+  is rejected for missing content. C5 visuals pass; corrected full branch CI and
+  other release requirements remain pending.
+
+- Save the verified locked-Mac native capture recipe and a standard-library
+  single-scene runner in the repository's OMOBA UI skill. It uses isolated RU
+  fixture settings/closed loopback endpoints and keeps failures/provenance;
+  validates offscreen/native readback before manual image acceptance. Skill
+  validation and actual surrender/guide-dismiss/menu/vote captures pass.
+
+- Add explicit desktop QA rendering to an image without an OS window. Retain
+  production main-camera/UI routing and virtual window metrics; preserve preview
+  image targets and existing capture gates. RU strict clippy/build,2 camera/opt-in
+  regressions and5 screen-map checks PASS. Actual locked-Mac RU852×393 remake,
+  surrender, vote and guide-dismiss frames are inspected; failed Home fixture
+  remains rejected. Normal launch and mobile/physical acceptance stay separate.
+
+- Classify native directory DNS fixtures as raw protocol literals under the
+  existing localization-scanner convention. Fixes the1ab44e5a CI key-shaped
+  literal failure without changing host values, translations or the guard.
+  The unchanged compiled source-scan test now passes against current files.
+
+- Correct the remake presentation fixture to avoid supplying a contradictory
+  Victory snapshot with a winner-less Remade receipt. Keep production outcome
+  fencing intact; extend its conflict test to Remade. All18 post-match cases and
+  strict client test-target clippy PASS. Preserve rejected result/black-window
+  attempts; a separate no-window texture-render diagnostic works, but actual
+  game integration/build/pixel acceptance remains pending.
+
+- Add independent native directory signature/authority checks and a durable
+  exact-byte cache. Expired history still fences rollback and changed payloads
+  reusing a sequence; corrupt state and backwards clocks fail closed. A stable
+  OS lock and synced atomic replacement protect concurrent processes. All9
+  native/9 endpoint cases,18 post-match cases and strict client test-target
+  clippy PASS; no live pins/routing were activated or dependencies added.
+
+- Add native anonymous game-directory transport using the account region's
+  fixed HTTPS portal, no ambient service override/session/cookies, no redirects,
+  bounded JSON response streaming and total/connect deadlines. All4 real local
+  HTTP cases and strict RU passport all-target clippy PASS. Independent native
+  pin/cache/selection integration is still required before player activation.
+
+- Add opt-in anonymous signed-directory HTTP delivery in Account API and the
+  regional portal. Verify bounded regular signed files against the configured
+  public pin/build scope; forward exact bytes without browser account material,
+  and support atomic replacement without restarts.4 API and7 real API/PostgreSQL/
+  production Next checks PASS; portal257 tests PASS/3 expected skips, typecheck
+  and RU production build PASS. Native fetch/cache/routing and live publication
+  remain pending; no service or key was provisioned.
+- Verify the actual decorator/20-modal-cycle regression in e85875ba CI:1579
+  client tests PASS,1 ignored. Preserve sanitized evidence; fixed-state native
+  screenshots remain pending and the redundant local compile was stopped.
+
+- Native e85875ba RU build and strict client/test-target clippy PASS; fixed-state
+  pixel acceptance and the real decorator regression are still pending. Preserve
+  the independently checked directory2a45600c full7-job/18-stage CI summary:
+ 546050ms Ranked with exact all-ten settlement,15s consent and recovery gates.
+
+- Flush vote/menu replacement after current pause navigation and before UI-kit
+  decoration, so opening a modal cannot leave queued decoration targeting removed
+  vote buttons. Add a real decorator/modal-cycle regression with same-frame skins
+  and a preserved vote request. Strict RU client/test-target clippy PASS; targeted
+  test execution and native recapture are in progress, not final crash acceptance.
+- Strengthen focused captures with an actual visible screen root and clear modal/
+  help state; re-enter the screen and create the result fixture's local player.
+  This prevents accepting a backdrop/covered menu or waiting for an absent player.
+
+- Verify/preserve native C7 Taken feedback, Search restart notice and returning-
+  user remake/surrender menu/prompts; exact PNGs and hashes in the fair-play
+  evidence pack. C7 software criterion is complete. Reject the guide-obscured
+  menu, incomplete Home and missing-player result attempt. Default-guide prompt
+  initialization twice exposed an entity-despawn crash; render-order regression/
+  fix, stricter modal/root gates and corrected result fixture are in verification.
+
+- Add one-state opt-in native QA for Taken feedback, party/search restart
+  notifications, remake/surrender voting and result presentation. It removes
+  transport before supplying labelled synthetic views; required localized text,
+  fitting controls, vote touch targets and color readback gate the capture.
+  Strict RU client/test-target clippy and all5 screen-map checks PASS. Native
+  build and actual pixel acceptance are in progress; no finding is closed yet.
+
+- Independently verify93a769ab complete CI:all7 jobs/18 public-PG stages PASS.
+  Actual463497ms Ranked victory has exact all-ten rating/XP/history/season
+  updates and zeroAFK/disconnection;15s consent, party recovery, actual10th
+  eligibility/noVK, crash, unique picks, remake and surrender pass. Preserve
+  sanitized artifact identity/proof in docs/evidence/ranked-2026-11-06.
+  New directory checkpoint2a45600c has its own CI running; RU rollout remains open.
+
+- Add the bounded version1 signed game-directory contract, exact IP targets,
+  scope/expiry/sequence and compatible weighted admission policy, plus an
+  offline Ed25519 signer/verifier.197 shared/2 operator and9 independent
+  Node/process checks PASS; strict checks PASS. No new dependency or runtime
+  activation. Client/cache/fallback/publication and multi-host proof remain open.
+
+- Complete findings35/39 software acceptance: native interseason Home/personal
+  demotion and RU/EN profile badges are verified; portal RU notices and EN
+  seasonal/privacy/legacy checks PASS. Preserve15 accepted unmodified PNGs and
+  source/SHA256 metadata in docs/evidence/ranked-2026-11-06 for review. Rejected
+  captures remain rejected; hardware, other findings and RU rollout stay open.
+
+- Keep process-rehearsal clients off lobby/future-worker UDP ports, with bounded
+  rebinding and no sends before an accepted bind. Diagnose local ports/retries.
+  Full CIa877 had22 AddrInUse workers before reaching its party-disconnect test;
+  preserve that failed artifact. Two real UDP regressions and the exact signed
+  party-disconnect rehearsal PASS; full18-stage CI remains required.
+- Current c826 native CI executes all1578 client tests PASS, including the new
+  interseason Home guards. RU build is ready; two native pixels still await an
+  unlocked Mac. Portal ccee8fa rank-change banners pass250 tests plus focused
+  browser/build/type checks. Release and hardware gates remain open.
+
+- Show a localized interseason Ranked state on Home from optional server-clock
+  availability, disable Ranked and refuse stale activations while leaving Casual
+  available. Hint-only changes refresh the screen; legacy omission is supported.
+  193 shared/498 server cases and strict RU native test-target clippy PASS;
+  new Home execution and actual pixels remain pending committed verification.
+- Capture seasonal result notices only while the expected text is visible and
+  the toast has settled. Missing notices fail rather than passing a40-frame wait
+  that can outlive the notification on a slow GPU. No toast duration change.
+
+- Refresh already connected players' profile/rating/placements/badge after an
+  operator season rollover through the existing bounded access read. Read the
+  snapshot atomically with key status, adopt only a newer season, and reject
+  older own-profile action/settlement replies. Preserve same-season settled
+  awards, monotonic public eligibility, session correlation and revocation. All63 real-PostgreSQL store cases,
+  497 server unit cases, the affected concurrent PostgreSQL access case and
+  strict store/server all-target clippy PASS; full current-source CI is pending.
+- Screen-registry repair passes CI Python tooling. Local complete tooling passes
+  658 cases (9 skips), iOS62 and Android7 with isolated handoff/loopback settings.
+  Demotion pixels prove personal defeat/-32/zeroXP, but the transient notice
+  still needs a state-gated capture; the missing notice is not counted as PASS.
+
+- Register the shared seasonal QA fixture in the frontend/career screen map,
+  preserving source-coverage validation. Current native CI passes all1578 client
+  tests (one ignored), Android and strict checks; the Python registry repair is
+  verified separately. The locked-screen demotion image remains rejected.
+
+- Add opt-in seasonal data to the existing native QA paths and restrict seasonal
+  career capture to the three changed profile/friend views. Six RU852x393 native
+  pixel checks PASS: calibrated and reset Home, own/visited/friend badges and
+  promotion. Demotion is being recaptured with a coherent personal-leave penalty.
+  The driver uses no live server for Result QA, as that fixture requires. Repair
+  the stale Home expectation: a calibrated1199 profile shows Silver. Strict RU
+  native test-target clippy PASS; current final native CI remains required.
+- Independently verify schema10 core236d1c13 full CI42168782869:all7 jobs and18
+  public stages PASS. Actual Rankedf7a85df6eadb8fd9c071bf1a6bdbea1f (454307ms),
+  exact all-ten Elo/XP/history/current-season counters and zeroAFK/disconnection.
+  Real tenth-public/noVK and early crash PASS. A fresh local full PostgreSQL run
+  passes669 cases, and current public v3 passes all18 stages after setup repair.
+
+- Prepare ready-check probe qualification fixtures before issuing Search, including
+  the replacement player. Bound setup separately while preserving the real15s
+  consent window and all no-worker/FIFO/late-accept assertions. Real signed local
+  ready-check scenario and queue policy/boundary checks PASS; full public rerun
+  remains required. This changes test setup only, not production queue deadlines.
+
+- Add native seasonal tier/placement badges on own, visited and friend profiles;
+  Home shows the calibrated tier or current-season calibration. Profile windows
+  and earned historical badges stay distinct from lifetime totals. Scoped,
+  deduplicated post-match notices cover calibration, promotion and demotion,
+  including personal penalty demotions after an interrupted match. Honest-match
+  guards prevent celebrating an abandonment. RU/EN/ZH copy and eight additional
+  CJK display glyphs included. Strict native test-target clippy, formatting and
+  asset/cmap checks PASS; test execution and native pixels remain pending.
+
+- Repair the schema10 CI font-coverage failure by adding Chinese休/季/闲 to
+  the display subset, preserving all old codepoints (+1680 bytes). Update the
+  installed asset budget; cmap/dictionary and asset consistency checks PASS.
+  Native test execution is pending the next CI.
+
+- Serve current-season progress and the latest ten archived seasons under existing
+  profile/statistics privacy rules, including self reads through the restricted
+  portal role. Rank the ladder by current-season calibration/counts while keeping
+  lifetime totals separate; ladder listing does not disclose historical badges.
+  All11 Account API PostgreSQL cases and strict store/API all-target clippy PASS.
+  The first full schema10 PostgreSQL run stopped on a device-test startup503;
+  unchanged focused migration and all8 device cases subsequently PASS. Its cause
+  remains unconfirmed; a complete current-source/public-game rerun is required.
+
+- Apply owner-approved schema10 runtime permission patch: metadata/portal archive
+  reads and immutable game allocation inserts, with operator season sequence
+  access revoked from runtimes. Closing/archiving/reset writes remain operator
+  only. Restricted-role/temp-shadow and post-reset gameplay checks PASS; fresh
+  full installation and public journeys remain required. No production action.
+
+- Implement local schema10 seasonal progress, durable allocation identity and an
+  explicit atomic/idempotent archive/badge/reset operator. Preserve lifetime/XP/
+  public eligibility, fence old recovery and expired consent, and use seasonal
+  placement K/cohorts. Protected registration coordinates with close without
+  runtime reset privileges.193 shared,63 store/matching,64 lobby,33 harness and
+  12 Python checks PASS; strict affected/native test-target clippy and actual
+  isolated operator CLI proof PASS. Deployment-role approval, API/native/portal
+  presentation and current full public/visual/CI gates remain required.
+- Independently recheck ddc59e1d CI42153618597:all7 jobs/18 stages PASS. Verified
+  artifact13475806511, exact all-ten Ranked awards/history, zeroAFK/disconnection,
+  real tenth-public/noVK and early-crash recovery. This predates schema10.
+
+- Prepare a distinct current-season profile/badge contract and migration010
+  draft with immutable season history and registration/rollover coordination.
+  193 shared tests, five-crate strict clippy and a rolled-back local PostgreSQL
+  migration/invariant probe PASS. Runtime remains schema9; season close,
+  settlement/admission integration, role grants and presentation remain pending.
+
+- Independently verify repeated1000-client gameplay on frozen78070b27:100 arenas,
+  ten signed native AI peers each, zero server bots and60s all-playing PASS.
+  Current hashes, manifests, unique identities, snapshots and cleanup verified;
+  temporary owned test PG restored100. Received wire p95=39347B/player/s;
+  complete snapshots median8.64Hz. Latency/cadence, sustained WAN and RU host
+  acceptance remain open; this is a bounded local proof.
+
+- Retain declared touch/mouse/mixed/unknown controls in immutable match receipts,
+  preserving checkpoint evidence across recovery and settlement retry. Native
+  signed movement reports selected controls; the queue stays shared. Add a
+  bounded anonymous wins/sample-size query and read-only reporting example.
+  192 shared,17 fair-play,55 real PG/store/matching and33 harness cases PASS;
+  native test-target check, strict native clippy and six affected-crate all-target
+  clippy PASS. Season/UI/full CI remain
+  required. Preserve the1000-client v5 failure (24 silent stale paths) and add
+  bounded same-key Home-path recovery to the disposable test actor.
+
+- Correct playing-capacity warmup telemetry: report authentication independently
+  of world snapshots and require fresh matching-nonce acknowledgements. Preserve
+  the v4 timeout caused by stale world-dependent observations.32 harness unit,
+  1 CLI process,16 Python cases and strict harness clippy PASS; actual ten-client
+  pilot passes15s all-playing. Fresh1000-client repeat remains pending.
+
+- Start playing-capacity measurement after every ordinary sign-in is fresh,
+  error-free and stable for5s; release queue intent through a loopback-only
+  actor marker. Record login/release/play timings separately. This prevents
+  delayed sign-ups from consuming a1000-human benchmark's finite seats through
+  ordinary Casual bot fill.31 harness/1 CLI boundary/6 Python checks, strict
+  clippy and actual ten-client pilot PASS;1000 repeat remains pending.
+- Protocol16 compression checkpoint ebf3a1fa passes all7 CI jobs/18 public stages
+  in42139546925. Independent artifact recheck verifies Ranked base victory,
+  exact all-ten awards/history, zeroAFK/disconnection and real tenth/noVK gate.
+
+- Recover the public rehearsal client after a rejected challenge or explicit
+  loss of account authority; request a fresh challenge/path with the same key,
+  preserve retry pacing and reject foreign epochs. Recognize the server's
+  alternate revoked-device wording in native scoped recovery. Server signature,
+  expiry and refusal enforcement stays intact.191 shared,14 matching,30 harness
+  and5 capacity-tool checks plus strict affected-crate clippy pass; native test
+  targets typecheck. Repeated1000-player acceptance and full CI remain required.
+
+- Verify protocol16 full Ranked base victory with exact all-ten awards/history
+  and zeroAFK/disconnection (469460ms gameplay). The60s1000-playing trial lowers
+  measured p95 wire traffic to42014B/player/s but received snapshots remain9.54Hz;
+  a repeat exposes stale synthetic-client auth recovery and fails acceptance.
+  Temporary owned test DB connections are restored to100; both failures remain
+  recorded. Recovery/performance/committed CI and RU verification remain open.
+- Start shared approved season/input primitives: tier boundaries,20 placements,
+  90-day duration, integer reset rounding toward1000 and mixed-control tracking.
+  191 shared tests pass; persistence, rollover and UI are not implemented yet.
+
+- Add owner-approved lossless world-snapshot compression under protocol16. Keep
+  the1200-byte UDP budget, exact JSON bytes, plain control packets and snapshot
+  cadence; bound decompression to65507 bytes and reject incomplete/trailing/
+  corrupted streams. Update native/harness shared codec and Python/Node observers.
+  No package identities added or removed.187 shared,654 isolated Python tooling,
+  exact40-frame cross-language corpus and malformed-stream checks PASS; actual
+  gameplay/load and committed full CI remain pending.656 real PG/API/server,
+  28 harness unit and5 actual UDP checks and strict affected-crate clippy also
+  PASS; signed15s ready/requeue lifecycle passes on protocol16.
+- Fix the locked Ranked caption overflowing the half-width phone button found
+  in current native RU852×393 capture; use shorter progress text and compact
+  two-line queue labels. Both corrected current native RU852×393 Home captures PASS (0/10 disabled,
+  10/10 enabled/rating); C6 software acceptance is complete.
+
+- Record owner-approved product rules:20 Ranked placement games, six rating
+  tiers,90-day seasons with archived results/badges and a half-distance reset
+  toward1000; one Ranked queue for touch/mouse with participant input statistics.
+  Implementation remains pending; no live ratings or season state changed.
+  Also approve the pinned lossless snapshot compression dependency; production
+  transport and actual-game/load verification follow as a separate checkpoint.
+
+- Add runtime maintenance drain with bounded operator-marker polling, exact
+  operation acknowledgement and localized search refusal. Pause all ready
+  checks without dodge penalties, preserve party/FIFO, keep live workers and
+  Resume, then require fresh consent.656 real PG/API/server tests,6 new drain
+  tests, native retry/localization and actual signed pause/restart/adoption
+  rehearsal PASS. Host ship/wait/cancel integration and full CI remain required.
+- Keep native rehearsal actors sending deliberate ordinary held movement/aim
+  on fresh alive decisions. A prior full-CI Ranked victory correctly failed
+  after an actor went AFK; production penalties and exact Elo checks remain.
+  Retain result diagnostics before verification and explicitly reject AFK/
+  abandonment/disconnection in the ordinary victory proof. Make the Unicode
+  account-search fixture unique across repeated/load tests.9 oracle tests and
+  current656 PG/API/server checks PASS. Fresh standard-map Ranked victory
+  verifies all ten exact awards/history with zero AFK/disconnection in435.92s
+  including setup; committed full CI remains pending.
+
+- Add guarded native playing-load measurement with exact UDP counters, separate
+  generator/server resources and captured worker receipts. Actual1000 signed
+  clients occupy100 Casual arenas with zero server bots for20s after all are
+  Running; source/binary/roster identities independently rechecked. On M4 Pro,
+  servers use5.26 cores/1536.55MiB and the generator2.25 cores/582.27MiB. Received
+  snapshots median11.72Hz (below nominal20Hz); egress/latency, longer soak and
+  RU capacity remain open. Counter fixture,28 harness tests,5 probe policy tests
+  and strict harness clippy PASS. No production protocol/rule/config change.
+
+- Update the existing Rustls lock entry from0.23.25 to0.23.46 for four upstream
+  TLS security advisories. No new packages, feature changes or TLS validation
+  bypasses. All650 real PG/API/server tests and strict affected-crate clippy
+  pass; committed full CI remains required. Align the old LR-37 requirements
+  with the approved ten-public-match Ranked gate and optional VK linking.
+
+- Read supporter grants, points and aura preference with one database statement,
+  preserving one snapshot and explicit opt-out behavior. The independent legacy
+  oracle and650 real PG/API/server tests pass. Actual signed1000-client queue
+  and all1000 fresh presence rows PASS without Busy or ServerFull; response gaps
+  p99=295ms on the local Mac. Add a guarded raw transport boundary probe:
+  2048 admitted paths and correlated72-byte ServerFull for the2049th (495-byte
+  probe), covering the combined global/per-source boundary.100 actual arenas
+  also PASS with100 connected humans/900 server bots; the temporary local DB
+  connection limit is restored. The separate native1000-playing follow-up is
+  recorded above; egress reduction and RU capacity/deployment remain required. No schema/protocol/dependency or
+  production configuration changes.
+
+- Bound Ranked cohort selection to rating sweeps and a fixed set of oldest party
+  sizes, preserving exact5+5 packing, FIFO, shared widening and mandatory anchors
+  (#21). Queue counters use common indexed snapshots; the exact capacity line is
+  recomputed only from tick when membership/policy/source capacity changes.
+  Immediate lobby account replies address their requester without resetting the
+  periodic broadcast clock. Independent brute-force/randomized regressions,
+  56 focused queue tests,649 real PG/API/server tests and server clippy pass.
+  Pace authorization refresh across bounded jobs so congested clients do not
+  lose their session; preserve the original fail-closed deadline. Deduplicate
+  profile presence and submit it in512-entry store batches. Five new refresh/
+  presence regressions and three read-batch/barrier/real-PG revocation tests
+  pass. Consecutive account reads use up to4 existing lobby connections,
+  preserving write barriers and older parked operations. Actual signed
+  ready/party/draft journeys and ten-client queue/presence checks pass.
+  Lobby maintenance runs once per tick while verified consent/cancel remains
+  immediate; lobby receive uses8ms/128 packets and workers retain2ms/128.
+  All1000 probe targets reach Waiting with authentication intact, but final
+  Busy messages still fail acceptance in that saved candidate. Its full7-job/
+  18-stage CI42116356054 now passes; the follow-up query fix above passes actual
+  1000 queue/presence. No1000-playing or RU capacity claim is made.
+
+- Share bounded worker status/cancellation snapshots across a whole player-view
+  batch (#54), preserving fresh search/cancel admission and monotonic observed
+  settlement. A late cancel after terminal completion creates no dodge penalty;
+  never-played survivors retain FIFO order. Retained terminal receipts sharing
+  a reused port no longer count as extra live arenas at restart. Final623 PG/API/
+  server tests and112 runtime checks pass. Signed crash recovery at capacity1
+  reuses the same port in2.55s; lifecycle/reconnect tests pass. Committed full-CI
+  acceptance passes: all7 jobs/18 public and PG stages, including ten-human
+  capacity1 recovery with same-port reassignment in2.45s.
+- Release a finished arena's port immediately after this lobby observes its exact
+  child exit (#53). Live children and adopted processes without exit proof keep
+  their safety hold. Tests cover101 consecutive arenas and restart; final actual
+  capacity1 recovery verifies same-port reassignment before the old35s hold.
+  Committed full7-job/18-stage CI42097650577 passes.
+- Verify the committed Ranked access package in full CI: all seven jobs/17 public
+  and PG stages pass, including a real tenth public completion and independent
+  standard-map Ranked base victory with exact awards/history for all ten humans.
+
+- Enforce distinct hero classes within a public team (C7): reject conflicting
+  Select/Lock and delayed ownership replies, allow opposing mirror picks, and
+  free a class on unlock. Timeout and legacy opt-out paths preserve valid human
+  locks and give other players/bots available canonical classes before asset
+  readiness and durable allocation. Native class tiles show localized Taken
+  state, with disabled controls and stale-action guards. Actual signed ten-human
+  draft-to-play proof,618 real PG/API/server tests and28 harness tests pass.
+  Fixture preparation stays asynchronous so UDP sessions keep heartbeats.
+  Thirteen focused native draft tests and final all-target client clippy pass;
+  committed full7-job/18-stage CI42090248772 passes; fresh native visual
+  acceptance remains pending.
+
+- Update the Home queue regression's expected Ranked label for its explicitly
+  qualified profile: the button includes rating1000. The previous expectation
+  described a profile-less screen and would fail with the new eligibility fixture.
+
+- Require ten completed public matches for Ranked, without mandatory VK.
+  Track a separate authoritative counter with schema9 historical backfill and
+  exactly-once settlement; check fresh search progress and locked new allocation.
+  Existing allocated seats remain resumable. Home and queue refusals show progress.
+  Remakes, interruptions, custom/offline practice and own proved leaves/AFK do
+  not count; ordinary completed surrender does. Local612PG/API/server,184shared,
+  27harness and13Python tests pass, with headless/native clippy and installed UI
+  assets checked. Actual public admission proof passes: wire denial0/9,
+  ordinary standard-map play and surrender after600140ms, saved completion10,
+  fresh Ranked acceptance10, with no VK link. Prior nine synthetic receipts are
+  disclosed. Full7-job/17-stage CI42083864979 passes; fresh native visual
+  proof remains pending. Synthetic warmup receipts in process tests
+  are disclosed and restricted to a separate loopback-omoba_test-only helper.
+
+- Fix two server Clippy findings caught by C5 CI: express vote-deadline terminal
+  handling with `if let`. The repeat full CI42074945255 passes all seven jobs;
+  all15 public/PG journeys and both native vote press tests pass. Native visual
+  acceptance remains pending.
+
+- Fix the AFK notice QA identifier: the new UI test could not find the rendered
+  label by its stable ID. CI caught this after typechecking; the notice now carries
+  the ID used by the existing test. All seven repeat CI jobs and all 13 complete
+  public/PG journeys pass for 0db576fc.
+
+- Add server-owned remake/surrender votes and native menu/prompt controls.
+  Remake is available before 3 minutes after a 90-second teammate absence;
+  surrender starts at 10 minutes. Votes last 30 seconds with a 120-second
+  failed-vote cooldown. Innocent remakes do not change ordinary career totals;
+  a proved ranked leaver keeps the individual penalty. Protocol 15/core schema 8.
+  Local verification: 608 real PostgreSQL tests, 183 shared tests, 12 vote
+  runtime/policy tests and all-target native clippy pass. Both real public
+  process scenarios pass, including all ten saved profiles/histories and
+  stale/opponent vote rejection. Native kit execution/full CI and native visual
+  proof remain pending. Portal presentation is saved in 8f6314b.
+
+- Move the compact Home build label away from the bottom navigation. An actual
+  unlocked RU 852×393 capture verified rating/placement display and exposed the
+  overlap; the changed label position still needs a fresh native capture.
+
+- Account for human connected/disconnected and AI-control
+  time, with 90-second AFK/reconnect grace and sticky abandon status. Winning
+  leavers lose rating and earn no XP; innocent losing teammates receive half
+  the normal loss. PostgreSQL settlement records one incident and a persistent
+  5-minute / 30-minute / 24-hour cooldown in the same transaction. Local store
+  tests pass, including all 593 PostgreSQL/API/store/server cases. Native client
+  tests and all 13 complete journeys pass in CI 42061098787. Player-caused
+  unattended shutdown still penalizes proved abandons; host failure and duration
+  caps are exempt. Native and portal history distinguish personal forfeits from
+  team victory; API filtering, profile counters and rating graphs include the
+  same penalty. Finding #34 is verified; production deployment remains pending.
+
+- Correlate probe ready consent with the current search so a retained old view
+  cannot starve search refresh and falsely penalize reconnecting survivors.
+  The party scenario exercises this race for all ten replacement clients.
+
+- Calibrate each player's first 20 rated matches with K=48, then use K=32.
+  Choose the coefficient from the locked pre-settlement profile, independently
+  for mixed-experience rosters. The full Ranked rehearsal checks exact awards;
+  boundary, independent clamping and idempotent settlement are covered (#35).
+
+- Public solo and party queues enter search directly with the profile card's
+  preferred class and valid avatar; the allocated draft owns hero selection.
+  Offline practice keeps its picker (#65).
+- Home shows rating and the first 20 ranked matches on phones, links the
+  trusted regional leaderboard and shows rating on the Ranked button. Placement
+  count changes refresh the card even when rating is unchanged (#39).
+- Lobby reconnection announces lost groups and restarted solo searches globally,
+  including after stale party UI expired, once per new server epoch (#45).
+- Preserve search age through mobile pauses of less than 60 seconds. Explicit
+  match acceptance still expires after exactly 15 seconds; longer silent search
+  entries expire at 60 seconds. Foreground mobile search/draft/loading/play keeps
+  the screen awake. A long resume refreshes the same search before displaying
+  ready state; live unanswered checks sound once and vibrate on iOS/Android (C3).
+  Android vibration respects system haptic settings and safely tolerates an
+  unavailable vibrator; it uses the already pinned JNI package.
+  The process gate verifies retained FIFO after a 30-second pause and eventual
+  60-second expiry despite continued signed Home heartbeats.
+
+- Verify the native Russian 15-second match confirmation at 852×393: visible
+  acceptance count, countdown and separate Accept/Decline controls. This is a
+  desktop-rendered phone viewport; physical mobile checks remain separate.
+
+- Add `make test-postgres-harness`: fresh API registration/device enrollment,
+  300-client restart admission, native signed gameplay/reconnect, all public
+  readiness/recovery/party scenarios and a full standard-rules Ranked win.
+  Both native tests accept the general disposable database setting and reject
+  unsafe overrides. Registration peers explicitly answer the 15-second ready
+  check. Temporary private keys are removed and filtered-out tests cannot pass
+  silently. CI passes all 13 stages and retains diagnostics without private keys (#31).
+
+- Ranked draft exits now persist an exact profile/session cancellation even
+  when the account cancellation packet is lost or throttled. Retired unplayed
+  workers repeat the return-to-search signal without simulating gameplay;
+  join deadlines also retire the worker. Nine survivors keep FIFO age and
+  party membership, with no unplayed credit or collateral dodge penalties.
+  Public process probes cover explicit Leave and silent disconnect (#43).
+- The public probe ignores queued replies from its previous lobby socket after
+  worker handoff. A deterministic stale-callback fixture guards authentication;
+  failures print bounded client/draft/worker diagnostics for CI.
+
+- Allocated workers accept an explicit rehearsal map only when both lobby and
+  worker bind loopback; exposed listeners ignore it. A fast custom-map objective
+  run verifies saved Victory with zero rating/XP, separately from the real
+  standard-rules Ranked win. Existing local overrides remain stripped (#42).
+
+- Headless fill clients can join the signed public lobby (`bots --public`),
+  explicitly accept ready checks, authenticate again at the assigned worker,
+  lock/load their hero and play with the existing legal lane AI. Throwaway keys
+  stay in memory. `--exit-after-result` waits for durable results and each
+  profile's history; an isolated loopback rehearsal checks all ten Ranked
+  profiles, Elo and XP without changing map or gameplay rules (#40, #14).
+
+- Commit gameplay activation to PostgreSQL before combat or income begins,
+  separately from the allocation acknowledgement. A crash in the first seconds
+  now recovers a played Interrupted match; an explicit pre-start cancellation
+  racing the activation ACK still settles without career credit. The public
+  probe covers every profile/history of a ten-human Ranked roster and supports
+  an early crash before the ordinary ten-second checkpoint (#27, #41).
+
+- Server SIGTERM/SIGINT handling finalizes an interrupted/aborted round and
+  waits for a generation-bound fsync acknowledgement before exit, with a
+  15-second stop budget. Lobby shutdown preserves independently running workers.
+
+- RU monitor detects terminal result receipts pending for at least five minutes
+  in lobby and worker outboxes, including unreadable receipts and bounded-scan
+  overflow. Active match checkpoints do not trigger settlement alerts (C9).
+
+- Match confirmation: every human has 15 seconds to accept this exact roster.
+  No worker is spawned before unanimous acceptance; a timeout returns accepted
+  players with their original queue age. Declines and missed confirmations have
+  a persisted host-local cooldown (60/300/900/3600 seconds within 24 hours).
+  Protocol 13 adds the signed ready answer and recipient-specific ready state;
+  native client and server must ship together.
+- Unplayed draft/loading allocations settle without matches, XP, rating,
+  history or analytics credit. Casual loading timeouts replace only missing
+  humans with bots while keeping survivor picks; Ranked timeouts abort for
+  re-search. Draft shows the join deadline, Loading names missing players.
+
+- Public groups now report who has not joined the search and continue with
+  present members after 60 seconds without losing queue age (#18). Exact
+  bounded two-team packing finds valid rosters such as 3+2 versus 3+2 behind
+  older parties of four, instead of starving a feasible full match (#29).
+
+- Product-completion work now tracks every remaining lobby finding and critic
+  item sequentially in `docs/plans/TODO-LOBBY-2026-11-05.md`, including the
+  previously deferred ready-check, fair-play, recovery and scaling work.
+
+- Matchmaking readiness for the RU launch (LR-32 minimum, LR-35, LR-47, ADR-027):
+  an allocation that ends before its match starts re-queues the other humans
+  with their place and the client searches again with a notice; cancelling a
+  found Ranked match costs a 60 s cooldown; a worker nobody reached aborts after
+  60 s and a silent worker is killed after 20 s. The Ranked window widens with
+  the wait (300 → 600 points, brackets merge at 5 min; parties stay one cohort).
+  Ready 5v5 rosters take a scarce arena before solo bot games. Lobby caps:
+  `OMOBA_LOBBY_MAX_WAITING` (1024), 4096 recent requests (`lobby_busy`), 2048
+  endpoints/career clients, per-IP refusals answer `server_full`. Party views
+  are no longer rebuilt on every presence heartbeat; party refusals, lobby
+  failure codes, prematch resets and `not_completed` reach players as localized
+  text. Leaderboard: career schema 6 index, `GET /v1/leaderboard`, portal page,
+  opt-out (portal schema 11). RU kit: 16 arenas, `KillMode=process`, NAT-sized
+  limits, `max_connections` check; `make verify-public-mvp`. Automatic returns
+  survive the draft/loading screen without issuing a dodge, ready Ranked
+  rosters keep their shared players, and the Chinese display subset covers
+  the new translations.
+
 - Creator tooling exports a game-owned Classic hero design policy beside the
   animation contract. All 17 bases stay explicitly unconfigured until reviewed;
   strict bindings reject `any`, wrong identities and stale hashes/revisions.

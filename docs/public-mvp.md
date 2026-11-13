@@ -74,7 +74,7 @@ export OMOBA_DATABASE_URL='postgres://ADMIN@DB_HOST/omoba'
 ./omoba-account-api migrate
 ```
 
-This prepares career schema v3 and portal schema v3, including optional supporter
+This prepares career schema v9 and portal schema v11, including optional supporter
 tables. The game runtime validates schema and does not perform DDL. The account
 HTTP service is optional for native play; it is needed for the existing portal
 and account recovery/device management. It must remain behind trusted HTTPS
@@ -121,7 +121,19 @@ and run 900 AI heroes. Configure hardware, worker count, database connections an
 egress for the intended mode mix. Each public match worker uses one PostgreSQL
 connection. The lobby and standalone game career workers use pools of up to four
 connections each; budget the optional portal/API pool, monitoring and administration
-separately. Do not claim 100-player readiness solely from setting capacity to 100.
+separately (the RU host checks `max_connections ≥ capacity + 32`). Do not claim
+100-player readiness solely from setting capacity to 100.
+
+The RU host runs 16 arenas (UDP 41000–41015) under cgroup limits from a per-arena
+formula pending the LR-09 measurement: `MemoryMax = 16 MiB × arenas + 200 MiB`
+(500M, `MemoryHigh` 450M), `TasksMax ≥ 3 × arenas + 16` (96), `CPUQuota` 190 % of
+its 2 vCPU. Egress is the other budget: `arenas × 10 players × 250 kB/s` of
+snapshots must stay under 60 % of the port, so 16 arenas (≈ 40 MB/s ≈ 320 Mbit/s)
+need a ≥ 500 Mbit/s uplink and a 100 Mbit/s port carries about six full PvP
+arenas; about 1000 concurrent players (100 arenas) need ≈ 2 Gbit/s and more than
+one host (LR-57). A lobby restart there leaves the workers running
+(`KillMode=process`) and the next lobby adopts them ([ops/vps/ru/README.md › Arena
+capacity](../ops/vps/ru/README.md#arena-capacity-lr-09), › Upgrades and live matches).
 
 Local capacity evidence on 2026-09-22 used an Apple M4 Pro (14 CPU cores, 48 GiB
 RAM), a development build, loopback PostgreSQL and a 30-second observation after
@@ -145,8 +157,10 @@ its place and, once arenas have freed recently, an estimated wait, and the searc
 screen offers Offline practice in one tap (it leaves the queue). The lobby rewrites
 `<match root>/capacity.json` every 5 s and logs `CAPACITY_METRIC` lines when the line
 forms, every minute while it lasts and when it clears; the RU host monitor alerts on a
-2-minute wait. At 512 endpoints or 512 career clients the lobby answers a newcomer
-"server full" instead of staying silent, and the game keeps trying. A 100-arena configuration is a tested stress
+2-minute wait. At 2048 endpoints or 2048 career clients the lobby answers a newcomer
+"server full" instead of staying silent, as it does a new source of an IP that already
+holds its `OMOBA_LIMIT_ENDPOINTS_PER_IP` share, and the game keeps trying; 2048 is the
+lobby's player ceiling, the arenas run out first. A 100-arena configuration is a tested stress
 case, not a recommended launch setting. Payload totals include startup/ramp-up
 and exclude IP/UDP overhead; they also show that egress capacity matters. Raw
 reports are in the task proof under `raw/capacity-human-100-v2` and
@@ -170,10 +184,13 @@ UDP admission validates return path before creating a gameplay endpoint, and
 world replication requires authenticated manifest membership. Empty bootstrap
 snapshots carry connection metadata only. Commands bind the
 saved Ed25519 key, transport nonce, authentication nonce, epoch, match and monotonic
-sequence. Per process, admission retains at most 512 endpoint records (8 per source
-IP; a new source beyond 512 is answered `server_full`), accepts up to 64 probes per second after per-IP (8) and per-network (32)
+sequence. Per process, admission retains at most 2048 endpoint records (8 per source
+IP by default, up to 2048 with `OMOBA_LIMIT_ENDPOINTS_PER_IP`; a new source beyond
+2048, or beyond its IP's share, is answered `server_full`, never with more bytes than
+its probe), accepts up to 64 probes per second after per-IP (8) and per-network (32)
 budgets with 16 kept for new sources, and limits each endpoint to 120 packets per
-second. New profiles, arenas held by one IP and abandoned vs Bots allocations are
+second. Expired records are swept every 250 ms and the sender's own record is checked
+on every datagram, so a full table costs no pass per packet. New profiles, arenas held by one IP and abandoned vs Bots allocations are
 limited per source too (LR-16, `ops/vps/ru/README.md` "Admission limits").
 Challenges expire after five seconds; validated paths expire after 30 seconds
 without traffic. Public datagrams are capped at 12 KiB, with signed command payloads
@@ -213,8 +230,44 @@ node scripts/test_public_mvp.mjs --mix=bot_practice:5,quick:5,humans_only:10 --m
 node scripts/test_public_mvp.mjs --scenario=capacity-wait --clients=1 --preference=bot_practice
 ```
 
+`make verify-public-mvp` (with `OMOBA_TEST_DATABASE_URL`) builds the server, migrates the
+database and runs the lifecycle scenario and the mixed load above (the load with
+`--seconds=5`); CI's `postgres` job runs the same target.
+
+The complete opt-in gate is `make test-postgres-harness`, with the same disposable
+`OMOBA_TEST_DATABASE_URL` (or explicit `OMOBA_HARNESS_DATABASE_URL`) and the assigned
+primary `CARGO_TARGET_DIR` cache A/B. It builds the server, bots and Account API,
+migrates only a loopback `omoba_test` database without URI overrides, then runs:
+
+- the actual 300-client admission/restart test;
+- fresh VK ID / OK / Mail registration through the Account API router with a
+  loopback provider fixture, followed by signed device enrollment;
+- native public admission, ready acceptance, worker gameplay and same-seat
+  reconnect using those three newly enrolled profiles;
+- public lifecycle/mixed load, ready timeout/replacement, party draft Leave and
+  silent disconnect, early Ranked crash/recovery and graceful termination;
+- a genuine ten-human standard-rules Ranked Victory with each participant's
+  saved result, history, Elo and XP checked.
+
+`POSTGRES_HARNESS_OUT=.agent/postgres-harness` selects a new private output
+directory. The report includes stage timings and bounded diagnostics, never
+signing seeds. The temporary `native-private.json` has mode 0600 in a 0700
+directory and is removed after native registration, and again on failure or
+interruption. Rust filters must execute exactly one test rather than silently
+pass with zero tests or an ignored test. The full Ranked phase may take several
+minutes; its default deadline is 3000 seconds with no accelerated game rules.
+This gate exercises the API and real game processes; portal browser UI and real
+provider app certification remain separate checks. The CI postgres job runs this complete gate, with a 90-minute budget and
+retained failure diagnostics excluding the private fixture. The owner-approved
+review patch is retained in `docs/plans/postgres-harness-ci-2026-11-05.patch`.
+
 `--mix` interleaves players of several queues; `--capacity` sets the lobby's arena count;
 `--max-wait-secs` fails the run when a player needs longer to reach Running;
+`--allow-large` lifts the client cap from 100 to 1000 (capacity stays at the pool's
+maximum of 100); `--queue-only` makes every player sign in and FindMatch without a
+handoff, so a thousand lobby clients run from one machine
+(`--queue-only --allow-large --clients=1000 --capacity=1`; the `QUEUE_RESULT` line and
+`report.queue` give sign-in times, lobby states, `server_full` replies, CPU and RSS);
 `--limits-from=<unit>` (Linux) runs the lobby and its workers under a systemd unit's
 memory, CPU and task limits. The report records, per arena type, the snapshot gaps, the
 time to Running and the snapshot bytes per second per player, and the lobby's and
@@ -248,3 +301,250 @@ session status and remaining checks are in
 [the public MVP session note](progress/2026-09-22-public-mvp.md).
 WAN loss/jitter, public DNS/firewall reachability, signed platform installers and
 physical phone QA remain separate publication gates.
+
+Ready confirmation can be rehearsed with `--scenario=ready-check --seconds=2
+--input-hz=0`: the probe keeps one human unconfirmed for 15 seconds, asserts no
+worker was spawned, checks preserved FIFO age, rejects a stale answer and seats
+a replacement only after another unanimous confirmation.
+
+`--scenario=termination --seconds=2 --input-hz=0` sends SIGTERM to its own running
+worker and asserts a durable Interrupted result with no Elo/XP changes and one
+played-match increment. Both scenarios launch their own loopback lobby and need
+the same disposable database as the existing probes.
+
+For full-roster Ranked recovery, use `--scenario=recovery --preference=humans_only
+--clients=10`. `--scenario=early-recovery --preference=humans_only --clients=10
+--seconds=2 --input-hz=0` kills the worker before the ordinary first ten-second
+checkpoint. It verifies all ten profiles and histories, unchanged rating/XP,
+the actual >=120 s recovery gate and re-entry into a unanimously accepted roster.
+Casual (`--preference=quick`, one roster of up to ten) is accepted too. Recovery
+keeps its real wall-clock gates; no timeout or lease is accelerated.
+
+
+## Signed AI fill clients and a full Ranked rehearsal
+
+Build the server and headless tooling in the repository's assigned cargo cache:
+
+```sh
+cargo build --locked -p server -p harness --bin server --bin bots
+make bots BOTS_PUBLIC=1 BOTS=9 BOTS_SERVER=127.0.0.1:4000
+```
+
+Public fill clients default to Ranked (`BOTS_PREFERENCE=humans_only`). They keep
+throwaway keys only in memory, explicitly accept the 15-second ready check,
+follow the worker handoff, re-authenticate, lock/load and play with the existing
+lane AI. `BOTS_PREFERENCE=quick` selects Casual and `bot_practice` selects vs Bots.
+A single developer plus nine clients can form ten authenticated Ranked seats.
+
+For an owned loopback lobby and disposable migrated PostgreSQL database:
+
+```sh
+export OMOBA_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/omoba_test'
+python3 scripts/public_bots_rehearsal.py \
+  --server-bin "$CARGO_TARGET_DIR/debug/server" \
+  --bots-bin "$CARGO_TARGET_DIR/debug/bots" \
+  --output .agent/ranked-ai-smoke
+```
+
+This requires exactly ten clients for Ranked, creates its own lobby/worker root,
+raises only its own loopback admission limits and stops only processes it owns.
+It checks each client's own identity/fresh snapshot rather than requiring all
+opponents to be visible through fog of war. Output roots must be new.
+
+Add `--require-victory --timeout 3600` to play the standard map/rules to a real
+result. The clients request saved history and fresh profiles before exiting;
+the rehearsal checks every participant's rating delta, XP and exactly one
+history result. This can take a full match. The standard run does not alter the
+server clock, map HP, damage, debug privileges or Ranked eligibility. A started
+run is not a passed terminal proof; its `report.json` is authoritative after
+completion.
+
+For a separate **unrated** fast terminal-path check, add
+`--test-map examples/maps/rehearsal-victory.json --require-victory --timeout 300`.
+This explicit test map disables towers and gives Blue's base one HP. The runner
+selects loopback-only `bots --rush-objectives`, which focuses normal movement
+and casts on attackable structures rather than waiting for midgame rallies.
+Its result
+must have zero rating/XP credit, even from the Ranked queue. The runner copies
+the fixture into its own root. `OMOBA_MATCH_TEST_MAP_CONFIG` is forwarded to an
+allocated worker only if both actual lobby and worker binds are loopback; an
+exposed lobby ignores it and logs why. Ordinary map/targeting/bot-difficulty
+overrides are still stripped. This fast custom proof never substitutes for the
+standard rated match above.
+
+
+## Signed parties and departures during Draft
+
+The owned public-protocol probe can form a five-player party via actual signed
+Presence/Invite/Accept commands, add five solo peers and exercise Ranked Draft:
+
+```sh
+HARNESS_SERVER_BIN="$CARGO_TARGET_DIR/debug/server" \
+  node scripts/test_public_mvp.mjs --scenario=party-draft \
+  --clients=10 --preference=humans_only --seconds=3 \
+  --output=.agent/party-draft
+```
+
+Use the disposable `OMOBA_TEST_DATABASE_URL` from the earlier setup. Add
+`--draft-exit=disconnect` for socket loss instead of an explicit Leave. This
+waits the real worker join deadline. Both variants require preserved FIFO ages,
+restored group membership, no unplayed credit/history, the return signal for all
+nine survivors and a fresh unanimous Ranked roster. Only explicit departure
+incurs one dodge strike; the disconnect case verifies an empty penalty map.
+
+Add `--exercise-stale-handoff` to a party, lifecycle or mixed-load run to deliver
+a real old-lobby callback immediately after worker handoff. The probe must ignore
+it and preserve the new authentication scope. Failures print bounded client and
+worker-status diagnostics, so CI logs remain useful without an artifact upload.
+
+
+Worker handoff status and cancellation use one shared snapshot per due career
+broadcast, bounded to four refreshes per second even when requests force extra
+broadcasts. New search/cancellation admission checks current state. After the
+lobby observes settlement, a stale receipt cannot make that arena playable again.
+A terminal child reaped by its lobby releases its port immediately; an adopted
+process without exit proof retains the conservative 35-second heartbeat hold.
+Retained terminal receipts sharing one reused bind endpoint occupy one port,
+so rapid completed rounds do not become extra live arenas after restart. Startup
+still bounds the scan to 4096 entries and refuses more than 100 occupied ports.
+
+### Queue-only load evidence
+
+`test_public_mvp.mjs --queue-only --clients=1000 --allow-large --preference=quick
+--capacity=1 --seconds=15 --verify-presence` measures actual signed searchers on an isolated
+loopback `/omoba_test` database. First one ordinary vs-Bots helper reaches Running
+and holds the only arena with bounded signed activity. It is disclosed separately
+and excluded from target-client counts. Every target must remain Waiting, keep
+its current request correlation, receive fresh career views, and receive no world
+snapshots or worker handoff. CPU/RSS cover lobby plus the helper worker, excluding
+the client generator. The optional `--verify-presence` uses `psql` to read all
+target presence rows and checks their current expiry and common lobby owner.
+Use at least12s soak with this DB check to cover the ordinary10s presence
+cadence. Run the ten-client smoke first. Queue-only success does not
+prove1000 playing clients, snapshot egress, remote pools or RU-host capacity.
+
+Lobby queue views share indexed counters at the existing250ms cadence. Immediate
+account responses target their requester without resetting periodic broadcasts.
+Exact capacity-line recomputation occurs from tick only, and heartbeat-only
+renewals reuse it. Party/cohort/FIFO and ready-consent policies are unchanged.
+
+The optional raw admission boundary is separate from account/gameplay load:
+
+```bash
+HARNESS_SERVER_BIN="$CARGO_TARGET_DIR/debug/server" \
+  node scripts/test_public_transport_capacity.mjs --allow-large \
+  --output=.agent/admission-boundary
+```
+
+Use the same isolated loopback `OMOBA_TEST_DATABASE_URL`. The lobby requires that
+database for startup/heartbeat; this probe sends no account or search commands.
+It holds2048 return-path-validated endpoints and requires a nonce-correlated
+ServerFull for endpoint2049, no larger than its probe. Both global and per-source
+limits are2048 in this test, so the wire proof does not distinguish them. Exact
+u64 epochs are preserved. `--smoke=8` tests only a small per-source fixture; the
+large run requires `--allow-large`. It binds only its owned loopback lobby and
+changes no OS/network setting or production cap.
+
+### Native playing-load evidence
+
+`scripts/public_playing_capacity.py` drives signed public Casual clients in
+native ten-client AI processes. They explicitly confirm, draft, load and generate
+ordinary movement/skill/shop actions at the existing10Hz driver tick. Every
+simultaneous peer must be Running with a snapshot younger than2s, a unique
+profile, no account/JSON/framing errors and a ten-human/zero-bot allocation.
+The final report preserves fresh matching worker receipts and manifest hashes
+before cleanup. Safe counters measure received UDP bytes and accepted complete
+ordered snapshots; server resources and generator resources are separate.
+
+Build current `server` and `harness --bin bots` into the assigned shared Cargo
+cache. Prepare/migrate only a disposable loopback `/omoba_test` database and set
+`OMOBA_TEST_DATABASE_URL`; `psql` must be on PATH. Run the small smoke first:
+
+```bash
+python3 scripts/public_playing_capacity.py \
+  --server-bin "$CARGO_TARGET_DIR/debug/server" \
+  --bots-bin "$CARGO_TARGET_DIR/debug/bots" \
+  --clients 10 --seconds 15 --output .agent/playing-small
+```
+
+The1000-client mode requires `--allow-large --clients 1000` and100 worker ports,
+plus at least108 existing test DB connections (the owned test sample used200).
+The runner refuses insufficient connections and never changes that setting.
+Use a new output directory for every run, and never overlap these tests with
+schema-resetting PG tests. All bindings are loopback, source fixture allowances
+are disclosed, private signing keys stay in memory and only owned process groups
+are stopped. `--seconds` is15–120; `--timeout` bounds startup plus soak. No live
+host, credentials, OS limits, CI or production settings are changed.
+
+The2026-11-06 local sample reaches1000 clients in100 distinct ten-human Casual
+arenas after49.22s and passes20s all-playing soak. Final maximum snapshot age is
+573ms; complete received snapshots median11.72Hz/p05=10.97Hz, below nominal20Hz.
+Downlink p50=200199/p95=258272/p99=278937 bytes/player/s. On M4 Pro14-core48GiB,
+the101 server processes sample5.26 CPU cores and1536.55MiB peak summed RSS;100
+generator processes use2.25 cores/582.27MiB. DB CPU is excluded. The temporary
+owned PG connection limit was restored200→100 after all owned processes stopped.
+This short local AI-driver sample is not a sustained SLA,1000 physical people,
+a1000-player Ranked journey or RU/cgroup capacity proof. Keep egress, latency,
+longer soak, multi-host and RU-host acceptance open.
+
+### Maintenance drain runtime (C2, host controller pending)
+
+The lobby polls `<match root>/drain/` from its ordinary one-second scheduling
+pass. The directory must contain exactly one empty regular file named by a
+32-character lowercase hex operation ID. Symlinks, non-directories, malformed
+names, multiple entries or read errors pause allocation without acknowledging
+an operation. Runtime reads at most two entries and no marker contents. Player
+views use cached state; workers do not consult the marker.
+
+Entering maintenance returns every pending ready check, including fully
+accepted ones, to its original party/FIFO entries without a dodge strike.
+Waiting clients may renew/cancel normally. New searches receive the localized
+`server_draining` response. Removing the marker resumes ordinary selection with
+a fresh check ID and new explicit consent. Existing worker gameplay, retained
+seats and Resume continue, including after a draining-lobby restart.
+
+`capacity.json` adds `draining` and optional `drain_operation_id` under format1.
+A deployment controller must require its exact operation ID, a fresh report and
+occupied0, then retain the existing no-running-workers guard before migration
+or restart. An old report or an older runtime without acknowledgement cannot
+prove a drain. Timeout must preserve matches and maintenance state; cancelling
+must remove only that operator's marker. Host ship/wait/cancel integration is
+still being prepared and requires the standing production approval before use.
+No RU host was changed by the runtime implementation or loopback rehearsals.
+
+Current software evidence:6 new server cases,656 real PG/API/server tests,
+native maintenance retry/cancel and three-language failure copy pass. Signed
+capacity2 rehearsal proves an active match advances while a free arena stays
+unused, old consent expires without penalty, new searches are refused, and
+cancellation creates a fresh confirmation and another real match. A second
+operation survives actual lobby restart with both workers adopted and Resume
+usable. Fresh visual/physical acceptance and final committed CI remain separate.
+
+
+### Protocol16 compression and controlled playing-load startup
+
+World framing uses selective bounded lossless zlib; the original JSON bytes,
+vision, ordering,1200-byte UDP limit and plain account/control packets remain.
+The exact40-frame corpus shrinks79.08%; this is a codec measurement. Full CI
+42139546925 passes all7 jobs/18 public stages, including actual rated victory
+and exact all-ten awards/history/participation. Actual native RU852×393 Home
+captures separately verify ten-public-game progress and rating placement.
+
+The first compressed1000-playing trial passes60s simultaneous fresh Running
+with100 ten-human Casual workers and zero server bots, p95 wire42014B/player/s.
+Received complete snapshots median9.54Hz remains below nominal20Hz. This is not
+a sustained SLA/RU-host or controlled A/B claim. Repeats are retained failures:
+v2 exposed a stale synthetic sign-in challenge; v3 recovers most clients but a
+legitimate five-human/five-bot Casual fallback consumes seats, preventing1000
+humans from fitting in the100-arena pool. Owned test PG settings are restored.
+
+`scripts/public_playing_capacity.py` now separates ordinary sign-in from Search:
+all distinct profiles must be authenticated, unallocated, error-free and fresh
+for5s before an empty owned marker releases queue intent. Native drivers use
+`--search-gate FILE` only with public loopback admission; a regular empty file
+releases the gate once. This models waiting on Home before pressing Search and
+keeps the normal Casual fallback, unanimous consent, draft and gameplay rules.
+Report fields record authentication, release and all-Running times separately.
+No synthetic prior games, qualification bypass or server policy override is used.
+Current-source ten-client pilot passes ordinary sign-in/search/draft/load and15s
+playing; full1000 repeat and fresh committed CI remain required.

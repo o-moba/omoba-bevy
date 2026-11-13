@@ -1,0 +1,150 @@
+{
+  "head": "a654f032755372944353b13d8c93fbf53f40f03b",
+  "run_id": 42343372154,
+  "conclusion": "success",
+  "jobs": 7,
+  "artifact_id": 13563604431,
+  "bytes": 535187,
+  "sha256": "8c278653a3370cc490f53c50f8fe3c897181445aa55d3b6777e89d2a25c4a318",
+  "zip_entries": 244,
+  "safe_paths_crc": "PASS",
+  "stages": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "log": "build.log",
+      "seconds": 85.11
+    },
+    {
+      "name": "build-ranked-fixture",
+      "status": "PASS",
+      "log": "build-ranked-fixture.log",
+      "seconds": 25.06
+    },
+    {
+      "name": "migrate",
+      "status": "PASS",
+      "log": "migrate.log",
+      "seconds": 0.02
+    },
+    {
+      "name": "admission-300",
+      "status": "PASS",
+      "log": "admission-300.log",
+      "seconds": 48.99
+    },
+    {
+      "name": "registration-api",
+      "status": "PASS",
+      "log": "registration-api.log",
+      "seconds": 9.58
+    },
+    {
+      "name": "registration-game",
+      "status": "PASS",
+      "log": "registration-game.log",
+      "seconds": 29.86
+    },
+    {
+      "name": "lifecycle",
+      "status": "PASS",
+      "log": "lifecycle.log",
+      "proof": "lifecycle/report.json",
+      "seconds": 112.68
+    },
+    {
+      "name": "mixed",
+      "status": "PASS",
+      "log": "mixed.log",
+      "proof": "mixed/report.json",
+      "seconds": 47.38
+    },
+    {
+      "name": "ready-check",
+      "status": "PASS",
+      "log": "ready-check.log",
+      "proof": "ready-check/report.json",
+      "seconds": 49.59
+    },
+    {
+      "name": "cross-lobby-ready",
+      "status": "PASS",
+      "log": "cross-lobby-ready.log",
+      "proof": "cross-lobby-ready/report.json",
+      "seconds": 37.22
+    },
+    {
+      "name": "legacy-penalty",
+      "status": "PASS",
+      "log": "legacy-penalty.log",
+      "proof": "legacy-penalty/report.json",
+      "seconds": 30.11
+    },
+    {
+      "name": "unique-draft",
+      "status": "PASS",
+      "log": "unique-draft.log",
+      "proof": "unique-draft/report.json",
+      "seconds": 32.56
+    },
+    {
+      "name": "party-leave",
+      "status": "PASS",
+      "log": "party-leave.log",
+      "proof": "party-leave/report.json",
+      "seconds": 37.97
+    },
+    {
+      "name": "party-disconnect",
+      "status": "PASS",
+      "log": "party-disconnect.log",
+      "proof": "party-disconnect/report.json",
+      "seconds": 89.29
+    },
+    {
+      "name": "ranked-early-crash",
+      "status": "PASS",
+      "log": "ranked-early-crash.log",
+      "proof": "ranked-early-crash/report.json",
+      "seconds": 139.37
+    },
+    {
+      "name": "termination",
+      "status": "PASS",
+      "log": "termination.log",
+      "proof": "termination/report.json",
+      "seconds": 20.29
+    },
+    {
+      "name": "remake",
+      "status": "PASS",
+      "log": "remake.log",
+      "proof": "remake/report.json",
+      "seconds": 115.98
+    },
+    {
+      "name": "surrender",
+      "status": "PASS",
+      "log": "surrender.log",
+      "proof": "surrender/report.json",
+      "seconds": 619.42
+    },
+    {
+      "name": "ranked-eligibility",
+      "status": "PASS",
+      "log": "ranked-eligibility.log",
+      "proof": "ranked-eligibility/report.json",
+      "seconds": 616.28
+    },
+    {
+      "name": "ranked-victory",
+      "status": "PASS",
+      "log": "ranked-victory.log",
+      "proof": "ranked-victory/report.json",
+      "seconds": 477.51
+    }
+  ],
+  "private_fixture_removed": true,
+  "private_key_path_present": false,
+  "scope": "Complete critical-replies/healthv2 source CI; later physical recovery harness and documentation commits retain their own exact scopes"
+}

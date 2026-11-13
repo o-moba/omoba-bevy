@@ -1,0 +1,22 @@
+[
+  {
+    "input": "0",
+    "exit": 2
+  },
+  {
+    "input": "-1",
+    "exit": 2
+  },
+  {
+    "input": "61",
+    "exit": 2
+  },
+  {
+    "input": "bad",
+    "exit": 2
+  },
+  {
+    "input": "non-public20",
+    "exit": 2
+  }
+]

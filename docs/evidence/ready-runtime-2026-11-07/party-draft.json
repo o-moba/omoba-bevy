@@ -1,0 +1,184 @@
+{
+  "scenario": "party-draft",
+  "clients": 10,
+  "preference": "humans_only",
+  "capacity": 16,
+  "limits": {},
+  "max_wait_secs": null,
+  "protocol": 16,
+  "host": {
+    "platform": "darwin",
+    "cpus": 14,
+    "cpu_model": "Apple M4 Pro",
+    "memory_gib": 48
+  },
+  "input_hz_requested": 20,
+  "input_model": "signed_current_pose_transform",
+  "soak_seconds": 1,
+  "started_at": "2026-11-07T01:28:36.450Z",
+  "scenarios": [
+    "raw_ping_no_replication",
+    "signed_five_stack_ranked",
+    "draft_departure_requeues_nine_without_credit",
+    "fresh_unanimous_party_roster_running"
+  ],
+  "status": "PASS",
+  "party_draft": {
+    "exit": "leave",
+    "checks": [
+      {
+        "name": "five_stack_signed_invite_accept",
+        "status": "PASS",
+        "party_id": 1,
+        "members": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "name": "ranked_party_team_and_held_draft",
+        "status": "PASS",
+        "allocation_id": "715a38eefc5db35c67c9e2eb9ef83909",
+        "team": "green",
+        "humans": 10,
+        "bots": 0
+      },
+      {
+        "name": "draft_departure_requeues_nine_without_credit",
+        "status": "PASS",
+        "exit": "leave",
+        "original_queue_ages_secs": [
+          18,
+          18,
+          16,
+          14,
+          13,
+          11,
+          10,
+          8,
+          7,
+          0
+        ],
+        "elapsed_secs": [
+          30,
+          30,
+          27,
+          26,
+          25,
+          23,
+          22,
+          19,
+          12
+        ],
+        "all_profiles_unchanged": true,
+        "all_histories_empty": true,
+        "all_survivors_received_return_code": true,
+        "dodger_code": "dodge_cooldown"
+      },
+      {
+        "name": "stale_ready_search_id_refresh",
+        "status": "PASS",
+        "clients": 10,
+        "explicit_current_search_consent": true
+      },
+      {
+        "name": "replacement_party_ranked_running",
+        "status": "PASS",
+        "allocation_id": "d20d916335f886ad94958ad265efb010",
+        "humans": 10,
+        "bots": 0,
+        "party_team": "green"
+      }
+    ]
+  },
+  "qualification_fixtures": [
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    }
+  ],
+  "arenas": 1,
+  "elapsed_seconds": 47.098815875,
+  "total_transforms_sent": 210,
+  "total_sent_datagrams": 2385,
+  "total_sent_bytes": 1140580,
+  "stale_handoff_checks": 20,
+  "stale_endpoint_checks": 20,
+  "resources": []
+}

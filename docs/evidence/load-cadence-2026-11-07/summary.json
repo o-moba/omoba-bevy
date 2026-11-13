@@ -1,0 +1,116 @@
+{
+  "status": "1000-client acceptance FAILED; diagnostic implementation and 10-client control passed",
+  "source_parent": "efe321013c85be63ac771880270fee440d348093",
+  "production_binary_sha256": "7a73699731633f1a4d0831ec41715e789d91479649fadd0cb343c5dce2dea1a9",
+  "production_source_proof": "../terminal-spool-replay-2026-11-07/summary.json",
+  "unchanged_production_files_checked": 263,
+  "server_profile": "Existing renderer-free direct rustc binary, no -C opt-level: unoptimized root crates. This is not the Cargo dev opt-level1 or a release performance build.",
+  "files": {
+    "baseline-10--report.json.gz": {
+      "raw_path": "baseline-10/report.json",
+      "raw_bytes": 28953,
+      "raw_sha256": "bd501220e85e4b7b787e7ec639ceb749ccb7bf3061204d5c5f118194ebd54477",
+      "gzip_sha256": "56d4fa28d08ad1cdf1f9d0d1eb33e3f655c90db12fbe4b70584f511b4a2a4762"
+    },
+    "baseline-100--report.json.gz": {
+      "raw_path": "baseline-100/report.json",
+      "raw_bytes": 230189,
+      "raw_sha256": "cf746f7e451bc78988f9d35260be463f34ec5eb876b6f58aa78c9e19eae38c90",
+      "gzip_sha256": "fadef738ea8da8fd9224f9bd06dc278256f259839894ea04acc4a5b7c1ba3847"
+    },
+    "instrumented-10--report.json.gz": {
+      "raw_path": "instrumented-10/report.json",
+      "raw_bytes": 31315,
+      "raw_sha256": "8da3170fc067d0c19c37c2c70470b02c0fdf0b859fedf1e9e4a669b8c830cc81",
+      "gzip_sha256": "d8c3a6a4ee984bc0010e97f076a93636bb3acd52adc5acf6ca33f825d51946b7"
+    },
+    "instrumented-1000--report.json.gz": {
+      "raw_path": "instrumented-1000/report.json",
+      "raw_bytes": 1898330,
+      "raw_sha256": "53ad6ec64aaa62f9b5d66ea0d9377a79480a9c92cb52a8d1eb52a203fbae3073",
+      "gzip_sha256": "6c5f4d1f2f03e54b1d37e228f426ae6dbea05a578d0720f703729da2cd47ebd0"
+    },
+    "instrumented-10-baseline.json.gz": {
+      "raw_path": "instrumented-10-baseline.json",
+      "raw_bytes": 15744,
+      "raw_sha256": "ad0c378420b8431a5b89ead3cead42c2266a1bb5c383d5f1efd7ea7939980e86",
+      "gzip_sha256": "55841dc3d8ff807671407bcb40e92ddb1bfa813588145477b19bc87fa4956836"
+    },
+    "isolated-summary.json.gz": {
+      "raw_path": "isolated-summary.json",
+      "raw_bytes": 5001,
+      "raw_sha256": "a3d41ec9adc9f75eeda24bbd1f005400f7571b7ae7d648152082c35ca04d5eb0",
+      "gzip_sha256": "2d30697d8ae86dc75ca4b9cf1611119f728d2b34ba55e8b6325b92c39b602485"
+    },
+    "rejected-v1-summary.json.gz": {
+      "raw_path": "rejected-v1-summary.json",
+      "raw_bytes": 616,
+      "raw_sha256": "e5dfbd2ca7ce8eb3be8c7f22ee6cd806e22e709941031d6d0dbd5e5f27e6c095",
+      "gzip_sha256": "355ddd2c0398edbbf17cd76bcc19ec84f004c97f3644ea30d9e4d3b619408e24"
+    },
+    "baseline-build.json.gz": {
+      "raw_path": "baseline-build.json",
+      "raw_bytes": 33688,
+      "raw_sha256": "51ba2e15d8e47b562bd5501dff8a73b6861965352b65bc375a9f4ba404a99f68",
+      "gzip_sha256": "c3b3c08f473d0595e87613c2b3e888f746ba756054cc90a39688226e7474b1b6"
+    },
+    "build.json.gz": {
+      "raw_path": "build.json",
+      "raw_bytes": 33688,
+      "raw_sha256": "4dbdd5af4dd9991f62c8ebf17d595be6adfee6ab38f8d2086c4fa3420f242646",
+      "gzip_sha256": "6dc951aaed6f574c61fc34a035b5a03323dfd2ea33ea785ecc3162fea275c6d9"
+    },
+    "transport-tests.log.gz": {
+      "raw_path": "transport-tests.log",
+      "raw_bytes": 191,
+      "raw_sha256": "41247005afd9193dc06abbf43eb0a644b71a54e8f1aa6f30a8bc5840ebce93ff",
+      "gzip_sha256": "0c8622014308d1025d77caf8568b2d1f69caae21aa120efbf871ec2c9ea13fe0"
+    },
+    "clippy-0.log.gz": {
+      "raw_path": "clippy-0.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    },
+    "clippy-1.log.gz": {
+      "raw_path": "clippy-1.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    },
+    "clippy-2.log.gz": {
+      "raw_path": "clippy-2.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    }
+  },
+  "current_runner_sha256": "1aca04770a2166b877654d9cb4cee819aefae8deb7a465d839c936089b403692",
+  "checks": {
+    "python_cases": 7,
+    "actual_udp_transport_cases": 1,
+    "strict_clippy_targets": 3,
+    "format": "PASS",
+    "diff": "PASS",
+    "additional_python_rehearsal_cases": 14
+  },
+  "next": [
+    "Reproduce with before-cleanup exit/worker diagnostics now added; determine the first failure before modifying production.",
+    "Use an explicitly recorded optimized current server/generator build for performance qualification.",
+    "Then complete current-source 1000-client sustained cadence/latency and RU or identical-host uplink acceptance."
+  ],
+  "limitations": [
+    "No 1000-client soak or cadence result: Running acceptance never reached.",
+    "No physical devices, WAN, real RU host or release certification.",
+    "A producer tick span does not independently timestamp sending or measure latency.",
+    "The archived 10-client baseline was uniquely reconstructed from the native BOT_SAMPLE log and exactly reproduces all published wire metrics. Future runs save baseline directly.",
+    "Latest runner adds strict early metadata validation, baseline retention and first-owned-exit diagnostics after the live run; those diagnostic additions have unit/source checks but no new full live run."
+  ],
+  "cleanup": {
+    "initial_process_cleanup": "FAILED: PermissionError aborted stop_owned before all groups were stopped",
+    "remediation": "Revalidated own executable, UID and recorded groups; SIGTERM sent individually to86 verified owned processes; final process-group inventory empty",
+    "database_containers_and_volumes_removed": true,
+    "all_owned_process_groups_absent": true,
+    "regression": "Two actual-child lifecycle tests inject group denial; remaining children still terminate, and unverified group cleanup remains an explicit error"
+  }
+}

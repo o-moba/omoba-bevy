@@ -28,5 +28,14 @@
   "draft.timer.gathering": "Waiting for team…",
   "draft.stage.rotate": "Drag to rotate",
   "draft.tab.avatars": "Avatars",
-  "draft.tab.classes": "Classes"
+  "draft.tab.classes": "Classes",
+  "draft.error.roster_changed": "The roster changed. Check your team and lock in again.",
+  "draft.error.loading_timeout": "Not every player loaded in time. Lock in again or leave.",
+  "draft.error.start_timeout": "The match took too long to start. Lock in again or leave.",
+  "draft.timer.join_remaining": "Waiting for players · {seconds}s",
+  "draft.error.allocation_cancelled_or_expired": "A player could not connect. Returning to matchmaking…",
+  "draft.error.durable_start_pending": "Saving the match start. Please wait…",
+  "draft.class_taken": "{hero} · Taken",
+  "draft.error.hero_taken": "A teammate locked this class. Choose another class or wait for them to unlock.",
+  "draft.error.hero_auto_picked": "Your class was taken. An available class was selected automatically."
 }

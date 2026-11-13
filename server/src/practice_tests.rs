@@ -737,6 +737,8 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
     rt.handle_packet(
         bot_addr,
         ClientPacket::Transform {
+            input_kind: Default::default(),
+            input_active: false,
             dash_sequence: 0,
             x: to[0],
             y: PLAYER_GROUND_Y,

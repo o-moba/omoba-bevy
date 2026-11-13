@@ -1,0 +1,13 @@
+{
+  "observed_after_runs": "2026-11-09",
+  "logical_cpus": 2,
+  "mem_total_kib": 3480344,
+  "mem_available_kib_at_final_check": 2132256,
+  "owned_capacity_processes": [],
+  "disposable_omoba_test_database_count": 0,
+  "dev_services": {
+    "omoba-lobby-dev": "active",
+    "omoba-account-api-dev": "active"
+  },
+  "scope": "final read-only checks on the shared dev VPS after both 300-second runs; not a production/RU host"
+}

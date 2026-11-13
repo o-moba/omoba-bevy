@@ -1,8 +1,13 @@
 # Game directory and server routing
 
-Status: **concept / TODO**, recorded 2026-10-13 from the owner. Nothing here is
-implemented or scheduled. It keeps the idea, the current constraints and a phased
-path in one place.
+Status: **P7 in progress** (2026-11-06). D1's bounded contract, routing policy
+and offline signer/verifier plus opt-in Account API/portal HTTP delivery are
+implemented and locally verified. No directory
+is published or used by the running client yet. Fetch/cache/fallback, trusted
+key provisioning, operator publication, cross-host penalties/party/Resume
+behavior and actual second-host/capacity proof remain required. D0/D1 are now
+scheduled in P7 before multi-host launch acceptance; they are not deferred away
+from the owner's complete-finding scope.
 
 ## Idea
 
@@ -15,10 +20,10 @@ client.
 
 | Area | Today | Why it matters |
 | --- | --- | --- |
-| Client default | `DEFAULT_GAME_SERVER_ADDR` is a baked **IP and port** (`77.246.105.57:4000`), overridable at build time ([session_config.rs](../../client/src/session_config.rs)) | Moving the server means a new client release |
+| Client default | Account-region startup uses RU `lobby.omoba.ru:4000`; Global still uses `77.246.105.57:4000` ([region.rs](../../shared/src/region.rs), [session_config.rs](../../client/src/session_config.rs)) | Global D0/DNS provisioning remains open; signed routing must preserve account-region isolation |
 | Lobby | One coordinator, one region; it redirects to match workers on `OMOBA_MATCH_PUBLIC_HOST` and ports from `OMOBA_MATCH_FIRST_PORT` with `OMOBA_MATCH_CAPACITY` ([match_pool.rs](../../server/src/match_pool.rs), [public MVP](../public-mvp.md)) | The lobby already hands out match servers, but only on its own host |
 | Compatibility | Every transport runs a JSON preflight: handshake, release, protocol, catalog, geometry ([release compatibility](../release-compatibility.md), [compatibility.rs](../../shared/src/compatibility.rs)) | Routing can pick a lobby whose contract matches the client instead of failing after connect |
-| Web backend | app.omoba.io is a Vercel (Next.js) app: HTTPS only, serverless | It can serve a directory document and an HTTP matchmaking API; UDP game traffic must still go straight to game hosts |
+| Web layer | Next/HTTPS front and regional Account API | It can serve the signed document; UDP still goes directly to game hosts, not through the web front |
 | Contours | Dev builds bake the dev lobby and registry; prod builds will hide the server picker (connection profiles work) | A directory URL per contour can replace hard-coded addresses in both |
 
 ## Phases
@@ -36,7 +41,7 @@ Clients fetch one HTTPS document at startup:
 
 The document carries:
 - a schema version, an issue time and an expiry;
-- a list of lobbies: `id`, `region`, `host`, `port`, the compatibility contract
+- a list of lobbies: `id`, locality, `host`, signed concrete IP `addresses`, `port`, the compatibility contract
   (protocol, catalog, geometry), `status` (open, maintenance, full) and a `weight`;
 - a client policy: minimum release, update URL and a message of the day.
 
@@ -48,7 +53,11 @@ The client:
 3. never mixes contours: a prod client only accepts the prod directory.
 
 Sign the document with an ed25519 key whose public half is baked into the client,
-so a hosting or DNS compromise cannot redirect players. Operators publish it with
+so a hosting compromise cannot replace its routing policy. Clients must use the
+signed concrete IP targets, not a fresh DNS answer for the label; baked fallback
+also needs pinned addresses to meet the DNS-compromise requirement. These client
+and fallback rules are still pending. The current unauthenticated UDP preflight
+is not server identity proof. Operators publish the reviewed signed artifact with
 a CLI from a reviewed file. Production builds then hard-code only the directory URL
 and the fallback name.
 
@@ -80,8 +89,9 @@ queue times, fill rate, match start latency.
 
 ## Open questions
 
-1. Where the directory lives: a Vercel route in omoba-web, or a static signed file
-   on the game host behind Caddy (simpler, no serverless cold start).
+1. Delivery implementation: the fixed regional portal route proxies a signed file
+   served by the regional Account API. Reviewed live publication/key provisioning
+   remains pending; no live endpoint has been activated.
 2. Regions worth having for the first players. Beijing and Moscow latency differ a lot.
 3. Whether the matchmaker in D3 belongs to the Account API or is a separate service.
 4. What happens to LAN and self-hosted servers in production builds. Today the plan
@@ -98,3 +108,485 @@ queue times, fill rate, match start latency.
 - [ ] **D3** — matchmaker service and tickets, worker ticket check, party and
       reconnect, migration away from the direct lobby queue.
 - [ ] **D4** — multi-host health, capacity, autoscaling, metrics.
+
+
+## Implemented D1 contract/operator checkpoint
+
+Sources: [contract/policy](../../shared/src/game_directory.rs),
+[contract tests](../../shared/src/game_directory_tests.rs),
+[offline operator](../../server/examples/game-directory.rs),
+[process/interoperability proof](../../scripts/test_game_directory.mjs).
+No new dependency, live key, DNS record, workflow or production service is added.
+
+The signed envelope carries `key_id`, exact UTF-8 JSON `payload` and a lowercase
+hex Ed25519 signature. Signing bytes are
+`b"omoba.game-directory.v1\0" || u8(key_id_bytes.len) || key_id_bytes || payload_bytes`.
+The pinned public key must come from the client/operator trust configuration,
+never from the document. Envelope/payload limits are64/48KiB, at most32 lobbies
+and8 concrete addresses per lobby. Version1 is separate from UDP protocol16.
+
+Payload fields: `version`, `region` (`ru`/`global`), exact `contour` (`production`
+or the build contour), positive `sequence`, `issued_at_ms`, `expires_at_ms`,
+`policy` and `lobbies`. TTL is at most7 days; future issue skew is at most30s.
+Reject expired/wrong-scope/older-sequence documents, malformed or duplicate
+lobby IDs/targets, invalid destinations and incompatible contracts. A client
+cache must additionally refuse different payloads reusing the same sequence.
+Every publication/expiry/status change must advance the sequence.
+
+Policy has a semantic `min_release`, `maintenance`, optional HTTPS `update_url`
+and bounded plain `message`. Lobby fields are `id`, `location`, `host`, `addresses`,
+`port`, `contract`, `status` (`open`/`full`/`maintenance`) and weight1..10000.
+`host` is a display/contour label; `network_endpoints()` returns the exact signed
+IP destinations. Selection uses compatible open entries and caller entropy;
+valid maintenance/update/full outcomes must not silently bypass policy through
+fallback. Existing live-worker Resume must retain its owning lobby/worker and
+must not go through new-admission selection.
+
+Build and prove locally from the game checkout with shared cacheA:
+
+```sh
+export CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../target"
+cargo build --locked -p server --example game-directory
+node scripts/test_game_directory.mjs "$CARGO_TARGET_DIR/debug/examples/game-directory"
+```
+
+The offline command interface (UTC values are Unix milliseconds):
+
+```text
+game-directory sign INPUT_JSON KEY_FILE KEY_ID REGION CONTOUR NOW_MS
+game-directory verify SIGNED_JSON PINNED_PUBLIC_KEY_HEX KEY_ID REGION CONTOUR NOW_MS MIN_SEQUENCE
+```
+
+`sign` accepts a separate regular file containing the32-byte hexadecimal seed,
+with no group/other permissions on Unix. It validates input, signs and verifies
+its own output before printing the public envelope. `verify` prints only an
+authenticated, currently valid typed document; failure has no usable stdout.
+No networking, migration, key generation or automatic publication occurs.
+Live key creation/rotation/baking and publication require the owner's separate
+production approval; the publicly known fixture key must never be provisioned.
+
+Verification:all197 shared cases and2 operator cases PASS; strict shared/example
+clippy PASS. Nine actual-process/independent Node Ed25519 checks PASS, including
+exact Unicode payload, wrong key/region, expiry, rollback, tamper, key alias and
+unsafe key permissions. Synthetic private fixture removed. Reports:
+`.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p7-directory-v3-*`.
+Initial v1 shared gate correctly required classifying the new `LobbyStatus` as
+non-UDP; classification was added without a gameplay protocol bump, and final
+v3 passes. This checkpoint does not prove runtime routing or multi-host capacity.
+
+Remaining D1 integration gates:
+
+- Client anonymous bounded HTTPS read, signature verification and scoped durable
+  last-good cache; equal-sequence immutability and rollback fencing.
+- Pinned fallback destinations and region/contour checks on both labels and IPs;
+  worker handoff and saved Resume must retain the authorized destination scope.
+- Maintenance/update/capacity UI, compatible alternate/fallback tests, key rotation
+  and a reviewed publication kit; preserve party grouping when routing changes.
+- Cross-host ready/dodge discipline and real two-lobby/worker process proof, then
+  measured RU/WAN operation. No item is closed by these primitives alone.
+
+
+## Implemented D1 HTTP delivery checkpoint — 2026-11-06
+
+The regional portal exposes anonymous `GET`/`HEAD /api/game/directory`. It
+fetches only its configured Account API's `GET /v1/game-directory`; browser
+cookies, authorization and forwarding headers never select the upstream or
+become upstream account credentials. Existing hosted ingress authentication is
+applied from server configuration only. Query-selected region/contour is rejected.
+The route checks its configured Host, region, contour, freshness, strict UTF-8,
+envelope shape and bounded streamed body before forwarding the original bytes.
+It does not reserialize JSON or round the directory's u64 sequence. The portal
+is a transport guard; cryptographic authority remains the pinned Rust verifier,
+and native independent verification is still required before using destinations.
+
+Account API configuration is optional and all-or-none:
+
+```text
+OMOBA_GAME_DIRECTORY_FILE=/absolute/path/to/reviewed-signed-directory.json
+OMOBA_GAME_DIRECTORY_KEY_ID=<reviewed public key identifier>
+OMOBA_GAME_DIRECTORY_PUBLIC_KEY=<32-byte lowercase public key hex>
+```
+
+Unset configuration leaves the route unavailable and existing account behavior
+unchanged. Partial/invalid configuration fails startup. Region and contour come
+from the API build, never a request. The source must be a bounded regular file;
+it is signature/schema/scope/time checked on each read. Responses preserve exact
+signed wire bytes and use JSON, `no-store` and `nosniff`; missing, expired,
+tampered or wrong-scope input returns generic503 without reflecting paths/data.
+A reviewed regular-file atomic replacement becomes visible without restarting
+the API or portal. This server does not keep a sequence high-water mark; native
+durable rollback/equal-sequence fencing and monotonic operator publication remain
+required. No signer or private signing key runs in either service.
+
+Verification:4 API cases PASS, including the explicitly executed real migrated
+PostgreSQL/router case and real loopback HTTP replacement; strict all-target API
+clippy/build PASS. Portal257 tests PASS/3 pre-existing expected skips; typecheck
+and RU production build PASS. Seven real Rust API/PostgreSQL/production Next
+checks PASS, including native offline verification of the portal-delivered file,
+HEAD/method/query boundaries, corruption503 and hot signed replacement. The
+publicly known fixture private file was removed before services started. Summary:
+[HTTP proof](../evidence/fair-play-2026-11-06/directory-http-summary.json).
+
+Reproduce with an already migrated loopback `omoba_test`, prebuilt RU API and
+signer, and an RU/production portal build; from the portal checkout run
+`npm run test:game-directory` with `OMOBA_DIRECTORY_API_BIN`,
+`OMOBA_DIRECTORY_SIGNER_BIN`, `OMOBA_TEST_DATABASE_URL` and a fresh
+`OMOBA_DIRECTORY_EVIDENCE_DIR`. This starts only owned loopback processes and
+uses a publicly known test pin. It does not establish live HTTPS, native routing,
+key rotation, any second host, WAN capacity or release readiness. No live key,
+service settings, deployment, workflow, dependency or migration was changed.
+
+
+## Native trust/cache integration checkpoint — targeted checks PASS
+
+Native trust and storage now have an explicit reusable API in
+`client/src/game_directory.rs`; anonymous fixed-origin fetch is in
+`passport/src/game_directory.rs`. This is not yet wired to live UDP admission.
+No live pin was generated/baked/provisioned, and the existing ready native UI
+binary is preserved for the outstanding captures.
+
+- Trust comes from a separate caller-supplied set of up to4 public pins (unique
+  key IDs). Strict Ed25519 verification authenticates the exact signing domain,
+  key identity and UTF-8 payload before returning an immutable typed view.
+- Every directory and cached document is bound to the exact account region and
+  contour. Known foreign regional labels and IPs are checked independently;
+  production also refuses the documented dev namespaces/VPS IP and mapped IPv6
+  aliases. A valid signature never bypasses these destination guards.
+- The regular-file cache contains the original signed envelope, retaining its
+  u64 sequence after expiry. Expired data yields no admission destination, but
+  remains an authenticated rollback/equal-sequence fence across restart. Same
+  sequence with different signed payload is refused; outer JSON whitespace is
+  irrelevant. Corrupt/unreadable/nonregular state is not silently reset to zero.
+  A backwards clock returns an error instead of pretending known policy is absent.
+- A separate stable OS file-lock inode serializes compare-and-publish across
+  independently opened cache instances/processes. Contention is bounded/fails
+  busy; process death releases the lock. New bytes are written/synced to a unique
+  sibling, renamed and (on Unix) the directory is synced before exposure. Failure
+  must not permit falling back to an older open policy after a newer closed one.
+- Pin rotation requires an overlap and an advanced publication sequence before
+  retiring the cached document's old verifier. This disk cache is not hardware
+  monotonic storage and does not defend against an owner deleting/replacing the
+  entire application state or an untrusted process owning its storage directory.
+- Public transport derives its HTTPS URL from region/contour, ignores ambient
+  service overrides, has no account token/cookie jar, refuses redirects/non-JSON
+  or unsuccessful replies, and enforces a5s total/3s connect limit and64KiB
+  streamed cap. Only private test construction permits a loopback HTTP fixture.
+
+Verification:all9 native signature/cache cases and4 actual HTTP transport cases
+PASS, including an actual independently launched process blocked by the OS cache
+lock. All9 endpoint guard and18 post-match cases PASS; strict client lib/test-
+target and RU passport all-target clippy PASS. The first cacheA client test
+compile took1941.09s; subsequent test execution took0.12s and no new cargo cache
+was created. [Source hashes/proof](../evidence/fair-play-2026-11-06/directory-native-summary.json).
+Runtime pin configuration,
+fetch/cache/fallback lifecycle, policy UI, party/Resume ownership and actual
+multi-host/WAN remain required D1/P7 work.
+
+
+## Native admission coordinator candidate — 2026-11-07
+
+`client/src/game_directory/admission.rs` composes the existing anonymous fixed-
+region transport, independent signature trust and durable cache. It has a single
+bounded fetch in flight and nonblocking main-thread polling; HTTP/filesystem work
+runs on its worker. Current validated directory data chooses a compatible open
+lobby and a concrete signed IP. A fallback must be separately supplied by the
+build/operator, passes the same public-address/region/contour guards and never
+performs DNS. No fallback configuration means unavailable, not an unchecked
+legacy hostname. Current valid update/maintenance/full/incompatible policy cannot
+silently escape through fallback.
+
+The coordinator retains authenticated sequence history after expiry and compares
+memory/disk floors before accepting a candidate. If a valid newer maintenance
+policy cannot persist, its in-memory floor prevents the running process from
+reusing older open cache on a later outage. Successful equally/newer durable
+publication repairs that state. This does not claim hardware-monotonic storage or
+preservation of an unpersisted observation across process death. Corrupt/nonregular
+cache and backwards clocks fail closed. Equal-sequence differing payloads remain
+refused, and expired bytes are never exposed as a signed admission document.
+
+A retained route keeps an existing seat's exact lobby address across policy
+refresh. New admission for an existing party may retain that lobby/IP only while
+still authorized/open/compatible; it never silently moves the group to another
+lobby or newly substituted address. Actual session/queue integration still must
+call the correct path; these value APIs are not server admission tickets.
+
+Nine new cases cover cache/fallback/expiry, closed policies, compatible alternate,
+party/IP retention, original Resume address, tamper/replay/equivocation, corruption/
+clock, actual Unix denied-write recovery and a single asynchronous worker. All9
+actually execute and PASS in source8c9f9351's dev-client CI42277199327,
+job128096469173; complete client1601 PASS/0 FAIL/1 ignored. Both strict dev client
+clippy variants and Android compilation also pass. Preserve [exact source/job proof](../evidence/directory-admission-2026-11-07/summary.json).
+Complete core/PostgreSQL gates remain pending at this observation. No local heavy
+build was launched below20GiB and no native startup/UI proof is claimed.
+
+Remaining: complete the current full gate; add reviewed compiled public trust
+and fallback configuration; bind the asynchronous resolver to legal/region startup,
+new queue entry, policy UI, retry and exact-address transport; preserve actual
+party/worker/Resume ownership across refresh; prove two lobbies/shared discipline.
+No live pin, signing secret, public directory, service, workflow or deployment is
+changed. D1/#12/P7 remain incomplete until these end-to-end gates pass.
+
+
+## Build trust configuration candidate — 2026-11-07
+
+`client/src/game_directory/config.rs` parses the public JSON value baked by
+`option_env!("OMOBA_DEFAULT_GAME_DIRECTORY_TRUST")`. The running process does not read
+that environment variable for trust. Version1 is bounded to16KiB and at most
+two unique regional profiles; each profile has1..4 independent public pins and
+a required concrete fallback. Region/contour, public key encoding/curve strength,
+duplicate IDs, address bounds and known foreign/dev destinations are validated.
+Unknown fields (including a signing seed or alternate HTTP URL) are refused.
+Absent configuration is distinguishable from malformed/partial configuration;
+requesting a missing configured account region returns an error, not legacy.
+Cache paths explicitly include both the contour and account region.
+
+The desktop executable adds `--check-directory-trust`. It audits the *compiled*
+public pins/fallback destinations without starting account/GUI/service/cache
+initialization. Disabled/invalid builds exit2 rather than being certified as
+configured. The JSON report says `configured:true`; it is a configuration audit,
+not evidence of live routing or release readiness. Public key bytes are included
+so the operator can compare the actual binary's pins with the approved public
+keys. No signing key belongs in this configuration or binary.
+
+A deliberately invalid template, to fill only with separately reviewed public
+values before building:
+
+```json
+{"version":1,"contour":"production","regions":[{"region":"ru","pins":[{"key_id":"reviewed-key-id","public_key":"REVIEWED_64_LOWERCASE_HEX_PUBLIC_KEY"}],"fallback":{"id":"reviewed-ru-lobby","location":"moscow","host":"lobby.omoba.ru","addresses":["REVIEWED_PUBLIC_IP"],"port":4000}}]}
+```
+
+Direct Cargo builds can receive this public value explicitly. Release packaging
+intentionally scrubs ambient compile-time defaults; it needs a separately reviewed
+explicit bundle option before a packaged artifact can enable D1. No workflow or
+release-script edit is made here. Every offered account region must have its
+reviewed profile before that region can use this path. Rotations retain the
+previous verifier while cached/owned admissions still need it. Five new cases
+cover scope/fallback/cache paths, malformed/partial bounds/weak pins, actual
+compiled input, and a real subprocess with malicious runtime environment. They
+actually execute in sourcea7116c00 dev-client job128126563753: all5 PASS,
+with1610 total PASS,0 FAIL,1 ignored; both strict dev clippy variants pass. Its
+separate overall gate fails formatting and is corrected by108d147d, whose fresh
+complete gate remains pending. Earlierf144/8c9 do not verify these later cases.
+
+The parser/audit alone does not activate routing. The native integration below
+is now implemented as a candidate, with verification still pending. No live key
+is generated/baked, directory published, configuration installed, workflow changed
+or service moved.
+
+
+Before binding the session, `Admission::resume_at` now resolves a saved hint
+against the current authenticated owner list (or separately pinned fallback when
+no valid current directory exists). It checks the exact original lobby port and
+keeps its worker within that lobby's signed/pinned IPs. Known legacy labels map
+to those concrete addresses without DNS; IPv4-mapped aliases canonicalize. Current
+removal cannot escape through fallback. Expired secondary authority, foreign IPs/
+labels, zero ports and cache failure refuse a new transport. Existing-seat owner
+lookup bypasses new-search maintenance/full/min-release/weight decisions, then
+the real worker's normal compatibility and allocation/epoch/seat checks remain
+mandatory. A retained address value alone never authorizes a fresh reconnect.
+
+Four additional cases cover these owner boundaries, including current removal,
+expired secondary/explicit fallback, mixed worker hosts and multi-IP legacy hints.
+All4 execute and PASS in sourcea7116c00 dev-client CI alongside the5 config
+cases. Native runtime consumers are implemented below but need their own gate. Operators must retain a live
+owner in the signed list while its workers need recovery, even when new admission
+is closed. A baked fallback IP remains a static trust target for supported client
+artifacts and must remain under operator control for that lifetime.
+
+
+### Native runtime integration candidate — 2026-11-07
+
+`net::directory::DirectoryRouting` is initialized without HTTP/cache I/O. Both
+startup and refresh are behind the existing bound-region/legal-acceptance gate.
+Configured malformed/missing-region trust stays unavailable, rather than falling
+back to legacy. The existing explicitly validated desktop operator override is
+preserved; an invalid override cannot disable the compiled directory guard.
+Unconfigured artifacts keep the existing regional static route. Offline boot
+starts no resolver; its later online return goes through the configured guard.
+
+The resolver performs at most one anonymous fixed-regional HTTPS fetch at once;
+automatic refresh is30s, explicit retry at least5s apart. Only signed/pinned
+concrete IPs reach UDP, with normal server preflight still mandatory. Cold Resume
+loads a bounded16KiB credential-free hint without deleting it for disagreement
+with the static default, then validates/normalizes its original lobby and worker
+against current authority before exposing Resume or opening transport. Party/
+return and reconnect keep the retained owner. Removed/expired worker authority
+holds the pending allocation; Retry retains it until authority is repaired.
+Committed seat/epoch/backend authentication rules remain in force.
+
+New Join, service search and party launch pass a shared dispatch guard before
+new-search interception. Current FIFO request IDs, cancellation, profile/history
+and recovery remain usable. A deferred worker Join cannot leave on the old lobby
+transport, including the frame in which a refresh permits handoff. Existing worker
+transports and offline practice are not gated by new-search policy. Home/loading
+show localized policy detail, short header copy and Retry; required update uses
+the existing build-portal/store link restrictions. Actual new pixels remain
+unverified under the disk/build limitation.
+
+Nine new networking cases cover pending/invalid authority, real loopback UDP by
+signed IP despite an unresolvable label, original-owner Resume and normalized
+hints, expiry/removal, FIFO/cancel/new launch, dispatch before interception,
+allocated-seat Retry after authority repair, and party return through maintenance/
+weight changes. Two further cases cover Home stale actions/offline/Retry and
+required-update link selection without UDP. They are added but not yet accepted
+as executed. An intermediate local library check passed; all-target clippy found
+a test-only private import, two initializer-style errors and an incorrect test
+status/weight fixture, corrected before this checkpoint. Final-source all-target strict client clippy and no-default-
+features strict library clippy now PASS, together with formatting/diff checks and
+all29 DevContour packaging checks. The11 new test bodies compile, but execution
+and full branch CI remain required. Root space briefly recovered to21GiB, then
+fell below20GiB; no new heavy local linked build is started below the guard. Public-key provisioning/package input, actual
+configured binary audit, signed endpoint publication, alternate-host runtime and
+cross-host discipline/party discovery, real host/WAN/load and RU deployment still
+remain. #12/P7 and the overall release checklist stay incomplete.
+
+[Exact source fingerprint and validation scope](../evidence/directory-runtime-2026-11-07/summary.json).
+
+
+## Canonical public input audit — 2026-11-07
+
+A new desktop operator mode reads the proposed public bundle from stdin before
+any account/network/settings/cache/UI initialization:
+
+```sh
+path/to/new-client --check-directory-trust-input production < approved-public-trust.json
+# A separately reviewed dev bundle must explicitly use dev instead.
+path/to/new-client --check-directory-trust
+```
+
+The first mode uses the exact existing BuildTrust parser, Ed25519 curve-strength
+and destination/region rules, not a second Python/JavaScript trust implementation.
+It reads at most16385 bytes and rejects input over16KiB, bad UTF-8/JSON, weak public keys,
+private/unknown fields, wrong scope and invalid destinations. Errors
+do not echo raw input or detailed underlying I/O errors. Recognized audit flags
+with bad arguments return failure instead of starting the game. Ordinary game
+arguments and the compiled-only audit consume no stdin. The compiled flag now
+refuses extra arguments instead of silently ignoring a supposed input filename.
+
+An input success emits input_valid:true and compiled_configuration_checked:false
+plus the parsed public audit. It does not change or certify the running binary's
+compiled trust. The existing compiled audit remains separately required on the
+actual artifact, and unconfigured binaries still fail that check. A new binary
+containing this change is required; existing older Mac artifacts cannot prove it.
+
+Four regressions are added for exact parser reuse/authority, bounded streams and
+sanitized errors, strict dispatch/no accidental stdin, and actual operator-mode
+output. Formatting/source checks pass; execution and the full corrected-source
+gate are pending CI. [Exact source and scope](../evidence/directory-input-audit-2026-11-07/summary.json).
+No release script, workflow or mobile packaging is changed. The explicit reviewed
+public bundle option across all platforms, live keys/publication, actual
+configured artifacts and real multi-host/RU acceptance remain open.
+
+
+## Shared queue discipline foundation — 2026-11-07
+
+The store now supplies schema11 record_queue_dodge / queue_dodge_cooldown with a
+stable event ID, profile row locking, idempotent/conflict-safe receipts, separate
+queue state and observation-anchored cooldowns. Six new actual PG18.6 cases and
+all69 store tests pass, strict test-target clippy/formatting pass. This is stored
+application code, not a closed cross-host bypass: the lobby remains local.
+[Exact source and proof](../evidence/queue-discipline-store-2026-11-07/README.md).
+
+Complete next, without weakening the existing15s/FIFO/party/Resume behavior:
+
+- Produce stable events and deliver them off-tick through a separate typed durable
+  journal with bounded retries and flush/commit acknowledgements. Do not encode
+  them as MatchResult records that restart recovery may turn into Interrupted.
+- Add reviewed runtime grants, fresh access reads and final durable-start checks.
+  Profile row locks must serialize the penalty with actual match admission.
+- Fence shared ready ownership/deadlines before cross-host re-search, including
+  the interval before an old host's event reaches SQL. A late asynchronous write
+  alone does not prove that rapid host switching cannot bypass a penalty.
+- Reconcile existing local penalty floors without pardoning active penalties or
+  fabricating duplicate event/strike history from aggregated local counters.
+- Prove two actual lobbies with signed decline/15s timeout, accepted-player FIFO
+  and party retention, database outage/restart/replay, owner recovery and Resume.
+
+The owned test fixture is now career11/portal11. Older C4/schema10 proofs are
+historical; repeat actual recovery with schema11 before acceptance. The C2/C4
+review patches remain unchanged/unapplied pending owner answers. No production
+secret, service, key or host configuration is changed here.
+
+
+## Durable dodge delivery verified; global admission still open — 2026-11-07
+
+Wire stable local dodge events through a separate typed, bounded, locked durable
+journal into schema11 SQL. Retain producer copies until exact payload commit ACK;
+include this journal in shutdown flush without creating Interrupted match history.
+Corrupt local penalty state now closes new search and stays preserved; storage
+failure pauses ready checks and preserves other players/parties/FIFO.
+
+All60 renderer-free native backend tests PASS,0 failed/ignored, including all7
+actual PG cases. New coverage:16 journal units,5 backend ACK units and3 actual PG
+worker outage/restart/full-channel/corruption cases. Strict native Clippy,
+formatting and diff checks PASS. Source DML grants pass a rolled-back temporary
+NOLOGIN ACL proof, with zero role/profile/event leftovers. [Scope and evidence](../evidence/queue-dodge-delivery-2026-11-07/README.md).
+
+MatchService/engine tests and full current CI remain required. Parent1d1deb79
+CI42309434476 now reports all7 jobs SUCCESS, including the public-journey job;
+that earlier result does not certify this newer implementation. No fresh journey
+artifact inspection is claimed here. Shared cooldown reads/final durable-start,
+ready ownership/deadlines, legacy floor reconciliation, signed two-lobby fault
+proof, schema11 recovery and typed-journal health remain open. Original68 ledger
+stays62 done,5 partial,1 open. C2/C4 questions remain pending; no RU rollout.
+
+
+### Shared new-search and durable-start checks verified — 2026-11-07
+
+New search now uses shared queue discipline on both serial/parked and batched
+backend access paths. Normal account access/Resume remains separate. New durable
+allocation checks queue penalties after participant profile locks and rolls back
+all match/participant/active/season rows on refusal. Existing immutable allocation
+retry/adoption is preserved. A refused Start is retired through the durable
+rejection path so late terminal replay cannot start it after cooldown expiry.
+The client maps its stable dodge code to the existing Russian localized notice.
+
+All72 actual-PG18.6 store tests and all63 native backend tests PASS,0 failures/
+ignores; strict store/backend test-target Clippy and formatting/diff PASS. New
+proof includes three store cases (fresh cross-owner read, rollback/Resume and an
+observed real in-flight event/profile-lock race), two actual-worker PG cases and
+one backend dispatch unit. First71/1 store attempt exposed missing source grants
+in the restricted-role fixture; corrected, cleaned only its exact disposable
+schema/two NOLOGIN roles and reran72 PASS. [Exact scope/proof](../evidence/queue-admission-2026-11-07/README.md).
+
+Fresh full engine/client CI and rendered current Russian pixels remain required.
+Previousef9c865b CI42316037246 was still running at this checkpoint, with Android,
+Python, harness and bot jobs passed; it does not certify these newer changes.
+Shared ready ownership/deadlines BEFORE cross-host re-search, legacy floors and
+actual signed two-lobby/party/FIFO/Resume fault proof remain open. So do C2/C4
+approval/actual RU recovery, typed-journal health and physical/capacity gates.
+Original68 ledger stays62 done,5 partial,1 open; no acceptance criterion waived.
+
+
+### Durable ready ownership contract; correlation repair — 2026-11-07
+
+Schema12 now stores check ownership, immutable profile/session membership,
+responses and unique profile claims. Reserve precedes Publish; the stored window
+is exactly15000ms and retries cannot extend it. An expired healthy check writes
+only missed seats' stable events/penalties and releases claims in one transaction;
+failed/unpublished owners and failed handoffs free players without invented
+strikes. Sorted profile/check locks guard new admission; existing allocation
+recovery remains separate. [Exact scope/proof](../evidence/ready-ownership-2026-11-07/README.md).
+
+Nine new actual-PG scenarios and all81 store tests PASS,0 failures/ignores; all64
+native backend cases and strict store/backend Clippy PASS. Restricted game-role
+lifecycle and portal refusal are exercised. The owned fixture is career12/portal11;
+no per-test schema/role remains. Additive migration/strict runtime schema guard
+requires the matching migrated schema and binary for release; no rollout occurs.
+Older schema10/11 recovery proofs remain historical; real schema12 recovery is open.
+
+Parent1e587a39 CI42317119362 has6 successful jobs, but PG/public job128232347108
+FAILED at party-leave after store72/server534 PASS. Exact artifact13551717666,
+68440bytes SHA256a440a26df733050702b06e65001e2603ba5523e8363dc92c298b6892dba59b01
+shows nine retained survivors and a correctly denied dodger whose Failed/current
+request was overwritten with local Idle/null. Preserve the correlated store
+refusal; clear it on new search/cancel/success and ignore stale replies. Native
+regression PASS; unchanged public-journey rerun/engine/client current CI pending.
+
+This contract is NOT yet active lobby consent: wire bounded off-tick reserve,
+publish/answer/poll/cancel jobs and ACKs, expose consent only after SQL publication,
+require committed unanimity before spawn and bind worker result ID to its check.
+Use the SQL penalty snapshot without a second local event. Actual signed two-
+lobby15s/party/FIFO/restart/Resume proof, legacy floor reconciliation, ready/journal
+health/retention and every other physical/capacity/release/RU gate remain open.
+C2/C4 questions remain pending; original68 ledger stays62 done,5 partial,1 open.

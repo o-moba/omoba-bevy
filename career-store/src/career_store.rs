@@ -20,9 +20,16 @@ use std::{
     time::Duration,
 };
 
+mod fair_play;
+mod input_stats;
+mod queue_discipline;
+pub use queue_discipline::QueuePenaltyFloor;
+pub mod ready;
+mod seasons;
+
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 5] = [1, 2, 3, 4, 5];
+pub const SCHEMA_VERSIONS: [i32; 13] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -124,6 +131,12 @@ where
 }
 
 impl CareerStore {
+    /// Decode season columns selected alongside a profile in the caller's snapshot.
+    /// Authorization and selection of visible profile fields remain with the caller.
+    pub fn ranked_profile_from_row(row: &PgRow) -> Result<shared::ranked::SeasonProfile, String> {
+        seasons::profile(row).map_err(|error| error.to_string())
+    }
+
     /// Read only provider-verified grants. Missing billing migrations fail closed.
     /// One read-only snapshot: the bounded grant list (active first), the Hero
     /// tier sum (`portal.supporter_points`) and the stored aura, combined by the
@@ -136,43 +149,35 @@ impl CareerStore {
             AuraStyle, STATUS_GRANT_LIMIT, SupporterGrantSummary, SupporterStatus, tier_points,
         };
         let unavailable = |_| "Supporter storage is unavailable.".to_string();
-        let mut tx = self.pool.begin().await.map_err(unavailable)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(unavailable)?;
-        let (now, points): (i64, i64) = sqlx::query_as(
-            "SELECT EXTRACT(EPOCH FROM now())::bigint, portal.supporter_points($1, EXTRACT(EPOCH FROM now())::bigint)",
+        // One statement gives time, grants, points and preference one MVCC
+        // snapshot without a transaction's repeated network roundtrips.
+        let row = sqlx::query(
+            "SELECT n.read_at, portal.supporter_points($1,n.read_at) AS points, \
+             (p.profile_id IS NOT NULL) AS preference_set,p.aura, \
+             (SELECT coalesce(jsonb_agg(to_jsonb(g)-'active' ORDER BY g.active DESC,g.valid_until DESC),'[]'::jsonb) \
+              FROM (SELECT provider,valid_from,valid_until,(revoked_at IS NOT NULL) AS revoked,renewal_enabled,tier_points, \
+                    (revoked_at IS NULL AND valid_from<=n.read_at AND valid_until>n.read_at) AS active \
+                    FROM portal.supporter_grants WHERE profile_id=$1 \
+                    ORDER BY active DESC,valid_until DESC LIMIT $2) g) AS grants \
+             FROM (SELECT EXTRACT(EPOCH FROM now())::bigint AS read_at) n \
+             LEFT JOIN portal.supporter_preferences p ON p.profile_id=$1"
         )
         .bind(profile_id)
-        .fetch_one(&mut *tx)
+        .bind(STATUS_GRANT_LIMIT)
+        .fetch_one(&self.pool)
         .await
         .map_err(unavailable)?;
-        let rows = sqlx::query("SELECT provider, valid_from, valid_until, revoked_at, renewal_enabled, tier_points FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=$2 AND valid_until>$2) DESC, valid_until DESC LIMIT $3")
-            .bind(profile_id).bind(now).bind(STATUS_GRANT_LIMIT).fetch_all(&mut *tx).await.map_err(unavailable)?;
-        let grants = rows
-            .iter()
-            .map(|row| SupporterGrantSummary {
-                provider: row.get("provider"),
-                valid_from: row.get("valid_from"),
-                valid_until: row.get("valid_until"),
-                revoked: row.get::<Option<i64>, _>("revoked_at").is_some(),
-                renewal_enabled: row.get("renewal_enabled"),
-                tier_points: tier_points(i64::from(row.get::<i32, _>("tier_points"))),
-            })
-            .collect();
-        let preference: Option<Option<String>> =
-            sqlx::query_scalar("SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1")
-                .bind(profile_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(unavailable)?;
-        tx.commit().await.map_err(unavailable)?;
+        let Json(grants): Json<Vec<SupporterGrantSummary>> =
+            row.try_get("grants").map_err(unavailable)?;
+        let aura: Option<String> = row.try_get("aura").map_err(unavailable)?;
+        let preference = row
+            .get::<bool, _>("preference_set")
+            .then(|| aura.as_deref().and_then(AuraStyle::from_id));
         Ok(SupporterStatus::from_grants(
             grants,
-            now,
-            tier_points(points),
-            preference.map(|aura| aura.as_deref().and_then(AuraStyle::from_id)),
+            row.get("read_at"),
+            tier_points(row.get("points")),
+            preference,
         ))
     }
 
@@ -298,6 +303,56 @@ impl CareerStore {
             sqlx::raw_sql(include_str!("../migrations/postgres/005_sanctions.sql"))
                 .execute(&mut *tx)
                 .await?;
+        }
+        if !versions.contains(&6) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/006_rating_ladder.sql"))
+                .execute(&mut *tx)
+                .await?;
+        }
+        if !versions.contains(&7) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/007_fair_play.sql"))
+                .execute(&mut *tx)
+                .await?;
+        }
+        if !versions.contains(&8) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/008_match_votes.sql"))
+                .execute(&mut *tx)
+                .await?;
+        }
+        if !versions.contains(&9) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/009_ranked_eligibility.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if !versions.contains(&10) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/010_ranked_seasons.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if !versions.contains(&11) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/011_queue_discipline.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if !versions.contains(&12) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/012_ready_ownership.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if !versions.contains(&13) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/013_ready_retention.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
@@ -462,7 +517,7 @@ impl CareerStore {
         retry(|| async {
             check_id(id)?;
             let before = before.map(i64::try_from).transpose().map_err(|_| "Invalid history cursor.")?;
-            let rows = sqlx::query("SELECT m.seq,m.result FROM career_matches m JOIN career_participants p USING(result_id) WHERE p.profile_id=$1 AND m.status='settled' AND ($2::bigint IS NULL OR m.seq<$2) ORDER BY m.seq DESC LIMIT $3")
+            let rows = sqlx::query("SELECT m.seq,m.result FROM career_matches m JOIN career_participants p USING(result_id) WHERE p.profile_id=$1 AND m.status='settled' AND coalesce((m.result->>'gameplay_started')::boolean,true) AND ($2::bigint IS NULL OR m.seq<$2) ORDER BY m.seq DESC LIMIT $3")
                 .bind(id).bind(before).bind((HISTORY_PAGE_SIZE + 1) as i64).fetch_all(&self.pool).await?;
             let more = rows.len() > HISTORY_PAGE_SIZE;
             let mut summaries = Vec::new(); let mut cursor = None;
@@ -472,7 +527,7 @@ impl CareerStore {
                     .ok_or("Stored result has an inconsistent participant relation.")?;
                 cursor = Some(row.try_get::<i64,_>("seq")? as u64);
                 summaries.push(MatchSummary { result_id: result.result_id.clone(), ended_at_ms: result.ended_at_ms,
-                    duration_ms: result.duration_ms, outcome: result.outcome, won: result.winner.map(|w| w == p.team),
+                    duration_ms: result.duration_ms, outcome: result.outcome, won: result.participant_won(p),
                     hero_class: p.hero_class, avatar: p.avatar.clone(), sprite_character: p.sprite_character.clone(),
                     kills:p.stats.kills, deaths:p.stats.deaths, assists:p.stats.assists,
                     damage_to_heroes:p.stats.damage_to_heroes, rating:p.rating.clone() });
@@ -504,20 +559,38 @@ impl CareerStore {
         .await
     }
 
+    /// Unmanaged standalone allocation. Public server roles use `start_public`.
     pub async fn start(&self, result: MatchResult) -> Result<(), String> {
         retry(|| self.start_inner(result.clone())).await
     }
     async fn start_inner(&self, result: MatchResult) -> StoreResult<()> {
-        self.allocation_inner(result, false).await
+        self.allocation_inner(result, false, false).await
+    }
+    /// Public lobby/match workers must use this entry point. An absent ready
+    /// receipt is a refusal, never an implicit standalone allocation.
+    pub async fn start_public(&self, result: MatchResult) -> Result<(), String> {
+        retry(|| self.allocation_inner(result.clone(), false, true)).await
     }
     /// Reconcile durable spool metadata with an allocation, without treating its
     /// statistics as a new checkpoint. A live different owner is never adopted.
+    /// Public server roles use `ensure_public_allocation` instead.
     pub async fn ensure_allocation(&self, result: MatchResult) -> Result<(), String> {
-        retry(|| self.allocation_inner(result.clone(), true)).await
+        retry(|| self.allocation_inner(result.clone(), true, false)).await
     }
-    async fn allocation_inner(&self, result: MatchResult, recover: bool) -> StoreResult<()> {
+    /// Existing immutable SQL allocations can recover without a new vote. A
+    /// spool whose allocation never committed still needs committed consent.
+    pub async fn ensure_public_allocation(&self, result: MatchResult) -> Result<(), String> {
+        retry(|| self.allocation_inner(result.clone(), true, true)).await
+    }
+    async fn allocation_inner(
+        &self,
+        result: MatchResult,
+        recover: bool,
+        require_consent: bool,
+    ) -> StoreResult<()> {
         let result = normalize(result)?;
         let mut tx = self.pool.begin().await?;
+        seasons::lock(&mut tx).await?;
         // Serialize retries even before the allocation row exists.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,721946003))")
             .bind(&result.result_id)
@@ -556,8 +629,32 @@ impl CareerStore {
         sqlx::query("INSERT INTO career_matches(result_id,server_epoch,match_id,owner_id,lease_until,allocation,checkpoint) VALUES($1,$2,$3,$4,clock_timestamp()+interval '90 seconds',$5,$5)")
             .bind(&result.result_id).bind(result.server_epoch.to_string()).bind(result.match_id.to_string())
             .bind(&self.owner).bind(Json(&result)).execute(&mut *tx).await?;
+        seasons::reserve(&mut tx, &result).await?;
         let profiles = append_participants(&mut tx, &result, &[]).await?;
+        if !recover || require_consent {
+            // Profile locks serialize admission with settlement on every host.
+            // A stale lobby cache or already accepted ready check cannot race
+            // a newly committed disciplinary cooldown into another match.
+            let ids: Vec<_> = profiles.keys().cloned().collect();
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_play_penalties WHERE profile_id=ANY($1) AND cooldown_until>clock_timestamp())")
+                .bind(&ids).fetch_one(&mut *tx).await?;
+            if blocked {
+                return Err(shared::career::error_code::PLAY_COOLDOWN.into());
+            }
+            Self::check_queue_discipline(&mut tx, &ids).await?;
+            ready::admit(
+                &mut tx,
+                &result.result_id,
+                &ids,
+                require_consent,
+                result.rated,
+            )
+            .await?;
+        }
         if result.rated {
+            if (!recover || require_consent) && profiles.values().any(|p| !p.ranked_unlocked()) {
+                return Err(shared::career::error_code::RANKED_LOCKED.into());
+            }
             validate_current_cohort(&profiles)?;
         }
         tx.commit().await?;
@@ -568,7 +665,7 @@ impl CareerStore {
         retry(|| self.checkpoint_inner(result.clone())).await
     }
     async fn checkpoint_inner(&self, result: MatchResult) -> StoreResult<()> {
-        let result = normalize(result)?;
+        let mut result = normalize(result)?;
         let mut tx = self.pool.begin().await?;
         let row = locked_match(&mut tx, &result.result_id)
             .await?
@@ -584,6 +681,8 @@ impl CareerStore {
             tx.commit().await?;
             return Ok(());
         }
+        input_stats::preserve(&previous, &mut result);
+        fair_play::validate_participation_progress(&previous, &result)?;
         append_participants(&mut tx, &result, &previous.participants).await?;
         sqlx::query("UPDATE career_matches SET checkpoint=$2 WHERE result_id=$1")
             .bind(&result.result_id)
@@ -600,11 +699,13 @@ impl CareerStore {
         retry(|| self.stage_inner(result.clone())).await
     }
     async fn stage_inner(&self, result: MatchResult) -> StoreResult<()> {
-        let result = normalize_terminal(result)?;
+        let mut result = normalize_terminal(result)?;
         let mut tx = self.pool.begin().await?;
         let row = locked_match(&mut tx, &result.result_id)
             .await?
             .ok_or("Match must be durably started first.")?;
+        let previous: Json<MatchResult> = row.try_get("checkpoint")?;
+        input_stats::preserve(&previous, &mut result);
         if let Some(intent) = row.try_get::<Option<Json<MatchResult>>, _>("intent")? {
             if intent.0 != result {
                 return Err("Conflicting immutable result for this match.".into());
@@ -617,8 +718,13 @@ impl CareerStore {
             return Ok(());
         }
         require_owner(&row, &self.owner)?;
-        let previous: Json<MatchResult> = row.try_get("checkpoint")?;
         same_terminal_allocation(&previous, &result)?;
+        if !(result.outcome == MatchOutcome::Abandoned
+            && !result.gameplay_started
+            && result.unrated_reason.as_deref() == Some("prematch_abandoned"))
+        {
+            fair_play::validate_participation_progress(&previous, &result)?;
+        }
         append_participants(&mut tx, &result, &previous.participants).await?;
         sqlx::query("UPDATE career_matches SET intent=$2,status='pending' WHERE result_id=$1")
             .bind(&result.result_id)
@@ -635,6 +741,7 @@ impl CareerStore {
     }
     async fn finish_inner(&self, result_id: &str, expired: bool) -> StoreResult<MatchResult> {
         let mut tx = self.pool.begin().await?;
+        seasons::lock(&mut tx).await?;
         let row = locked_match(&mut tx, result_id)
             .await?
             .ok_or("Match allocation not found.")?;
@@ -681,6 +788,7 @@ impl CareerStore {
                 .bind(result_id).bind(Json(&recovered)).execute(&mut *tx).await?;
             recovered
         };
+        let allocated_season = seasons::allocation(&mut tx, result_id).await?;
         let mut profiles = locked_profiles(&mut tx, &result.participants).await?;
         let changes = if result.rated {
             validate_rated(&result)?;
@@ -690,7 +798,12 @@ impl CareerStore {
                 .map(|p| {
                     let profile =
                         &profiles[p.profile_id.as_ref().expect("validated rated identity")];
-                    (p.player_id, p.team, profile.rating)
+                    (
+                        p.player_id,
+                        p.team,
+                        profile.rating,
+                        profile.placement_matches(),
+                    )
                 })
                 .collect();
             crate::matchmaking::rating_changes_for_players(
@@ -704,6 +817,22 @@ impl CareerStore {
             BTreeMap::new()
         };
         let public_casual = result.ruleset == PUBLIC_CASUAL_RULESET;
+        // An unattended round ended by player absence must not provide a way
+        // to wait out discipline. Host failure and duration caps remain exempt.
+        let abandoned_reaped = result.outcome == MatchOutcome::Interrupted
+            && result.unrated_reason.as_deref() == Some("abandoned_reaped");
+        let remade = result.outcome == MatchOutcome::Remade;
+        let allocation: Json<MatchResult> = row.try_get("allocation")?;
+        let ranked_reaped = (abandoned_reaped || remade) && allocation.rated;
+        let discipline = result.gameplay_started
+            && (result.outcome == MatchOutcome::Completed || abandoned_reaped || remade)
+            && (result.ruleset == RULESET || public_casual);
+        let abandoned_teams: Vec<_> = result
+            .participants
+            .iter()
+            .filter(|p| fair_play::proved_abandon(p))
+            .map(|p| p.team)
+            .collect();
         for participant in &mut result.participants {
             let Some(id) = &participant.profile_id else {
                 continue;
@@ -711,12 +840,36 @@ impl CareerStore {
             let profile = profiles
                 .get_mut(id)
                 .ok_or("Stored participant profile is missing.")?;
+            if !result.gameplay_started {
+                continue;
+            }
+            // A remake is visible in history but does not count as a game for
+            // innocent players. The rated abandon remains an individual loss.
+            if remade && !(ranked_reaped && fair_play::proved_abandon(participant)) {
+                if discipline
+                    && fair_play::proved_abandon(participant)
+                    && let Some(total) = fair_play::record_abandon(&mut tx, id, result_id).await?
+                {
+                    profile.abandons = total;
+                }
+                continue;
+            }
             profile.matches_played = profile
                 .matches_played
                 .checked_add(1)
                 .ok_or("Career match counter is full.")?;
             if result.outcome == MatchOutcome::Completed {
-                let won = result.winner == Some(participant.team);
+                if !participant.is_bot
+                    && !fair_play::proved_abandon(participant)
+                    && (public_casual || (result.ruleset == RULESET && result.rated))
+                {
+                    profile.completed_public_matches = profile
+                        .completed_public_matches
+                        .checked_add(1)
+                        .ok_or("Completed public match counter is full.")?;
+                }
+                let won = result.winner == Some(participant.team)
+                    && !fair_play::proved_abandon(participant);
                 if won {
                     profile.wins = profile
                         .wins
@@ -729,10 +882,14 @@ impl CareerStore {
                         .ok_or("Career loss counter is full.")?;
                 }
                 if result.rated {
-                    let change = changes
-                        .get(&participant.player_id)
-                        .ok_or("Missing rating change.")?
-                        .clone();
+                    let change = fair_play::rating_award(
+                        changes
+                            .get(&participant.player_id)
+                            .ok_or("Missing rating change.")?,
+                        participant,
+                        result.winner.expect("validated winner"),
+                        abandoned_teams.contains(&participant.team),
+                    );
                     profile.rating = change.after;
                     participant.rating = Some(change);
                     profile.rated_matches = profile
@@ -740,7 +897,9 @@ impl CareerStore {
                         .checked_add(1)
                         .ok_or("Rated match counter is full.")?;
                 }
-                participant.progression_xp_gained = if result.rated {
+                participant.progression_xp_gained = if fair_play::reward_ineligible(participant) {
+                    0
+                } else if result.rated {
                     if won { 150 } else { 100 }
                 } else if public_casual {
                     if won { 50 } else { 25 }
@@ -753,9 +912,46 @@ impl CareerStore {
                     .filter(|&xp| xp <= i64::MAX as u64)
                     .ok_or("Career progression counter is full.")?;
             }
-            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7 WHERE profile_id=$1")
+            if ranked_reaped && fair_play::proved_abandon(participant) {
+                let before = profile.rating;
+                let after = before.saturating_sub(32).max(0);
+                participant.rating = Some(shared::career::RatingChange {
+                    before,
+                    after,
+                    delta: after - before,
+                });
+                profile.rating = after;
+                profile.losses = profile
+                    .losses
+                    .checked_add(1)
+                    .ok_or("Career loss counter is full.")?;
+                profile.rated_matches = profile
+                    .rated_matches
+                    .checked_add(1)
+                    .ok_or("Rated match counter is full.")?;
+            }
+            if discipline && fair_play::proved_abandon(participant) {
+                if let Some(total) = fair_play::record_abandon(&mut tx, id, result_id).await? {
+                    profile.abandons = total;
+                }
+            }
+            seasons::advance(
+                profile,
+                participant,
+                allocated_season,
+                result.outcome == MatchOutcome::Completed,
+                result.outcome == MatchOutcome::Completed
+                    && result.winner == Some(participant.team)
+                    && !fair_play::proved_abandon(participant),
+            )?;
+            let season = profile
+                .ranked
+                .as_ref()
+                .ok_or("Season progress is missing.")?;
+            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7,completed_public_matches=$8,season_rated_matches=$9,season_wins=$10,season_losses=$11,season_completed_matches=$12 WHERE profile_id=$1")
                 .bind(id).bind(profile.rating).bind(i64::from(profile.rated_matches)).bind(i64::from(profile.matches_played))
-                .bind(i64::from(profile.wins)).bind(i64::from(profile.losses)).bind(profile.progression_xp as i64)
+                .bind(i64::from(profile.wins)).bind(i64::from(profile.losses)).bind(profile.progression_xp as i64).bind(i64::from(profile.completed_public_matches))
+                .bind(i64::from(season.rated_matches)).bind(i64::from(season.wins)).bind(i64::from(season.losses)).bind(i64::from(season.completed_matches))
                 .execute(&mut *tx).await?;
         }
         result.saved = true;
@@ -1125,6 +1321,8 @@ fn profile_row(row: &PgRow) -> StoreResult<ProfileSummary> {
             .map_err(|_| "Invalid stored profile counter.".into())
     };
     Ok(ProfileSummary {
+        ranked: Some(seasons::profile(row)?),
+        completed_public_matches: counter("completed_public_matches")?,
         profile_id: row.try_get("profile_id")?,
         nickname: row.try_get("nickname")?,
         rating: row.try_get("rating")?,
@@ -1132,6 +1330,7 @@ fn profile_row(row: &PgRow) -> StoreResult<ProfileSummary> {
         matches_played: counter("matches_played")?,
         wins: counter("wins")?,
         losses: counter("losses")?,
+        abandons: counter("abandons")?,
         progression_xp: u64::try_from(row.try_get::<i64, _>("progression_xp")?)
             .map_err(|_| "Invalid stored progression.")?,
     })
@@ -1200,8 +1399,15 @@ fn validate_current_cohort(profiles: &BTreeMap<String, ProfileSummary>) -> Store
     if profiles.is_empty() {
         return Err("Rated allocation requires profiles.".into());
     }
-    // The same policy the queue and the lobby's Ranked search select with.
-    if !crate::matchmaking::same_cohort(profiles.values()) {
+    // The same policy family the queue and the lobby's Ranked search select
+    // with. The lobby widens its window while players wait (LR-35), up to
+    // `CohortAllowance::MAX`; the store re-checks the roster against that
+    // maximum with the ratings it holds now, so a roster whose ratings drifted
+    // beyond anything the lobby could have formed is still refused.
+    if !crate::matchmaking::same_cohort_with(
+        profiles.values(),
+        crate::matchmaking::CohortAllowance::MAX,
+    ) {
         // Queue snapshots on another process can outlive a completed match.
         // Locks are held through allocation commit, so current classification
         // cannot change after this check and before seats become authoritative.
@@ -1231,6 +1437,13 @@ fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
     let roster_fits_reason = match result.unrated_reason.as_deref() {
         Some("allocated_bots") => bots > 0,
         Some("casual_queue") => true,
+        Some("prematch_abandoned") => {
+            !result.gameplay_started && result.outcome != MatchOutcome::Completed
+        }
+        Some("abandoned_reaped" | "duration_capped") => {
+            result.gameplay_started && result.outcome == MatchOutcome::Interrupted
+        }
+        Some("remake") => result.gameplay_started && result.outcome == MatchOutcome::Remade,
         _ => interrupted_recovery,
     };
     if result.rated
@@ -1257,7 +1470,10 @@ fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
 }
 
 fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
-    if result.result_id.is_empty()
+    if result
+        .ranked_season_id
+        .is_some_and(|id| id == 0 || id > i64::MAX as u64)
+        || result.result_id.is_empty()
         || result.result_id.len() > 128
         || result.result_id.chars().any(char::is_control)
         || result.server_epoch == 0
@@ -1307,6 +1523,7 @@ fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
         p.rating = None;
         p.progression_xp_gained = 0;
     }
+    fair_play::validate_participation(&result)?;
     result.saved = false;
     result.participants.sort_by_key(|p| p.player_id);
     if result.ruleset == PUBLIC_CASUAL_RULESET {
@@ -1323,6 +1540,39 @@ fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
 }
 fn normalize_terminal(result: MatchResult) -> StoreResult<MatchResult> {
     let result = normalize(result)?;
+    match result.end_reason.as_deref() {
+        Some("surrender")
+            if result.outcome != MatchOutcome::Completed || result.duration_ms < 600_000 =>
+        {
+            return Err("Surrender requires a completed match after ten minutes.".into());
+        }
+        Some("remake") if result.outcome != MatchOutcome::Remade => {
+            return Err("Remake reason requires a remade match.".into());
+        }
+        Some(reason @ ("abandoned_reaped" | "duration_capped"))
+            if result.outcome != MatchOutcome::Interrupted
+                || !result.gameplay_started
+                || result.unrated_reason.as_deref() != Some(reason) =>
+        {
+            return Err("Forced end reason requires the matching played interruption.".into());
+        }
+        Some("surrender" | "remake" | "abandoned_reaped" | "duration_capped") | None => {}
+        Some(_) => return Err("Unknown authoritative match end reason.".into()),
+    }
+    if result.outcome == MatchOutcome::Remade
+        && (!result.gameplay_started
+            || result.end_reason.as_deref() != Some("remake")
+            || result.unrated_reason.as_deref() != Some("remake")
+            || !(90_000..180_000).contains(&result.duration_ms)
+            || !result.participants.iter().any(fair_play::proved_abandon))
+    {
+        return Err(
+            "Remake requires a played match, an abandon and the early remake window.".into(),
+        );
+    }
+    if !result.gameplay_started && result.outcome == MatchOutcome::Completed {
+        return Err("An unplayed allocation cannot complete or award progression.".into());
+    }
     if result.ended_at_ms == 0 || result.ended_at_ms < result.started_at_ms {
         return Err("Terminal result requires a valid end timestamp.".into());
     }
@@ -1380,7 +1630,8 @@ fn same_person(a: &ParticipantResult, b: &ParticipantResult) -> bool {
         && a.sprite_character == b.sprite_character
 }
 fn same_allocation(old: &MatchResult, new: &MatchResult, allow_add: bool) -> StoreResult<()> {
-    if old.result_id != new.result_id
+    if old.ranked_season_id != new.ranked_season_id
+        || old.result_id != new.result_id
         || old.server_epoch != new.server_epoch
         || old.match_id != new.match_id
         || old.started_at_ms != new.started_at_ms
@@ -1388,6 +1639,7 @@ fn same_allocation(old: &MatchResult, new: &MatchResult, allow_add: bool) -> Sto
         || old.ruleset != new.ruleset
         || old.rated != new.rated
         || old.unrated_reason != new.unrated_reason
+        || (old.gameplay_started && !new.gameplay_started)
         || (!allow_add && old.participants.len() != new.participants.len())
         || old
             .participants
@@ -1404,6 +1656,15 @@ fn same_terminal_allocation(old: &MatchResult, new: &MatchResult) -> StoreResult
     if new.outcome != MatchOutcome::Completed {
         comparable.rated = old.rated;
         comparable.unrated_reason = old.unrated_reason.clone();
+    }
+    // Activation may reach SQL while the simulation is still awaiting its ACK.
+    // An explicit unplayed terminal cancellation wins that race. Recovery and
+    // completed matches must never downgrade a committed gameplay checkpoint.
+    if new.outcome == MatchOutcome::Abandoned
+        && !new.gameplay_started
+        && new.unrated_reason.as_deref() == Some("prematch_abandoned")
+    {
+        comparable.gameplay_started = old.gameplay_started;
     }
     same_allocation(old, &comparable, roster_can_grow(old))
 }

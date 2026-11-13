@@ -1,0 +1,172 @@
+{
+  "status": "REVIEW_DRAFT_NOT_APPLIED",
+  "source_parent": "715a81173ac919cb48fd65d7df510c3f6daf4d72",
+  "patch": "docs/plans/reviews/C4-PITR-PARAMETERS-2026-11-07.patch",
+  "patch_sha256": "eb982138d39e1ddc90263ea742439d7235400bd67ad98a2789db57d656d3d84c",
+  "files": [
+    {
+      "path": "ops/vps/ru/README.md",
+      "old_sha256": "e51fe2dcde247fdf35b6a500550f71a6e827f9ac1091914f67ac61bd20918520",
+      "new_sha256": "8802c36dbb7f44411446c556460ddc01bdeb628d11cb21c86d9f76609676b30c"
+    },
+    {
+      "path": "ops/vps/ru/backup.env.example",
+      "old_sha256": "2ae4cbf9cfa1dffd2c438f555351567af5d8cb3cc60449857fea2fdc2847b7c5",
+      "new_sha256": "e5cddab15367a6fcfa617606ed39cc3a49db0bd54240b3fef030df3776c9d3f2"
+    },
+    {
+      "path": "ops/vps/ru/omoba-backup-check-ru.service",
+      "old_sha256": "6e48449bf778773916d71879ea27b563bfa1df12a67fb7f33fb7be3178c52370",
+      "new_sha256": "a66c769f00ba36d69d024e88efb27c32e0ed3a21923a5af95d3e6117884b338c"
+    },
+    {
+      "path": "ops/vps/ru/omoba-backup-ru.service",
+      "old_sha256": "4d68383930c91205c1d476d38fd0e87545a4ddd0c1135f0a9747c85a4d594569",
+      "new_sha256": "8820c9abb20ba354a581edcb3d9734b84f15114886b231076eafc268175cab71"
+    },
+    {
+      "path": "ops/vps/ru/omoba-pitr-check-ru.service",
+      "old_sha256": null,
+      "new_sha256": "8aacbd8b387ee38c812bfd7b27b83354bb58711d588cbadbed97a72988e6914d"
+    },
+    {
+      "path": "ops/vps/ru/omoba-pitr-check-ru.timer",
+      "old_sha256": null,
+      "new_sha256": "d4a4d967630fedd62c8b4823d8792ed97d12234336366ba62e41d45f89e7d6db"
+    },
+    {
+      "path": "ops/vps/ru/omoba-restore-drill-ru.service",
+      "old_sha256": "a5c1b2252dfb58a868ee2c10a0ede0b8e96cf0f356e6d5b01bb63e78f43796c6",
+      "new_sha256": "94bcdfb55337911fab1bc8ea5ef1d26faecb8620b1d354a7137425318229dcfe"
+    },
+    {
+      "path": "ops/vps/ru/pgbackrest.conf.example",
+      "old_sha256": null,
+      "new_sha256": "f48cbf882fb4ed947b60de4317832fb7c678819c7aa4f2d65ebc0ec928762833"
+    },
+    {
+      "path": "ops/vps/ru/ru_backup.py",
+      "old_sha256": "d5ed6fa2eb8a9aef00d7ad962ec3c4da36f674bf76290c5f055b3f83f90610ae",
+      "new_sha256": "cce1de26c770266aa700c2ab3b3a9a4a030b3c2723e89b364f1c4a729d4b8801"
+    },
+    {
+      "path": "ops/vps/ru/ru_host.py",
+      "old_sha256": "040c12e526554ab956bf1f2ab0caeae9b04b36a84c3d47016d0250b93fe91cbc",
+      "new_sha256": "ff4525deaeafddb4258abd34c80bf63335fa022a80aaeedd73efb26c4f6ca632"
+    },
+    {
+      "path": "ops/vps/ru/ru_monitor.py",
+      "old_sha256": "bb3e318fec9bf803e5b5435a8d2601c7305f92a690634ed1750f11653bbb6d85",
+      "new_sha256": "57aeb0a6b9cd7f48a06d43760bc64cb840458aa2b7de7842bc26bbb5f3ff1025"
+    },
+    {
+      "path": "ops/vps/ru/ru_pitr.py",
+      "old_sha256": null,
+      "new_sha256": "568b3e16d4c06770d1479c55874c44172415ada9cea71ac9891d31ebfad73f2e"
+    },
+    {
+      "path": "scripts/test_ru_backup.py",
+      "old_sha256": "26bc5192b95d12eafc08cae20b0971447cb48ec793f598aa77eddd5187446616",
+      "new_sha256": "5be1cff88dcd5c9f47201c4461bd0265a881a2fad07a571302d0e9e3cc68f210"
+    },
+    {
+      "path": "scripts/test_ru_host.py",
+      "old_sha256": "66fe9ea579fcc2cf9cdc10f2217ec7ac36a613a6172065aa2b7d27cd6971c297",
+      "new_sha256": "e4b8fc65bb0d0a65e96d4899e015ef00c8928a17acc6ff6d58601bbc03078409"
+    },
+    {
+      "path": "scripts/test_ru_pitr.py",
+      "old_sha256": null,
+      "new_sha256": "00665616973d58d8c258837db866119bf75fb5f6707e7e8aff96b8d80dd40b3c"
+    }
+  ],
+  "supersedes": "C4-PITR-2026-11-07.patch for proposed integration only; old evidence retained",
+  "source": "https://www.postgresql.org/docs/18/hot-standby.html#HOT-STANDBY-ADMIN",
+  "remaining": "current CI; existing owner integration and independent-storage/real-RU rollout decisions",
+  "applied_source_parent": "f8510b57146745a2d0707d0eb16767b46e52aee7",
+  "applied_current_files": [
+    {
+      "path": "ops/vps/ru/README.md",
+      "sha256": "615f2d5b62d24194707739554a655b4b2785f00b6eb0352e1e42a538dcc95ee6"
+    },
+    {
+      "path": "ops/vps/ru/backup.env.example",
+      "sha256": "e5cddab15367a6fcfa617606ed39cc3a49db0bd54240b3fef030df3776c9d3f2"
+    },
+    {
+      "path": "ops/vps/ru/omoba-backup-check-ru.service",
+      "sha256": "a66c769f00ba36d69d024e88efb27c32e0ed3a21923a5af95d3e6117884b338c"
+    },
+    {
+      "path": "ops/vps/ru/omoba-backup-ru.service",
+      "sha256": "8820c9abb20ba354a581edcb3d9734b84f15114886b231076eafc268175cab71"
+    },
+    {
+      "path": "ops/vps/ru/omoba-pitr-check-ru.service",
+      "sha256": "8aacbd8b387ee38c812bfd7b27b83354bb58711d588cbadbed97a72988e6914d"
+    },
+    {
+      "path": "ops/vps/ru/omoba-pitr-check-ru.timer",
+      "sha256": "d4a4d967630fedd62c8b4823d8792ed97d12234336366ba62e41d45f89e7d6db"
+    },
+    {
+      "path": "ops/vps/ru/omoba-restore-drill-ru.service",
+      "sha256": "94bcdfb55337911fab1bc8ea5ef1d26faecb8620b1d354a7137425318229dcfe"
+    },
+    {
+      "path": "ops/vps/ru/pgbackrest.conf.example",
+      "sha256": "f48cbf882fb4ed947b60de4317832fb7c678819c7aa4f2d65ebc0ec928762833"
+    },
+    {
+      "path": "ops/vps/ru/ru_backup.py",
+      "sha256": "cce1de26c770266aa700c2ab3b3a9a4a030b3c2723e89b364f1c4a729d4b8801"
+    },
+    {
+      "path": "ops/vps/ru/ru_host.py",
+      "sha256": "ff4525deaeafddb4258abd34c80bf63335fa022a80aaeedd73efb26c4f6ca632"
+    },
+    {
+      "path": "ops/vps/ru/ru_monitor.py",
+      "sha256": "e2edc856f8268f38c6345e831a0953518d48a081cd250a53c95365c9d098669d"
+    },
+    {
+      "path": "ops/vps/ru/ru_pitr.py",
+      "sha256": "568b3e16d4c06770d1479c55874c44172415ada9cea71ac9891d31ebfad73f2e"
+    },
+    {
+      "path": "scripts/test_ru_backup.py",
+      "sha256": "5be1cff88dcd5c9f47201c4461bd0265a881a2fad07a571302d0e9e3cc68f210"
+    },
+    {
+      "path": "scripts/test_ru_host.py",
+      "sha256": "e4b8fc65bb0d0a65e96d4899e015ef00c8928a17acc6ff6d58601bbc03078409"
+    },
+    {
+      "path": "scripts/test_ru_pitr.py",
+      "sha256": "00665616973d58d8c258837db866119bf75fb5f6707e7e8aff96b8d80dd40b3c"
+    }
+  ],
+  "validation": {
+    "current_unit_cases": 177,
+    "passed": 176,
+    "failed": 0,
+    "optional_skip": 1,
+    "real_pg18_checks": 22,
+    "real_pg18_report": "../worker-physical-recovery-2026-11-07/pg18/summary.json",
+    "candidate_applies_current": true,
+    "C2_patch_application_after_revised_C4": "PASS; no combined behavior claim",
+    "real_pg16_checks": 22,
+    "real_pg16_report": "../worker-physical-recovery-2026-11-07/pg16/summary.json",
+    "real_pg16_terminal_and_duplicate_checks": 22,
+    "real_terminal_report": "../terminal-spool-replay-2026-11-07/pg16/summary.json"
+  },
+  "rejected_unit_attempt": {
+    "log": "rejected-unit.log",
+    "scope": "old-base broad discovery, not current acceptance",
+    "cases": 170,
+    "failures": 1,
+    "optional_skips": 1,
+    "failure": "S3 error-response assertion expected did not answer, received503",
+    "resolution": "current-source composed four-suite run with explicit loopback NO_PROXY:176 pass/1 optional skip; no assertion changed"
+  }
+}

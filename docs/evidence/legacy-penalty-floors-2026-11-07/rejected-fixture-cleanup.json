@@ -1,0 +1,10 @@
+{
+  "owned_failed_test_schema": "career_test_12621_30",
+  "failure": "test passed profile ID as public device key; fixture corrected to actual key1",
+  "verified_before_drop": {
+    "profiles": 1,
+    "penalties_at_three": 1,
+    "invented_events": 0
+  },
+  "remaining": 0
+}

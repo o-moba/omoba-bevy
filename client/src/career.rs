@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 mod devices;
 #[path = "career_protection.rs"]
 pub(crate) mod protection;
+#[path = "ranked_presentation.rs"]
+pub(crate) mod ranked;
 #[path = "career_web.rs"]
 mod web;
 
@@ -1187,7 +1189,9 @@ fn player_progress(player: &ParticipantResult) -> String {
         ("rating", &rating(player.rating.as_ref())),
         ("xp", &player.progression_xp_gained),
     ];
-    if player.disconnected {
+    if player.participation.is_some_and(|p| p.abandoned) {
+        trf("career.player.progress_abandoned", &args)
+    } else if player.disconnected {
         trf("career.player.progress_disconnected", &args)
     } else {
         trf("career.player.progress", &args)
@@ -1204,6 +1208,7 @@ fn profile_progress(profile: &ProfileSummary) -> String {
             ("wins", &profile.wins),
             ("losses", &profile.losses),
             ("played", &profile.matches_played),
+            ("abandons", &profile.abandons),
         ],
     )
 }
@@ -1241,22 +1246,55 @@ pub(crate) fn local_participant<'a>(
         })
 }
 fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
-    match result.outcome {
-        MatchOutcome::Abandoned => tr("career.result.abandoned"),
-        MatchOutcome::Interrupted => tr("career.result.interrupted"),
-        MatchOutcome::Completed => match (result.winner, local_participant(result, career)) {
-            (Some(winner), Some(player)) if winner == player.team => tr("career.result.victory"),
-            (Some(_), Some(_)) => tr("career.result.defeat"),
-            _ => tr("career.result.complete"),
-        },
+    if let Some(won) = local_participant(result, career).and_then(|p| result.participant_won(p)) {
+        return tr(if won {
+            "career.result.victory"
+        } else {
+            "career.result.defeat"
+        });
     }
+    tr(match result.outcome {
+        MatchOutcome::Abandoned => "career.result.abandoned",
+        MatchOutcome::Interrupted => "career.result.interrupted",
+        MatchOutcome::Remade => "career.result.remade",
+        MatchOutcome::Completed => "career.result.complete",
+    })
 }
+
 /// The server's refusal in the player's language: its own copy for a code
 /// the client knows (`admission.error.<code>`, LR-16), otherwise the
 /// server's text.
 pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
     let error = view.error.as_ref()?;
     let code = view.error_code.as_deref();
+    for (known, key) in [
+        (
+            shared::career::error_code::DODGE_COOLDOWN,
+            "queue.failed.dodge_cooldown",
+        ),
+        (
+            shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION,
+            "queue.failed.profile_has_another_session",
+        ),
+        (
+            shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED,
+            "queue.failed.allocation_cancelled_or_expired",
+        ),
+    ] {
+        if code == Some(known) || error == known {
+            return Some(tr(key).into());
+        }
+    }
+    if code == Some(shared::career::error_code::PLAY_COOLDOWN)
+        || error == shared::career::error_code::PLAY_COOLDOWN
+    {
+        return Some(play_cooldown_text(view));
+    }
+    if code == Some(shared::career::error_code::RANKED_LOCKED)
+        || error == shared::career::error_code::RANKED_LOCKED
+    {
+        return Some(ranked_locked_text(view));
+    }
     // A moderation refusal (LR-15) names its end from the view's sanctions.
     if let Some(text) = code.and_then(|code| crate::moderation::refusal_text(code, &view.sanctions))
     {
@@ -1266,6 +1304,33 @@ pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
         code.and_then(admission_error)
             .map_or_else(|| error.clone(), str::to_owned),
     )
+}
+
+pub(crate) fn ranked_locked_text(view: &CareerView) -> String {
+    let played = view
+        .profile
+        .as_ref()
+        .map_or(0, |p| p.completed_public_matches);
+    trf(
+        "queue.ranked_locked.progress",
+        &[
+            ("played", &played),
+            ("total", &shared::career::RANKED_REQUIRED_PUBLIC_MATCHES),
+        ],
+    )
+}
+
+pub(crate) fn play_cooldown_text(view: &CareerView) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64);
+    match view.play_cooldown {
+        Some(p) => trf(
+            "queue.play_cooldown.remaining",
+            &[("seconds", &p.until.saturating_sub(now).max(0))],
+        ),
+        None => tr("queue.failed.play_cooldown").into(),
+    }
 }
 
 fn admission_error(code: &str) -> Option<&'static str> {
@@ -1716,15 +1781,7 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             ui::IVORY,
             "CareerProfileProgress",
         );
-        if profile.newcomer() {
-            label(
-                parent,
-                tr("career.profile.newcomer"),
-                14.0,
-                ui::JADE,
-                "CareerNewcomer",
-            );
-        }
+        ranked_profile_labels(parent, profile);
     } else {
         label(
             parent,
@@ -1844,6 +1901,24 @@ fn friend_code_label(parent: &mut ChildSpawnerCommands, handle: &str) {
     label(parent, handle, 20.0, ui::JADE, "CareerFriendCode");
 }
 
+fn ranked_badge(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary, name: &'static str) {
+    use crate::ui::widgets::surfaces::{BadgeKind, badge};
+    let kind = if profile.newcomer() {
+        BadgeKind::Muted
+    } else {
+        BadgeKind::Gold
+    };
+    let entity = badge(parent, ranked::progress_text(profile), kind, false);
+    parent.commands().entity(entity).insert(Name::new(name));
+}
+
+fn ranked_profile_labels(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) {
+    ranked_badge(parent, profile, "CareerRankedProgress");
+    for (name, text) in ranked::profile_lines(profile) {
+        label(parent, text, 14.0, ui::JADE, name);
+    }
+}
+
 fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) {
     label(
         parent,
@@ -1859,15 +1934,7 @@ fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) 
         ui::IVORY,
         "CareerVisitedStats",
     );
-    if profile.newcomer() {
-        label(
-            parent,
-            tr("career.profile.newcomer"),
-            14.0,
-            ui::JADE,
-            "CareerVisitedNewcomer",
-        );
-    }
+    ranked_profile_labels(parent, profile);
     friend_code_label(parent, &profile.nickname);
 }
 
@@ -1916,6 +1983,7 @@ fn friend_row(
                 },
                 "CareerFriendPresence",
             );
+            ranked_badge(row, &friend.profile, "CareerFriendRanked");
             row.spawn(row_node()).with_children(|buttons| {
                 button(
                     buttons,
@@ -2238,14 +2306,13 @@ fn history_body(
                     ..column_node()
                 })
                 .with_children(|p| {
-                    let outcome = tr(match item.outcome {
-                        MatchOutcome::Abandoned => "career.history.abandoned",
-                        MatchOutcome::Interrupted => "career.history.interrupted",
-                        MatchOutcome::Completed => match item.won {
-                            Some(true) => "career.result.victory",
-                            Some(false) => "career.result.defeat",
-                            None => "career.history.complete",
-                        },
+                    let outcome = tr(match (item.outcome, item.won) {
+                        (_, Some(true)) => "career.result.victory",
+                        (_, Some(false)) => "career.result.defeat",
+                        (MatchOutcome::Abandoned, None) => "career.history.abandoned",
+                        (MatchOutcome::Interrupted, None) => "career.history.interrupted",
+                        (MatchOutcome::Remade, None) => "career.result.remade",
+                        (MatchOutcome::Completed, None) => "career.history.complete",
                     });
                     label(
                         p,
@@ -2888,11 +2955,54 @@ mod tests {
                 server_error_text(&paused).unwrap().starts_with(pause),
                 "{locale}"
             );
+            let mut profile = ProfileSummary::new("a".repeat(64), "Player".into());
+            profile.completed_public_matches = 9;
+            let locked = CareerView {
+                profile: Some(profile),
+                error_code: Some(error_code::RANKED_LOCKED.into()),
+                ..refused.clone()
+            };
+            let rendered = server_error_text(&locked).unwrap();
+            assert_eq!(rendered, ranked_locked_text(&locked));
+            assert!(
+                rendered.contains("9/10") && !rendered.contains('{'),
+                "{locale}: {rendered}"
+            );
+            assert!(
+                !failed(error_code::RANKED_LOCKED).contains('{'),
+                "generic refusal cannot expose placeholders"
+            );
             assert!(failed("arena_limit").starts_with(arena), "{locale}");
             assert!(
                 failed("practice_cooldown").starts_with(cooldown),
                 "{locale}"
             );
+        }
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        for (known, key) in [
+            (
+                shared::career::error_code::DODGE_COOLDOWN,
+                "queue.failed.dodge_cooldown",
+            ),
+            (
+                shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION,
+                "queue.failed.profile_has_another_session",
+            ),
+            (
+                shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED,
+                "queue.failed.allocation_cancelled_or_expired",
+            ),
+        ] {
+            for error_code in [None, Some(known.into())] {
+                let view = CareerView {
+                    error: Some(known.into()),
+                    error_code,
+                    ..Default::default()
+                };
+                assert_eq!(server_error_text(&view).unwrap(), tr(key));
+            }
         }
     }
 
@@ -3030,6 +3140,9 @@ mod tests {
 
     fn result() -> MatchResult {
         MatchResult {
+            ranked_season_id: None,
+            gameplay_started: true,
+            end_reason: None,
             result_id: "r1".into(),
             server_epoch: 1,
             match_id: 1,
@@ -3043,6 +3156,8 @@ mod tests {
             rated: false,
             unrated_reason: Some("Practice match".into()),
             participants: vec![ParticipantResult {
+                input_kind: Default::default(),
+                participation: None,
                 is_bot: false,
                 player_id: 7,
                 profile_id: Some("a".repeat(64)),

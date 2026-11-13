@@ -51,7 +51,7 @@ use std::{
 
 use bevy::{
     prelude::*,
-    render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
+    render::view::screenshot::{ScreenshotCaptured, save_to_disk},
     window::{PrimaryWindow, WindowPosition},
 };
 use serde::Deserialize;
@@ -76,7 +76,7 @@ const LAUNCHER_TIP: [f32; 3] = [0.0, 0.13, 0.81];
 /// A flash this close to a tip (in the weapon's own frame) belongs to it.
 const TIP_TOLERANCE: f32 = 0.08;
 /// Labels whose text the state file reports.
-const LABELS: [&str; 9] = [
+const LABELS: [&str; 15] = [
     "CollectionAccountStatus",
     "SelectedWeaponStatus",
     "CollectionWeaponMarketHint",
@@ -86,6 +86,12 @@ const LABELS: [&str; 9] = [
     "DraftWeaponStatus",
     "DraftNotice",
     "HomeConnectionStatus",
+    "HomeNickname",
+    "HomeRating",
+    "HomeCompatibilityDetail",
+    "HomeOfflineNotice",
+    "HomeUpdateRequiredTitle",
+    "HomeUpdateRequiredBody",
 ];
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -286,6 +292,7 @@ struct Armed {
 
 #[derive(Resource)]
 struct Loop {
+    shot_target: Option<Handle<Image>>,
     dir: PathBuf,
     started: Instant,
     frame: u64,
@@ -339,7 +346,12 @@ impl Plugin for CreatorLoopQaPlugin {
             return;
         };
         let _ = std::fs::create_dir_all(&dir);
+        let shot_target = app
+            .world()
+            .get_resource::<super::offscreen::Surface>()
+            .map(|surface| surface.image.clone());
         app.insert_resource(Loop {
+            shot_target,
             dir,
             started: Instant::now(),
             frame: 0,
@@ -396,7 +408,9 @@ fn keep_window(
     }
     for mut window in &mut windows {
         window.resolution.set_scale_factor_override(Some(1.0));
-        if window.physical_width() != 1280 || window.physical_height() != 720 {
+        if lp.shot_target.is_none()
+            && (window.physical_width() != 1280 || window.physical_height() != 720)
+        {
             window.resolution.set_physical_resolution(1280, 720);
         }
         if !lp.placed {
@@ -836,7 +850,10 @@ fn spawn_shot(commands: &mut Commands, lp: &Loop, n: usize, file: &str, data: se
     let path = lp.dir.join(file);
     let _ = std::fs::remove_file(&path);
     commands
-        .spawn((Screenshot::primary_window(), LoopShot { n, data }))
+        .spawn((
+            super::offscreen::screenshot(lp.shot_target.as_ref()),
+            LoopShot { n, data },
+        ))
         .observe(save_to_disk(path));
 }
 
@@ -887,12 +904,29 @@ fn observe(
         Option<&crate::combat::CombatStats>,
     )>,
     cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::MainCamera>>,
-    labels: Query<(super::QaName, &Text)>,
+    labels: Query<(
+        super::QaName,
+        &Text,
+        Option<&ComputedNode>,
+        Option<&UiGlobalTransform>,
+        Option<&bevy::ui::CalculatedClip>,
+        Option<&TextFont>,
+        Option<&bevy::text::TextLayoutInfo>,
+    )>,
     pressables: Query<
-        (&crate::ui::TestId, Option<&InheritedVisibility>),
+        (
+            &crate::ui::TestId,
+            &ComputedNode,
+            &Node,
+            Option<&InheritedVisibility>,
+        ),
         With<crate::ui::Pressable>,
     >,
-    context: Res<crate::input_context::GameplayInputContext>,
+    (context, party, career): (
+        Res<crate::input_context::GameplayInputContext>,
+        Option<Res<crate::party::PartyClient>>,
+        Option<Res<crate::career::CareerClient>>,
+    ),
 ) {
     let frame = lp.frame;
     lp.input = serde_json::json!({"running": context.running, "modal_open": context.modal_open,
@@ -989,6 +1023,8 @@ fn observe(
                     &actors,
                     &labels,
                     &pressables,
+                    party.as_deref(),
+                    career.as_deref(),
                 );
                 return;
             }
@@ -1056,6 +1092,8 @@ fn observe(
         &actors,
         &labels,
         &pressables,
+        party.as_deref(),
+        career.as_deref(),
     );
 }
 
@@ -1076,11 +1114,26 @@ fn return_state(
         Has<Player>,
         Option<&crate::combat::CombatStats>,
     )>,
-    labels: &Query<(super::QaName, &Text)>,
+    labels: &Query<(
+        super::QaName,
+        &Text,
+        Option<&ComputedNode>,
+        Option<&UiGlobalTransform>,
+        Option<&bevy::ui::CalculatedClip>,
+        Option<&TextFont>,
+        Option<&bevy::text::TextLayoutInfo>,
+    )>,
     pressables: &Query<
-        (&crate::ui::TestId, Option<&InheritedVisibility>),
+        (
+            &crate::ui::TestId,
+            &ComputedNode,
+            &Node,
+            Option<&InheritedVisibility>,
+        ),
         With<crate::ui::Pressable>,
     >,
+    party: Option<&crate::party::PartyClient>,
+    career: Option<&crate::career::CareerClient>,
 ) {
     lp.reads = reads;
     if lp.last_state.is_some_and(|at| at.elapsed() < STATE_EVERY) {
@@ -1097,15 +1150,39 @@ fn return_state(
         _ => None,
     };
     let mut texts = serde_json::Map::new();
-    for (key, text) in labels.iter() {
-        if LABELS.contains(&key.as_str()) {
+    let mut label_geometry = serde_json::Map::new();
+    for (key, text, node, transform, clip, font, layout) in labels.iter() {
+        if LABELS.contains(&key.as_str())
+            || key.as_str().starts_with("PrematchStageText-")
+            || key.as_str().starts_with("LobbyMemberName-")
+            || key.as_str().starts_with("LobbyMemberStatus-")
+            || key.as_str().starts_with("LobbyRosterName-")
+            || key.as_str().starts_with("LobbyRosterTag-")
+        {
             texts.insert(key.as_str().to_owned(), text.0.clone().into());
+            label_geometry.insert(key.as_str().to_owned(), serde_json::json!({
+                "node_size": node.map(|n| n.size().to_array()),
+                "center": transform.map(|t| t.translation.to_array()),
+                "clip": clip.map(|c| [c.clip.min.to_array(), c.clip.max.to_array()]),
+                "font_size": font.map(|f| format!("{:?}", f.font_size)),
+                "layout_size": layout.map(|l| l.size.to_array()),
+                "layout_scale": layout.map(|l| l.scale_factor),
+                "glyph_count": layout.map(|l| l.glyphs.len()),
+                "last_glyphs": layout.map(|l| l.glyphs.iter().rev().take(8).map(|g| serde_json::json!({
+                    "center": g.position.to_array(), "size": g.atlas_info.rect.size().to_array(),
+                    "line": g.line_index,
+                })).collect::<Vec<_>>()),
+            }));
         }
     }
     let mut buttons: Vec<&str> = pressables
         .iter()
-        .filter(|(_, visible)| visible.is_some_and(|v| v.get()))
-        .map(|(id, _)| id.as_str())
+        .filter(|(_, computed, node, visible)| {
+            node.display != Display::None
+                && computed.size().min_element() > 1.0
+                && visible.is_some_and(|v| v.get())
+        })
+        .map(|(id, ..)| id.as_str())
         .collect();
     buttons.sort_unstable();
     buttons.truncate(300);
@@ -1144,6 +1221,12 @@ fn return_state(
         "selection": {"handheld": serde_json::to_value(&selection.handheld).unwrap_or_default(),
             "class": selection.hero_class.id(), "item": selected},
         "labels": texts,
+        "label_geometry": label_geometry,
+        "active_toasts": labels.iter().filter(|(name, ..)| name.as_str() == "UiToastText")
+            .map(|(_, text, ..)| text.0.clone()).collect::<Vec<_>>(),
+        "party": party.map(|p| &p.view),
+        "party_notice": party.and_then(|p| p.notice(Instant::now())).map(|notice| format!("{notice:?}")),
+        "career_profile": career.and_then(|c| c.view.profile.as_ref()),
         "buttons": buttons,
         "players": players,
         "local_level": lp.level,

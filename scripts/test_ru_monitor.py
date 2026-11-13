@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs
@@ -91,6 +92,8 @@ class MonitorCase(unittest.TestCase):
         os.makedirs(self.p(ru_monitor.MATCH_ROOT), exist_ok=True)
         self.cluster("16", "main")
         self.host = FakeHost()
+        self.auto_storage = True
+        self.health_roots = {ru_monitor.LOBBY_OUTBOX: None}
         self.telegram = Telegram()
         self.journal = io.StringIO()
         self.settings(BOT)
@@ -107,6 +110,13 @@ class MonitorCase(unittest.TestCase):
         Path(self.env).write_text(text)
 
     def monitor(self):
+        if self.auto_storage:
+            for root, epoch in self.health_roots.items():
+                try:
+                    if not Path(self.p(root)).is_symlink():
+                        self.storage_report(root, epoch)
+                except OSError:
+                    pass  # a deliberately broken outbox is observed by the monitor
         return ru_monitor.Monitor(ru_monitor.Config(self.env), self.state_dir, root=self.root, run=self.host.run,
                                   now=lambda: self.host.clock, monotonic=lambda: 10 + self.host.uptime,
                                   statvfs=self.host.statvfs, opener=self.telegram, stderr=self.journal,
@@ -131,6 +141,134 @@ class MonitorCase(unittest.TestCase):
         status = {"allocation_id": name, "server_epoch": 1, "phase": phase,
                   "heartbeat_ms": int((self.host.clock - age) * 1000), "result_id": None, **extra}
         Path(folder, "status.json").write_text(json.dumps(status))
+        self.health_roots[f"{ru_monitor.MATCH_ROOT}/{name}/outbox"] = status["server_epoch"]
+
+    def storage_report(self, outbox=ru_monitor.LOBBY_OUTBOX, epoch=None, **changes):
+        now = int(self.host.clock * 1000)
+        report = {"version": 2, "updated_ms": now, "server_epoch": epoch,
+                  "probe_checked_ms": now, "sql_ready": True, "journal_ready": True,
+                  "staged_dodges": 0, "legacy_floors": 0, "unpersisted_results": 0,
+                  "critical_replies": 0, "reply_receiver_closed": False,
+                  "blocked_since_ms": None, **changes}
+        path = Path(self.p(outbox)) / "health/status.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report))
+        return path
+
+
+class StorageHealthTest(MonitorCase):
+    def setUp(self):
+        super().setUp()
+        self.auto_storage = False
+        self.path = self.storage_report()
+
+    def storage(self):
+        report = self.check()
+        return report, report["facts"]["career_storage"]
+
+    def test_required_lobby_report_and_readiness_are_checked_before_any_receipt(self):
+        report, facts = self.storage()
+        self.assertTrue(report["ok"])
+        self.assertEqual(facts["checked"], 1)
+        self.path.unlink()
+        report, facts = self.storage()
+        self.assertIn("career:storage", report["codes"])
+        self.assertEqual(facts["missing"], 1)
+        self.assertEqual(report["facts"]["settlements"]["scanned"], 0)
+        self.assertEqual(report["facts"]["queue_dodges"]["pending"], 0)
+
+    def test_every_pre_persistence_blocker_is_visible_after_two_minutes(self):
+        now = int(self.host.clock * 1000)
+        for changes in ({"sql_ready": False}, {"journal_ready": False}, {"staged_dodges": 1},
+                        {"legacy_floors": 1}, {"unpersisted_results": 1},
+                        {"critical_replies": 1}, {"reply_receiver_closed": True}):
+            self.storage_report(**changes, blocked_since_ms=now - 119000)
+            self.assertNotIn("career:storage", self.storage()[0]["codes"])
+            self.storage_report(**changes, blocked_since_ms=now - 120000)
+            report, facts = self.storage()
+            self.assertIn("career:storage", report["codes"], changes)
+            self.assertEqual(facts["persistent"], 1)
+            self.assertEqual(facts["critical_replies"], changes.get("critical_replies", 0))
+            self.assertEqual(facts["closed_reply_receivers"], int(changes.get("reply_receiver_closed", False)))
+
+    def test_stale_report_or_probe_and_wrong_worker_epoch_are_actionable(self):
+        now = int(self.host.clock * 1000)
+        self.storage_report(updated_ms=now - 61000, probe_checked_ms=now - 61000)
+        self.assertEqual(self.storage()[1]["stale"], 1)
+        self.storage_report(probe_checked_ms=now - 31000)
+        self.assertEqual(self.storage()[1]["stale"], 1)
+        self.storage_report()
+        name = "a" * 32
+        self.worker(name)
+        root = f"{ru_monitor.MATCH_ROOT}/{name}/outbox"
+        self.storage_report(root, 2)
+        self.assertEqual(self.storage()[1]["unreadable"], 1)
+        self.storage_report(root, 1)
+        self.assertTrue(self.storage()[0]["ok"])
+
+    def test_worker_startup_grace_and_terminal_workers_do_not_false_alert(self):
+        name = "b" * 32
+        self.worker(name)
+        manifest = Path(self.p(f"{ru_monitor.MATCH_ROOT}/{name}/manifest.json"))
+        manifest.write_text(json.dumps({"join_deadline_ms": int((self.host.clock + 60) * 1000)}))
+        self.assertTrue(self.storage()[0]["ok"])
+        manifest.write_text(json.dumps({"join_deadline_ms": int((self.host.clock - 121) * 1000)}))
+        self.assertEqual(self.storage()[1]["missing"], 1)
+        self.worker(name, phase="finished")
+        self.assertTrue(self.storage()[0]["ok"])
+        self.path.unlink()
+        self.host.uptime = 119
+        self.assertNotIn("career:storage", self.storage()[0]["codes"])
+
+    def test_corrupt_oversize_future_and_inconsistent_contracts_fail_closed(self):
+        valid = json.loads(self.path.read_text())
+        for changes in ({"version": True}, {"version": 1}, {"sql_ready": 1}, {"staged_dodges": True},
+                        {"critical_replies": 257, "blocked_since_ms": int(self.host.clock * 1000)},
+                        {"updated_ms": int((self.host.clock + 30) * 1000)},
+                        {"probe_checked_ms": None}, {"blocked_since_ms": 0},
+                        {"sql_ready": False}, {"private_key": "never disclose"}):
+            self.path.write_text(json.dumps({**valid, **changes}))
+            report, facts = self.storage()
+            self.assertEqual(facts["unreadable"], 1, changes)
+            self.assertNotIn("never disclose", json.dumps(report))
+        for raw in ("{bad", "x" * 4097):
+            self.path.write_text(raw)
+            self.assertEqual(self.storage()[1]["unreadable"], 1)
+        self.storage_report()
+        self.worker("c" * 32, phase="unknown")
+        self.assertEqual(self.storage()[1]["unreadable"], 1)
+
+    def test_links_and_fifo_never_escape_or_block_the_health_read(self):
+        outside = Path(self.root) / "outside"
+        outside.write_text(self.path.read_text())
+        self.path.unlink()
+        self.path.symlink_to(outside)
+        self.assertEqual(self.storage()[1]["unreadable"], 1)
+        self.path.unlink()
+        os.mkfifo(self.path)
+        self.assertEqual(self.storage()[1]["unreadable"], 1)
+
+    def test_worker_scan_limit_is_not_a_healthy_result(self):
+        for letter in "ab":
+            self.worker(letter * 32)
+            self.storage_report(f"{ru_monitor.MATCH_ROOT}/{letter * 32}/outbox", 1)
+        with mock.patch.object(ru_monitor, "MAX_WORKER_DIRS", 1):
+            report, facts = self.storage()
+        self.assertIn("career:storage", report["codes"])
+        self.assertTrue(facts["scan_limited"])
+
+    def test_resolution_reuses_existing_alert_state_without_identifiers(self):
+        self.path.unlink()
+        self.monitor().alert_check()
+        self.assertEqual(len(self.telegram.sent), 1)
+        self.assertNotIn("profile", self.telegram.sent[0])
+        self.storage_report()
+        self.monitor().alert_check()
+        self.host.clock += 16 * 60
+        self.storage_report()
+        self.monitor().alert_check()
+        self.assertEqual(len(self.telegram.sent), 2)
+        self.assertIn("career storage availability: ok again", self.telegram.sent[-1])
 
 
 class ConfigTest(MonitorCase):
@@ -298,6 +436,190 @@ class CapacityTest(MonitorCase):
         self.report()
         self.monitor().alert_check()
         self.assertIn("arena capacity: ok again", self.telegram.sent[-1])
+
+
+class SettlementTest(MonitorCase):
+    def receipt(self, root, name, kind, age):
+        folder = Path(self.p(root))
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / (name + ".json")
+        path.write_text(json.dumps({"kind": kind, "result": {"nickname": "never expose this"}}))
+        os.utime(path, (self.host.clock - age, self.host.clock - age))
+        return path
+
+    def test_terminal_receipts_age_while_live_checkpoints_do_not_alert(self):
+        root = ru_monitor.MATCH_ROOT + "/" + "a" * 32 + "/outbox"
+        self.receipt(root, "live", "Checkpoint", 7200)
+        self.receipt(ru_monitor.LOBBY_OUTBOX, "new", "Settle", 299)
+        self.assertTrue(self.check()["ok"])
+        pending = self.receipt(root, "waiting", "Settle", 300)
+        report = self.check()
+        self.assertEqual(report["codes"], ["settlement:outbox"])
+        self.assertEqual(report["facts"]["settlements"]["stale"], 1)
+        self.assertNotIn("never expose this", str(report))
+        pending.unlink()
+        self.assertTrue(self.check()["ok"])
+
+    def test_broken_receipts_and_scan_limits_are_actionable(self):
+        path = self.receipt(ru_monitor.LOBBY_OUTBOX, "broken", "Settle", 301)
+        path.write_text("{")
+        self.assertEqual(self.check()["facts"]["settlements"]["unreadable"], 1)
+        path.unlink()
+        self.receipt(ru_monitor.LOBBY_OUTBOX, "one", "Start", 900)
+        self.receipt(ru_monitor.LOBBY_OUTBOX, "two", "Start", 900)
+        with mock.patch.object(ru_monitor, "MAX_OUTBOX_RECORDS", 1):
+            report = self.check()
+        self.assertEqual(report["codes"], ["settlement:outbox"])
+        self.assertTrue(report["facts"]["settlements"]["scan_limited"])
+
+    def test_old_terminal_time_alerts_even_when_retry_just_rewrote_the_file(self):
+        path = self.receipt(ru_monitor.LOBBY_OUTBOX, "rewritten", "Settle", 0)
+        path.write_text(json.dumps({"kind": "Settle", "result": {
+            "ended_at_ms": int((self.host.clock - 301) * 1000),
+            "nickname": "never expose this",
+        }}))
+        os.utime(path, (self.host.clock, self.host.clock))
+        report = self.check()
+        self.assertEqual(report["codes"], ["settlement:outbox"])
+        self.assertEqual(report["facts"]["settlements"]["oldest_seconds"], 301)
+        self.assertNotIn("never expose this", str(report))
+
+    def test_terminal_times_reject_malformed_and_future_values(self):
+        for ended in [True, -1, "old", 1.5, 2**64, int((self.host.clock + 30) * 1000)]:
+            path = self.receipt(ru_monitor.LOBBY_OUTBOX, "invalid-time", "Settle", 0)
+            path.write_text(json.dumps({"kind": "Settle", "result": {"ended_at_ms": ended}}))
+            self.assertEqual(self.check()["facts"]["settlements"]["unreadable"], 1, ended)
+            path.unlink()
+
+    def test_receipts_symlinked_outside_the_outbox_are_not_read(self):
+        path = self.receipt(ru_monitor.LOBBY_OUTBOX, "live", "Start", 900)
+        outside = Path(self.root) / "outside.json"
+        path.rename(outside)
+        path.symlink_to(outside)
+        self.assertTrue(self.check()["ok"])
+        self.assertEqual(self.check()["facts"]["settlements"]["scanned"], 0)
+
+
+class QueueDodgeTest(MonitorCase):
+    def event(self, age=0, root=None, event_id="a" * 32):
+        folder = Path(self.p(root or ru_monitor.LOBBY_OUTBOX)) / "queue-dodges"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / (event_id + ".json")
+        event = {"version": 1, "event_id": event_id, "profile_id": "b" * 64,
+                 "observed_at_ms": int((self.host.clock - age) * 1000)}
+        path.write_text(json.dumps(event))
+        os.utime(path, (self.host.clock, self.host.clock))
+        return path, event
+
+    def test_new_journal_events_and_native_lock_temp_files_are_healthy(self):
+        path, _ = self.event(299)
+        (path.parent / ".lock").touch()
+        (path.parent / ".pending.tmp").write_text("incomplete write")
+        report = self.check()
+        self.assertTrue(report["ok"], report["problems"])
+        self.assertEqual(report["facts"]["queue_dodges"]["pending"], 1)
+        self.assertEqual(report["facts"]["queue_dodges"]["stale"], 0)
+        self.assertEqual(report["facts"]["settlements"]["scanned"], 0)
+
+    def test_old_lobby_and_worker_events_alert_without_exposing_identities(self):
+        self.event(301, event_id="1" * 32)
+        self.event(600, root=ru_monitor.MATCH_ROOT + "/" + "c" * 32 + "/outbox", event_id="2" * 32)
+        report = self.check()
+        self.assertEqual(report["codes"], ["queue-dodge:journal"])
+        facts = report["facts"]["queue_dodges"]
+        self.assertEqual((facts["pending"], facts["stale"], facts["oldest_seconds"]), (2, 2, 600))
+        self.assertEqual(report["facts"]["settlements"]["stale"], 0)
+        for identity in ["b" * 64, "1" * 32, "2" * 32]:
+            self.assertNotIn(identity, str(report))
+
+    def test_acknowledged_journal_removal_resolves_the_existing_alert(self):
+        path, _ = self.event(301)
+        self.monitor().alert_check()
+        self.assertEqual(len(self.telegram.sent), 1)
+        self.assertIn("matchmaking penalty delivery needs attention", self.telegram.sent[0])
+        path.unlink()
+        self.host.clock += 16 * 60
+        self.monitor().alert_check()
+        self.assertIn("matchmaking penalty delivery: ok again", self.telegram.sent[-1])
+        self.assertNotIn("b" * 64, " ".join(self.telegram.sent))
+
+    def test_corrupt_future_and_unknown_fields_are_actionable(self):
+        path, valid = self.event()
+        cases = [None, [], {**valid, "version": 2}, {**valid, "version": True},
+                 {**valid, "version": 1.0}, {**valid, "profile_id": "B" * 64},
+                 {**valid, "event_id": "f" * 32}, {**valid, "observed_at_ms": -1},
+                 {**valid, "observed_at_ms": True}, {**valid, "observed_at_ms": 2**63},
+                 {**valid, "observed_at_ms": int((self.host.clock + 30) * 1000)},
+                 {**valid, "private": TOKEN}]
+        for value in cases:
+            path.write_text(json.dumps(value))
+            report = self.check()
+            self.assertEqual(report["codes"], ["queue-dodge:journal"], value)
+            self.assertEqual(report["facts"]["queue_dodges"]["unreadable"], 1, value)
+            self.assertNotIn(TOKEN, str(report))
+        path.write_text("{")
+        self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1)
+        path.write_bytes(b" " * (ru_monitor.MAX_QUEUE_EVENT_BYTES + 1))
+        with mock.patch.object(ru_monitor.json, "loads", side_effect=AssertionError("oversized JSON parsed")):
+            _, facts = self.monitor().queue_dodge_problems()
+        self.assertEqual(facts["unreadable"], 1)
+
+    def test_leaf_and_root_symlinks_are_not_followed(self):
+        path, _ = self.event()
+        outside = Path(self.root) / "outside.json"
+        path.rename(outside)
+        path.symlink_to(outside)
+        with self.assertRaises(OSError):
+            ru_monitor.read_regular_json(path, ru_monitor.MAX_QUEUE_EVENT_BYTES)
+        with mock.patch.object(ru_monitor, "read_regular_json", side_effect=AssertionError("link followed")):
+            _, facts = self.monitor().queue_dodge_problems()
+            self.assertEqual(facts["unreadable"], 1)
+        path.unlink()
+        folder = path.parent
+        folder.rmdir()
+        target = Path(self.root) / "outside-journal"
+        target.mkdir()
+        folder.symlink_to(target, target_is_directory=True)
+        self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1)
+
+    def test_ignored_temp_entries_still_count_toward_the_bounded_scan(self):
+        path, _ = self.event()
+        path.unlink()
+        for name in [".one.tmp", ".two.tmp"]:
+            (path.parent / name).write_text("pending")
+        with mock.patch.object(ru_monitor, "MAX_QUEUE_JOURNAL_ENTRIES", 1):
+            report = self.check()
+        self.assertEqual(report["codes"], ["queue-dodge:journal"])
+        self.assertTrue(report["facts"]["queue_dodges"]["scan_limited"])
+        self.assertEqual(report["facts"]["queue_dodges"]["scanned"], 1)
+
+    def test_native_journal_capacity_limits_alert_before_any_event_is_old(self):
+        path, _ = self.event(event_id="1" * 32)
+        other, _ = self.event(event_id="2" * 32)
+        with mock.patch.object(ru_monitor, "MAX_QUEUE_EVENTS_PER_JOURNAL", 1):
+            report = self.check()
+        self.assertEqual(report["codes"], ["queue-dodge:journal"])
+        self.assertTrue(report["facts"]["queue_dodges"]["capacity_exceeded"])
+        path.unlink()
+        other.unlink()
+        for name in [".one.tmp", ".two.tmp"]:
+            (path.parent / name).touch()
+        with mock.patch.object(ru_monitor, "MAX_QUEUE_ENTRIES_PER_JOURNAL", 1):
+            report = self.check()
+        self.assertTrue(report["facts"]["queue_dodges"]["capacity_exceeded"])
+
+    def test_unexpected_entries_and_non_regular_files_block_journal_health(self):
+        path, _ = self.event()
+        path.unlink()
+        for name in [".lock", "note.txt", "d" * 32 + ".json"]:
+            entry = path.parent / name
+            entry.mkdir()
+            self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1, name)
+            entry.rmdir()
+        os.mkfifo(path)
+        with self.assertRaises(ValueError):
+            ru_monitor.read_regular_json(path, ru_monitor.MAX_QUEUE_EVENT_BYTES)
+        self.assertEqual(self.check()["facts"]["queue_dodges"]["unreadable"], 1)
 
 
 class AlertTest(MonitorCase):

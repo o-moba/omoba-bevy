@@ -38,5 +38,14 @@
   "home.recovery.bot": "机器人",
   "home.recovery.idle": "待机",
   "home.recovery.seat": "{name} · {policy}",
-  "home.recovery.team": "队友控制（{count}）"
+  "home.recovery.team": "队友控制（{count}）",
+  "home.rating.pending": "评分 · 排行榜",
+  "home.rating.newcomer": "分数 {rating} · 定位赛 {played}/{total}",
+  "home.rating.rated": "分数 {rating} · {tier}",
+  "home.ranked.rating": "排位赛\n评分 {rating}",
+  "home.button.leaderboard": "排行榜",
+  "home.leaderboard.error": "无法打开排行榜，请重试。",
+  "home.recovery.afk": "你长时间未操作，英雄由AI控制。移动或使用技能可恢复控制。本局的挂机记录将保留。",
+  "home.ranked.locked": "排位未解锁\n公开对局 {played}/{total}",
+  "home.ranked.between_seasons": "排位赛\n赛季已结束"
 }

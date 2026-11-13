@@ -53,19 +53,53 @@ impl ResumeMatchState {
 fn resume_path() -> Option<std::path::PathBuf> {
     crate::connection_profile::profile_file("match-resume.json")
 }
-pub(crate) fn load_resume(mut resume: ResMut<ResumeMatchState>, session: Res<ClientSessionId>) {
-    resume.saved = resume_path()
-        .and_then(|path| load_resume_at(&path, &session.0, &super::session::startup_lobby_addr()));
+pub(crate) fn load_resume(
+    mut resume: ResMut<ResumeMatchState>,
+    session: Res<ClientSessionId>,
+    directory: Option<Res<super::directory::DirectoryRouting>>,
+) {
+    if directory
+        .as_ref()
+        .is_some_and(|directory| directory.configured())
+    {
+        // Do not delete an old owning-lobby hint by comparing it to today's
+        // static default. Authenticated directory ownership is checked at boot.
+        return;
+    }
+    load_legacy_resume(
+        &mut resume,
+        &session.0,
+        &super::session::startup_lobby_addr(),
+    );
+}
+pub(super) fn load_legacy_resume(resume: &mut ResumeMatchState, identity: &str, lobby: &str) {
+    resume.saved = resume_path().and_then(|path| load_resume_at(&path, identity, lobby));
+}
+fn read_hint(path: &std::path::Path) -> Option<SavedResume> {
+    use std::io::Read;
+    // Bound allocation even if an untrusted file grows after metadata lookup.
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > 16_384 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(16_385).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 16_384 {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+pub(super) fn directory_resume_hint(identity: &str) -> Option<SavedResume> {
+    let saved = read_hint(&resume_path()?)?;
+    valid_resume(&saved, identity, &saved.lobby).then_some(saved)
 }
 /// The hint at `path` when it belongs to `session` on `lobby` (this process's
 /// lobby). A hint for another lobby is deleted: a build that no longer offers
 /// that server (an older build's custom or LAN lobby, the production app since
 /// it lost server selection) must not send the player back to it.
 fn load_resume_at(path: &std::path::Path, session: &str, lobby: &str) -> Option<SavedResume> {
-    let saved = std::fs::read(path)
-        .ok()
-        .filter(|bytes| bytes.len() <= 16_384)
-        .and_then(|bytes| serde_json::from_slice::<SavedResume>(&bytes).ok())?;
+    let saved = read_hint(path)?;
     if !same_lobby(&saved.lobby, lobby) {
         let _ = std::fs::remove_file(path);
         return None;
@@ -90,6 +124,7 @@ pub(crate) fn remember_resume(
     snapshot: Res<GameStateSnapshot>,
     career: Res<CareerClient>,
     auth: Res<crate::career_identity::CareerIdentity>,
+    directory: Option<Res<super::directory::DirectoryRouting>>,
 ) {
     if let Some(saved) = &resume.saved
         && session.server_addr() == saved.lobby
@@ -141,9 +176,12 @@ pub(crate) fn remember_resume(
         match_id: snapshot.meta.match_id,
         join: join.clone(),
     };
-    if resume.saved.as_ref() != Some(&saved)
-        && valid_resume(&saved, &identity.0, &super::session::startup_lobby_addr())
-    {
+    let lobby = directory
+        .as_ref()
+        .filter(|d| d.active)
+        .and_then(|d| d.owned_lobby())
+        .unwrap_or_else(super::session::startup_lobby_addr);
+    if resume.saved.as_ref() != Some(&saved) && valid_resume(&saved, &identity.0, &lobby) {
         resume.saved = Some(saved);
         resume.persist();
     }

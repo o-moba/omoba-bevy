@@ -21,6 +21,21 @@ pub(crate) const CLIENT_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 
 const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 
+fn receive_budget(lobby: bool) -> Duration {
+    Duration::from_millis(if lobby {
+        8
+    } else {
+        shared::public_transport::RECEIVE_BUDGET_MILLIS
+    })
+}
+
+#[test]
+fn only_the_lobby_gets_a_larger_bounded_receive_slice() {
+    assert_eq!(receive_budget(false), Duration::from_millis(2));
+    assert_eq!(receive_budget(true), Duration::from_millis(8));
+    assert_eq!(shared::public_transport::MAX_PACKETS_PER_TICK, 128);
+}
+
 impl ServerRuntime {
     pub(crate) fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
@@ -58,10 +73,11 @@ impl ServerRuntime {
             }
         }
         let receive_started = self.clock.now();
+        // The lobby has no combat simulation; allow its signed search/heartbeat
+        // traffic a larger bounded slice without changing any worker's budget.
+        let receive_budget = receive_budget(self.match_service.is_lobby());
         for _ in 0..shared::public_transport::MAX_PACKETS_PER_TICK {
-            if self.clock.now().saturating_duration_since(receive_started)
-                >= Duration::from_millis(shared::public_transport::RECEIVE_BUDGET_MILLIS)
-            {
+            if self.clock.now().saturating_duration_since(receive_started) >= receive_budget {
                 break;
             }
             match self.transport.recv(&mut self.recv_buf) {
@@ -100,6 +116,11 @@ impl ServerRuntime {
                         ) {
                             public_transport::Decision::Dispatch(packet) => {
                                 self.handle_packet(addr, packet, now)
+                            }
+                            public_transport::Decision::DispatchSigned(packet, sequence) => {
+                                self.load_metrics.signed_dispatch(addr, sequence);
+                                self.handle_packet(addr, packet, now);
+                                self.load_metrics.finish_dispatch();
                             }
                             public_transport::Decision::Reply(bytes) => {
                                 let _ = self.transport.send_to(&bytes, addr);
@@ -226,7 +247,9 @@ impl ServerRuntime {
                 }
             }
         }
-        self.handle_packet_authorized(addr, packet, now);
+        if self.human_network_activity(addr, &packet, now) {
+            self.handle_packet_authorized(addr, packet, now);
+        }
     }
 
     pub(crate) fn handle_packet_authorized(
@@ -282,6 +305,24 @@ impl ServerRuntime {
         // the tail; then a paused sandbox swallows movement and combat; then
         // the per-variant handlers run on the (sandbox) simulation clock.
         let flow = match packet {
+            ClientPacket::MatchVote {
+                server_epoch,
+                match_id,
+                generation,
+                kind,
+                action,
+            } => {
+                self.handle_match_vote(
+                    addr,
+                    server_epoch,
+                    match_id,
+                    generation,
+                    kind,
+                    action,
+                    wall_now,
+                );
+                ControlFlow::Break(())
+            }
             ClientPacket::TakeoverVote {
                 server_epoch,
                 match_id,
@@ -334,15 +375,28 @@ impl ServerRuntime {
             | ClientPacket::Utility { .. }
             | ClientPacket::BasicAttack { .. }
             | ClientPacket::UpgradeSkill { .. }
-            | ClientPacket::BuyItem { .. }) => common::command::apply(
-                &mut self.world,
-                addr,
-                &packet,
-                self.server_epoch,
-                self.match_id,
-                now,
-            )
-            .expect("gameplay command"),
+            | ClientPacket::BuyItem { .. }) => {
+                let flow = common::command::apply(
+                    &mut self.world,
+                    addr,
+                    &packet,
+                    self.server_epoch,
+                    self.match_id,
+                    now,
+                )
+                .expect("gameplay command");
+                if matches!(packet, ClientPacket::Transform { .. })
+                    && let Some(player_id) = self
+                        .world
+                        .players
+                        .get(&addr)
+                        .map(|player| player.hero.identity.id)
+                {
+                    self.load_metrics
+                        .applied_transform(addr, player_id, wall_now);
+                }
+                flow
+            }
             ClientPacket::Join {
                 prematch,
                 team,

@@ -33,7 +33,9 @@ pub mod widgets;
 
 use bevy::prelude::*;
 
-use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionEvent, SessionReactions};
+use crate::net::{
+    ClientSession, GameState, GameStateSnapshot, SessionEvent, SessionReactions, SessionUiCommand,
+};
 use crate::player::Player;
 
 /// The screen the player is looking at. Menus and the match are mutually
@@ -144,11 +146,12 @@ pub fn automation_bypass() -> bool {
 }
 
 /// These harnesses exercise the actual menu controls as well as match states.
-const SHELL_HARNESSES: [&str; 4] = [
+const SHELL_HARNESSES: [&str; 5] = [
     "OMOBA_FRONTEND_QA_OUTPUT",
     "OMOBA_RECOVERY_QA_OUTPUT",
     "OMOBA_DAGGER_QA_DIR",
     "OMOBA_EQUIPPED_SKILLS_QA_DIR",
+    "OMOBA_FAIR_PLAY_QA_OUTPUT",
 ];
 
 fn bypass_for(keys: impl Iterator<Item = String>) -> bool {
@@ -234,6 +237,7 @@ fn drive_screen_from_session(
     matchmaking: Option<Res<crate::match_service::MatchServiceClient>>,
     career: Option<Res<crate::career::CareerClient>>,
     result_latch: Option<Res<postmatch::PostMatchLatch>>,
+    mut session_ui: MessageWriter<SessionUiCommand>,
 ) {
     if paused.0 || automation_bypass() {
         return;
@@ -290,15 +294,32 @@ fn drive_screen_from_session(
     match current {
         AppScreen::Searching => {
             if session.join_blocked() {
-                // Keep the reason, drop the dead join: the picker must be usable
-                // again and the player must know why they are back on it.
-                notice.0 = Some(
-                    crate::net::link_status(&session)
-                        .detail()
-                        .unwrap_or_else(|| crate::i18n::tr("frontend.join.no_answer").to_owned()),
-                );
-                session.abandon_join();
-                next.set(AppScreen::HeroSelect);
+                if matchmaking
+                    .as_ref()
+                    .is_some_and(|flow| flow.allocation.is_some())
+                {
+                    // The join an allocated worker refused belongs to the
+                    // lobby's handoff, not to the picker: leave the worker
+                    // through the shell's cleanup, which returns the client
+                    // to the lobby transport without the dead allocation
+                    // (`match_service` has queued the re-search when the
+                    // match had not started).
+                    session.abandon_join();
+                    session_ui.write(SessionUiCommand::LeaveMatch);
+                } else {
+                    // Keep the reason, drop the dead join: the picker must be
+                    // usable again and the player must know why they are
+                    // back on it.
+                    notice.0 = Some(
+                        crate::net::link_status(&session)
+                            .detail()
+                            .unwrap_or_else(|| {
+                                crate::i18n::tr("frontend.join.no_answer").to_owned()
+                            }),
+                    );
+                    session.abandon_join();
+                    next.set(AppScreen::HeroSelect);
+                }
             } else if !committed && matchmaking.as_ref().is_some_and(|flow| flow.is_searching()) {
                 *uncommitted_frames = 0;
             } else if !committed {
@@ -632,6 +653,7 @@ mod tests {
             "OMOBA_FRONTEND_QA_OUTPUT",
             "OMOBA_RECOVERY_QA_OUTPUT",
             "OMOBA_EQUIPPED_SKILLS_QA_DIR",
+            "OMOBA_FAIR_PLAY_QA_OUTPUT",
         ] {
             assert!(
                 !bypass_for(keys(&[harness, "HOME"]).into_iter()),
@@ -854,6 +876,7 @@ mod tests {
             .init_resource::<JoinNotice>()
             .init_resource::<ClientSession>()
             .init_resource::<GameStateSnapshot>()
+            .add_message::<SessionUiCommand>()
             .add_systems(
                 Update,
                 (apply_pending_screen, drive_screen_from_session).chain(),
@@ -963,6 +986,7 @@ mod tests {
         use shared::prematch::{PrematchPhase, PrematchSnapshot};
         let mut app = driver_app();
         app.world_mut().resource_mut::<GameStateSnapshot>().prematch = Some(PrematchSnapshot {
+            join_remaining_ms: None,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,
@@ -1022,6 +1046,43 @@ mod tests {
         assert!(!session.join_in_flight());
         assert!(!session.has_committed_join());
         assert!(!session.join_blocked());
+    }
+
+    /// A join refused by the lobby's allocated worker is not a picker return:
+    /// the shell leaves the worker through `LeaveMatch` (back to the lobby,
+    /// allocation dropped, re-search queued by `match_service`) and shows no
+    /// picker notice.
+    #[test]
+    fn a_rejected_handoff_join_leaves_through_the_lobby_instead_of_the_picker() {
+        let mut app = driver_app();
+        let mut flow = crate::match_service::MatchServiceClient::default();
+        flow.active = true;
+        flow.lobby_addr = Some("127.0.0.1:4000".into());
+        flow.allocation = Some(shared::match_service::MatchAllocation {
+            allocation_id: "allocated".into(),
+            endpoint: "127.0.0.1:4001".into(),
+            preference: shared::match_service::MatchPreference::Casual,
+            team: shared::map::Team::Green,
+            human_count: 1,
+            bot_count: 9,
+            rated: false,
+            join_deadline_ms: 0,
+        });
+        app.insert_resource(flow);
+        let mut session = ClientSession::queued_for_test();
+        session.reject_for_test(shared::protocol::JoinRejection::MatchFull);
+        enter(&mut app, AppScreen::Searching, session);
+        assert_ne!(screen(&app), AppScreen::HeroSelect);
+        assert!(app.world().resource::<JoinNotice>().0.is_none());
+        let session = app.world().resource::<ClientSession>();
+        assert!(!session.has_committed_join());
+        assert!(!session.join_blocked());
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, SessionUiCommand::LeaveMatch))
+        );
     }
 
     #[test]

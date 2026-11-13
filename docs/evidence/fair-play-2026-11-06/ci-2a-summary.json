@@ -1,0 +1,30 @@
+{
+  "commit": "2a45600c7a06acd0e3ffc2ccab1f3586c9d7a9bd",
+  "run": 42201671041,
+  "artifact": 13497606620,
+  "sha256": "4d5b0973b4e1a7b3a67b659a0ef818898f6538b5c6f84be4c352de1518a104e3",
+  "archive_entries": 139,
+  "jobs": 7,
+  "stages": 18,
+  "independent_recheck": "PASS",
+  "seconds": 2699.35,
+  "ranked_result_id": "e2de026ae59553a668818e861b2dbe8f",
+  "gameplay_ms": 546050,
+  "zero_afk_disconnects": true,
+  "exact_all_ten_awards_profile_history_season_counters": true,
+  "ready_window_secs": 15,
+  "eligibility": {
+    "status": "PASS",
+    "wire_denials": [
+      0,
+      9
+    ],
+    "wire_acceptance": 10,
+    "real_standard_map_tenth_completion": true,
+    "completion_reason": "surrender",
+    "vk_required": false
+  },
+  "early_crash": "PASS",
+  "private_fixture_removed": true,
+  "scope": "Directory-foundation source before the focused fair-play QA/modal fix; loopback signed AI-controlled human seats, not physical devices or real provider accounts"
+}
