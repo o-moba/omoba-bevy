@@ -1,4 +1,4 @@
-# Pinned with Bevy 0.20.0 minimum supported Rust version.
+# Bevy is exactly pinned to 0.20.1; this is its minimum supported Rust version.
 [toolchain]
 channel = "1.97.1"
 components = ["rustfmt", "clippy"]

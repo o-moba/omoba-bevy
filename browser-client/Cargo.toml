@@ -8,7 +8,7 @@ license = "AGPL-3.0-only"
 common = { path = "../common" }
 shared = { path = "../shared" }
 serde_json.workspace = true
-bevy = { version = "0.20.0", default-features = false, features = [
+bevy = { version = "=0.20.1", default-features = false, features = [
     "std", "web", "default_app", "2d_bevy_render", "ui_bevy_render",
     "bevy_winit", "default_font", "png", "webgl2", "bevy_gizmos",
 ] }

@@ -20,11 +20,11 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 
 [workspace.dependencies]
-bevy = "0.20.0"
+bevy = "=0.20.1"
 crossbeam-channel = "0.5.15"
 # One pinned SDK revision for every crate. Its features are opt-in per crate:
 # the desktop client takes the defaults (Bevy helpers, HTTP), passport `http`.
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "b67b33fde4ceba3084a771905d9660ca6659dfb0", default-features = false }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "ad951438e9bf076e5155a39b2ecb44e15a60c203", default-features = false }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 winit = "=0.30.12"
