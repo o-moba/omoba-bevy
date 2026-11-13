@@ -1,0 +1,15 @@
+{
+  "update.required.title": "需要更新",
+  "update.required.detail": "需要更新：版本 {version} 已无法在线游戏。",
+  "update.required.body": "版本 {version} 已无法在线游戏。请下载新版本以继续游戏。",
+  "update.required.body_store": "版本 {version} 已无法在线游戏。请在 App Store 或 TestFlight 中更新游戏。",
+  "update.required.body_site": "版本 {version} 已无法在线游戏。请从网站下载新版本。",
+  "update.required.latest": "新版本：{version}",
+  "update.servers_updating": "服务器正在切换到你的版本 {version}，稍后将自动连接。",
+  "update.available": "有可用更新：版本 {version}",
+  "update.button.download": "下载更新",
+  "update.button.get": "下载",
+  "update.button.later": "稍后",
+  "update.pill.required": "需要更新",
+  "update.pill.servers_updating": "服务器更新中"
+}

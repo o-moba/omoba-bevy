@@ -1,6 +1,18 @@
-// Open Omoba.xcodeproj, choose the Omoba scheme and Any iOS Device (arm64).
+// Open Omoba.xcodeproj, choose Omoba or Omoba Dev and Any iOS Device (arm64).
 PRODUCT_NAME = OmobaBeta
-PRODUCT_BUNDLE_IDENTIFIER = space.ekza.omoba.beta
+// The contour picks the app (scripts/contours.py): empty is the production app
+// space.ekza.omoba.beta; `dev` is the separate OMOBA Dev tester app with its own
+// bundle id, name, DEV-ribbon icon and dev connection profiles, installable beside
+// it. `scripts/release.py build ios --contour dev` passes OMOBA_CONTOUR=dev; for a
+// Run from Xcode choose the Omoba Dev scheme (Debug Dev / Release Dev).
+OMOBA_CONTOUR =
+OMOBA_BUNDLE_ID_ = space.ekza.omoba.beta
+OMOBA_BUNDLE_ID_prod = space.ekza.omoba.beta
+OMOBA_BUNDLE_ID_dev = space.ekza.omoba.dev
+OMOBA_APP_ICON_ = AppIcon
+OMOBA_APP_ICON_prod = AppIcon
+OMOBA_APP_ICON_dev = AppIconDev
+PRODUCT_BUNDLE_IDENTIFIER = $(OMOBA_BUNDLE_ID_$(OMOBA_CONTOUR))
 EXECUTABLE_NAME = client
 SDKROOT = iphoneos
 SUPPORTED_PLATFORMS = iphoneos
@@ -10,10 +22,14 @@ IPHONEOS_DEPLOYMENT_TARGET = 15.0
 SUPPORTS_MACCATALYST = NO
 SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO
 CODE_SIGN_STYLE = Automatic
+OMOBA_ENTITLEMENTS_ = Omoba.entitlements
+OMOBA_ENTITLEMENTS_prod = Omoba.entitlements
+OMOBA_ENTITLEMENTS_dev = OmobaDev.entitlements
+CODE_SIGN_ENTITLEMENTS = $(OMOBA_ENTITLEMENTS_$(OMOBA_CONTOUR))
 CURRENT_PROJECT_VERSION = 12
 GENERATE_INFOPLIST_FILE = NO
 INFOPLIST_FILE = $(DERIVED_FILE_DIR)/Omoba-Info.plist
-ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+ASSETCATALOG_COMPILER_APPICON_NAME = $(OMOBA_APP_ICON_$(OMOBA_CONTOUR))
 ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO
 ENABLE_USER_SCRIPT_SANDBOXING = NO
 ENABLE_BITCODE = NO

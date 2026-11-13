@@ -30,11 +30,33 @@ impl EkzaConfig {
     pub fn from_env(portal_origin: &str) -> Result<Self> {
         match std::env::var("OMOBA_EKZA_LOCAL_FIXTURE_ORIGIN") {
             Ok(origin) => Self::local_fixture(&origin, portal_origin),
-            Err(std::env::VarError::NotPresent) => {
-                Self::new("https://registry.ekza.io", "https://studio.ekza.io", false)
-            }
+            Err(std::env::VarError::NotPresent) => Self::for_portal(portal_origin),
             Err(_) => Err(unavailable()),
         }
+    }
+    fn for_portal(portal_origin: &str) -> Result<Self> {
+        if portal_origin == "https://app.dev.omoba.io" {
+            return Self::new(
+                "https://registry.dev.ekza.io",
+                "https://hub.dev.ekza.io",
+                false,
+            );
+        }
+        let portal = Url::parse(portal_origin).map_err(|_| unavailable())?;
+        let host = portal
+            .host_str()
+            .ok_or_else(unavailable)?
+            .trim_end_matches('.');
+        if ["dev.omoba.io", "dev.ekza.io"]
+            .iter()
+            .any(|zone| host == *zone || host.ends_with(&format!(".{zone}")))
+        {
+            // An almost-correct DEV configuration must never fall back to production.
+            return Err(unavailable());
+        }
+        // The Ekza Hub (formerly the Studio site) approves device links. Since
+        // 2026-10-20 it is hub.ekza.io; studio.ekza.io is the Ekza Studio editor.
+        Self::new("https://registry.ekza.io", "https://hub.ekza.io", false)
     }
     /// Explicit local test seam. Never accepts a remote or credential-bearing origin.
     pub fn local_fixture(origin: &str, portal_origin: &str) -> Result<Self> {
@@ -314,6 +336,37 @@ fn pending_dto(config: &EkzaConfig, row: &sqlx::postgres::PgRow) -> Result<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn portal_routes_library_consent_within_its_contour() {
+        let dev = EkzaConfig::for_portal("https://app.dev.omoba.io").unwrap();
+        assert_eq!(dev.registry, "https://registry.dev.ekza.io");
+        assert_eq!(dev.studio, "https://hub.dev.ekza.io");
+        assert!(!dev.prototype);
+        let prod = EkzaConfig::for_portal("https://app.omoba.io").unwrap();
+        assert_eq!(prod.registry, "https://registry.ekza.io");
+        assert_eq!(prod.studio, "https://hub.ekza.io");
+        assert!(!prod.prototype);
+    }
+    #[test]
+    fn malformed_dev_portal_never_falls_back_to_production() {
+        for origin in [
+            "http://app.dev.omoba.io",
+            "https://app.dev.omoba.io/",
+            "https://app.dev.omoba.io:443",
+            "https://app.dev.omoba.io/path",
+            "https://app.dev.omoba.io?x=1",
+            "https://user@app.dev.omoba.io",
+            "https://APP.DEV.OMOBA.IO",
+            "https://other.dev.omoba.io",
+            "https://app.dev.omoba.io.",
+            "https://other.dev.omoba.io.",
+            "https://dev.omoba.io",
+            "https://studio.dev.ekza.io",
+            "https://hub.dev.ekza.io",
+        ] {
+            assert!(EkzaConfig::for_portal(origin).is_err(), "{origin}");
+        }
+    }
     #[test]
     fn fixture_is_explicit_loopback_only() {
         assert!(

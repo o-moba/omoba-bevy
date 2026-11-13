@@ -25,6 +25,7 @@ pub(crate) const RATED_RULESET: &str = "verdant-default-v1";
 struct CareerRound {
     result: MatchResult,
     start_enqueued: bool,
+    gameplay_enqueued: bool,
     started_at: Instant,
     checkpoint_at: Instant,
     finalized: bool,
@@ -69,6 +70,8 @@ fn utc_ms() -> u64 {
 }
 fn participant(player: &ConnectedPlayer) -> ParticipantResult {
     ParticipantResult {
+        input_kind: Default::default(),
+        participation: None,
         is_bot: player.hero.identity.is_bot,
         player_id: player.hero.identity.id,
         profile_id: player
@@ -187,6 +190,21 @@ pub(crate) fn encode_career_datagrams(
 }
 
 impl ServerRuntime {
+    pub(crate) fn career_allocation_is_live(&self) -> bool {
+        self.career
+            .round
+            .as_ref()
+            .is_some_and(|r| !r.finalized && r.result.gameplay_started)
+    }
+
+    pub(crate) fn career_refresh_views(&mut self, now: Instant) {
+        self.career.last_sent = None;
+        self.send_career_views(now);
+    }
+    pub(crate) fn flush_career_for_shutdown(&mut self, now: Instant) -> bool {
+        self.poll_career(now);
+        self.career.pending.is_empty() && self.career.backend.flush_outbox()
+    }
     pub(crate) fn career_worker_terminal(&self) -> bool {
         self.career
             .round
@@ -236,10 +254,17 @@ impl ServerRuntime {
         self.career.backend.set_playing(addr, admitted_human);
         self.career.backend.handle(addr, request);
         self.career.backend.set_playing(addr, admitted_human);
-        // Only verified signed cancellation completions change queue state.
-        self.poll_career(now);
-        self.career.last_sent = None;
-        self.send_career_views(now);
+        if self.match_service.is_lobby() {
+            // Keep receipt-time consent/cancel ordering, without scanning every
+            // profile for each datagram. Full account maintenance runs in tick.
+            self.apply_ready_career_requests(now);
+            self.apply_cancelled_career_requests(now);
+            self.send_requested_career_view(addr, now);
+        } else {
+            self.poll_career(now);
+            self.career.last_sent = None;
+            self.send_career_views(now);
+        }
     }
 
     pub(crate) fn authorize_career_join(
@@ -416,6 +441,33 @@ impl ServerRuntime {
         let Some(profile) = self.career.backend.profile(addr) else {
             return;
         };
+        if self
+            .career
+            .backend
+            .view(addr)
+            .play_cooldown
+            .is_some_and(|p| p.until > crate::moderation::unix_now())
+        {
+            self.career_error(addr, shared::career::error_code::PLAY_COOLDOWN);
+            return;
+        }
+        if !profile.ranked_unlocked() {
+            self.career_error(addr, shared::career::error_code::RANKED_LOCKED);
+            return;
+        }
+        // This standalone queue is rated: a matchmaking or ranked ban
+        // refuses it (LR-15).
+        if let Some((code, _)) = shared::moderation::queue_refusal(
+            &self.career.backend.sanctions(addr),
+            shared::match_service::MatchPreference::Ranked,
+            crate::moderation::unix_now(),
+        ) {
+            self.career_error(
+                addr,
+                format!("Matchmaking is restricted for this profile ({code})."),
+            );
+            return;
+        }
         if let Err(error) = self.career.queue.enqueue(id, profile.clone(), now) {
             self.career_error(addr, error.to_string());
             return;
@@ -530,6 +582,14 @@ impl ServerRuntime {
         if roster.iter().any(|participant| participant.is_bot) {
             return Err("Bot participants are not eligible for ranked play.");
         }
+        // Only a Ranked allocation is rated (LR-08), whatever its head count.
+        if self
+            .match_service
+            .worker()
+            .is_some_and(|w| !w.manifest.preference.rated())
+        {
+            return Err("Only Ranked matches are rated.");
+        }
         if !self.career_queue_enabled() && self.match_service.worker().is_none() {
             return Err("Development or legacy guest match.");
         }
@@ -563,18 +623,46 @@ impl ServerRuntime {
         Ok(())
     }
 
+    /// Allocation metadata is immutable even while its durable ACK is pending.
+    pub(crate) fn career_roster_is_frozen(&self) -> bool {
+        self.career.round.is_some()
+    }
+
     /// Called at the final formation boundary. Career-backed rounds remain at
     /// Starting(0) until durable allocation ACK; no combat or income runs early.
     pub(crate) fn begin_career_round(&mut self, now: Instant) -> bool {
+        self.apply_allocated_releases(now, true);
         if self.match_service.worker().is_some_and(|w| {
-            w.recovery
+            w.aborted
+                || w.recovery
                 || w.cancelled()
-                || crate::match_allocation::unix_ms() > w.manifest.join_deadline_ms
+                || (crate::match_allocation::unix_ms() > w.manifest.join_deadline_ms
+                    && w.manifest.preference.rated())
         }) && self.match_started_at.is_none()
         {
             return false;
         }
+        if let Some(worker) = self.match_service.worker()
+            && worker.manifest.preference.rated()
+            && self
+                .world
+                .players
+                .values()
+                .filter(|p| p.joined && !p.hero.identity.is_bot)
+                .filter_map(|p| p.career_profile.as_ref())
+                .any(|p| {
+                    p.ranked.as_ref().map_or(1, |s| s.season_id)
+                        != worker.manifest.ranked_season_id.unwrap_or(1)
+                })
+        {
+            // An old reserved/drafting worker cannot enter a newly reset season.
+            // Its ordinary pre-start timeout returns players to a fresh search.
+            return false;
+        }
         if !self.allocated_humans_ready() {
+            return false;
+        }
+        if !self.prepare_public_unique_loadouts(now) {
             return false;
         }
         let practice = self.rules.local_results;
@@ -605,7 +693,29 @@ impl ServerRuntime {
             } // Pure simulation fixtures.
             let eligibility = self.rating_eligibility(&roster);
             let result = MatchResult {
-                result_id: self.career.backend.new_result_id(),
+                ranked_season_id: if let Some(worker) = self.match_service.worker() {
+                    worker
+                        .manifest
+                        .preference
+                        .rated()
+                        .then_some(worker.manifest.ranked_season_id)
+                        .flatten()
+                } else if eligibility.is_ok() {
+                    self.career
+                        .queue
+                        .selection()
+                        .and_then(|selection| selection.participants.first())
+                        .and_then(|p| p.waiting.profile.ranked.as_ref())
+                        .map(|season| season.season_id)
+                } else {
+                    None
+                },
+                gameplay_started: false,
+                end_reason: None,
+                result_id: self.match_service.worker().map_or_else(
+                    || self.career.backend.new_result_id(),
+                    |worker| worker.manifest.allocation_id.clone(),
+                ),
                 server_epoch: self.server_epoch,
                 match_id: self.match_id,
                 started_at_ms: utc_ms(),
@@ -625,8 +735,19 @@ impl ServerRuntime {
                 outcome: MatchOutcome::Interrupted,
                 winner: None,
                 rated: eligibility.is_ok(),
+                // The queue says why it is unrated: Casual PvP never is
+                // rated, vs Bots seats bots (LR-08).
                 unrated_reason: if public_casual {
-                    Some("allocated_bots".into())
+                    Some(
+                        if self.match_service.worker().is_some_and(|w| {
+                            w.manifest.preference == shared::match_service::MatchPreference::Casual
+                        }) {
+                            "casual_queue"
+                        } else {
+                            "allocated_bots"
+                        }
+                        .into(),
+                    )
                 } else {
                     eligibility.err().map(str::to_owned)
                 },
@@ -636,6 +757,7 @@ impl ServerRuntime {
             self.career.round = Some(CareerRound {
                 result,
                 start_enqueued: false,
+                gameplay_enqueued: false,
                 started_at: now,
                 checkpoint_at: now,
                 finalized: false,
@@ -665,6 +787,20 @@ impl ServerRuntime {
                 }
             }
             round.result.participants.sort_by_key(|p| p.player_id);
+            if durable && self.career.backend.enabled() {
+                if !round.gameplay_enqueued {
+                    let mut marker = round.result.clone();
+                    marker.gameplay_started = true;
+                    round.gameplay_enqueued = self.career.backend.checkpoint(marker);
+                }
+                if !self
+                    .career
+                    .backend
+                    .gameplay_committed(&round.result.result_id)
+                {
+                    return false;
+                }
+            }
             if let Err(error) = self
                 .combat_log
                 .ledger
@@ -677,6 +813,7 @@ impl ServerRuntime {
                 }
                 return false;
             }
+            round.result.gameplay_started = true;
             round.started_at = now;
             round.checkpoint_at = now;
             self.career.queue.commit_selection();
@@ -758,6 +895,16 @@ impl ServerRuntime {
         winner: Option<Team>,
         now: Instant,
     ) {
+        self.finish_career_round_with_reason(outcome, winner, now, None);
+    }
+
+    pub(crate) fn finish_career_round_with_reason(
+        &mut self,
+        outcome: MatchOutcome,
+        winner: Option<Team>,
+        now: Instant,
+        reason: Option<&str>,
+    ) {
         if self
             .career
             .round
@@ -767,14 +914,19 @@ impl ServerRuntime {
             return;
         }
         self.update_career_totals();
-        let participants = if self.combat_log.ledger.is_started() {
+        self.observe_fair_play(now, true);
+        let mut participants = if self.combat_log.ledger.is_started() {
             Some(self.combat_log.ledger.freeze())
         } else {
             None
         };
+        if let Some(participants) = participants.as_mut() {
+            self.fair_play.annotate(participants);
+        }
         let round = self.career.round.as_mut().unwrap();
         round.finalized = true;
         round.result.outcome = outcome;
+        round.result.end_reason = reason.map(str::to_owned);
         round.result.winner = winner;
         round.result.ended_at_ms = utc_ms().max(round.result.started_at_ms);
         round.result.duration_ms = now
@@ -788,8 +940,21 @@ impl ServerRuntime {
             round.result.rated = false;
             round.result.winner = None;
             if !self.rules.local_results {
-                round.result.unrated_reason = Some("The match did not finish normally.".into());
+                // A stable code (LR-31): the client and the portal localize it.
+                round.result.unrated_reason = Some(
+                    if round.result.gameplay_started {
+                        "not_completed"
+                    } else {
+                        "prematch_abandoned"
+                    }
+                    .into(),
+                );
             }
+        }
+        if outcome != MatchOutcome::Completed
+            && let Some(reason) = reason
+        {
+            round.result.unrated_reason = Some(reason.into());
         }
         for participant in &round.result.participants {
             self.career
@@ -815,6 +980,7 @@ impl ServerRuntime {
             return;
         }
         self.update_career_totals();
+        self.observe_fair_play(now, false);
         let Some(round) = self.career.round.as_mut() else {
             return;
         };
@@ -825,6 +991,7 @@ impl ServerRuntime {
         }
         let mut checkpoint = round.result.clone();
         checkpoint.participants = self.combat_log.ledger.snapshot();
+        self.fair_play.annotate(&mut checkpoint.participants);
         checkpoint.duration_ms = now
             .saturating_duration_since(round.started_at)
             .as_millis()
@@ -844,6 +1011,7 @@ impl ServerRuntime {
     }
 
     pub(crate) fn reset_career_round(&mut self) {
+        self.fair_play = Default::default();
         let career_flow = self.career_flow_active();
         self.career.round = None;
         self.career.queue.release_selection();
@@ -855,6 +1023,47 @@ impl ServerRuntime {
         }
     }
 
+    /// Both signed account cancellation and gameplay Leave use this path.
+    /// Gameplay Leave is independent of the account-action throttle, but must
+    /// identify the exact allocated profile/session before aborting a draft.
+    pub(crate) fn cancel_unstarted_ranked_allocation(&mut self, addr: SocketAddr) {
+        if self.match_started_at.is_some() {
+            return;
+        }
+        let Some(worker) = self.match_service.worker() else {
+            return;
+        };
+        if !worker.manifest.preference.rated() {
+            return;
+        }
+        let Some((_, session)) = self
+            .career
+            .backend
+            .profile(addr)
+            .zip(self.career.backend.authenticated_session(addr))
+            .filter(|(profile, session)| {
+                worker.manifest.team(&profile.profile_id, session).is_some()
+            })
+        else {
+            return;
+        };
+        let path = worker.directory.join("cancel.json");
+        let mut left: Vec<String> = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        if !left.contains(&session) {
+            left.push(session);
+        }
+        if crate::match_allocation::atomic_json(&path, &left).is_ok() {
+            if let crate::match_service::MatchService::Worker(worker) = &mut self.match_service {
+                worker.aborted = true;
+            }
+        } else {
+            eprintln!("Cannot persist Ranked draft cancellation");
+        }
+    }
+
     /// A running allocated seat changes controller and remains reclaimable.
     /// Other seats and any queue entry are released at once,
     /// so a guest can join again straight away with a new hero. Signed profiles
@@ -863,6 +1072,25 @@ impl ServerRuntime {
     pub(crate) fn leave_match(&mut self, addr: SocketAddr, now: Instant) {
         if self.detach_running_seat(addr, now) {
             return;
+        }
+        if self.match_started_at.is_none()
+            && let Some(session) = self.career.backend.authenticated_session(addr)
+            && let Some(profile) = self.career.backend.profile(addr)
+            && let crate::match_service::MatchService::Worker(worker) = &mut self.match_service
+            && !worker.manifest.preference.rated()
+            && worker
+                .manifest
+                .humans
+                .iter()
+                .any(|h| h.session_id == session && h.profile_id == profile.profile_id)
+            && !worker.released.contains(&session)
+        {
+            worker.released.push(session);
+            worker.aborted = worker
+                .manifest
+                .humans
+                .iter()
+                .all(|h| worker.released.contains(&h.session_id));
         }
         let Some(player) = self.world.players.get_mut(&addr) else {
             return;
@@ -921,6 +1149,29 @@ impl ServerRuntime {
                 self.elapsed_match_ms(now)
             );
         }
+        if self.match_started_at.is_none()
+            && self
+                .match_service
+                .worker()
+                .is_some_and(|w| !w.manifest.preference.rated())
+        {
+            if self
+                .world
+                .players
+                .values()
+                .any(|p| p.joined && !p.hero.identity.is_bot)
+            {
+                self.fill_practice_bots(now);
+            } else if let crate::match_service::MatchService::Worker(worker) =
+                &mut self.match_service
+            {
+                worker.aborted = worker
+                    .manifest
+                    .humans
+                    .iter()
+                    .all(|h| worker.released.contains(&h.session_id));
+            }
+        }
     }
 
     pub(crate) fn disconnect_career_player(&mut self, addr: SocketAddr, now: Instant) {
@@ -942,6 +1193,52 @@ impl ServerRuntime {
         }
         self.career.backend.forget(addr);
         self.career.errors.remove(&addr);
+    }
+
+    fn apply_ready_career_requests(&mut self, now: Instant) {
+        for request in self.career.backend.take_ready_requests() {
+            if let (Some(profile), Some(session)) = (
+                self.career.backend.profile(request.addr),
+                self.career.backend.authenticated_session(request.addr),
+            ) {
+                self.match_service.respond_ready(
+                    &profile.profile_id,
+                    &session,
+                    request.request_id,
+                    &request.check_id,
+                    request.accepted,
+                    now,
+                );
+            }
+        }
+    }
+
+    fn apply_cancelled_career_requests(&mut self, now: Instant) {
+        for addr in self.career.backend.take_cancelled() {
+            if let Some(profile) = self.career.backend.profile(addr) {
+                self.match_service.cancel(&profile.profile_id, now);
+            }
+            if self.match_started_at.is_none()
+                && self
+                    .match_service
+                    .worker()
+                    .is_some_and(|w| !w.manifest.preference.rated())
+            {
+                self.leave_match(addr, now);
+                continue;
+            }
+            self.cancel_unstarted_ranked_allocation(addr);
+            if let Some(player) = self.world.players.get(&addr) {
+                if player.joined && matches!(self.world.game_state, GameState::Running) {
+                    continue;
+                }
+                let id = player.hero.identity.id;
+                self.career.blocked_starts.remove(&id);
+                self.career.errors.remove(&addr);
+                self.cancel_career_entry(id, now);
+                self.career.backend.set_playing(addr, false);
+            }
+        }
     }
 
     pub(crate) fn poll_career(&mut self, now: Instant) {
@@ -969,6 +1266,22 @@ impl ServerRuntime {
             .errors
             .retain(|addr, _| self.world.players.contains_key(addr));
         self.career.backend.poll();
+        self.match_service
+            .enable_shared_ready(self.career.backend.shared_ready_enabled());
+        for (request, code) in self.career.backend.take_match_refusals() {
+            if let (Some(profile), Some(session)) = (
+                self.career.backend.profile(request.addr),
+                self.career.backend.authenticated_session(request.addr),
+            ) {
+                self.match_service.refuse(
+                    &profile.profile_id,
+                    session,
+                    request.request_id,
+                    &code,
+                    now,
+                );
+            }
+        }
         let mut invalidated = Vec::new();
         for (addr, player) in &mut self.world.players {
             // Retained humans have no transport authentication at their internal
@@ -1006,51 +1319,66 @@ impl ServerRuntime {
             // seat. Reuse normal cancellation so the remaining roster can queue.
             self.cancel_career_entry(player_id, now);
         }
-        for (addr, request_id, preference) in self.career.backend.take_match_requests() {
+        for request in self.career.backend.take_match_requests() {
+            let addr = request.addr;
             if let (Some(profile), Some(session)) = (
                 self.career.backend.profile(addr),
                 self.career.backend.authenticated_session(addr),
             ) {
-                let party = self.party_tag(addr);
-                self.match_service
-                    .enqueue(profile, session, request_id, preference, party, now);
-            }
-        }
-        self.handle_rejected_career_start(now);
-        for addr in self.career.backend.take_cancelled() {
-            if let Some(profile) = self.career.backend.profile(addr) {
-                self.match_service.cancel(&profile.profile_id);
-            }
-            if let Some(worker) = self.match_service.worker() {
-                let member = self
+                if self
                     .career
                     .backend
-                    .profile(addr)
-                    .zip(self.career.backend.authenticated_session(addr))
-                    .is_some_and(|(profile, session)| {
-                        worker
-                            .manifest
-                            .team(&profile.profile_id, &session)
-                            .is_some()
-                    });
-                if self.match_started_at.is_none() && member {
-                    let _ = crate::match_allocation::atomic_json(
-                        &worker.directory.join("cancel.json"),
-                        &true,
+                    .view(addr)
+                    .play_cooldown
+                    .is_some_and(|p| p.until > crate::moderation::unix_now())
+                {
+                    self.match_service.refuse(
+                        &profile.profile_id,
+                        session,
+                        request.request_id,
+                        shared::career::error_code::PLAY_COOLDOWN,
+                        now,
                     );
-                }
-            }
-            if let Some(player) = self.world.players.get(&addr) {
-                if player.joined && matches!(self.world.game_state, GameState::Running) {
                     continue;
                 }
-                let id = player.hero.identity.id;
-                self.career.blocked_starts.remove(&id);
-                self.career.errors.remove(&addr);
-                self.cancel_career_entry(id, now);
-                self.career.backend.set_playing(addr, false);
+                // A matchmaking or ranked ban refuses the search, localized
+                // with its end from the career view (LR-15).
+                if let Some((code, _)) = shared::moderation::queue_refusal(
+                    &self.career.backend.sanctions(addr),
+                    request.preference,
+                    crate::moderation::unix_now(),
+                ) {
+                    self.match_service.refuse(
+                        &profile.profile_id,
+                        session,
+                        request.request_id,
+                        code,
+                        now,
+                    );
+                    continue;
+                }
+                let party = self.party_tag(addr);
+                if let Some((id, members)) = self.queue_party_roster(addr) {
+                    self.match_service.set_party_roster(id, members);
+                }
+                let search = crate::match_service::Search {
+                    preference: request.preference,
+                    also_casual: request.also_casual,
+                };
+                self.match_service.enqueue(
+                    profile,
+                    session,
+                    request.request_id,
+                    search,
+                    party,
+                    crate::admission::SourceIp::of(addr),
+                    now,
+                );
             }
         }
+        self.apply_ready_career_requests(now);
+        self.handle_rejected_career_start(now);
+        self.apply_cancelled_career_requests(now);
         while let Some(result) = self.career.pending.front() {
             if !self.career.backend.settle(result.clone()) {
                 break;
@@ -1101,7 +1429,19 @@ impl ServerRuntime {
                 if player.hero.identity.id == participant.player_id {
                     player.joined = false;
                     self.career.backend.set_playing(*addr, false);
-                    self.career.errors.insert(*addr, format!("{error} Leave queue to clear this attempt, then retry after the other match ends."));
+                    let message = if matches!(
+                        error.as_str(),
+                        shared::career::error_code::DODGE_COOLDOWN
+                            | shared::career::error_code::PROFILE_HAS_ANOTHER_SESSION
+                            | shared::career::error_code::ALLOCATION_CANCELLED_OR_EXPIRED
+                    ) {
+                        error.clone()
+                    } else {
+                        format!(
+                            "{error} Leave queue to clear this attempt, then retry after the other match ends."
+                        )
+                    };
+                    self.career.errors.insert(*addr, message);
                 }
             }
         }
@@ -1160,14 +1500,28 @@ impl ServerRuntime {
 
     pub(crate) fn career_view(&self, addr: SocketAddr, now: Instant) -> CareerView {
         let mut view = self.career.backend.view(addr);
+        view.match_vote = self.match_vote_view(addr, now);
         view.takeovers = self.takeover_view(addr);
+        view.afk_control = self.session_recovery.is_afk(addr);
         if let (Some(profile), Some(session)) = (
             self.career.backend.profile(addr),
             self.career.backend.authenticated_session(addr),
         ) {
-            view.match_service = self.match_service.view(&profile.profile_id, &session, now);
-            view.match_service_request_id =
-                self.match_service.request_id(&profile.profile_id, &session);
+            view.ranked_season_open = profile.ranked.as_ref().map(|s| s.active_at(utc_ms()));
+            // A fresh shared-store refusal never entered the lobby queue. Keep
+            // its current request ID instead of replacing it with local Idle
+            // or a previous attempt's request (including after reconnect).
+            let queue_refused = self.match_service.is_lobby()
+                && view.match_service_request_id.is_some()
+                && matches!(
+                    view.match_service,
+                    Some(shared::match_service::MatchServiceView::Failed { .. })
+                );
+            if !queue_refused {
+                view.match_service = self.match_service.view(&profile.profile_id, &session, now);
+                view.match_service_request_id =
+                    self.match_service.request_id(&profile.profile_id, &session);
+            }
         } else if self.match_service.is_lobby() {
             view.match_service = Some(shared::match_service::MatchServiceView::Idle);
         }
@@ -1201,7 +1555,50 @@ impl ServerRuntime {
         if let Some(error) = self.career.errors.get(&addr) {
             view.error = Some(error.clone());
         }
+        view.last_result = view.last_result.filter(|result| result.gameplay_started);
         view
+    }
+
+    fn send_career_datagrams_to(&self, addr: SocketAddr, now: Instant) -> Result<(), String> {
+        encode_career_datagrams(
+            self.career_view(addr, now),
+            self.server_epoch,
+            self.career.sequence,
+        )
+        .and_then(|datagrams| {
+            for bytes in datagrams {
+                let sent = self
+                    .transport
+                    .send_to(&bytes, addr)
+                    .map_err(|error| error.to_string())?;
+                if sent != bytes.len() {
+                    return Err("Incomplete career datagram send".into());
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Immediate lobby response is private to the requesting endpoint. It
+    /// cannot reset the common cadence or starve other players' updates.
+    fn send_requested_career_view(&mut self, addr: SocketAddr, now: Instant) {
+        if self
+            .world
+            .players
+            .get(&addr)
+            .is_none_or(|p| !p.career_capable || !crate::runtime::network_endpoint(addr, p))
+        {
+            return;
+        }
+        self.match_service.refresh_handoff_views(now);
+        self.career.sequence = self.career.sequence.saturating_add(1);
+        if let Err(error) = self.send_career_datagrams_to(addr, now)
+            && let Some(suppressed) = self.snapshot_send_diagnostic.record(now)
+        {
+            eprintln!(
+                "Career transport failed for {addr}: {error}; suppressed {suppressed} similar errors"
+            );
+        }
     }
 
     pub(crate) fn send_career_views(&mut self, now: Instant) {
@@ -1212,29 +1609,14 @@ impl ServerRuntime {
         {
             return;
         }
+        self.match_service.refresh_handoff_views(now);
         self.career.last_sent = Some(now);
         self.career.sequence = self.career.sequence.saturating_add(1);
         for (addr, player) in &self.world.players {
-            if !player.career_capable || crate::bots::is_bot_address(*addr) {
+            if !player.career_capable || !crate::runtime::network_endpoint(*addr, player) {
                 continue;
             }
-            let result = encode_career_datagrams(
-                self.career_view(*addr, now),
-                self.server_epoch,
-                self.career.sequence,
-            )
-            .and_then(|datagrams| {
-                for bytes in datagrams {
-                    let sent = self
-                        .transport
-                        .send_to(&bytes, *addr)
-                        .map_err(|error| error.to_string())?;
-                    if sent != bytes.len() {
-                        return Err("Incomplete career datagram send".into());
-                    }
-                }
-                Ok(())
-            });
+            let result = self.send_career_datagrams_to(*addr, now);
             if let Err(error) = result
                 && let Some(suppressed) = self.snapshot_send_diagnostic.record(now)
             {

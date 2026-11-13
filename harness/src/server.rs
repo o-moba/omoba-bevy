@@ -48,6 +48,12 @@ impl ServerLog {
         lines.push_back(line);
     }
 
+    /// The oldest buffered line containing `needle`.
+    fn find(&self, needle: &str) -> Option<String> {
+        let lines = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        lines.iter().find(|line| line.contains(needle)).cloned()
+    }
+
     /// The buffered lines, oldest first, one per line.
     fn tail(&self) -> String {
         let lines = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -82,6 +88,7 @@ pub struct ServerProcess {
     child: Child,
     addr: SocketAddr,
     log: ServerLog,
+    envs: Vec<(String, String)>,
 }
 
 impl ServerProcess {
@@ -126,13 +133,42 @@ impl ServerProcess {
         let addr: SocketAddr = format!("127.0.0.1:{port}")
             .parse()
             .expect("loopback addr should parse");
+        let envs = envs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect();
+        Self::try_spawn_at(addr, envs)
+    }
 
+    /// Stops the server and starts it again on the same address with the same
+    /// environment, as a restart of its systemd unit would. Waits until the
+    /// new process listens.
+    pub fn restart(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let deadline = Instant::now() + READY_TIMEOUT;
+        loop {
+            match Self::try_spawn_at(self.addr, self.envs.clone()) {
+                Ok(mut fresh) => {
+                    std::mem::swap(self, &mut fresh);
+                    // `fresh` now holds the stopped child; dropping it is a no-op kill.
+                    return;
+                }
+                Err(error) if Instant::now() >= deadline => {
+                    panic!("server did not restart on {}: {error}", self.addr)
+                }
+                Err(_) => thread::sleep(Duration::from_millis(100)),
+            }
+        }
+    }
+
+    fn try_spawn_at(addr: SocketAddr, envs: Vec<(String, String)>) -> Result<Self, String> {
         let mut command = build_command();
         command
             .env("SERVER_ADDR", addr.to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        for (key, value) in envs {
+        for (key, value) in &envs {
             command.env(key, value);
         }
 
@@ -164,7 +200,12 @@ impl ServerProcess {
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
             if ready_rx.try_recv().is_ok() {
-                return Ok(ServerProcess { child, addr, log });
+                return Ok(ServerProcess {
+                    child,
+                    addr,
+                    log,
+                    envs,
+                });
             }
             // A child that exits before announcing it is listening lost the port
             // race (or otherwise failed to bind) — retry fast with a new port.
@@ -200,6 +241,22 @@ impl ServerProcess {
     /// The loopback address bots should connect to.
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// The first buffered stdout/stderr line containing `needle`, waiting up
+    /// to `timeout` for it (for example a `MATCH_METRIC` event). Only the last
+    /// [`LOG_LINES`] lines are kept, so wait while the line is recent.
+    pub fn wait_for_output(&self, needle: &str, timeout: Duration) -> Option<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(line) = self.log.find(needle) {
+                return Some(line);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 }
 
@@ -270,19 +327,19 @@ fn workspace_root() -> PathBuf {
 /// Returns the prebuilt debug server binary path if it exists, honoring
 /// `CARGO_TARGET_DIR` when set.
 fn prebuilt_binary() -> Option<PathBuf> {
+    prebuilt("server")
+}
+
+/// A prebuilt debug binary of the workspace (`cargo build -p server` builds
+/// `server` and `migrate-career`), honoring `CARGO_TARGET_DIR`.
+pub fn prebuilt(name: &str) -> Option<PathBuf> {
     let target_dir = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root().join("target"));
-    let candidate = target_dir.join("debug").join(server_bin_name());
+    let candidate = target_dir
+        .join("debug")
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     candidate.exists().then_some(candidate)
-}
-
-fn server_bin_name() -> &'static str {
-    if cfg!(windows) {
-        "server.exe"
-    } else {
-        "server"
-    }
 }
 
 /// Warns once per test binary when the prebuilt server is older than its

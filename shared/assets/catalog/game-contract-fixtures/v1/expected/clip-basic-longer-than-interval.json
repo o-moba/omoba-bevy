@@ -1,0 +1,19 @@
+{
+  "case": "clip-basic-longer-than-interval",
+  "contract": "sha256-490411f885107bc156482c90ac660e83ed2c968b9899a2526bb56ffd9728e42b",
+  "target": "wildspark",
+  "document": "ok",
+  "pack": "ok",
+  "warnings": [],
+  "slots": {
+    "base.run": "pass",
+    "basic.wildspark.0": "pass",
+    "skill.wild_zap.release": "pass"
+  },
+  "slotWarnings": {
+    "basic.wildspark.0": [
+      "clip.min-interval"
+    ]
+  },
+  "note": "a 0.6 s basic attack; the fastest basic attacks come 0.4375 s apart (warning)"
+}

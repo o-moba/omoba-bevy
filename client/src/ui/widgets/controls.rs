@@ -127,6 +127,56 @@ pub(crate) fn sized_icon_button<T: UiActionT>(
     )
 }
 
+/// In-match phone chrome: a small painted disc inside an independent 44px
+/// touch target. The transparent outer skin must not repaint a full-size slab.
+pub(crate) fn compact_hud_icon_button<T: UiActionT>(
+    parent: &mut ChildSpawnerCommands,
+    icon: Icon,
+    action: T,
+    id: impl Into<TestId>,
+) -> Entity {
+    let mut button = parent.spawn((
+        button_bundle(
+            Node {
+                width: Val::Px(44.0),
+                height: Val::Px(44.0),
+                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            ButtonKind::Secondary,
+            action,
+            id.into(),
+        ),
+        KitSkin::Tertiary,
+        KitParts::default(),
+        NoSlab,
+    ));
+    button.insert(BackgroundColor(Color::NONE));
+    button.with_children(|target| {
+        target
+            .spawn((
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(24.0),
+                    flex_shrink: 0.0,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
+                BackgroundColor(theme::perceptual(color::SURFACE_GLASS)),
+                BorderColor::all(color::GOLD_600),
+                Pickable::IGNORE,
+                Name::new("CompactHudIconFace"),
+            ))
+            .with_child(icon_node(icon, 14.0, color::TEXT_GOLD));
+    });
+    button.id()
+}
+
 /// A stepper `−`/`+` button: 44 × 44 on both profiles, `radius.md`.
 pub(crate) fn stepper_button<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
@@ -1182,6 +1232,47 @@ mod tests {
     }
     #[derive(Component)]
     struct Value;
+
+    #[test]
+    fn compact_hud_icon_keeps_a_transparent_touch_target_and_dispatches_its_action() {
+        let mut app = kit_app();
+        app.add_ui_action::<Probe>();
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| {
+                compact_hud_icon_button(
+                    parent,
+                    Icon::NavSettings,
+                    Probe::Toggle,
+                    "CompactSettings",
+                );
+            });
+        app.world_mut().flush();
+        app.update();
+        let button = find(app.world_mut(), "CompactSettings").unwrap();
+        let node = app.world().get::<Node>(button).unwrap();
+        assert_eq!((node.width, node.height), (Val::Px(44.0), Val::Px(44.0)));
+        assert_eq!(
+            app.world().get::<BackgroundColor>(button).unwrap().0,
+            Color::NONE
+        );
+        let face = app.world().get::<Children>(button).unwrap()[0];
+        let face_node = app.world().get::<Node>(face).unwrap();
+        assert_eq!(
+            (face_node.width, face_node.height),
+            (Val::Px(24.0), Val::Px(24.0))
+        );
+        app.world_mut()
+            .write_message(crate::ui::SyntheticPress(button));
+        app.update();
+        assert_eq!(drain_actions::<Probe>(app.world_mut()), [Probe::Toggle]);
+        assert_eq!(
+            app.world().get::<BackgroundColor>(button).unwrap().0,
+            Color::NONE
+        );
+    }
 
     #[test]
     fn cycle_row_turns_left_right_into_its_chevron_actions() {

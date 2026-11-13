@@ -31,11 +31,22 @@ impl LocalPractice {
         snapshots: Sender<ServerPacket>,
         signals: Sender<NetThreadSignal>,
     ) -> Self {
+        let mut simulation = common::offline::PracticeSession::new(std::time::Instant::now());
+        // Until the practice picker lands, a desktop tester sets the level of
+        // both teams' bots with OMOBA_BOT_DIFFICULTY; unset keeps Elite.
+        match shared::bot_profile::BotDifficulty::from_env() {
+            Ok(Some(level)) => simulation.set_bot_difficulty(level),
+            Ok(None) => {}
+            Err(value) => warn!(
+                "Ignoring {}={value:?}: use recruit, regular, veteran or elite",
+                shared::bot_profile::BotDifficulty::ENV
+            ),
+        }
         Self {
             commands,
             snapshots,
             _signals: signals,
-            simulation: common::offline::PracticeSession::new(std::time::Instant::now()),
+            simulation,
         }
     }
 }

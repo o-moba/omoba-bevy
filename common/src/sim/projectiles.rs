@@ -43,7 +43,7 @@ pub fn simulate_projectiles_filtered(
     }
     let mut damage_events: Vec<(u64, TargetId, f32, Team, HitSource)> = Vec::new();
 
-    projectiles.retain(|_, projectile| {
+    let mut step = |projectile: &mut Projectile| -> bool {
         if !targets(projectile.target.kind) {
             return true;
         }
@@ -148,7 +148,19 @@ pub fn simulate_projectiles_filtered(
             return false;
         }
         true
-    });
+    };
+    // Step in creation order too: an intercept counts the blocks of its
+    // holder (`intercept_players`), so with two projectiles blocked in one
+    // tick, HashMap order would decide which one the first block takes.
+    let mut ids: Vec<u64> = projectiles.keys().copied().collect();
+    ids.sort_unstable();
+    for id in ids {
+        if let Some(projectile) = projectiles.get_mut(&id)
+            && !step(projectile)
+        {
+            projectiles.remove(&id);
+        }
+    }
 
     // HashMap traversal must not decide which simultaneous base hit wins.
     // Apply impacts in projectile creation order and retain the final blow receipt.

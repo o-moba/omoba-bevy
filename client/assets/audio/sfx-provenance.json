@@ -147,6 +147,34 @@
       "license": "CC0-1.0",
       "duration_seconds": 0.85,
       "sha256": "d18f1759ef84f6740039a8c82194eabe6042c59d01f66cb98644b5db17ab5fd6"
+    },
+    "radiant_charge": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "path": "audio/sfx/radiant_charge.ogg",
+      "license": "CC0-1.0",
+      "duration_seconds": 1.12,
+      "sha256": "49d030648b613a05cc105eec3b7d87db04b4a65fc5bca89fd18da4e284a4242f"
+    },
+    "radiant_beam": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "path": "audio/sfx/radiant_beam.ogg",
+      "license": "CC0-1.0",
+      "duration_seconds": 0.95,
+      "sha256": "efffe0e402b944fe3a0c612f82ba00f1c480f1cc071fce93bd75fc9440446ced"
+    },
+    "radiant_core": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "path": "audio/sfx/radiant_core.ogg",
+      "license": "CC0-1.0",
+      "duration_seconds": 0.52,
+      "sha256": "7769e267c6641997c053225069c671f94eca842cd6a7b324ae1f99861fa021cd"
+    },
+    "radiance_burst": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "path": "audio/sfx/radiance_burst.ogg",
+      "license": "CC0-1.0",
+      "duration_seconds": 0.5,
+      "sha256": "7a11c1a28cc23444a891cecddf3c87fefb693b959a56ac72c960f5dcd2e34e5b"
     }
   }
 }

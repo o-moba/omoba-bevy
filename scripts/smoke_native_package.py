@@ -8,6 +8,7 @@ import socket
 import subprocess
 import tempfile
 import time
+from qa_account_fixture import prepare_capture_account
 
 
 def main():
@@ -23,6 +24,7 @@ def main():
         reservation.bind(("127.0.0.1", 0))
         address = "127.0.0.1:" + str(reservation.getsockname()[1])
     with tempfile.TemporaryDirectory(prefix="omoba-native-smoke-") as isolated:
+        prepare_capture_account(isolated, in_root=True)
         env = dict(os.environ, SERVER_ADDR=address, GAME_SERVER_ADDR=address,
                    OMOBA_CLIENT_CONFIG_DIR=isolated, OMOBA_MATCH_MODE="dev")
         env.pop("OMOBA_MEASURE_MODELS", None)

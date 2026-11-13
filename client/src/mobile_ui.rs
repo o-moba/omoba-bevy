@@ -1,4 +1,12 @@
-//! Phone layouts and a shell-free address entry for controlled native playtests.
+//! Phone layouts, and a contour build's connection panel: the shell-free
+//! profile selector (Dev, Local, Custom) that Home, the party lobby and the
+//! legacy phone bar open on desktop and phone alike.
+//!
+//! A production build spawns no server or connection UI at all: no panel, no
+//! SERVER button, no presets (`crate::connection_profile`). In a contour build
+//! the panel saves a profile for the next start; nothing switches in the
+//! running process, so an account link or a store cache never crosses
+//! profiles.
 // i18n-strict
 use bevy::{
     input::keyboard::{Key, KeyboardInput},
@@ -7,16 +15,22 @@ use bevy::{
 };
 
 use crate::{
+    connection_profile::{
+        ActiveConnection, ConnectionProfile, CustomEndpoints, MAX_FIELD_CHARS, ProfileId,
+        validate_lobby,
+    },
     i18n::{Localized, UiLabel, tr},
     mobile_controls::{MobileControls, MobileControlsSet},
-    net::{ClientSession, SessionUiCommand},
+    net::ClientSession,
     ui::{
         Activated, ModalId, ModalRoot, ScrollArea, TestId, UiAction, UiActionAppExt,
         test_id::NodeKey,
         theme::{
-            self as ui,
+            self as ui, ButtonKind, Form, TextStyle,
             metric::{self, PhoneText},
         },
+        tokens::{TextRole, border, color, radius, space},
+        widgets::{self as kit, ButtonStyle, controls, surfaces},
     },
 };
 
@@ -41,7 +55,7 @@ impl Plugin for MobileUiPlugin {
             )
             .add_systems(
                 Update,
-                (address_keyboard, sync_phone_ui)
+                (address_keyboard, sync_phone_ui, refresh_connection_panel)
                     .chain()
                     .after(phone_menu_actions),
             )
@@ -64,42 +78,125 @@ impl Plugin for MobileUiPlugin {
     }
 }
 
+/// The custom profile field the keyboard types into.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) enum CustomField {
+    #[default]
+    Lobby,
+    Registry,
+}
+
+/// The connection panel of a contour build (`ModalId::ServerEntry`): the
+/// profile it shows, the custom fields, the confirmation step and the outcome
+/// of the last choice. It never opens in a production build.
 #[derive(Resource, Default)]
 pub(crate) struct ServerEntry {
     pub open: bool,
-    address: String,
-    /// The entry's error, a `phone.*` key (shown in the active language).
-    error: Option<&'static str>,
-    initialized: bool,
+    /// The profile the panel shows; the one that runs next when it opens.
+    choice: Option<ProfileId>,
+    lobby: String,
+    registry: String,
+    field: CustomField,
+    /// The profile the confirmation step asks to switch to.
+    confirming: Option<ConnectionProfile>,
+    /// A `connection.error.*` key and the custom field it is about.
+    error: Option<(&'static str, Option<CustomField>)>,
+    /// A `connection.notice.*` key: the outcome of the last choice.
+    notice: Option<&'static str>,
     keyboard: bool,
 }
 
 impl ServerEntry {
-    /// Screen-owned utility buttons share the address editor without a
-    /// second floating toolbar competing with the menu's own header.
-    pub(crate) fn open_for(&mut self, session: &ClientSession) {
-        if session.join_in_flight() || session.has_committed_join() {
+    /// Opens the panel on the profile that runs next, with the saved custom
+    /// lobby and registry filled in. Nothing opens in a production build or
+    /// while a join is committed.
+    pub(crate) fn open_for(&mut self, session: &ClientSession, connection: &ActiveConnection) {
+        if !connection.selectable() || session.join_in_flight() || session.has_committed_join() {
             return;
         }
+        let custom = connection.custom.clone().unwrap_or_default();
         self.open = true;
-        self.address = if session.server_addr().is_empty() {
-            crate::session_config::DEFAULT_GAME_SERVER_ADDR.to_owned()
-        } else {
-            session.server_addr().to_owned()
-        };
+        self.choice = Some(connection.next().id);
+        self.lobby = custom.lobby;
+        self.registry = custom.registry.unwrap_or_default();
+        self.field = CustomField::Lobby;
+        self.confirming = None;
         self.error = None;
+        self.notice = None;
+    }
+
+    fn custom(&self) -> CustomEndpoints {
+        CustomEndpoints {
+            lobby: self.lobby.trim().to_owned(),
+            registry: Some(self.registry.trim().to_owned()).filter(|registry| !registry.is_empty()),
+        }
+    }
+
+    /// Whether typed text goes into a custom field.
+    fn editing(&self) -> bool {
+        self.open && self.choice == Some(ProfileId::Custom) && self.confirming.is_none()
+    }
+
+    fn field_text(&mut self) -> &mut String {
+        match self.field {
+            CustomField::Lobby => &mut self.lobby,
+            CustomField::Registry => &mut self.registry,
+        }
+    }
+
+    fn type_text(&mut self, typed: &str) {
+        let field = self.field;
+        edit_field(field, self.field_text(), typed);
+        self.error = None;
+        self.notice = None;
+    }
+
+    fn delete(&mut self) {
+        self.field_text().pop();
+        self.error = None;
+        self.notice = None;
     }
 }
 
-/// Presses on the phone bar and the server-address entry. The buttons keep
-/// their fixed `TILE` colour (no `ButtonStyle`).
+/// Opens the connection panel (Home's and the lobby's connection buttons);
+/// without the resource, with this process's connection.
+pub(crate) fn open_connection_panel(
+    entry: &mut ServerEntry,
+    session: &ClientSession,
+    connection: Option<&ActiveConnection>,
+) {
+    match connection {
+        Some(connection) => entry.open_for(session, connection),
+        None => entry.open_for(session, &ActiveConnection::current()),
+    }
+}
+
+/// Whether this build shows connection UI, from the resource when it exists.
+pub(crate) fn offers_connection(connection: Option<&ActiveConnection>) -> bool {
+    connection.map_or_else(
+        crate::connection_profile::selectable,
+        ActiveConnection::selectable,
+    )
+}
+
+/// Presses on the legacy phone bar and in the connection panel.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PhoneAction {
     Menu,
     Help,
     Server,
-    Connect,
-    Preset(crate::session_config::ServerPreset),
+    /// Show a profile in the connection panel.
+    Profile(ProfileId),
+    /// Type into a custom field.
+    Field(CustomField),
+    /// Use the shown profile: asks to confirm a switch.
+    Use,
+    /// Save the switch for the next start.
+    Confirm,
+    /// Leave the confirmation step.
+    Back,
+    /// Desktop: start a fresh game now, so the saved profile runs.
+    Restart,
     Close,
     Key(char),
     Backspace,
@@ -109,10 +206,9 @@ enum PhoneAction {
 struct PhoneBar;
 #[derive(Component)]
 struct ServerEntryRoot;
+/// The typed text of a custom field (`text_input`'s value), written in place.
 #[derive(Component)]
-struct ServerAddressLabel;
-#[derive(Component)]
-struct ServerErrorLabel;
+struct ConnectionFieldValue(CustomField);
 
 fn phone_button(
     parent: &mut ChildSpawnerCommands,
@@ -142,8 +238,23 @@ fn phone_button(
         });
 }
 
-fn setup_phone_ui(mut commands: Commands, mobile: Res<MobileControls>) {
-    if mobile.enabled {
+fn setup_phone_ui(
+    mut commands: Commands,
+    mobile: Res<MobileControls>,
+    connection: Option<Res<ActiveConnection>>,
+) {
+    spawn_phone_ui(
+        &mut commands,
+        mobile.enabled,
+        offers_connection(connection.as_deref()),
+    );
+}
+
+/// The legacy phone bar (phones only; its SERVER button only with a
+/// connection selector) and, only in a contour build, the connection panel's
+/// modal root. A production build spawns no server or connection UI.
+fn spawn_phone_ui(commands: &mut Commands, phone: bool, selector: bool) {
+    if phone {
         commands
             .spawn((
                 Node {
@@ -153,7 +264,7 @@ fn setup_phone_ui(mut commands: Commands, mobile: Res<MobileControls>) {
                     ..default()
                 },
                 // Above the front-end screens: on a phone this bar is the only way
-                // to settings and to the server address (there is no Escape key).
+                // to settings and to the connection panel (there is no Escape key).
                 ZIndex(crate::ui::theme::SCREEN_Z + 10),
                 PhoneBar,
                 Name::new("PhoneMenuBar"),
@@ -166,16 +277,19 @@ fn setup_phone_ui(mut commands: Commands, mobile: Res<MobileControls>) {
                     "LegacyPhoneMenuButton",
                     PhoneAction::Menu,
                 );
-                phone_button(
-                    bar,
-                    Localized::new("phone.bar.server"),
-                    "LegacyPhoneServerButton",
-                    PhoneAction::Server,
-                );
+                if selector {
+                    phone_button(
+                        bar,
+                        Localized::new("phone.bar.server"),
+                        "LegacyPhoneServerButton",
+                        PhoneAction::Server,
+                    );
+                }
             });
     }
-    commands
-        .spawn((
+    if selector {
+        // The panel itself is rebuilt by `refresh_connection_panel` while open.
+        commands.spawn((
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -183,188 +297,58 @@ fn setup_phone_ui(mut commands: Commands, mobile: Res<MobileControls>) {
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
                 display: Display::None,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.005, 0.02, 0.02, 0.98)),
             ZIndex(150),
             ServerEntryRoot,
             ModalRoot(ModalId::ServerEntry),
             Name::new("ServerEntryRoot"),
-        ))
-        .with_children(|overlay| {
-            overlay
-                .spawn((
-                    Node {
-                        width: Val::Px(640.0),
-                        max_width: Val::Percent(90.0),
-                        max_height: Val::Percent(92.0),
-                        overflow: Overflow::scroll_y(),
-                        padding: UiRect::all(Val::Px(14.0)),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.0),
-                        ..ui::panel_node()
-                    },
-                    BackgroundColor(ui::PANEL),
-                    BorderColor::all(ui::EDGE),
-                    Name::new("ServerEntryPanel"),
-                    ScrollArea::phone_panel(),
-                ))
-                .with_children(|panel| {
-                    panel.spawn((
-                        Localized::new("phone.server.title").into_text(),
-                        ui::text(24.0),
-                        TextColor(ui::IVORY),
-                    ));
-                    panel.spawn((
-                        Localized::new("phone.server.hint").into_text(),
-                        ui::text(14.0),
-                        TextColor(ui::MUTED),
-                    ));
-                    panel
-                        .spawn(Node {
-                            column_gap: Val::Px(8.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            phone_button(
-                                row,
-                                Localized::new("phone.server.beta"),
-                                "ServerPresetBeta",
-                                PhoneAction::Preset(crate::session_config::ServerPreset::Beta),
-                            );
-                            phone_button(
-                                row,
-                                Localized::new("phone.server.local"),
-                                "ServerPresetLocal",
-                                PhoneAction::Preset(crate::session_config::ServerPreset::Local),
-                            );
-                        });
-                    panel.spawn((
-                        Node {
-                            padding: UiRect::all(Val::Px(10.0)),
-                            min_height: Val::Px(44.0),
-                            ..default()
-                        },
-                        Text::new(""),
-                        ui::text(20.0),
-                        TextColor(ui::GOLD),
-                        BackgroundColor(ui::TILE),
-                        ServerAddressLabel,
-                    ));
-                    // A native numeric keypad also works when an Android IME does not
-                    // deliver composed text to NativeActivity. Hostnames use normal IME.
-                    panel
-                        .spawn((
-                            Node {
-                                flex_wrap: FlexWrap::Wrap,
-                                column_gap: Val::Px(6.0),
-                                row_gap: Val::Px(6.0),
-                                ..default()
-                            },
-                            Name::new("ServerKeypad"),
-                        ))
-                        .with_children(|keys| {
-                            for key in "1234567890.:".chars() {
-                                phone_button(
-                                    keys,
-                                    key.to_string(),
-                                    &format!("ServerKey-{key}"),
-                                    PhoneAction::Key(key),
-                                );
-                            }
-                            phone_button(
-                                keys,
-                                Localized::new("phone.server.delete"),
-                                "ServerBackspace",
-                                PhoneAction::Backspace,
-                            );
-                        });
-                    panel.spawn((
-                        Text::new(""),
-                        ui::text(13.0),
-                        TextColor(ui::GOLD),
-                        ServerErrorLabel,
-                    ));
-                    panel
-                        .spawn((Node {
-                            column_gap: Val::Px(8.0),
-                            ..default()
-                        },))
-                        .with_children(|row| {
-                            phone_button(
-                                row,
-                                Localized::new("phone.server.connect"),
-                                "ServerConnectButton",
-                                PhoneAction::Connect,
-                            );
-                            phone_button(
-                                row,
-                                Localized::new("phone.server.close"),
-                                "ServerCloseButton",
-                                PhoneAction::Close,
-                            );
-                            phone_button(
-                                row,
-                                Localized::new("phone.server.keyboard"),
-                                "ServerKeyboardButton",
-                                PhoneAction::Keyboard,
-                            );
-                        });
-                });
-        });
+        ));
+    }
 }
 
-fn edit_address(address: &mut String, text: &str) {
-    for ch in text
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']'))
-    {
-        if address.len() < 253 {
-            address.push(ch);
+/// Keeps the characters a lobby address (`host:port`, `[v6]:port`) or, in the
+/// registry field, an origin URL can contain, up to the field limit.
+fn edit_field(field: CustomField, text: &mut String, typed: &str) {
+    for ch in typed.chars() {
+        let allowed = ch.is_ascii_alphanumeric()
+            || matches!(ch, '.' | ':' | '-' | '[' | ']')
+            || (field == CustomField::Registry && ch == '/');
+        if allowed && text.chars().count() < MAX_FIELD_CHARS {
+            text.push(ch);
         }
     }
 }
 
 fn phone_menu_actions(
     mut activated: MessageReader<Activated<PhoneAction>>,
-    _mobile: Res<MobileControls>,
     session: Res<ClientSession>,
     mut entry: ResMut<ServerEntry>,
+    mut connection: Option<ResMut<ActiveConnection>>,
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
     mut help: ResMut<crate::help_overlay::HelpOverlayVisible>,
-    mut requests: MessageWriter<SessionUiCommand>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     let presses: Vec<PhoneAction> = activated.read().map(|a| a.action).collect();
     for action in presses {
         match action {
             PhoneAction::Menu => pause.open = !pause.open,
             PhoneAction::Help => help.0 = !help.0,
-            PhoneAction::Server if !session.join_in_flight() && !session.has_committed_join() => {
-                entry.open_for(&session);
+            PhoneAction::Server => {
+                open_connection_panel(&mut entry, &session, connection.as_deref());
             }
             PhoneAction::Close => {
                 entry.open = false;
                 entry.keyboard = false;
             }
             PhoneAction::Keyboard => entry.keyboard = !entry.keyboard,
-            PhoneAction::Key(ch) if entry.open => edit_address(&mut entry.address, &ch.to_string()),
-            PhoneAction::Backspace if entry.open => {
-                entry.address.pop();
-            }
-            PhoneAction::Preset(preset) if entry.open => {
-                entry.address = preset.address().to_owned();
-                entry.error = None;
-            }
-            PhoneAction::Connect if entry.open => {
-                if let Some(address) = crate::persistence::validate_game_server_addr(&entry.address)
-                {
-                    requests.write(SessionUiCommand::ConnectTo(address));
-                    entry.open = false;
-                    entry.error = None;
-                } else {
-                    entry.error = Some("phone.server.invalid");
+            PhoneAction::Key(ch) if entry.editing() => entry.type_text(&ch.to_string()),
+            PhoneAction::Backspace if entry.editing() => entry.delete(),
+            action if entry.open => {
+                if let Some(connection) = connection.as_deref_mut() {
+                    if let Some(exit_now) = panel_action(&mut entry, connection, action) {
+                        exit.write(exit_now);
+                    }
                 }
             }
             _ => {}
@@ -372,13 +356,92 @@ fn phone_menu_actions(
     }
 }
 
-/// The frontmost editor consumes keyboard/gamepad back before the pause menu.
+/// The panel's steps: show a profile, use it (the running one cancels a saved
+/// switch at once; another asks to confirm), confirm (saved for the next
+/// start), restart (desktop). Returns the exit a successful restart needs.
+fn panel_action(
+    entry: &mut ServerEntry,
+    connection: &mut ActiveConnection,
+    action: PhoneAction,
+) -> Option<AppExit> {
+    match action {
+        PhoneAction::Profile(id) => {
+            entry.choice = Some(id);
+            entry.confirming = None;
+            entry.error = None;
+            entry.notice = None;
+        }
+        PhoneAction::Field(field) => entry.field = field,
+        PhoneAction::Use => {
+            entry.error = None;
+            entry.notice = None;
+            let id = entry.choice.unwrap_or(connection.next().id);
+            match connection.candidate(id, &entry.custom()) {
+                Err(error) => {
+                    let field = (id == ProfileId::Custom).then(|| {
+                        if validate_lobby(connection.contour.as_deref(), &entry.lobby).is_err() {
+                            CustomField::Lobby
+                        } else {
+                            CustomField::Registry
+                        }
+                    });
+                    entry.error = Some((error.key(), field));
+                }
+                Ok(profile) if profile == *connection.next() => {
+                    entry.notice = Some(if connection.pending.is_some() {
+                        "connection.notice.saved"
+                    } else {
+                        "connection.notice.current"
+                    });
+                }
+                Ok(profile) if profile == connection.profile => save(entry, connection, profile),
+                Ok(profile) => entry.confirming = Some(profile),
+            }
+        }
+        PhoneAction::Confirm => {
+            if let Some(profile) = entry.confirming.take() {
+                save(entry, connection, profile);
+            }
+        }
+        PhoneAction::Back => entry.confirming = None,
+        PhoneAction::Restart if connection.pending.is_some() && crate::platform::CAN_RELAUNCH => {
+            match crate::platform::relaunch() {
+                Ok(()) => return Some(AppExit::Success),
+                Err(_) => entry.error = Some(("connection.error.restart", None)),
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+/// Saves `profile` for the next start; the running profile cancels a saved switch.
+fn save(entry: &mut ServerEntry, connection: &mut ActiveConnection, profile: ConnectionProfile) {
+    let cancels = profile == connection.profile;
+    match connection.choose(profile) {
+        Ok(()) => {
+            entry.notice = Some(if cancels {
+                "connection.notice.kept"
+            } else {
+                "connection.notice.saved"
+            });
+        }
+        Err(_) => entry.error = Some(("connection.error.save", None)),
+    }
+}
+
+/// The frontmost editor consumes keyboard/gamepad back before the pause menu:
+/// it leaves the confirmation step first, then closes.
 pub(crate) fn close_server_entry_on_back(
     mut back: crate::ui::BackInput,
     mut entry: ResMut<ServerEntry>,
 ) {
     if entry.open && back.just_pressed() {
-        entry.open = false;
+        if entry.confirming.is_some() {
+            entry.confirming = None;
+        } else {
+            entry.open = false;
+        }
         back.consume();
     }
 }
@@ -390,7 +453,7 @@ pub(crate) fn address_keyboard(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut owned_ime: Local<bool>,
 ) {
-    // A closed shared server editor must not disable another desktop field's IME.
+    // A closed connection panel must not disable another desktop field's IME.
     if (entry.open || *owned_ime)
         && let Ok(mut window) = windows.single_mut()
     {
@@ -401,28 +464,32 @@ pub(crate) fn address_keyboard(
     }
     *owned_ime = entry.open;
     for event in ime.read() {
-        if entry.open
+        if entry.editing()
             && let Ime::Commit { value, .. } = event
         {
-            edit_address(&mut entry.address, value);
+            entry.type_text(value);
         }
     }
     for event in input.read() {
-        if !entry.open || !event.state.is_pressed() {
+        if !entry.editing() || !event.state.is_pressed() {
             continue;
         }
         match &event.logical_key {
-            Key::Backspace => {
-                entry.address.pop();
+            Key::Backspace => entry.delete(),
+            Key::Tab => {
+                entry.field = match entry.field {
+                    CustomField::Lobby => CustomField::Registry,
+                    CustomField::Registry => CustomField::Lobby,
+                };
             }
-            Key::Escape => {}
+            Key::Escape | Key::Enter => {}
             _ => {
                 let text = event.text.as_deref().or_else(|| match &event.logical_key {
                     Key::Character(text) => Some(text.as_str()),
                     _ => None,
                 });
                 if let Some(text) = text {
-                    edit_address(&mut entry.address, text);
+                    entry.type_text(text);
                 }
             }
         }
@@ -432,9 +499,8 @@ pub(crate) fn address_keyboard(
 fn sync_phone_ui(
     mobile: Res<MobileControls>,
     session: Res<ClientSession>,
-    _screen: Option<Res<State<crate::frontend::AppScreen>>>,
     shop: Option<Res<crate::shop::ShopState>>,
-    mut entry: ResMut<ServerEntry>,
+    entry: Res<ServerEntry>,
     mut bar: Query<
         &mut Node,
         (
@@ -455,16 +521,12 @@ fn sync_phone_ui(
         (&UiAction<PhoneAction>, &mut Node),
         (Without<PhoneBar>, Without<ServerEntryRoot>),
     >,
-    mut address: Query<&mut Text, (With<ServerAddressLabel>, Without<ServerErrorLabel>)>,
-    mut errors: Query<&mut Text, (With<ServerErrorLabel>, Without<ServerAddressLabel>)>,
+    mut values: Query<(&ConnectionFieldValue, &mut Text)>,
     ui_scale: Option<Res<UiScale>>,
 ) {
     let scale = metric::ui_scale(ui_scale.as_ref().map_or(1.0, |scale| scale.0));
-    if mobile.enabled && !entry.initialized && !session.server_addr().is_empty() {
-        entry.initialized = true;
-    }
-    // Home now owns its Help/Settings/Server controls inside the header;
-    // the picker owns Back. Keep the editor, hide the legacy floating bar.
+    // Home now owns its Help/Settings/connection controls inside the header;
+    // the picker owns Back. Keep the panel, hide the legacy floating bar.
     let bar_wanted = false;
     for mut node in &mut bar {
         node.display = if mobile.enabled
@@ -512,16 +574,422 @@ fn sync_phone_ui(
             Display::None
         };
     }
-    for mut text in &mut address {
-        text.0 = format!("{}|", entry.address);
-    }
-    // Every frame, so a language change reaches a visible error at once.
-    let error = entry.error.map_or("", tr);
-    for mut text in &mut errors {
-        if text.0 != error {
-            text.0 = error.to_owned();
+    for (ConnectionFieldValue(field), mut text) in &mut values {
+        let value = match field {
+            CustomField::Lobby => &entry.lobby,
+            CustomField::Registry => &entry.registry,
+        };
+        if text.0 != *value {
+            text.0.clone_from(value);
         }
     }
+}
+
+/// What the connection panel shows; it is rebuilt when this changes (typed
+/// text is written in place by [`sync_phone_ui`]).
+#[derive(Clone, Debug, PartialEq)]
+struct PanelView {
+    choice: ProfileId,
+    choices: &'static [ProfileId],
+    field: CustomField,
+    confirming: Option<ConnectionProfile>,
+    error: Option<(&'static str, Option<CustomField>)>,
+    notice: Option<&'static str>,
+    running: ConnectionProfile,
+    next: ConnectionProfile,
+    /// The built-in profile the panel describes; none for custom.
+    shown: Option<ConnectionProfile>,
+    /// Desktop with a saved switch: offer to restart now.
+    restart: bool,
+    /// Phone on the custom profile: the numeric keypad.
+    keypad: bool,
+    form: Form,
+    locale: u32,
+}
+
+fn panel_view(
+    entry: &ServerEntry,
+    connection: &ActiveConnection,
+    phone: bool,
+    locale: u32,
+) -> PanelView {
+    let choice = entry.choice.unwrap_or(connection.next().id);
+    PanelView {
+        choice,
+        choices: connection.choices(),
+        field: entry.field,
+        confirming: entry.confirming.clone(),
+        error: entry.error,
+        notice: entry.notice,
+        running: connection.profile.clone(),
+        next: connection.next().clone(),
+        shown: if choice == ProfileId::Custom {
+            None
+        } else {
+            connection
+                .candidate(choice, &CustomEndpoints::default())
+                .ok()
+        },
+        restart: connection.pending.is_some() && crate::platform::CAN_RELAUNCH,
+        keypad: phone && choice == ProfileId::Custom,
+        form: Form::of(phone),
+        locale,
+    }
+}
+
+/// Spawns the panel when it opens and rebuilds it when what it shows changes.
+fn refresh_connection_panel(
+    mut commands: Commands,
+    entry: Res<ServerEntry>,
+    connection: Option<Res<ActiveConnection>>,
+    mobile: Res<MobileControls>,
+    locale: Option<Res<crate::i18n::Locale>>,
+    roots: Query<Entity, With<ServerEntryRoot>>,
+    mut shown: Local<Option<PanelView>>,
+) {
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let generation = locale.as_deref().map_or(0, crate::i18n::Locale::generation);
+    let view = connection
+        .as_deref()
+        .filter(|_| entry.open)
+        .map(|connection| panel_view(&entry, connection, mobile.enabled, generation));
+    if *shown == view {
+        return;
+    }
+    // Only a fresh open plays the kit's open animation.
+    let animate = shown.is_none();
+    commands.entity(root).despawn_related::<Children>();
+    if let Some(view) = &view {
+        commands
+            .entity(root)
+            .with_children(|root| spawn_connection_panel(root, view, animate));
+    }
+    *shown = view;
+}
+
+/// A caption line in `ink`.
+fn caption<L: UiLabel>(text: L, ink: Color) -> impl Bundle {
+    (
+        text.into_text(),
+        ui::styled_text(TextStyle::keep_case(TextRole::Caption)),
+        TextColor(ink),
+    )
+}
+
+fn profile_name(profile: &ConnectionProfile) -> &'static str {
+    tr(profile.id.label_key())
+}
+
+/// The connection panel, a kit modal over its scrim: the profiles this build
+/// offers, what the shown one points at (or the custom fields), and the
+/// use → confirm → saved steps.
+fn spawn_connection_panel(root: &mut ChildSpawnerCommands, view: &PanelView, animate: bool) {
+    let panel = surfaces::modal(
+        root,
+        Localized::new("connection.title"),
+        PhoneAction::Close,
+        view.form,
+        "ServerEntry",
+    );
+    let mut commands = root.commands();
+    if !animate {
+        commands.entity(panel).insert((
+            surfaces::PanelOpen { elapsed: f32::MAX },
+            UiTransform::IDENTITY,
+        ));
+    }
+    commands.entity(panel).with_children(|panel| {
+        panel
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(space::S12),
+                    max_height: Val::Vh(68.0),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
+                ScrollArea::menu(48.0),
+                Name::new("ConnectionBody"),
+            ))
+            .with_children(|body| {
+                body.spawn(caption(
+                    Localized::new("connection.hint"),
+                    color::TEXT_SECONDARY,
+                ));
+                body.spawn((
+                    caption(
+                        Localized::with_args(
+                            "connection.running",
+                            [
+                                ("profile", &profile_name(&view.running)),
+                                ("lobby", &view.running.lobby),
+                            ],
+                        ),
+                        color::TEXT_PRIMARY,
+                    ),
+                    Name::new("ConnectionRunning"),
+                ));
+                if view.next != view.running {
+                    body.spawn((
+                        caption(
+                            Localized::with_args(
+                                "connection.pending",
+                                [("profile", &profile_name(&view.next))],
+                            ),
+                            color::TEXT_GOLD,
+                        ),
+                        Name::new("ConnectionPending"),
+                    ));
+                }
+                body.spawn((
+                    Node {
+                        column_gap: Val::Px(space::S8),
+                        row_gap: Val::Px(space::S8),
+                        flex_wrap: FlexWrap::Wrap,
+                        ..default()
+                    },
+                    Name::new("ConnectionProfiles"),
+                ))
+                .with_children(|row| {
+                    for id in view.choices {
+                        kit::screen_tile(
+                            row,
+                            Localized::new(id.label_key()),
+                            *id == view.choice,
+                            PhoneAction::Profile(*id),
+                            id.test_id(),
+                        );
+                    }
+                });
+                match &view.shown {
+                    Some(profile) => spawn_details(body, profile),
+                    None => spawn_custom_fields(body, view),
+                }
+                if let Some((key, _)) = view.error {
+                    body.spawn((
+                        caption(Localized::new(key), color::TEXT_DANGER),
+                        Name::new("ConnectionError"),
+                    ));
+                }
+                if let Some(key) = view.notice {
+                    body.spawn((
+                        caption(
+                            Localized::with_args(key, [("profile", &profile_name(&view.next))]),
+                            color::TEXT_GOLD,
+                        ),
+                        Name::new("ConnectionNotice"),
+                    ));
+                    if view.next != view.running && !view.restart {
+                        body.spawn(caption(
+                            Localized::new("connection.notice.reopen"),
+                            color::TEXT_SECONDARY,
+                        ));
+                    }
+                }
+                spawn_actions(body, view);
+            });
+    });
+}
+
+/// Where a built-in profile points: lobby, registry, market, Studio, passport.
+fn spawn_details(body: &mut ChildSpawnerCommands, profile: &ConnectionProfile) {
+    for (key, value) in detail_rows(profile, crate::account_region::features().ekza) {
+        body.spawn(caption(
+            Localized::with_args(key, [("value", &value)]),
+            color::TEXT_SECONDARY,
+        ));
+    }
+}
+
+/// The detail lines (dictionary key, value) of `profile`; a build without
+/// Ekza has only its lobby to show.
+fn detail_rows(profile: &ConnectionProfile, ekza: bool) -> Vec<(&'static str, String)> {
+    let mut rows = vec![("connection.detail.lobby", profile.lobby.clone())];
+    if !ekza {
+        return rows;
+    }
+    let passport = if profile.passport_closed() {
+        tr("connection.passport.closed").to_owned()
+    } else {
+        profile.passport.clone()
+    };
+    rows.extend([
+        ("connection.detail.registry", profile.registry.clone()),
+        ("connection.detail.market", profile.market.clone()),
+        ("connection.detail.studio", profile.studio.clone()),
+        ("connection.detail.passport", passport),
+    ]);
+    rows
+}
+
+/// The custom lobby and registry fields (kit text inputs; the selected one is
+/// typed into), and on a phone the numeric keypad.
+fn spawn_custom_fields(body: &mut ChildSpawnerCommands, view: &PanelView) {
+    for (field, label, placeholder, id) in [
+        (
+            CustomField::Lobby,
+            "connection.custom.lobby",
+            "connection.custom.lobby_hint",
+            "ConnectionLobbyField",
+        ),
+        (
+            CustomField::Registry,
+            "connection.custom.registry",
+            "connection.custom.registry_hint",
+            "ConnectionRegistryField",
+        ),
+    ] {
+        body.spawn(caption(Localized::new(label), color::TEXT_SECONDARY));
+        let input = controls::text_input(
+            body,
+            Localized::new(placeholder),
+            None,
+            ConnectionFieldValue(field),
+            PhoneAction::Field(field),
+            id,
+        );
+        let error = view.error.is_some_and(|(_, at)| at == Some(field));
+        body.commands().entity(input).insert((
+            ButtonStyle {
+                kind: ButtonKind::Tile,
+                selected: view.field == field,
+            },
+            controls::InputError(error),
+        ));
+    }
+    body.spawn(caption(
+        Localized::new("connection.custom.rest"),
+        color::TEXT_SECONDARY,
+    ));
+    if !view.keypad {
+        return;
+    }
+    // A numeric keypad also works when an Android IME does not deliver
+    // composed text to NativeActivity. Host names use the normal keyboard.
+    body.spawn((
+        Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(space::S4),
+            row_gap: Val::Px(space::S4),
+            ..default()
+        },
+        Name::new("ServerKeypad"),
+    ))
+    .with_children(|keys| {
+        for key in "1234567890.:".chars() {
+            key_button(
+                keys,
+                key.to_string(),
+                PhoneAction::Key(key),
+                format!("ServerKey-{key}"),
+            );
+        }
+        key_button(
+            keys,
+            Localized::new("connection.key.delete"),
+            PhoneAction::Backspace,
+            "ServerBackspace".to_owned(),
+        );
+        key_button(
+            keys,
+            Localized::new("connection.key.keyboard"),
+            PhoneAction::Keyboard,
+            "ServerKeyboardButton".to_owned(),
+        );
+    });
+}
+
+/// One keypad key: a kit tile at the touch minimum.
+fn key_button(
+    parent: &mut ChildSpawnerCommands,
+    label: impl UiLabel,
+    action: PhoneAction,
+    id: String,
+) {
+    kit::spawn_button(
+        parent,
+        Node {
+            min_width: Val::Px(metric::TOUCH_MIN),
+            height: Val::Px(metric::TOUCH_MIN),
+            padding: UiRect::horizontal(Val::Px(space::S8)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            ..default()
+        },
+        label,
+        TextStyle::keep_case(TextRole::Label),
+        ButtonKind::Tile,
+        None,
+        action,
+        TestId::new(id),
+        (),
+    );
+}
+
+/// Use (or, in the confirmation step, switch / back) and, on desktop with a
+/// saved switch, restart now.
+fn spawn_actions(body: &mut ChildSpawnerCommands, view: &PanelView) {
+    if let Some(target) = &view.confirming {
+        body.spawn((
+            caption(
+                Localized::with_args(
+                    "connection.confirm",
+                    [("profile", &profile_name(target)), ("lobby", &target.lobby)],
+                ),
+                color::TEXT_PRIMARY,
+            ),
+            Name::new("ConnectionConfirmText"),
+        ));
+    }
+    body.spawn(Node {
+        column_gap: Val::Px(space::S8),
+        row_gap: Val::Px(space::S8),
+        flex_wrap: FlexWrap::Wrap,
+        align_items: AlignItems::Center,
+        ..default()
+    })
+    .with_children(|row| {
+        if view.confirming.is_some() {
+            kit::screen_button(
+                row,
+                Localized::new("connection.switch"),
+                ButtonKind::Primary,
+                PhoneAction::Confirm,
+                "ConnectionConfirm",
+            );
+            kit::screen_button(
+                row,
+                Localized::new("connection.back"),
+                ButtonKind::Secondary,
+                PhoneAction::Back,
+                "ConnectionBack",
+            );
+            return;
+        }
+        kit::screen_button(
+            row,
+            Localized::with_args(
+                "connection.use",
+                [("profile", &tr(view.choice.label_key()))],
+            ),
+            ButtonKind::Primary,
+            PhoneAction::Use,
+            "ConnectionUse",
+        );
+        if view.restart {
+            kit::screen_button(
+                row,
+                Localized::new("connection.restart"),
+                ButtonKind::Secondary,
+                PhoneAction::Restart,
+                "ConnectionRestart",
+            );
+        }
+    });
 }
 
 #[derive(Component)]
@@ -850,71 +1318,213 @@ mod tests {
     use super::*;
     use bevy::input::touch::{TouchInput, TouchPhase};
 
-    /// A gamepad back over the server entry closes the entry only; the pause
-    /// menu under it stays open until the next back.
+    fn scratch_selection(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        let directory = std::env::temp_dir().join(format!(
+            "omoba-connection-panel-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        directory.join(crate::connection_profile::SELECTION_FILE)
+    }
+
     #[test]
-    fn shared_editor_presets_do_not_connect_and_invalid_input_keeps_it_open() {
+    fn connection_details_name_ekza_endpoints_only_in_an_ekza_build() {
+        use shared::market::Market;
+        let profile =
+            crate::connection_profile::ActiveConnection::for_contour(Some("dev"), None).profile;
+        let keys = |market: Market| -> Vec<&str> {
+            detail_rows(&profile, market.default_features().ekza)
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect()
+        };
+        assert_eq!(
+            keys(Market::Global),
+            [
+                "connection.detail.lobby",
+                "connection.detail.registry",
+                "connection.detail.market",
+                "connection.detail.studio",
+                "connection.detail.passport"
+            ]
+        );
+        for market in [Market::Ru, Market::Cn] {
+            assert_eq!(keys(market), ["connection.detail.lobby"]);
+        }
+    }
+
+    fn press(app: &mut App, action: PhoneAction) {
+        app.world_mut().write_message(Activated {
+            action,
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+    }
+
+    fn actions_app(connection: ActiveConnection) -> App {
         let mut app = App::new();
         let mut mobile = MobileControls::default();
         mobile.enabled = false;
         app.insert_resource(mobile)
+            .insert_resource(connection)
             .init_resource::<ClientSession>()
             .init_resource::<ServerEntry>()
             .init_resource::<crate::pause_menu::PauseMenuState>()
             .init_resource::<crate::help_overlay::HelpOverlayVisible>()
             .add_message::<Activated<PhoneAction>>()
-            .add_message::<SessionUiCommand>()
+            .add_message::<crate::net::SessionUiCommand>()
+            .add_message::<AppExit>()
             .add_systems(Update, phone_menu_actions);
-        app.world_mut().resource_mut::<ServerEntry>().open = true;
-        for preset in [
-            crate::session_config::ServerPreset::Beta,
-            crate::session_config::ServerPreset::Local,
-        ] {
-            app.world_mut().write_message(Activated {
-                action: PhoneAction::Preset(preset),
-                source: Entity::PLACEHOLDER,
-            });
-            app.update();
-            assert_eq!(
-                app.world().resource::<ServerEntry>().address,
-                preset.address()
-            );
-            assert!(
-                app.world()
-                    .resource::<Messages<SessionUiCommand>>()
-                    .is_empty()
-            );
-        }
-        app.world_mut().resource_mut::<ServerEntry>().address = "bad address".into();
-        app.world_mut().write_message(Activated {
-            action: PhoneAction::Connect,
-            source: Entity::PLACEHOLDER,
-        });
-        app.update();
-        assert!(app.world().resource::<ServerEntry>().open);
-        assert!(app.world().resource::<ServerEntry>().error.is_some());
-        assert!(
-            app.world()
-                .resource::<Messages<SessionUiCommand>>()
-                .is_empty()
-        );
-        app.world_mut().resource_mut::<ServerEntry>().address = "other.example:4999".into();
-        app.world_mut().write_message(Activated {
-            action: PhoneAction::Connect,
-            source: Entity::PLACEHOLDER,
-        });
-        app.update();
-        let events: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<SessionUiCommand>>()
-            .drain()
-            .collect();
-        assert!(
-            matches!(events.as_slice(), [SessionUiCommand::ConnectTo(address)] if address == "other.example:4999")
-        );
-        assert!(!app.world().resource::<ServerEntry>().open);
+        app
     }
 
+    /// The panel saves a profile for the next start: it never reconnects this
+    /// process, refuses production, and choosing the running profile cancels.
+    #[test]
+    fn obsolete_server_actions_never_change_the_account_route_or_create_a_config() {
+        for contour in [None, Some("dev")] {
+            let path = scratch_selection("no-player-config");
+            let original = ActiveConnection::for_contour(contour, Some(path.clone()));
+            let mut app = actions_app(original.clone());
+            for action in [
+                PhoneAction::Server,
+                PhoneAction::Profile(ProfileId::Local),
+                PhoneAction::Use,
+                PhoneAction::Confirm,
+            ] {
+                press(&mut app, action);
+            }
+            assert!(!app.world().resource::<ServerEntry>().open);
+            assert_eq!(
+                app.world().resource::<ActiveConnection>().profile,
+                original.profile
+            );
+            assert!(!path.exists());
+            assert!(
+                app.world()
+                    .resource::<Messages<crate::net::SessionUiCommand>>()
+                    .is_empty()
+            );
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn production_builds_never_open_the_panel() {
+        let mut app = actions_app(ActiveConnection::for_contour(None, None));
+        press(&mut app, PhoneAction::Server);
+        assert!(!app.world().resource::<ServerEntry>().open);
+        let mut entry = ServerEntry::default();
+        entry.open_for(
+            &ClientSession::default(),
+            &ActiveConnection::for_contour(None, None),
+        );
+        assert!(!entry.open);
+    }
+
+    /// Every server or connection control a build might show, by name.
+    fn connection_ui(app: &mut App) -> Vec<String> {
+        let mut names: Vec<String> = app
+            .world_mut()
+            .query::<NodeKey>()
+            .iter(app.world())
+            .map(|key| key.as_str().to_owned())
+            .filter(|name| {
+                name.starts_with("Server")
+                    || name.starts_with("Connection")
+                    || name.contains("ServerButton")
+                    || name.contains("Preset")
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn phone_ui_app(phone: bool, connection: ActiveConnection) -> App {
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = phone;
+        mobile.landscape = true;
+        mobile.viewport = Vec2::new(844.0, 390.0);
+        app.insert_resource(mobile)
+            .insert_resource(connection)
+            .init_resource::<ClientSession>()
+            .init_resource::<ServerEntry>()
+            .add_systems(Startup, setup_phone_ui)
+            .add_systems(Update, (sync_phone_ui, refresh_connection_panel).chain());
+        app
+    }
+
+    #[test]
+    fn production_builds_spawn_no_server_or_connection_ui_on_desktop_or_phone() {
+        for phone in [false, true] {
+            let mut app = phone_ui_app(phone, ActiveConnection::for_contour(None, None));
+            app.update();
+            app.world_mut().resource_mut::<ServerEntry>().open = true;
+            app.update();
+            assert_eq!(
+                connection_ui(&mut app),
+                Vec::<String>::new(),
+                "phone {phone}"
+            );
+            assert!(
+                !app.world_mut()
+                    .query::<&ModalRoot>()
+                    .iter(app.world())
+                    .any(|root| root.0 == ModalId::ServerEntry)
+            );
+            assert!(
+                !app.world_mut()
+                    .query::<&UiAction<PhoneAction>>()
+                    .iter(app.world())
+                    .any(|UiAction(action)| matches!(action, PhoneAction::Server))
+            );
+        }
+    }
+
+    #[test]
+    fn no_player_build_exposes_raw_server_configuration_even_for_forced_open_state() {
+        for contour in [None, Some("dev")] {
+            for phone in [false, true] {
+                let connection = ActiveConnection::for_contour(contour, None);
+                let mut app = phone_ui_app(phone, connection.clone());
+                app.update();
+                app.world_mut()
+                    .resource_mut::<ServerEntry>()
+                    .open_for(&ClientSession::default(), &connection);
+                app.update();
+                assert!(connection_ui(&mut app).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn obsolete_custom_server_preferences_cannot_restore_a_configuration_panel() {
+        let path = scratch_selection("obsolete-switch");
+        let mut connection = ActiveConnection::for_contour(Some("dev"), Some(path.clone()));
+        connection
+            .choose(
+                connection
+                    .candidate(ProfileId::Local, &Default::default())
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut app = phone_ui_app(false, connection.clone());
+        app.update();
+        app.world_mut()
+            .resource_mut::<ServerEntry>()
+            .open_for(&ClientSession::default(), &connection);
+        app.update();
+        assert!(connection_ui(&mut app).is_empty());
+        assert!(!app.world().resource::<ServerEntry>().open);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A gamepad back over the server entry closes the entry only; the pause
+    /// menu under it stays open until the next back.
     #[test]
     fn escape_closes_only_the_frontmost_server_editor() {
         for pause_open in [false, true] {
@@ -1078,13 +1688,14 @@ mod tests {
     }
 
     #[test]
-    fn help_and_shop_panels_become_phone_scroll_areas_and_the_server_entry_is_a_modal_root() {
+    fn help_and_shop_panels_become_phone_scroll_areas_and_the_connection_panel_is_a_modal_root() {
         let mut app = App::new();
         let mut mobile = MobileControls::default();
         mobile.enabled = true;
         mobile.landscape = true;
         mobile.viewport = Vec2::new(844.0, 390.0);
         app.insert_resource(mobile)
+            .insert_resource(ActiveConnection::for_contour(Some("dev"), None))
             .init_resource::<ClientSession>()
             .add_systems(Startup, setup_phone_ui)
             .add_systems(PostUpdate, adapt_phone_layout);
@@ -1102,9 +1713,9 @@ mod tests {
             })
             .collect();
         found.sort();
-        assert_eq!(found, ["HelpBody", "ServerEntryPanel", "ShopCards"]);
+        assert_eq!(found, ["HelpBody", "ShopCards"]);
         let mut roots = app.world_mut().query::<(&Name, &ModalRoot)>();
-        assert!(roots.iter(app.world()).any(
+        assert!(!roots.iter(app.world()).any(
             |(name, root)| name.as_str() == "ServerEntryRoot" && root.0 == ModalId::ServerEntry
         ));
     }
@@ -1135,6 +1746,7 @@ mod tests {
         let mut app = App::new();
         let mut mobile = MobileControls::default();
         mobile.enabled = true;
+        mobile.safe.top = 12.0;
         app.insert_resource(mobile)
             .init_resource::<ClientSession>()
             .init_resource::<ServerEntry>()
@@ -1144,53 +1756,64 @@ mod tests {
             .add_systems(Startup, setup_phone_ui)
             .add_systems(Update, sync_phone_ui)
             .add_systems(PostUpdate, adapt_phone_layout);
-        for (scale, shop_open) in [
-            (1.0, false),
-            (0.61, false),
-            (0.61, true),
-            (0.61, false),
-            (0.8, false),
-            (1.0, false),
+        // This consumer fixture does not run refresh_mobile_layout. Feed it
+        // both production inset values; the producer's screen policy is tested
+        // separately in compact_match_gutter_preserves_menu_and_loading_safe_area.
+        for (screen, expected_top) in [
+            (crate::frontend::AppScreen::Home, 12.0),
+            (crate::frontend::AppScreen::InMatch, 4.0),
+            (crate::frontend::AppScreen::Home, 12.0),
         ] {
-            app.world_mut().resource_mut::<UiScale>().0 = scale;
-            app.world_mut()
-                .resource_mut::<crate::shop::ShopState>()
-                .open = shop_open;
-            app.update();
-            let mut buttons = app.world_mut().query::<(&UiAction<PhoneAction>, &Node)>();
-            for (UiAction(action), node) in buttons.iter(app.world()) {
-                if matches!(
-                    action,
-                    PhoneAction::Help | PhoneAction::Menu | PhoneAction::Server
-                ) {
-                    let Val::Px(height) = node.height else {
-                        panic!("explicit target height")
-                    };
-                    let Val::Px(width) = node.width else {
-                        panic!("explicit target width")
-                    };
-                    assert!((height * scale - 44.0).abs() < 0.001);
-                    assert!(width * scale >= 47.999);
+            app.insert_resource(State::new(screen));
+            app.world_mut().resource_mut::<MobileControls>().safe.top = expected_top;
+            for (scale, shop_open) in [
+                (1.0, false),
+                (0.61, false),
+                (0.61, true),
+                (0.61, false),
+                (0.8, false),
+                (1.0, false),
+            ] {
+                app.world_mut().resource_mut::<UiScale>().0 = scale;
+                app.world_mut()
+                    .resource_mut::<crate::shop::ShopState>()
+                    .open = shop_open;
+                app.update();
+                let mut buttons = app.world_mut().query::<(&UiAction<PhoneAction>, &Node)>();
+                for (UiAction(action), node) in buttons.iter(app.world()) {
+                    if matches!(
+                        action,
+                        PhoneAction::Help | PhoneAction::Menu | PhoneAction::Server
+                    ) {
+                        let Val::Px(height) = node.height else {
+                            panic!("explicit target height")
+                        };
+                        let Val::Px(width) = node.width else {
+                            panic!("explicit target width")
+                        };
+                        assert!((height * scale - 44.0).abs() < 0.001);
+                        assert!(width * scale >= 47.999);
+                    }
                 }
-            }
-            let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
-            let node = bars.single(app.world()).unwrap();
-            assert_eq!(node.display, Display::None);
-            let Val::Px(top) = node.top else {
-                panic!("safe top")
-            };
-            let Val::Px(right) = node.right else {
-                panic!("safe right")
-            };
-            assert!((top * scale - 12.0).abs() < 0.001);
-            assert!((right * scale - 32.0).abs() < 0.001);
-            let mut fonts = app.world_mut().query::<(&Text, &TextFont)>();
-            for (text, font) in fonts.iter(app.world()) {
-                if matches!(text.0.as_str(), "?" | "MENU" | "SERVER") {
-                    let bevy::text::FontSize::Px(px) = font.font_size else {
-                        panic!("phone font must remain pixel-sized");
-                    };
-                    assert!((px * scale - 14.0).abs() < 0.001);
+                let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
+                let node = bars.single(app.world()).unwrap();
+                assert_eq!(node.display, Display::None);
+                let Val::Px(top) = node.top else {
+                    panic!("safe top")
+                };
+                let Val::Px(right) = node.right else {
+                    panic!("safe right")
+                };
+                assert!((top * scale - expected_top).abs() < 0.001);
+                assert!((right * scale - 32.0).abs() < 0.001);
+                let mut fonts = app.world_mut().query::<(&Text, &TextFont)>();
+                for (text, font) in fonts.iter(app.world()) {
+                    if matches!(text.0.as_str(), "?" | "MENU" | "SERVER") {
+                        let bevy::text::FontSize::Px(px) = font.font_size else {
+                            panic!("phone font must remain pixel-sized");
+                        };
+                        assert!((px * scale - 14.0).abs() < 0.001);
+                    }
                 }
             }
         }
@@ -1220,7 +1843,7 @@ mod tests {
     }
 
     /// Phone copy is dictionary text: a language switch relabels the phone
-    /// bar, the entry's error and the help overlay's phone copy, while text
+    /// bar and the help overlay's phone copy, while text
     /// owned by other modules (they write their own phone wording) is left
     /// untouched.
     #[test]
@@ -1257,7 +1880,6 @@ mod tests {
         .into_iter()
         .map(|(name, text)| (world.spawn((Text::new(text), Name::new(name))).id(), text))
         .collect();
-        world.resource_mut::<ServerEntry>().error = Some("phone.server.invalid");
         let read =
             |app: &mut App, entity: Entity| app.world().get::<Text>(entity).unwrap().0.clone();
         let label = |app: &mut App, key: &str| {
@@ -1268,51 +1890,42 @@ mod tests {
                 .map(|(_, text)| text.0.clone())
                 .unwrap()
         };
-        let error = |app: &mut App| {
-            let mut errors = app
-                .world_mut()
-                .query_filtered::<&Text, With<ServerErrorLabel>>();
-            errors.single(app.world()).unwrap().0.clone()
-        };
         app.update();
         assert_eq!(
             read(&mut app, dismiss),
             crate::i18n::tr("help.phone.dismiss")
         );
         assert_eq!(label(&mut app, "phone.bar.menu"), "MENU");
-        assert_eq!(
-            error(&mut app),
-            "Use a host address and port, for example 192.168.1.20:4000"
-        );
         let zh = LocaleId::parse("zh-Hans").unwrap();
         app.world_mut().resource_mut::<Locale>().set(zh);
         app.update();
         assert_eq!(read(&mut app, dismiss), "知道了，开始游戏");
         assert_eq!(label(&mut app, "phone.bar.menu"), "菜单");
-        assert_eq!(label(&mut app, "phone.bar.server"), "服务器");
-        assert_eq!(label(&mut app, "phone.server.connect"), "连接");
-        assert_eq!(
-            error(&mut app),
-            "请输入主机地址和端口，例如 192.168.1.20:4000"
-        );
         for (entity, text) in others {
             assert_eq!(read(&mut app, entity), text);
         }
     }
 
     #[test]
-    fn address_keypad_filters_controls_and_supports_ipv4_hostnames() {
-        let mut address = String::new();
-        edit_address(&mut address, "192.168.1.20:4000\n\t/;💥");
-        assert_eq!(address, "192.168.1.20:4000");
-        assert!(crate::persistence::validate_game_server_addr(&address).is_some());
-        address.clear();
-        edit_address(&mut address, "beta-server.example:4000");
-        assert!(crate::persistence::validate_game_server_addr(&address).is_some());
-        address.clear();
-        edit_address(&mut address, "[2001:db8::1]:4000");
-        assert!(crate::persistence::validate_game_server_addr(&address).is_some());
-        edit_address(&mut address, &"a".repeat(300));
-        assert_eq!(address.len(), 253);
+    fn custom_fields_keep_address_characters_within_the_limit() {
+        let mut lobby = String::new();
+        edit_field(CustomField::Lobby, &mut lobby, "192.168.1.20:4000\n\t/;💥");
+        assert_eq!(lobby, "192.168.1.20:4000");
+        assert!(crate::persistence::validate_game_server_addr(&lobby).is_some());
+        lobby.clear();
+        edit_field(CustomField::Lobby, &mut lobby, "beta-server.example:4000");
+        assert!(crate::persistence::validate_game_server_addr(&lobby).is_some());
+        lobby.clear();
+        edit_field(CustomField::Lobby, &mut lobby, "[2001:db8::1]:4000");
+        assert!(crate::persistence::validate_game_server_addr(&lobby).is_some());
+        edit_field(CustomField::Lobby, &mut lobby, &"a".repeat(300));
+        assert_eq!(lobby.chars().count(), MAX_FIELD_CHARS);
+        let mut registry = String::new();
+        edit_field(
+            CustomField::Registry,
+            &mut registry,
+            "https://registry.lan.example:8443/ ?#",
+        );
+        assert_eq!(registry, "https://registry.lan.example:8443/");
     }
 }

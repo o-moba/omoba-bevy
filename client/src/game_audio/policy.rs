@@ -5,7 +5,7 @@ use serde::Deserialize;
 use shared::{
     HeroClass,
     combat::{CombatEntity, CombatEntityKind, CombatEvent, ProjectileStyle},
-    loadout::LoadoutState,
+    loadout::{EffectVisualKind, LoadoutState, SkillEffectState},
 };
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     skill_presentation::{
         SkillPresentation, SoundCue,
         cast::{CastKey, SkillCastObserved},
-        stage::{EndKind, StageChange, StageEvent, Transition},
+        stage::{EndKind, StageChange, StageEvent, TelegraphSeen, Transition},
         vocab::{AudioBase, AudioSlice},
     },
     team::Team,
@@ -55,10 +55,18 @@ pub(crate) enum AudioCue {
     TrapTrigger,
     Bluff,
     VitalBreak,
+    /// The Horizon Ray charge: its ignition is the cast, its swell the warning.
+    RadiantCharge,
+    /// The Horizon Ray firing.
+    RadiantBeam,
+    /// A beam hit inside the core of the ray.
+    RadiantCore,
+    /// A Radiance mark detonated.
+    RadianceBurst,
 }
 
 impl AudioCue {
-    pub(super) const ALL: [Self; 20] = [
+    pub(super) const ALL: [Self; 24] = [
         Self::Melee,
         Self::Arrow,
         Self::Arcane,
@@ -79,6 +87,10 @@ impl AudioCue {
         Self::TrapTrigger,
         Self::Bluff,
         Self::VitalBreak,
+        Self::RadiantCharge,
+        Self::RadiantBeam,
+        Self::RadiantCore,
+        Self::RadianceBurst,
     ];
 
     pub(crate) const fn id(self) -> &'static str {
@@ -103,6 +115,10 @@ impl AudioCue {
             Self::TrapTrigger => "trap_trigger",
             Self::Bluff => "bluff",
             Self::VitalBreak => "vital_break",
+            Self::RadiantCharge => "radiant_charge",
+            Self::RadiantBeam => "radiant_beam",
+            Self::RadiantCore => "radiant_core",
+            Self::RadianceBurst => "radiance_burst",
         }
     }
 
@@ -110,6 +126,9 @@ impl AudioCue {
         matches!(self, Self::UiClick | Self::UiConfirm)
     }
 
+    /// The admission order of a frame, lowest first. The core note and the Radiance burst
+    /// add to a hit that already has a voice, so they come after every other voice and are
+    /// the first to go when the frame is full.
     pub(super) const fn priority(self) -> u8 {
         match self {
             Self::Victory | Self::Defeat | Self::Death => 0,
@@ -121,6 +140,7 @@ impl AudioCue {
             | Self::TrapTrigger
             | Self::VitalBreak => 1,
             Self::UiClick | Self::UiConfirm | Self::Hit => 2,
+            Self::RadiantCore | Self::RadianceBurst => 4,
             _ => 3,
         }
     }
@@ -145,6 +165,8 @@ impl AudioCue {
             AudioBase::Caster => Self::Caster,
             AudioBase::Tower => Self::Tower,
             AudioBase::Bluff => Self::Bluff,
+            AudioBase::RadiantCharge => Self::RadiantCharge,
+            AudioBase::RadiantBeam => Self::RadiantBeam,
         }
     }
 
@@ -301,6 +323,8 @@ impl Variant {
 pub(super) enum Moment {
     Cast,
     Recast,
+    /// A timed telegraph appeared just after it was cast.
+    Telegraph,
     /// A telegraph fired.
     Release,
     /// A confirmed hit.
@@ -315,6 +339,7 @@ impl Moment {
         match self {
             Self::Cast => "cast",
             Self::Recast => "recast",
+            Self::Telegraph => "telegraph",
             Self::Release => "release",
             Self::Impact => "impact",
             Self::Attack => "attack",
@@ -521,6 +546,8 @@ impl EventCursor {
         let previous = self.high_water;
         self.high_water = self.high_water.max(latest);
         let mut seen = Vec::new();
+        // One core note and one burst a frame, as loud as the loudest receipt that asks.
+        let (mut core, mut burst) = (0.0_f32, 0.0_f32);
         for event in events.iter().take(96) {
             if event.id <= previous || seen.contains(&event.id) {
                 continue;
@@ -594,10 +621,21 @@ impl EventCursor {
             if outgoing && event.killed && event.target.kind == CombatEntityKind::Player {
                 cues.push(Candidate::local(AudioCue::Kill));
             }
-            if gain > 0.0 && area.is_none() {
+            // The local hero's own hit is confirmed in full however far it landed, as the
+            // trap and vital cues are.
+            let heard = if outgoing || incoming { 1.0 } else { gain };
+            if event.core_hit {
+                core = core.max(heard);
+            }
+            // A burst has a voice of its own, never the voice of the hit that set it off.
+            if event.radiance_burst {
+                burst = burst.max(heard);
+                continue;
+            }
+            if heard > 0.0 && area.is_none() {
                 cues.push(Candidate::plain(
                     AudioCue::for_style(event.style),
-                    gain,
+                    heard,
                     Origin::Receipt {
                         id: event.id,
                         source: event.source,
@@ -605,6 +643,14 @@ impl EventCursor {
                         style: event.style,
                     },
                 ));
+            }
+        }
+        for (cue, gain) in [
+            (AudioCue::RadianceBurst, burst),
+            (AudioCue::RadiantCore, core),
+        ] {
+            if gain > 0.0 {
+                cues.push(Candidate::plain(cue, gain, Origin::Other));
             }
         }
         if death {
@@ -698,6 +744,8 @@ pub(super) struct Heard<'a> {
     /// The accepted actions the cast observer and the stage tracker reported.
     pub casts: &'a [SkillCastObserved],
     pub stages: &'a [StageEvent],
+    /// Timed telegraphs the stage tracker saw for the first time just after their cast.
+    pub telegraphs: &'a [TelegraphSeen],
 }
 
 fn row_id(key: CastKey) -> &'static str {
@@ -737,8 +785,9 @@ fn hit_cue(registry: &SkillPresentation, key: CastKey) -> Option<&SoundCue> {
 /// the cue of its wire style. An enemy's accepted attack takes the voice of its basic
 /// attack, or leaves the word to the cast voice of its skill. A repeater has a voice for
 /// each of its two rounds: the receipt names the round by its wire style, the accepted
-/// attack by the weapon mode of the snapshot that carries it. Every observed cast and
-/// every telegraph that fired adds the voice of its row, if the row has one.
+/// attack by the weapon mode of the snapshot that carries it. Every observed cast, every
+/// telegraph that appeared and every telegraph that fired adds the voice of its row, if the
+/// row has one.
 pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
     let Heard {
         registry,
@@ -746,6 +795,7 @@ pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
         heroes,
         casts,
         stages,
+        telegraphs,
     } = *heard;
     let hero = |id: u64| heroes.iter().find(|hero| hero.id == id);
     candidates.retain_mut(|candidate| match candidate.origin {
@@ -841,32 +891,44 @@ pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
             }
         }
     }
-    for event in stages {
-        // A warning became the beam or the bolt it announced, or a fuse burned down.
-        if !matches!(
-            event.change,
-            StageChange::Transition(Transition::KindFlipped)
-                | StageChange::Ended(EndKind::Released)
-        ) {
-            continue;
-        }
-        let effect = &event.effect;
+    // A telegraph and its release sound where the effect was received, never where a hero
+    // stands: the telegraph is heard whether or not its hero is seen.
+    let effects = telegraphs
+        .iter()
+        .map(|seen| (Moment::Telegraph, &seen.effect, seen.owner))
+        .chain(
+            stages
+                .iter()
+                // A warning became the beam or the bolt it announced, or a fuse burned down.
+                .filter(|event| {
+                    matches!(
+                        event.change,
+                        StageChange::Transition(Transition::KindFlipped)
+                            | StageChange::Ended(EndKind::Released)
+                    )
+                })
+                .map(|event| (Moment::Release, &event.effect, event.owner)),
+        );
+    for (moment, effect, owner) in effects {
         let Some(cue) = registry
             .profile(effect.skill)
-            .and_then(|profile| profile.sound.as_ref()?.release.as_ref())
+            .and_then(|profile| profile.sound.as_ref())
+            .and_then(|sound| match moment {
+                Moment::Telegraph => sound.telegraph.as_ref(),
+                _ => sound.release.as_ref(),
+            })
         else {
             continue;
         };
-        let own = event.owner.is_some_and(|owner| owner.local);
-        // The release sounds where the effect was received, never where a hero stands.
-        let gain = heard_at(own, Vec3::new(effect.position[0], 0.0, effect.position[1]));
+        let own = owner.is_some_and(|owner| owner.local);
+        let gain = heard_at(own, heard_from(effect, listener.position));
         if gain > 0.0 {
             candidates.push(Candidate::voiced(
                 cue,
                 gain,
                 own,
                 Origin::Row {
-                    moment: Moment::Release,
+                    moment,
                     row: effect.skill.id(),
                     actor: effect.owner_id,
                     id: effect.id,
@@ -874,6 +936,22 @@ pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
             ));
         }
     }
+}
+
+/// Where a listener hears an effect from: the point of a warning lane or a beam that is
+/// nearest to it, else the position of the effect. Both lie on the ground plane.
+pub(super) fn heard_from(effect: &SkillEffectState, listener: Vec3) -> Vec3 {
+    let start = Vec2::from_array(effect.position);
+    let point = match effect.kind {
+        EffectVisualKind::BeamWarning | EffectVisualKind::Beam => {
+            let lane = Vec2::from_array(effect.end) - start;
+            let along = (Vec2::new(listener.x, listener.z) - start).dot(lane)
+                / lane.length_squared().max(f32::EPSILON);
+            start + lane * along.clamp(0.0, 1.0)
+        }
+        _ => start,
+    };
+    Vec3::new(point.x, 0.0, point.y)
 }
 
 pub(super) fn distance_gain(listener: Vec3, hit: Vec3) -> f32 {

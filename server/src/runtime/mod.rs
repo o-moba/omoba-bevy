@@ -57,11 +57,45 @@ impl RateLimitedDiagnostic {
     }
 }
 
+/// Whether datagrams for `player` can go to `addr` at all: a human seat on a
+/// real network endpoint. Bots and detached human seats (bot- or
+/// idle-controlled after a Leave or timeout) live at internal `[::]:N` actor
+/// addresses that the IPv4 socket cannot address, so every per-tick stream
+/// skips them instead of failing once per datagram.
+pub(crate) fn network_endpoint(
+    addr: std::net::SocketAddr,
+    player: &crate::entities::ConnectedPlayer,
+) -> bool {
+    !bots::is_bot_address(addr) && !player.hero.identity.is_bot
+}
+
+impl ServerRuntime {
+    /// A recipient of the match streams (world snapshots, chat and
+    /// reactions): a human network endpoint that passed this role's endpoint
+    /// admission. A seat whose human left or timed out moves to an internal
+    /// address (worker) or out of the roster (standalone), so it never
+    /// matches; its identity-keyed subscriptions resume on reclaim.
+    pub(crate) fn live_match_endpoint(&self, addr: std::net::SocketAddr, now: Instant) -> bool {
+        self.world
+            .players
+            .get(&addr)
+            .is_some_and(|player| network_endpoint(addr, player))
+            && if self.match_service.is_public() {
+                self.public_transport.validated(addr, now)
+            } else {
+                self.endpoint_verified(addr)
+            }
+    }
+}
+
 pub(crate) struct ServerRuntime {
+    pub(crate) fair_play: crate::fair_play::FairPlay,
+    pub(crate) match_votes: crate::match_votes::MatchVotes,
     pub(crate) session_recovery: crate::session_recovery::SessionRecovery,
     pub(crate) sandbox: Option<sandbox::SandboxRuntime>,
     pub(crate) match_service: match_service::MatchService,
     pub(crate) public_transport: public_transport::PublicTransport,
+    pub(crate) load_metrics: crate::load_metrics::LoadMetrics,
     pub(crate) prematch: prematch::PrematchRuntime,
     pub(crate) social: social::SocialRuntime,
     pub(crate) party: party::PartyState,
@@ -92,6 +126,11 @@ pub(crate) struct ServerRuntime {
     pub(crate) snapshot_tick: u64,
     pub(crate) match_started_at: Option<Instant>,
     pub(crate) empty_since: Option<Instant>,
+    /// Worker only: since when a running match has had no human on a
+    /// network endpoint (`match_lifecycle.rs`).
+    pub(crate) unattended_since: Option<Instant>,
+    /// The hard cap on a running match (`OMOBA_MATCH_MAX_DURATION_SECS`).
+    pub(crate) max_match_duration: Duration,
     pub(crate) metrics_players: HashMap<u64, (u32, bool)>,
     pub(crate) metrics_objectives: HashSet<u64>,
 }
@@ -110,23 +149,31 @@ impl ServerRuntime {
     /// career store configured by the environment (the process shape).
     #[cfg(test)]
     pub(crate) fn new(socket: UdpSocket, match_config: MatchConfig) -> Self {
-        Self::new_with_map(socket, match_config, shared::map::ResolvedMap::default())
+        Self::new_with_map(
+            socket,
+            match_config,
+            shared::map::ResolvedMap::default(),
+            crate::admission::Limits::default(),
+        )
     }
 
     pub(crate) fn new_with_map(
         socket: UdpSocket,
         match_config: MatchConfig,
         map_config: shared::map::ResolvedMap,
+        limits: crate::admission::Limits,
     ) -> Self {
         let server_epoch = fresh_server_epoch();
-        Self::with_ports(
+        let mut runtime = Self::with_ports(
             Box::new(UdpTransport(socket)),
             Box::new(SystemClock),
             server_epoch,
-            Box::new(career_backend::CareerBackend::new(server_epoch)),
+            Box::new(career_backend::CareerBackend::new(server_epoch, limits)),
             match_config,
             map_config,
-        )
+        );
+        runtime.public_transport = public_transport::PublicTransport::new(limits);
+        runtime
     }
 
     /// A socket-free runtime on a manual clock and an in-memory career
@@ -161,10 +208,13 @@ impl ServerRuntime {
     ) -> Self {
         let now = clock.now();
         Self {
+            fair_play: Default::default(),
+            match_votes: Default::default(),
             session_recovery: Default::default(),
             sandbox: None,
             match_service: match_service::MatchService::default(),
             public_transport: public_transport::PublicTransport::default(),
+            load_metrics: crate::load_metrics::LoadMetrics::from_env(now),
             prematch: prematch::PrematchRuntime::default(),
             bots: bots::BotControllers::default(),
             social: social::SocialRuntime::default(),
@@ -191,13 +241,61 @@ impl ServerRuntime {
             snapshot_tick: 0,
             match_started_at: None,
             empty_since: None,
+            unattended_since: None,
+            max_match_duration: crate::match_lifecycle::DEFAULT_MATCH_MAX_DURATION,
             metrics_players: HashMap::new(),
             metrics_objectives: HashSet::new(),
         }
     }
 }
 
+impl ServerRuntime {
+    fn shutdown_gracefully(&mut self) -> io::Result<()> {
+        let now = self.clock.now();
+        let outcome = if self.match_started_at.is_some() {
+            shared::career::MatchOutcome::Interrupted
+        } else {
+            shared::career::MatchOutcome::Abandoned
+        };
+        self.finish_career_round(outcome, None, now);
+        if let match_service::MatchService::Worker(worker) = &mut self.match_service {
+            worker.aborted = !matches!(
+                self.world.game_state,
+                shared::wire::GameState::Victory { .. }
+            );
+            worker.last_status = None;
+        }
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let now = self.clock.now();
+            let flushed = self.flush_career_for_shutdown(now);
+            if flushed && let match_service::MatchService::Worker(worker) = &mut self.match_service
+            {
+                // The final terminal receipt must not wait for the normal 1 s
+                // heartbeat: exiting with a stale Settling receipt would spawn
+                // an unnecessary recovery worker despite successful settlement.
+                worker.last_status = None;
+            }
+            if self.match_service.worker().is_some() {
+                self.tick_match_service(now);
+            }
+            self.send_career_views(now);
+            if flushed {
+                println!("SHUTDOWN_METRIC terminal_outbox=durable");
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other(
+                    "Graceful shutdown could not confirm the durable outbox within 15 seconds; preserve outboxes and inspect storage errors",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
 pub(crate) fn run() -> io::Result<()> {
+    let shutdown = crate::shutdown::ShutdownSignal::install()?;
     shared::catalog::ensure_loaded();
     // The one environment read of the avatar roster source; admission and
     // slug normalization use this roster for the process lifetime.
@@ -218,7 +316,10 @@ pub(crate) fn run() -> io::Result<()> {
     socket.set_nonblocking(true)?;
     println!("UDP game server is listening on {bind_addr}");
 
-    let match_service = match_service::MatchService::from_env().map_err(io::Error::other)?;
+    let limits = crate::admission::Limits::from_env().map_err(io::Error::other)?;
+    println!("{}", limits.summary());
+    let match_service = match_service::MatchService::from_env(socket.local_addr()?, limits)
+        .map_err(io::Error::other)?;
     if match_service.is_public()
         && std::env::var("OMOBA_DATABASE_URL")
             .ok()
@@ -232,11 +333,7 @@ pub(crate) fn run() -> io::Result<()> {
             return Err(io::Error::other("Worker bind differs from allocation"));
         }
         match_config = MatchConfig {
-            mode: if worker.manifest.humans.len() == 10 {
-                MatchMode::Release
-            } else {
-                MatchMode::Practice
-            },
+            mode: worker.manifest.match_mode(),
             team_size: 5,
         };
     }
@@ -254,8 +351,42 @@ pub(crate) fn run() -> io::Result<()> {
         ),
     }
 
-    let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
+    let max_match_duration = crate::match_lifecycle::max_match_duration(
+        std::env::var(crate::match_lifecycle::MATCH_MAX_DURATION_ENV)
+            .ok()
+            .as_deref(),
+    )
+    .map_err(io::Error::other)?;
+    println!(
+        "Match duration cap: {} s ({})",
+        max_match_duration.as_secs(),
+        crate::match_lifecycle::MATCH_MAX_DURATION_ENV
+    );
+
+    let chat = shared::moderation::chat_from_env(
+        std::env::var(shared::moderation::CHAT_ENV).ok().as_deref(),
+    )
+    .map_err(io::Error::other)?;
+    println!(
+        "Chat: {} ({}; `omoba-account-api chat off` also turns it off at runtime); reactions always on",
+        if chat { "on" } else { "off" },
+        shared::moderation::CHAT_ENV
+    );
+
+    let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config, limits);
     runtime.match_service = match_service;
+    runtime.max_match_duration = max_match_duration;
+    runtime.social.set_env_chat(chat);
+    let bot_difficulty = bots::boot_bot_difficulty(
+        runtime.match_service.is_public(),
+        runtime.rules.fills_with_bots,
+        || std::env::var(shared::bot_profile::BotDifficulty::ENV).ok(),
+    )
+    .map_err(io::Error::other)?;
+    if let Some(level) = bot_difficulty {
+        runtime.set_bot_difficulty(level);
+        println!("Practice bot level: {} for both teams", level.name());
+    }
     if std::env::var("OMOBA_COMBAT_SANDBOX").as_deref() == Ok("1") {
         if !runtime.rules.combat_sandbox_allowed
             || runtime.match_service.is_public()
@@ -271,6 +402,9 @@ pub(crate) fn run() -> io::Result<()> {
         println!("Combat Sandbox enabled (local, unrated)");
     }
     loop {
+        if shutdown.requested() {
+            return runtime.shutdown_gracefully();
+        }
         let step_started = Instant::now();
         let (now, dt) = runtime.prepare_tick();
         runtime.tick(now, dt);

@@ -1,0 +1,18 @@
+{
+  "legal.card.title": "Before you play",
+  "legal.card.body": "To play OMOBA, read and accept the User Agreement and the Privacy Policy.",
+  "legal.card.version": "Documents version: {version}",
+  "legal.card.language": "Language",
+  "legal.card.accept": "I accept the User Agreement and the Privacy Policy",
+  "legal.card.continue": "Continue",
+  "legal.link.terms": "User Agreement",
+  "legal.link.privacy": "Privacy Policy",
+  "legal.link.source": "Source code",
+  "legal.link.community_vk": "VK community",
+  "legal.link.community_telegram": "Telegram channel",
+  "legal.link.failed": "The browser did not open. The address: {url}",
+  "legal.about.title": "About",
+  "legal.about.build": "Build: {build}",
+  "legal.about.age": "Age rating",
+  "legal.about.support": "Support: {email}"
+}

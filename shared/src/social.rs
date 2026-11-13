@@ -94,6 +94,18 @@ pub struct SocialView {
     pub request_id: Option<u64>,
     pub error: Option<String>,
     pub allowed_reactions: Vec<String>,
+    /// A stable code for `error` (`crate::moderation::code`, LR-15) that the
+    /// client shows in its own words. Additive, like the fields below: older
+    /// clients ignore them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    /// Text chat is switched off on this server (`OMOBA_CHAT=off` or
+    /// `omoba-account-api chat off`); reactions still work.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub chat_disabled: bool,
+    /// This player's active chat mute, with its end.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mute: Option<crate::moderation::Sanction>,
 }
 
 fn unsafe_text_character(character: char) -> bool {

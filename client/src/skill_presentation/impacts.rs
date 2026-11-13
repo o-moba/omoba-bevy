@@ -2,12 +2,16 @@
 //! receipt position only: nothing follows the target, stays on it or depicts a status, and
 //! a skill without area damage keeps its whole burst close to the unit it hit. The mark of
 //! a kind is whole on the frame that shows the receipt, and every burst closes with the
-//! flash of the hit behind it, as wide as that kind of mark needs.
+//! flash of the hit behind it, as wide as that kind of mark needs. The flags of a receipt
+//! choose how it is drawn: a beam hit inside its full-damage core is brighter than one at
+//! its edge, and a detonated Radiance mark is the pop of that mark, not a second hit.
 use super::SkillPresentation;
 use super::accents::{Palette, drift, fly, ground, heading, share, sized, spread, tagged};
 use super::cast::CastKey;
 use super::category::{self, SkillKey};
+use super::geometry;
 pub(crate) use super::schema::ImpactRecipe;
+use super::status::StatePaint;
 use super::vocab::{ImpactKind, PaletteSlot, ParticleShape};
 use crate::game_vfx::{
     Curve, Orient, ParticleSource, ParticleSpec, Tint, blade_depth, jitter, unit_radius,
@@ -60,6 +64,18 @@ const FLASH_BLOOM: f32 = 0.95;
 const FLASH_CORE: f32 = 0.86;
 const FLASH_SPARK: f32 = 0.75;
 const FLASH_LIFE: f32 = 0.5;
+/// A beam hit outside the full-damage core draws this share of its recipe's particles at
+/// this share of its reach. One inside the core leads with white, and its flash is this
+/// much wider than the kind's own, never wider than the widest flash of any kind.
+const EDGE_COUNT: f32 = 0.5;
+const EDGE_REACH: f32 = 0.75;
+const CORE_FLASH: f32 = 1.25;
+/// The pop of a detonated Radiance mark: the reach of its star and of its ring, the motes
+/// that rise from it, and how long it lasts. It is the gold of the mark that burst.
+const POP_STAR: f32 = 0.5;
+const POP_RING: f32 = 0.9;
+const POP_MOTES: usize = 4;
+const POP_SECS: f32 = 0.55;
 
 const fn flash_share(kind: ImpactKind) -> f32 {
     use ImpactKind as K;
@@ -82,6 +98,51 @@ const fn flash_share(kind: ImpactKind) -> f32 {
 /// target; the built-in burst of the wire style is drawn this far above it too, where the
 /// camera sees it over the body it hit.
 const BODY: f32 = 0.75;
+
+/// How a receipt of a beam with a full-damage core struck, from its `core_hit` flag
+/// (`geometry::damage_core`). A receipt of any other skill is plain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum HitTier {
+    #[default]
+    Plain,
+    /// Inside the core, for the whole damage: the burst leads with white and its flash is
+    /// wider.
+    Core,
+    /// Outside it, for less: the same recipe, smaller and with fewer particles.
+    Edge,
+}
+
+impl HitTier {
+    /// The tier of a receipt of `key`.
+    pub(crate) fn of(key: Option<SkillKey>, core_hit: bool) -> Self {
+        match key.and_then(SkillKey::modular).map(geometry::damage_core) {
+            Some(Some(_)) if core_hit => Self::Core,
+            Some(Some(_)) => Self::Edge,
+            _ => Self::Plain,
+        }
+    }
+}
+
+/// Receipts of one strike in one snapshot above which each of them draws fewer particles,
+/// and the fewest particles of its recipe a crowded receipt still draws, an edge hit too.
+const CROWD: usize = 3;
+const CROWD_LEAST: usize = 4;
+
+/// Particles of its budget one receipt of `key` leaves to the others when `receipts`
+/// receipts of the same strike arrive in one snapshot. Only a strike that runs through its
+/// targets shares (`category::pierces`: a beam or a body that flies on); any other strike
+/// is drawn whole. Above `CROWD` receipts each keeps its share of `CROWD` whole bursts,
+/// and never fewer than `CROWD_LEAST` particles. A beam through a wave then does not take
+/// the pool from the heroes it struck as well. The recipe is laid out with that many
+/// fewer, as for any reserve.
+pub(crate) fn crowd_reserve(key: Option<CastKey>, receipts: usize) -> usize {
+    let runs_through = key.and_then(CastKey::skill).is_some_and(category::pierces);
+    if !runs_through || receipts <= CROWD {
+        return 0;
+    }
+    let room = IMPACT_MAX - 1;
+    room - (room * CROWD / receipts).max(CROWD_LEAST)
+}
 
 /// What the client knows about one accepted receipt.
 #[derive(Clone, Copy, Debug)]
@@ -569,6 +630,19 @@ pub(crate) fn impact_particles(
     palette: &Palette,
     ctx: &ImpactContext,
 ) -> Vec<ParticleSpec> {
+    tiered_particles(recipe, palette, ctx, HitTier::Plain)
+}
+
+/// The burst of one accepted receipt, as its tier draws the recipe: a core hit leads with
+/// white and flashes wider, an edge hit is the same recipe with fewer particles and less
+/// reach, but never fewer than a crowded receipt keeps (`CROWD_LEAST`). Both stay inside
+/// the budget and the bounds of a plain hit.
+pub(crate) fn tiered_particles(
+    recipe: &ImpactRecipe,
+    palette: &Palette,
+    ctx: &ImpactContext,
+    tier: HitTier,
+) -> Vec<ParticleSpec> {
     if !(ctx.position.is_finite() && ctx.ground.is_finite() && ctx.direction.is_finite()) {
         return Vec::new();
     }
@@ -577,6 +651,24 @@ pub(crate) fn impact_particles(
     let room = IMPACT_MAX - 1 - ctx.reserved.min(IMPACT_MAX - 2);
     let count = usize::from(recipe.count.unwrap_or(default_count(kind))).clamp(1, room);
     let [lead, companion] = palette.pair(recipe.slots);
+    let (count, lead, companion, reach, flash_share) = match tier {
+        HitTier::Plain => (count, lead, companion, 1.0, flash_share(kind)),
+        // White-hot: white leads and the row's own lead follows it.
+        HitTier::Core => (
+            count,
+            palette.slot(PaletteSlot::White),
+            lead,
+            1.0,
+            (flash_share(kind) * CORE_FLASH).min(FLASH_BLOOM),
+        ),
+        HitTier::Edge => (
+            ((count as f32 * EDGE_COUNT).ceil() as usize).max(CROWD_LEAST.min(count)),
+            lead,
+            companion,
+            EDGE_REACH,
+            flash_share(kind),
+        ),
+    };
     // Whatever colours the row picks for its marks, the flash is the skill colour, at no
     // more than the gain of the pool: a broad glow above it turns pale on pale ground.
     let primary = palette.slot(PaletteSlot::Primary);
@@ -592,7 +684,7 @@ pub(crate) fn impact_particles(
     let direction = onward
         .or_else(|| ctx.direction.try_normalize())
         .unwrap_or(Vec2::X);
-    let scale = recipe.scale.clamp(0.3, 2.0);
+    let scale = recipe.scale.clamp(0.3, 2.0) * reach;
     let centre = ctx.position + Vec3::Y * BODY;
     let burst = Burst {
         centre,
@@ -612,7 +704,7 @@ pub(crate) fn impact_particles(
         lead,
         companion,
         flash,
-        flash_share: flash_share(kind),
+        flash_share,
         id: ctx.receipt,
     };
     let mut specs = burst.particles(kind, count);
@@ -633,8 +725,11 @@ pub(crate) struct Receipt {
     /// The hero that dealt it and where the client observes that hero.
     pub source: u64,
     pub source_position: Vec3,
-    /// Particles the engine adds to the burst of this receipt on its own.
+    /// Particles the engine adds to the burst of this receipt on its own, and those it
+    /// leaves to the other receipts of a crowded strike (`crowd_reserve`).
     pub reserved: usize,
+    /// The receipt's `core_hit` flag: a beam struck inside its full-damage core.
+    pub core_hit: bool,
 }
 
 /// Heading of the live effect of this skill and owner that is nearest to a receipt.
@@ -668,7 +763,7 @@ pub(crate) fn receipt_burst(
 ) -> Option<Vec<ParticleSpec>> {
     let look = registry.look(key)?;
     let skill = key.skill();
-    Some(impact_particles(
+    Some(tiered_particles(
         look.impact?,
         &look.palette,
         &ImpactContext {
@@ -682,7 +777,87 @@ pub(crate) fn receipt_burst(
             receipt: receipt.id,
             reserved: receipt.reserved,
         },
+        HitTier::of(skill, receipt.core_hit),
     ))
+}
+
+/// The name capture evidence gives the burst of a detonated Radiance mark.
+#[cfg(feature = "qa")]
+pub(crate) const RADIANCE_POP: &str = "radiance_pop";
+
+/// The pop of a detonated Radiance mark, for a receipt flagged `radiance_burst`. It is the
+/// passive's own moment, not a second hit of the skill or basic attack that set it off,
+/// so no recipe of a row draws it: a star, a ring and rising motes in the gold of the mark
+/// that burst, held on the unit. It points nowhere, so it says nothing of where the hero
+/// who set the mark stands.
+pub(crate) fn radiance_pop(position: Vec3, receipt: u64) -> Vec<ParticleSpec> {
+    if !position.is_finite() {
+        return Vec::new();
+    }
+    let (color, gain) = StatePaint::Gold.look();
+    let gold = Tint {
+        color: Color::srgb_from_array(color),
+        gain,
+    };
+    // A broad glow is held to the pool's gain, as the flash of any hit is.
+    let glow = Tint {
+        gain: gain.min(ParticleSpec::BASE.color.gain),
+        ..gold
+    };
+    let white = Tint {
+        color: Color::WHITE,
+        ..glow
+    };
+    let centre = position + Vec3::Y * BODY;
+    let base = ParticleSpec {
+        event_id: receipt,
+        origin: centre,
+        lifetime: POP_SECS,
+        color: gold,
+        end_color: Some(white),
+        ..ParticleSpec::BASE
+    };
+    let mut out = vec![
+        ParticleSpec {
+            size: sized(ParticleShape::Star, POP_STAR, Curve::Pop),
+            shape: ParticleShape::Star,
+            curve: Curve::Pop,
+            spin: 2.0,
+            ..base.clone()
+        },
+        ParticleSpec {
+            size: sized(ParticleShape::Ringlet, POP_RING, Curve::Grow),
+            shape: ParticleShape::Ringlet,
+            curve: Curve::Grow,
+            end_color: None,
+            ..base.clone()
+        },
+    ];
+    out.extend((0..POP_MOTES).map(|i| {
+        // Evenly around the unit: together they lean to no side.
+        let outward = ground(TAU * i as f32 / POP_MOTES as f32 + jitter(receipt, 0, 67) * PI);
+        let mote = ParticleSpec {
+            origin: centre + outward * (0.3 * POP_STAR),
+            size: sized(ParticleShape::Glow, 0.12, Curve::Shrink),
+            lifetime: POP_SECS * 1.2,
+            color: glow,
+            velocity: Vec3::Y * 1.4,
+            ..base.clone()
+        };
+        drift(mote, outward, 0.3)
+    }));
+    // The flash behind it, as every hit has one.
+    out.push(ParticleSpec {
+        size: sized(ParticleShape::Glow, 0.6, Curve::Hold),
+        lifetime: POP_SECS * FLASH_LIFE,
+        color: glow,
+        end_color: None,
+        curve: Curve::Hold,
+        dense: true,
+        ..base
+    });
+    contain(&mut out, centre, SINGLE_TARGET_REACH);
+    tagged(out, ParticleSource::Impact)
 }
 
 /// One authoritative Wildspark detonation: compact ignition, travelling ground wave,
@@ -1577,6 +1752,7 @@ mod tests {
             source: 7,
             source_position: HIT - Vec3::X * 6.0,
             reserved: 0,
+            core_hit: true,
         };
         let beam = |owner: u64, skill: SkillId, kind: EffectVisualKind| SkillEffectState {
             id: 5,
@@ -1593,7 +1769,7 @@ mod tests {
         };
         let look = registry.look(key).unwrap();
         let drawn = |heading: Option<Vec2>| {
-            impact_particles(
+            tiered_particles(
                 look.impact.unwrap(),
                 &look.palette,
                 &ImpactContext {
@@ -1605,6 +1781,7 @@ mod tests {
                     receipt: 77,
                     reserved: 0,
                 },
+                HitTier::Core,
             )
         };
         // The recipe, the colours and the receipt id come from the row; the hit points away
@@ -1660,5 +1837,231 @@ mod tests {
                 .iter()
                 .all(|spec| spec.source == ParticleSource::Impact)
         );
+    }
+
+    /// A beam hit inside its full-damage core is drawn brighter and bigger than one at its
+    /// edge: white leads it, more particles fly and its flash is wider. The edge hit keeps
+    /// the row's own colours and kind, smaller. Both stay inside the budget and the reach
+    /// of a hit on one unit. Any other skill's receipt is drawn as its row says.
+    #[test]
+    fn a_core_hit_outshines_an_edge_hit() {
+        let registry = target();
+        let key = CastKey::Skill(SkillKey::Modular(SkillId::DawnRay));
+        let look = registry.look(key).unwrap();
+        let recipe = look.impact.unwrap();
+        let ctx = receipt(false);
+        let [lead, companion] = look.palette.pair(recipe.slots);
+        let white = look.palette.slot(PaletteSlot::White);
+        let core = tiered_particles(recipe, &look.palette, &ctx, HitTier::Core);
+        let edge = tiered_particles(recipe, &look.palette, &ctx, HitTier::Edge);
+        let plain = impact_particles(recipe, &look.palette, &ctx);
+        for burst in [&core, &edge] {
+            assert!(burst.len() <= IMPACT_MAX && burst.last().unwrap().dense);
+            assert!(burst.iter().all(|spec| spec.is_sound()
+                && spec.end_secs() <= IMPACT_SECS
+                && spec.source == ParticleSource::Impact
+                && spec.event_id == 501));
+            assert!(reach(burst) <= SINGLE_TARGET_REACH + 1e-3);
+        }
+        assert!(core.len() > edge.len(), "{} {}", core.len(), edge.len());
+        assert_eq!(core.len(), plain.len());
+        // White leads the core hit and the row's lead follows it; the edge hit is the row.
+        assert_eq!((core[0].color, core[0].end_color), (white, Some(lead)));
+        assert_eq!((edge[0].color, edge[0].end_color), (lead, Some(companion)));
+        assert_ne!(lead, white);
+        // The flash of a core hit is the widest mark of the three.
+        let flash = |burst: &[ParticleSpec]| burst.last().unwrap().reach(HIT + Vec3::Y * BODY);
+        assert!(flash(&core) > flash(&plain) && flash(&plain) > flash(&edge));
+        assert!(reach(&core) > reach(&edge));
+
+        // The tier comes from the flag and from a skill whose damage depends on the axis.
+        let ray = Some(SkillKey::Modular(SkillId::DawnRay));
+        assert_eq!(HitTier::of(ray, true), HitTier::Core);
+        assert_eq!(HitTier::of(ray, false), HitTier::Edge);
+        for key in [
+            Some(SkillKey::Modular(SkillId::DawnBind)),
+            Some(SkillKey::Modular(SkillId::HorizonWave)),
+            None,
+        ] {
+            assert_eq!(HitTier::of(key, true), HitTier::Plain);
+            assert_eq!(HitTier::of(key, false), HitTier::Plain);
+        }
+        let hit = Receipt {
+            id: 501,
+            position: HIT,
+            ground: HIT.y,
+            source: 7,
+            source_position: HIT - Vec3::new(0.6, 0.0, 0.8),
+            reserved: 0,
+            core_hit: true,
+        };
+        let drawn = |core_hit| receipt_burst(&registry, key, &Receipt { core_hit, ..hit }, &[]);
+        let ctx = ImpactContext {
+            direction: (hit.position - hit.source_position).xz(),
+            ..ctx
+        };
+        let tiered = |tier| Some(tiered_particles(recipe, &look.palette, &ctx, tier));
+        assert_eq!(drawn(true), tiered(HitTier::Core));
+        assert_eq!(drawn(false), tiered(HitTier::Edge));
+        // A flag on another row's receipt changes nothing.
+        let bind = CastKey::Skill(SkillKey::Modular(SkillId::DawnBind));
+        assert_eq!(
+            receipt_burst(&registry, bind, &hit, &[]),
+            receipt_burst(
+                &registry,
+                bind,
+                &Receipt {
+                    core_hit: false,
+                    ..hit
+                },
+                &[]
+            )
+        );
+    }
+
+    /// Every beam row's tiers keep the budget, whatever the engine reserves.
+    #[test]
+    fn the_tiers_of_every_beam_row_keep_the_budget() {
+        let registry = target();
+        let mut beams = 0;
+        for (id, _) in registry.rows() {
+            let Some(skill) =
+                SkillId::from_id(id).filter(|id| geometry::damage_core(*id).is_some())
+            else {
+                continue;
+            };
+            beams += 1;
+            let look = registry
+                .look(CastKey::Skill(SkillKey::Modular(skill)))
+                .unwrap();
+            let recipe = look.impact.unwrap();
+            for tier in [HitTier::Core, HitTier::Edge] {
+                for reserved in 0..=IMPACT_MAX {
+                    let ctx = ImpactContext {
+                        reserved,
+                        ..receipt(false)
+                    };
+                    let burst = tiered_particles(recipe, &look.palette, &ctx, tier);
+                    assert!(
+                        burst.len() + reserved.min(IMPACT_MAX - 2) <= IMPACT_MAX,
+                        "{id}"
+                    );
+                    assert!(reach(&burst) <= SINGLE_TARGET_REACH + 1e-3, "{id}");
+                }
+            }
+        }
+        assert_eq!(beams, 1);
+    }
+
+    /// Only a strike that runs through its targets leaves room to the others of a crowd,
+    /// whichever hero deals it; an area, a single-target strike or a basic attack is drawn
+    /// whole however many receipts it lands. A crowded edge hit of the ray still draws
+    /// `CROWD_LEAST` particles of its recipe and its flash.
+    #[test]
+    fn only_a_strike_that_runs_through_its_targets_shares_a_crowd() {
+        let registry = target();
+        let mut runs_through = Vec::new();
+        for (id, _) in registry.rows() {
+            let Some(skill) = SkillId::from_id(id) else {
+                continue;
+            };
+            let key = CastKey::Skill(SkillKey::Modular(skill));
+            let pierces = category::pierces(SkillKey::Modular(skill));
+            for receipts in 0..=CROWD {
+                assert_eq!(crowd_reserve(Some(key), receipts), 0, "{id}");
+            }
+            for receipts in CROWD + 1..64 {
+                let reserve = crowd_reserve(Some(key), receipts);
+                assert_eq!(reserve > 0, pierces, "{id} {receipts}");
+                assert!(reserve <= IMPACT_MAX - 1 - CROWD_LEAST, "{id}");
+            }
+            if pierces {
+                runs_through.push(skill);
+            }
+        }
+        assert!(runs_through.contains(&SkillId::DawnRay));
+        assert!(runs_through.len() > 1, "{runs_through:?}");
+        assert!(!runs_through.contains(&SkillId::DawnField));
+        for class in [HeroClass::Dawnweaver, HeroClass::Stormfist] {
+            assert_eq!(crowd_reserve(Some(CastKey::Basic(class)), 10), 0);
+        }
+        assert_eq!(crowd_reserve(None, 10), 0);
+
+        let ray = CastKey::Skill(SkillKey::Modular(SkillId::DawnRay));
+        let look = registry.look(ray).unwrap();
+        let recipe = look.impact.unwrap();
+        for receipts in CROWD + 1..64 {
+            let ctx = ImpactContext {
+                reserved: crowd_reserve(Some(ray), receipts),
+                ..receipt(false)
+            };
+            let core = tiered_particles(recipe, &look.palette, &ctx, HitTier::Core);
+            let edge = tiered_particles(recipe, &look.palette, &ctx, HitTier::Edge);
+            assert!(edge.len() > CROWD_LEAST, "{receipts}: {}", edge.len());
+            assert!(edge.len() <= core.len(), "{receipts}");
+        }
+    }
+
+    /// The ray's own hit leads with a colour that glows, and its row asks for no more reach
+    /// than a hit on one unit may have, so nothing of it is cut back without a word.
+    #[test]
+    fn the_ray_impact_glows_and_is_drawn_at_its_authored_reach() {
+        let registry = target();
+        let look = registry
+            .look(CastKey::Skill(SkillKey::Modular(SkillId::DawnRay)))
+            .unwrap();
+        let recipe = look.impact.unwrap();
+        let [lead, _] = look.palette.pair(recipe.slots);
+        assert!(lead.gain > 1.0, "{lead:?}");
+        assert!(recipe.scale * REACH <= SINGLE_TARGET_REACH + 1e-4);
+        let mut wide = receipt(true);
+        let free = impact_particles(recipe, &look.palette, &wide);
+        wide.area_damage = false;
+        assert_eq!(free, impact_particles(recipe, &look.palette, &wide));
+    }
+
+    /// A detonated Radiance mark pops in the gold of the mark on the unit: a star, a ring,
+    /// rising motes and a flash, inside the budget and the reach of one hit, pointing
+    /// nowhere, and never a recipe of the row.
+    #[test]
+    fn a_radiance_burst_pops_in_the_gold_of_the_mark() {
+        let pop = radiance_pop(HIT, 31);
+        assert!(!pop.is_empty() && pop.len() <= IMPACT_MAX);
+        assert!(pop.iter().all(|spec| spec.is_sound()
+            && spec.end_secs() <= IMPACT_SECS
+            && spec.source == ParticleSource::Impact
+            && spec.event_id == 31));
+        let centre = HIT + Vec3::Y * BODY;
+        assert!(
+            pop.iter()
+                .all(|spec| spec.reach(centre) <= SINGLE_TARGET_REACH + 1e-4)
+        );
+        let (gold, _) = StatePaint::Gold.look();
+        assert_eq!(pop[0].shape, ParticleShape::Star);
+        assert_eq!(pop[0].color.color, Color::srgb_from_array(gold));
+        assert!(pop.iter().any(|spec| spec.shape == ParticleShape::Ringlet));
+        assert!(pop.last().unwrap().dense);
+        // The motes rise and the burst as a whole drifts nowhere on the ground.
+        let drift: Vec2 = pop.iter().map(|spec| spec.velocity.xz()).sum();
+        assert!(drift.length() < 1e-3, "{drift}");
+        assert!(pop.iter().filter(|spec| spec.velocity.y > 0.0).count() >= POP_MOTES);
+        // It is the pop, not the hit of any row that could have set it off.
+        let registry = target();
+        for key in [
+            CastKey::Skill(SkillKey::Modular(SkillId::DawnRay)),
+            CastKey::Basic(HeroClass::Dawnweaver),
+        ] {
+            let hit = Receipt {
+                id: 31,
+                position: HIT,
+                ground: HIT.y,
+                source: 7,
+                source_position: HIT - Vec3::X,
+                reserved: 0,
+                core_hit: false,
+            };
+            assert_ne!(receipt_burst(&registry, key, &hit, &[]), Some(pop.clone()));
+        }
+        assert!(radiance_pop(Vec3::NAN, 31).is_empty());
     }
 }

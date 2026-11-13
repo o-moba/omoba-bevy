@@ -1,0 +1,83 @@
+warning: failed to auto-clean cache data
+
+failed to clean entries from the global cache
+
+Caused by:
+  failed to remove file `/Users/wotori/.cargo/git/checkouts/ekza-bevy-sdk-93c50f0335f3416b/6e4123a/Cargo.toml`
+
+Caused by:
+  Permission denied (os error 13)
+   Compiling omoba-account-api v0.44.0 (/Users/wotori/git/ekza/_workspace/worktrees/playtest-game/account-api)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.74s
+     Running unittests src/lib.rs (/Users/wotori/git/ekza/omoba-bevy/target/debug/deps/omoba_account_api-d905c5fb0209d2d5)
+
+running 12 tests
+test schema_tests::recognition_runtime_requires_complete_schema_six_before_serving_existing_routes ... ok
+test read::tests::query_is_strict ... ok
+test supporter::recognition::tests::supporter_directory_accepts_only_bounded_canonical_pagination ... ok
+test supporter::solana::tests::currency_and_chain_labels_are_bound_to_canonical_usdc ... ok
+test supporter::recognition::tests::recognition_toggle_requires_exact_boolean_only ... ok
+test supporter::solana::tests::normalized_legacy_v0_and_v1_transactions_are_supported ... ok
+test crypto::tests::delivery_is_bound_and_authenticated ... ok
+test supporter::solana::tests::exact_transfer_valid_and_encodings_roundtrip ... ok
+test supporter::solana::tests::forged_wrong_or_reused_inputs_do_not_validate ... ok
+test ekza_library::tests::malformed_dev_portal_never_falls_back_to_production ... ok
+test ekza_library::tests::fixture_is_explicit_loopback_only ... ok
+test ekza_library::tests::portal_routes_library_consent_within_its_contour ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/wotori/git/ekza/omoba-bevy/target/debug/deps/omoba_passport-101eded9a42c1be0)
+
+running 48 tests
+test attribution::tests::creator_text_is_one_bounded_line ... ok
+test entitlements::tests::companion_grants_require_exact_approved_avatar_response_and_stay_scoped ... ok
+test avatars::tests::boss_slugs_are_not_player_selectable ... ok
+test avatars::tests::avatar_slug_normalization_rejects_unknown_values ... ok
+test avatars::tests::approved_release_roster_retains_fifteen_heroes_and_removed_selections_fall_back ... ok
+test avatars::tests::avatar_roster_is_committed_and_licensed ... ok
+test avatars::tests::store_avatars_register_only_under_their_derived_passport_slug ... ok
+test avatars::tests::roster_entries_must_follow_the_store_avatar_rule ... ok
+test avatars::tests::roster_loads_override_then_asset_root_then_embedded_without_cwd_lookup ... ok
+test humanoid::tests::intermediary_nodes_are_permitted_without_name_guessing ... ok
+test humanoid::tests::vrm1_optional_chest_neck_and_thumb_names_follow_the_spec ... ok
+test humanoid::tests::clipless_versions_ignore_names_and_keep_nonidentity_rest_transforms ... ok
+test humanoid::tests::malformed_maps_and_unsupported_rigs_fail_with_context ... ok
+test sponsorship::tests::utc_dates_are_calendar_checked_and_wall_clock_independent ... ok
+test humanoid::tests::required_extensions_match_the_supported_renderer_subset ... ok
+test humanoid::tests::nonunit_source_quaternions_are_rejected_instead_of_repaired_only_in_metadata ... ok
+test store::tests::catalogue_states_distinguish_loading_empty_and_failed_cache ... ok
+test sponsorship::tests::replayed_server_time_cannot_extend_a_live_placement ... ok
+test sponsorship::tests::empty_revocation_advances_watermark_and_rejects_an_unseen_older_snapshot ... ok
+test sponsorship::tests::description_is_optional_exact_plain_text_with_scalar_and_control_limits ... ok
+test sponsorship::tests::unknown_slots_inexact_urls_and_expired_identity_fail_closed ... ok
+test sponsorship::tests::source_cat_meets_profile_and_has_grounded_fixed_fit ... ok
+test tests::rejects_corrupt_truncated_or_incomplete_approved_model ... ok
+test weapon_store::tests::an_unchanged_library_read_keeps_the_revision ... ok
+test weapon_store::tests::entries_show_the_attribution_of_their_own_store_item ... ok
+test weapon_store::tests::library_only_weapons_list_and_resolve_before_the_catalogue_catches_up ... ok
+test weapon_store::tests::the_library_lists_first_and_an_owned_asset_never_repeats_in_the_catalogue ... ok
+test sponsorship::tests::replay_after_expiry_cannot_restart_a_grant ... ok
+test weapon_store::tests::the_sdk_catalogue_item_brings_its_attribution_through_the_weapon_selector ... ok
+test weapons::tests::malformed_scene_objects_and_transforms_fail_before_loading ... ok
+test humanoid::tests::malformed_container_and_limits_are_rejected_without_panics ... ok
+test weapons::tests::malformed_scene_references_and_cycles_fail_before_loading ... ok
+test tests::library_owner_and_exact_support_selectability_are_independent_of_shared_roster ... ok
+test tests::only_explicit_secure_operator_origin_is_allowed ... ok
+test web_account::tests::dev_account_transport_rejects_runtime_cross_contour_overrides ... ok
+test web_account::tests::rejects_untrusted_urls ... ok
+test weapons::tests::wildspark_set_shape_passes_and_its_muzzle_hint_is_optional ... ok
+test tests::download_is_bounded_checked_and_never_sends_session_token ... ok
+test sponsorship::tests::hostile_models_fail_before_loading ... ok
+test tests::poll_uses_secret_body_and_reports_pending_then_approval ... ok
+test tests::imported_bytes_and_sidecar_retain_identity_and_preserve_original_roster ... ok
+test weapons::tests::shipped_props_and_catalog_follow_the_same_import_contract ... ok
+test tests::denied_expired_replay_and_redirect_responses_never_grant ... ok
+test weapons::tests::sdk_catalog_download_import_and_hash_rejection_use_real_http ... ok
+test sponsorship::tests::revoked_expired_stale_and_late_downloads_cannot_reappear ... ok
+test sponsorship::tests::real_http_manifest_and_atomic_install_verify_bytes_and_reject_redirects ... ok
+test humanoid::tests::all_shipped_vrm_rigs_are_supported_without_modifying_or_using_clips ... ok
+test store::fixture_tests::sdk_http_catalogue_refresh_validation_and_failed_cache_are_real ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

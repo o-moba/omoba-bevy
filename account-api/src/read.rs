@@ -1,7 +1,7 @@
 //! Immutable result reads and a replayable, idempotent statistics projection.
 use crate::auth::Session;
 use crate::*;
-use shared::career::{MatchOutcome, MatchResult};
+use shared::career::MatchResult;
 use sqlx::types::Json as DbJson;
 use std::collections::BTreeMap;
 
@@ -68,10 +68,11 @@ impl Filter {
         } else {
             sqlx::query_scalar("SELECT extract(epoch FROM ((date_trunc('day',clock_timestamp() AT TIME ZONE coalesce((SELECT timezone FROM portal.profile_settings WHERE profile_id=$1),'UTC'))-make_interval(days=>$2-1)) AT TIME ZONE coalesce((SELECT timezone FROM portal.profile_settings WHERE profile_id=$1),'UTC')))::double precision").bind(&s.profile_id).bind(days).fetch_one(&app.pool).await?
         };
+        // Every playable class, by its wire id (the `hero_class` the facts store).
         let class = q.get("hero_class").filter(|v| v.as_str() != "all").cloned();
         if class
             .as_ref()
-            .is_some_and(|v| !matches!(v.as_str(), "warrior" | "ranger" | "mage" | "cleric"))
+            .is_some_and(|v| shared::HeroClass::from_id(v).is_none())
         {
             return Err(invalid());
         }
@@ -87,10 +88,12 @@ impl Filter {
                 _ => return Err(invalid()),
             };
         let outcome = q.get("outcome").filter(|v| v.as_str() != "all").cloned();
-        if outcome
-            .as_ref()
-            .is_some_and(|v| !matches!(v.as_str(), "win" | "loss" | "interrupted" | "abandoned"))
-        {
+        if outcome.as_ref().is_some_and(|v| {
+            !matches!(
+                v.as_str(),
+                "win" | "loss" | "interrupted" | "abandoned" | "remade"
+            )
+        }) {
             return Err(invalid());
         }
         let limit = q
@@ -159,12 +162,21 @@ pub async fn detail(app: &App, s: &Session, id: &str) -> Result<Value> {
         .zip(&r.participants)
     {
         v["player_id"] = json!(p.player_id.to_string());
+        if let Some(participation) = p.participation {
+            for (name, time) in [
+                ("connected_ms", participation.connected_ms),
+                ("disconnected_ms", participation.disconnected_ms),
+                ("afk_ms", participation.afk_ms),
+            ] {
+                v["participation"][name] = json!(time.to_string());
+            }
+        }
     }
     Ok(json!({"match":value}))
 }
 pub async fn history(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> {
     let f = Filter::read(app, s, raw, false).await?;
-    let rows=sqlx::query("SELECT m.result FROM career_matches m JOIN career_participants cp USING(result_id) CROSS JOIN LATERAL jsonb_array_elements(m.result->'participants') p WHERE cp.profile_id=$1 AND p->>'profile_id'=$1 AND m.status='settled' AND (m.result->>'ended_at_ms')::numeric >= $2::double precision*1000 AND ($3::text IS NULL OR p->>'hero_class'=$3) AND ($4::boolean IS NULL OR (m.result->>'rated')::boolean=$4) AND ($5::text IS NULL OR CASE WHEN $5 IN('win','loss') THEN m.result->>'outcome'='completed' AND m.result->>'winner' IS NOT NULL AND ((m.result->>'winner'=p->>'team')=($5='win')) ELSE m.result->>'outcome'=$5 END) AND ($6::text::numeric IS NULL OR ((m.result->>'ended_at_ms')::numeric,m.result_id)<($6::text::numeric,$7::text)) ORDER BY (m.result->>'ended_at_ms')::numeric DESC,m.result_id DESC LIMIT $8")
+    let rows=sqlx::query("SELECT m.result FROM career_matches m JOIN career_participants cp USING(result_id) CROSS JOIN LATERAL jsonb_array_elements(m.result->'participants') p WHERE cp.profile_id=$1 AND p->>'profile_id'=$1 AND m.status='settled' AND coalesce((m.result->>'gameplay_started')::boolean,true) AND (m.result->>'ended_at_ms')::numeric >= $2::double precision*1000 AND ($3::text IS NULL OR p->>'hero_class'=$3) AND ($4::boolean IS NULL OR ((m.result->>'rated')::boolean OR p->'rating'->>'delta' IS NOT NULL)=$4) AND ($5::text IS NULL OR CASE WHEN $5 IN('win','loss') THEN (CASE WHEN m.result->>'outcome'='completed' AND m.result->>'winner' IS NOT NULL THEN (m.result->>'winner'=p->>'team') AND NOT coalesce((p->'participation'->>'abandoned')::boolean,false) WHEN (m.result->>'outcome'='remade' OR (m.result->>'outcome'='interrupted' AND m.result->>'unrated_reason'='abandoned_reaped')) AND coalesce((p->'participation'->>'abandoned')::boolean,false) AND p->'rating'->>'delta' IS NOT NULL THEN false ELSE NULL END)=($5='win') ELSE m.result->>'outcome'=$5 END) AND ($6::text::numeric IS NULL OR ((m.result->>'ended_at_ms')::numeric,m.result_id)<($6::text::numeric,$7::text)) ORDER BY (m.result->>'ended_at_ms')::numeric DESC,m.result_id DESC LIMIT $8")
         .bind(&s.profile_id).bind(f.from).bind(&f.class).bind(f.rated).bind(&f.outcome).bind(f.cursor.as_ref().map(|c|c.0.to_string())).bind(f.cursor.as_ref().map(|c|&c.1)).bind(f.limit+1).fetch_all(&app.pool).await?;
     let more = rows.len() > f.limit as usize;
     let mut entries = Vec::new();
@@ -177,7 +189,7 @@ pub async fn history(app: &App, s: &Session, raw: Option<&str>) -> Result<Value>
             .find(|p| p.profile_id.as_deref() == Some(&s.profile_id))
             .ok_or_else(invalid)?;
         cursor = Some(format!("{}:{}", r.ended_at_ms, r.result_id));
-        entries.push(json!({"result_id":r.result_id,"ended_at":timestamp(&app.pool,(r.ended_at_ms/1000) as i64).await?,"duration_ms":r.duration_ms.to_string(),"outcome":r.outcome,"won":r.winner.map(|w|w==p.team),"rated":r.rated,"hero_class":p.hero_class,"avatar":p.avatar,"kills":p.stats.kills,"deaths":p.stats.deaths,"assists":p.stats.assists,"damage_to_heroes":p.stats.damage_to_heroes,"rating":p.rating}));
+        entries.push(json!({"result_id":r.result_id,"ended_at":timestamp(&app.pool,(r.ended_at_ms/1000) as i64).await?,"duration_ms":r.duration_ms.to_string(),"outcome":r.outcome,"won":r.participant_won(p),"rated":r.rated || p.rating.is_some(),"hero_class":p.hero_class,"avatar":p.avatar,"kills":p.stats.kills,"deaths":p.stats.deaths,"assists":p.stats.assists,"damage_to_heroes":p.stats.damage_to_heroes,"rating":p.rating}));
     }
     Ok(
         json!({"matches":entries,"next_cursor":if more{cursor}else{None},"data_as_of":timestamp(&app.pool,now()).await?}),
@@ -197,7 +209,11 @@ pub async fn project(app: &App, limit: i64) -> Result<usize> {
     for row in rows {
         let r: DbJson<MatchResult> = row.try_get("result")?;
         for p in &r.participants {
-            if p.is_bot || p.profile_id.is_none() {
+            if !r.gameplay_started
+                || p.is_bot
+                || p.profile_id.is_none()
+                || (r.outcome == shared::career::MatchOutcome::Remade && p.rating.is_none())
+            {
                 continue;
             }
             if !p.stats.damage_to_heroes.is_finite() {
@@ -207,7 +223,7 @@ pub async fn project(app: &App, limit: i64) -> Result<usize> {
                 .bind(&r.result_id).bind(p.player_id.to_string()).bind(&p.profile_id).bind(r.ended_at_ms as f64/1000.).bind(r.duration_ms as f64)
                 .bind(serde_json::to_value(p.hero_class).map_err(|_|invalid())?.as_str().ok_or_else(invalid)?)
                 .bind(serde_json::to_value(r.outcome).map_err(|_|invalid())?.as_str().ok_or_else(invalid)?)
-                .bind(r.rated).bind(if r.outcome==MatchOutcome::Completed{r.winner.map(|w|w==p.team)}else{None})
+                .bind(r.rated || p.rating.is_some()).bind(r.participant_won(p))
                 .bind(i64::from(p.stats.kills)).bind(i64::from(p.stats.deaths)).bind(i64::from(p.stats.assists)).bind(p.stats.damage_to_heroes).bind(i64::from(p.stats.minion_last_hits)).bind(i64::from(p.stats.jungle_last_hits))
                 .bind(p.rating.as_ref().map(|v|v.before)).bind(p.rating.as_ref().map(|v|v.after)).bind(p.rating.as_ref().map(|v|v.delta)).execute(&mut *tx).await?;
         }
@@ -238,7 +254,7 @@ fn aggregate(row: &sqlx::postgres::PgRow) -> Result<Value> {
 }
 pub async fn statistics(app: &App, s: &Session, raw: Option<&str>) -> Result<Value> {
     let f = Filter::read(app, s, raw, true).await?;
-    let predicate = " FROM portal.player_match_facts WHERE profile_id=$1 AND ended_at>=to_timestamp($2) AND ($3::text IS NULL OR hero_class=$3) AND ($4::boolean IS NULL OR rated=$4) AND ($5::text IS NULL OR CASE WHEN $5 IN('win','loss') THEN outcome='completed' AND won=($5='win') ELSE outcome=$5 END)";
+    let predicate = " FROM portal.player_match_facts WHERE profile_id=$1 AND ended_at>=to_timestamp($2) AND ($3::text IS NULL OR hero_class=$3) AND ($4::boolean IS NULL OR rated=$4) AND ($5::text IS NULL OR CASE WHEN $5 IN('win','loss') THEN won=($5='win') ELSE outcome=$5 END)";
     let sql = format!(
         "SELECT hero_class,count(*)::bigint AS matches,count(*) FILTER(WHERE won)::bigint AS wins,count(*) FILTER(WHERE NOT won)::bigint AS losses,coalesce(sum(kills),0)::bigint AS kills,coalesce(sum(deaths),0)::bigint AS deaths,coalesce(sum(assists),0)::bigint AS assists,coalesce(sum(duration_ms),0)::double precision AS duration,coalesce(sum(damage_to_heroes),0)::double precision AS damage,coalesce(sum(minion_last_hits),0)::bigint AS minions,coalesce(sum(jungle_last_hits),0)::bigint AS jungle{predicate} GROUP BY GROUPING SETS ((),(hero_class)) ORDER BY hero_class NULLS FIRST"
     );
@@ -309,7 +325,12 @@ pub fn releases(app: &App) -> Result<Value> {
     }
     let source = std::fs::read(path)
         .map_err(|_| Error(StatusCode::SERVICE_UNAVAILABLE, "catalog_unavailable"))?;
-    let value: Value = parse(&source)?;
+    catalog(&source)
+}
+/// A curated `releases.json` (account-api/README.md#downloads), checked whole:
+/// one bad entry refuses the catalog.
+fn catalog(source: &[u8]) -> Result<Value> {
+    let value: Value = parse(source)?;
     let items = value
         .get("releases")
         .and_then(Value::as_array)
@@ -329,6 +350,43 @@ pub fn releases(app: &App) -> Result<Value> {
             || uri.query().is_some()
         {
             return Err(invalid());
+        }
+        // Optional since LR-14 (LR-68 rules), held to the game's own rules
+        // (`passport/src/release_catalog.rs`): the build channel (absent =
+        // direct), the channel's minimum release and its update page.
+        if let Some(page) = item.get("update_url")
+            && !page
+                .as_str()
+                .is_some_and(shared::compatibility::valid_update_url)
+        {
+            return Err(invalid());
+        }
+        if let Some(channel) = item.get("channel")
+            && !channel.as_str().is_some_and(|channel| {
+                (1..=32).contains(&channel.len())
+                    && channel
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
+            })
+        {
+            return Err(invalid());
+        }
+        if let Some(minimum) = item.get("min_release") {
+            let version = item.get("version").and_then(Value::as_str);
+            let at_most_version =
+                minimum
+                    .as_str()
+                    .zip(version)
+                    .is_some_and(|(minimum, version)| {
+                        minimum.len() <= 64
+                            && matches!(
+                                shared::compatibility::release_order(minimum, version),
+                                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                            )
+                    });
+            if !at_most_version {
+                return Err(invalid());
+            }
         }
         if crypto::decode::<32>(
             item.get("sha256")
@@ -370,6 +428,45 @@ pub fn releases(app: &App) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalog_entries_are_checked_with_their_optional_fields() {
+        let entry = |extra: Value| {
+            let mut entry = json!({
+                "platform": "linux", "architecture": "x86_64", "version": "0.46.0",
+                "url": "https://d.example/omoba.tar.gz", "sha256": "a".repeat(64),
+                "size_bytes": "1", "published_at": "2026-10-25T00:00:00Z",
+                "instructions": "Unpack and run.", "test_status": "playtest",
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                entry[key] = value.clone();
+            }
+            serde_json::to_vec(&json!({ "releases": [entry] })).unwrap()
+        };
+        for good in [
+            json!({}),
+            json!({"channel": "direct", "min_release": "0.46.0",
+                   "update_url": "https://omoba.example/download?platform=linux"}),
+            json!({"min_release": "0.46.0-rc.1"}),
+        ] {
+            let listed = catalog(&entry(good.clone())).unwrap();
+            assert_eq!(listed["releases"][0]["version"], "0.46.0", "{good}");
+        }
+        for bad in [
+            json!({"url": "https://d.example/omoba.tar.gz?x=1"}),
+            json!({"update_url": "http://omoba.example/download"}),
+            json!({"update_url": "https://user@omoba.example/download"}),
+            json!({"update_url": format!("https://omoba.example/{}", "a".repeat(256))}),
+            json!({"update_url": null}),
+            json!({"channel": "App Store"}),
+            json!({"channel": ""}),
+            json!({"min_release": 46}),
+            json!({"min_release": ""}),
+            json!({"min_release": "soon"}),
+            json!({"min_release": "0.46.1"}),
+        ] {
+            assert!(catalog(&entry(bad.clone())).is_err(), "{bad}");
+        }
+    }
     #[test]
     fn query_is_strict() {
         assert_eq!(

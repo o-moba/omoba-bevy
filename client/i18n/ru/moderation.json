@@ -1,0 +1,13 @@
+{
+  "moderation.account_banned.until": "Ваш аккаунт заблокирован до {until} UTC.",
+  "moderation.account_banned.plain": "Ваш аккаунт заблокирован.",
+  "moderation.matchmaking_ban.until": "Поиск матчей недоступен вам до {until} UTC.",
+  "moderation.matchmaking_ban.plain": "Поиск матчей вам недоступен.",
+  "moderation.ranked_ban.until": "Рейтинговые матчи закрыты для вас до {until} UTC.\nОбычные PvP и матчи против ботов доступны.",
+  "moderation.ranked_ban.plain": "Рейтинговые матчи для вас закрыты.\nОбычные PvP и матчи против ботов доступны.",
+  "moderation.name_locked.until": "Модератор сбросил ваше имя. Сменить его можно после {until} UTC.",
+  "moderation.name_locked.plain": "Модератор сбросил ваше имя. Пока сменить его нельзя.",
+  "moderation.chat_muted.until": "Вам запрещено писать в чат до {until} UTC. Реакции работают.",
+  "moderation.chat_muted.plain": "Вам запрещено писать в чат. Реакции работают.",
+  "moderation.chat_disabled": "Чат на этом сервере выключен. Реакции работают."
+}

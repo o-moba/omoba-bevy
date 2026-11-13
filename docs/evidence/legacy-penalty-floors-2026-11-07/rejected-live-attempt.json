@@ -1,0 +1,7 @@
+{
+  "status": "rejected",
+  "error": "Error: legacy import/ready decline gives no career credit: timed out after 10000ms; inspect clients.json\n    at pumpUntil (file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:421:8)\n    at async legacyPenaltyLifecycle (file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:706:3)\n    at async file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:1418:33",
+  "cause": "one-shot profile read could be refused by the existing account request rate limit; no response arrived",
+  "resolution": "retry signed profile reads every1s and explicit decline every500ms; all career/penalty assertions unchanged; final-v2 PASS",
+  "not_product_waiver": true
+}

@@ -1,0 +1,171 @@
+{
+  "scenario": "drain",
+  "clients": 1,
+  "preference": "bot_practice",
+  "capacity": 2,
+  "limits": {},
+  "max_wait_secs": null,
+  "protocol": 16,
+  "host": {
+    "platform": "darwin",
+    "cpus": 14,
+    "cpu_model": "Apple M4 Pro",
+    "memory_gib": 48
+  },
+  "input_hz_requested": 20,
+  "input_model": "signed_current_pose_transform",
+  "soak_seconds": 1,
+  "started_at": "2026-11-07T01:40:56.658Z",
+  "scenarios": [
+    "raw_ping_no_replication",
+    "allocated_draft_countdown_loading_running",
+    "distinct_workers_and_ten_player_rosters",
+    "lobby_restart_preserves_worker_and_assignment",
+    "maintenance_pauses_new_matches_and_preserves_live_play_fifo_consent"
+  ],
+  "status": "PASS",
+  "arenas": 1,
+  "total_bytes": 287057,
+  "total_datagrams": 318,
+  "elapsed_seconds": 14.069478958,
+  "snapshot_gap_ms": {
+    "p50": 56.078583000000435,
+    "p95": 62.333708000000115,
+    "p99": 62.333708000000115,
+    "max": 62.333708000000115
+  },
+  "per_arena_type": {
+    "bot_practice": {
+      "arenas": 1,
+      "players": 1,
+      "snapshot_gap_ms": {
+        "p50": 56.078583000000435,
+        "p95": 62.333708000000115,
+        "p99": 62.333708000000115,
+        "max": 62.333708000000115
+      },
+      "running_after_secs": {
+        "p50": 12.994369375,
+        "p95": 12.994369375,
+        "p99": 12.994369375,
+        "max": 12.994369375
+      },
+      "snapshot_bytes_per_second_per_player": {
+        "p50": 57719.27464581213,
+        "p95": 57719.27464581213,
+        "p99": 57719.27464581213,
+        "max": 57719.27464581213
+      }
+    }
+  },
+  "soak_resources": {
+    "samples": 2,
+    "processes": 2,
+    "cpu_percent_mean": 16,
+    "cpu_percent_peak": 24.3,
+    "rss_mib_mean": 38,
+    "rss_mib_peak": 38.1,
+    "per_arena": {
+      "cpu_percent": 16.02,
+      "rss_mib": 38.1
+    }
+  },
+  "running_after_secs": {
+    "p50": 12.994369375,
+    "p95": 12.994369375,
+    "p99": 12.994369375,
+    "max": 12.994369375
+  },
+  "recovery": {
+    "checks": [
+      {
+        "name": "lobby_restart_adopts_live_worker",
+        "status": "PASS",
+        "old_lobby_pid": 3450,
+        "new_lobby_pid": 4569,
+        "worker_pid": 3595,
+        "server_epoch": 1794015664468834001,
+        "endpoint": "127.0.0.1:46600",
+        "roster": [
+          "1",
+          "10",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9"
+        ]
+      }
+    ],
+    "allocation_id": "05c18a17e8dee1ab50ba1dbdac3dfc2d",
+    "worker_pid": 3595
+  },
+  "drain": {
+    "status": "PASS",
+    "operation_id": "121fc5009ae548eb96426a63e83915b9",
+    "restart_operation_id": "6f3b0afb1757f11c9877b47dea1abc5f",
+    "capacity": 2,
+    "existing_allocation": "05c18a17e8dee1ab50ba1dbdac3dfc2d",
+    "new_allocation": "2272c061407f7491021ca07817e6ea03",
+    "paused_ready_without_penalty": true,
+    "late_decline_rejected": true,
+    "new_search_correlated_refusal": true,
+    "existing_worker_advanced": true,
+    "fresh_consent_required": true,
+    "lobby_restart_keeps_drain_and_adopted_workers": true,
+    "resume_allowed_during_drain": true,
+    "observation_seconds": 16
+  },
+  "total_transforms_sent": 1106,
+  "total_sent_datagrams": 1640,
+  "total_sent_bytes": 858757,
+  "resources": [
+    {
+      "at": "2026-11-07T01:40:58.194Z",
+      "wall_ms": 1558.073917,
+      "processes": 1,
+      "cpu_percent": 67.7,
+      "rss_mib": 16.265625,
+      "cpu_seconds": 1.36
+    },
+    {
+      "at": "2026-11-07T01:41:03.188Z",
+      "wall_ms": 6552.919583,
+      "processes": 2,
+      "cpu_percent": 12.200000000000001,
+      "rss_mib": 27.640625,
+      "cpu_seconds": 1.47,
+      "cpu_percent_interval": 2.2022702472825486
+    },
+    {
+      "at": "2026-11-07T01:41:08.195Z",
+      "wall_ms": 11559.7395,
+      "processes": 2,
+      "cpu_percent": 2.1,
+      "rss_mib": 36.640625,
+      "cpu_seconds": 2.8499999999999996,
+      "cpu_percent_interval": 27.562405336656724
+    },
+    {
+      "at": "2026-11-07T01:41:11.202Z",
+      "wall_ms": 14566.7525,
+      "processes": 2,
+      "cpu_percent": 92.8,
+      "rss_mib": 37.890625,
+      "cpu_seconds": 3.58,
+      "cpu_percent_interval": 24.27658277499965
+    },
+    {
+      "at": "2026-11-07T01:41:12.234Z",
+      "wall_ms": 15598.382875,
+      "processes": 2,
+      "cpu_percent": 10.4,
+      "rss_mib": 38.125,
+      "cpu_seconds": 3.66,
+      "cpu_percent_interval": 7.754715442534364
+    }
+  ]
+}

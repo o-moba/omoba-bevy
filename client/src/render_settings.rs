@@ -306,6 +306,7 @@ fn update_fps_readout(
     measured: Res<MeasuredFps>,
     settings: Res<RenderSettings>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
     mut readout: Query<(&mut Text, &mut Node), With<FpsReadout>>,
 ) {
     for (mut text, mut node) in &mut readout {
@@ -326,7 +327,16 @@ fn update_fps_readout(
             .filter(|mobile| mobile.enabled)
             .map(|mobile| mobile.safe);
         let right = Val::Px(safe.map_or(8.0, |safe| safe.right + 8.0));
-        let top = Val::Px(if safe.is_some() { 2.0 } else { 4.0 });
+        let in_match = screen
+            .as_ref()
+            .is_some_and(|screen| *screen.get() == crate::frontend::AppScreen::InMatch);
+        let top = Val::Px(match safe {
+            Some(safe) if in_match => {
+                safe.top.max(4.0) + crate::hud_layout::plate::SCORE_STRIP_PHONE.y + 2.0
+            }
+            Some(_) => 2.0,
+            None => 4.0,
+        });
         if node.right != right {
             node.right = right;
         }
@@ -525,6 +535,31 @@ mod tests {
         }
         assert!((measured.value.unwrap() - 120.0).abs() < 0.01);
     }
+    #[test]
+    fn phone_fps_clears_the_score_ribbon_without_moving_menu_readout() {
+        let mut app = App::new();
+        let mut mobile = crate::mobile_controls::MobileControls::default();
+        mobile.enabled = true;
+        let ribbon = crate::hud_layout::HudLayout::phone(&mobile).score_strip;
+        app.insert_resource(mobile)
+            .init_resource::<MeasuredFps>()
+            .init_resource::<RenderSettings>()
+            .insert_resource(State::new(crate::frontend::AppScreen::InMatch))
+            .add_systems(Update, update_fps_readout);
+        let readout = app
+            .world_mut()
+            .spawn((Text::new(""), Node::default(), FpsReadout))
+            .id();
+        app.update();
+        let Val::Px(top) = app.world().get::<Node>(readout).unwrap().top else {
+            panic!()
+        };
+        assert!(top > ribbon.max.y);
+        app.insert_resource(State::new(crate::frontend::AppScreen::Home));
+        app.update();
+        assert_eq!(app.world().get::<Node>(readout).unwrap().top, Val::Px(2.0));
+    }
+
     #[test]
     fn readout_counts_real_frames_not_fixed_simulation_ticks_or_requested_cap() {
         let mut app = App::new();

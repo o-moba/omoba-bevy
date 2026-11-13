@@ -88,6 +88,39 @@ impl Default for TeamSelection {
     }
 }
 
+impl TeamSelection {
+    /// A public queue has its own draft. Carry a valid preferred presentation
+    /// from the profile card into that draft without asking for a first pick.
+    pub(crate) fn queue_from_card(
+        &mut self,
+        card: &crate::frontend::card::ProfileCard,
+    ) -> NetworkCommand {
+        let available = crate::passport::selectable_avatars();
+        self.hero_class = card.main_class;
+        self.avatar = card
+            .showcase_avatar
+            .as_ref()
+            .filter(|slug| available.iter().any(|a| &a.slug == *slug))
+            .or_else(|| {
+                self.avatar
+                    .as_ref()
+                    .filter(|slug| available.iter().any(|a| &a.slug == *slug))
+            })
+            .cloned()
+            .or_else(|| available.first().map(|a| a.slug.clone()));
+        // A committed join enables local actor admission. The allocation's
+        // server-assigned team replaces this placeholder on the first snapshot.
+        self.team = Some(Team::Green);
+        NetworkCommand::JoinPrematch {
+            handheld: self.handheld.clone(),
+            character: self.character,
+            hero_class: self.hero_class,
+            avatar: self.avatar.clone(),
+            sprite_character: Some(self.sprite_character.clone()),
+        }
+    }
+}
+
 /// Thumbnail image handles for the avatar grid, keyed by slug.
 #[derive(Resource, Default)]
 pub struct AvatarThumbnails(pub HashMap<String, Handle<Image>>);
@@ -1143,6 +1176,13 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
         });
 }
 
+/// Whether the picker hides its Ekza parts (the Studio label, hint and
+/// refresh, the wallet/account strip and unknown store avatars): offline
+/// practice, and every build without Ekza.
+fn ekza_rows_hidden(offline: bool, ekza: bool) -> bool {
+    offline || !ekza
+}
+
 /// Which Ekza connection a strip button starts.
 enum ConnectTarget {
     Wallet,
@@ -1849,9 +1889,10 @@ fn layout_spacious_picker(
         node.min_width = Val::Px(0.0);
         node.min_height = Val::Px(0.0);
     };
+    let hide_ekza = ekza_rows_hidden(session.is_offline(), crate::account_region::features().ekza);
     for (name, id, class, action, mut node) in &mut nodes {
         let key = crate::ui::test_id::node_key(name, id).unwrap_or_default();
-        if session.is_offline() && (matches!(key, "EkzaConnectRow" | "StudioAvatarsLabel" | "PurchasedAvatarsHint" | "PickerRefreshStudio")
+        if hide_ekza && (matches!(key, "EkzaConnectRow" | "StudioAvatarsLabel" | "PurchasedAvatarsHint" | "PickerRefreshStudio")
             || action.is_some_and(|a| matches!(&a.0, HeroSelectAction::Avatar(slug) if omoba_passport::avatars::avatar_definition(slug).is_none()))) {
             node.display = Display::None; continue;
         }
@@ -2127,6 +2168,18 @@ impl PickerLayout {
 mod tests {
     use super::*;
     use shared::SPRITE_CHARACTER_IDS;
+
+    #[test]
+    fn the_picker_hides_ekza_rows_offline_and_in_every_build_without_ekza() {
+        use shared::market::Market;
+        let ekza = Market::Global.default_features().ekza;
+        assert!(!ekza_rows_hidden(false, ekza));
+        assert!(ekza_rows_hidden(true, ekza));
+        for market in [Market::Ru, Market::Cn] {
+            let ekza = market.default_features().ekza;
+            assert!(ekza_rows_hidden(false, ekza) && ekza_rows_hidden(true, ekza));
+        }
+    }
 
     #[test]
     fn hero_picker_keeps_preview_notice_and_action_inside_each_viewport() {

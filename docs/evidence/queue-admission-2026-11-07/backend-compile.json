@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "scope": "Actual current backend, port, admission, queue journal and store; engine-coupled public transport contributes only its verbatim capacity constant; no MatchService/engine integration certification",
+  "constant": "pub(crate) const MAX_ENDPOINTS: usize = 2048;",
+  "dependencies": {
+    "tokio": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libtokio-2103d2eff50c8fc5.rlib",
+    "ed25519_dalek": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libed25519_dalek-07e8e74834c18542.rlib",
+    "sqlx": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libsqlx-1b0f57f250251a24.rlib",
+    "serde": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde-b7f89bf2e8085ad9.rlib",
+    "serde_json": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libserde_json-e3ae0e86c339e589.rlib",
+    "getrandom": "/Volumes/Orico/omoba-build-cache/target-b/debug/deps/libgetrandom-d4a5344f6007f6a9.rlib",
+    "shared": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/codex-ranked-readiness/queue-discipline/libshared.rlib",
+    "omoba_career_store": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/codex-ranked-readiness/queue-delivery/libomoba_career_store.rlib"
+  },
+  "wrapper_sha256": "e2111bfe6cae360dcf2c3a236e8b7805900fbf8ce5d9c24d0c91851471e12d2f",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+}

@@ -5,8 +5,9 @@
 //! (`crate::party::PartyClient`); buttons only send `PartyCommand`s. The
 //! launch itself moves every member to hero select (`crate::party`).
 //!
-//! Text comes from the `lobby` dictionary; the render key includes the
-//! locale generation, so a language change rebuilds the screen.
+//! Text comes from the `lobby` dictionary (refusals and notices from
+//! `party`); the render key includes the locale generation, so a language
+//! change rebuilds the screen.
 // i18n-strict
 
 use bevy::prelude::*;
@@ -17,7 +18,7 @@ use super::party_stage::{PartyStage, STAGE_HEIGHT, STAGE_WIDTH, StageMember, Sta
 use super::{AppScreen, automation_bypass, widgets};
 use crate::i18n::{Locale, tr, trf};
 use crate::net::{ClientSession, NetworkCommand};
-use crate::party::PartyClient;
+use crate::party::{PartyClient, PartyNotice};
 use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::TextStyle;
 use crate::ui::theme::{self, ButtonKind};
@@ -30,7 +31,10 @@ pub struct LobbyScreenPlugin;
 impl Plugin for LobbyScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<LobbyAction>()
-            .add_systems(OnEnter(AppScreen::Lobby), (spawn_backdrop, spawn_lobby))
+            .add_systems(
+                OnEnter(AppScreen::Lobby),
+                (spawn_backdrop, spawn_lobby, request_friends_on_enter),
+            )
             .add_systems(
                 PostUpdate,
                 sync_scrollbar.after(bevy::ui::UiSystems::Layout),
@@ -56,6 +60,8 @@ pub(crate) enum LobbyAction {
     Accept(u64),
     Decline(u64),
     Kick(u64),
+    /// A contour build's connection panel (`mobile_ui::ServerEntry`).
+    Connection,
 }
 
 #[derive(Component)]
@@ -130,6 +136,40 @@ pub(crate) fn stage_members(
         .collect()
 }
 
+/// Outside the career client's own request sequence: the reply only refreshes
+/// the server's friend list for this endpoint (the ★ marks and the order of
+/// the online list), the career client has nothing pending for it.
+const LOBBY_FRIENDS_REQUEST_ID: u64 = 1 << 62;
+
+/// Friends are marked and listed first on the first visit: the server learns
+/// a player's friends from a Friends request, which otherwise the friends
+/// modal sends. The same command the modal sends, for a signed-in player.
+fn request_friends_on_enter(
+    career: Res<crate::career::CareerClient>,
+    mut requests: MessageWriter<NetworkCommand>,
+) {
+    if career.view.storage_enabled && career.view.profile.is_some() {
+        requests.write(NetworkCommand::Career(
+            shared::career::CareerRequest::Friends {
+                request_id: LOBBY_FRIENDS_REQUEST_ID,
+            },
+        ));
+    }
+}
+
+/// A refusal code (`PartyView::error`) in the player's words; an unknown
+/// code gets the generic line.
+pub(crate) fn party_error_text(code: &str) -> &'static str {
+    crate::i18n::lookup(&format!("party.error.{code}")).unwrap_or_else(|| tr("party.error.unknown"))
+}
+
+fn notice_text(notice: &PartyNotice) -> &'static str {
+    match notice {
+        PartyNotice::Error(code) => party_error_text(code),
+        PartyNotice::LobbyRestarted => tr("party.notice.lobby_restarted"),
+    }
+}
+
 fn member_status(member: &shared::party::PartyMember) -> (&'static str, Color) {
     if member.away {
         (tr("lobby.status.away"), theme::MUTED)
@@ -140,6 +180,19 @@ fn member_status(member: &shared::party::PartyMember) -> (&'static str, Color) {
     }
 }
 
+/// Keep the public handle tag outside the elided nickname so equal prefixes
+/// cannot make two roster rows indistinguishable next to the kick action.
+fn roster_identity(member: &shared::party::PartyMember) -> (&str, String) {
+    match member.nickname.rsplit_once('#') {
+        Some((name, tag))
+            if !name.is_empty() && tag.len() == 4 && tag.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            (name, format!("#{tag}"))
+        }
+        _ => (member.nickname.as_str(), format!("#{}", member.player_id)),
+    }
+}
+
 #[derive(PartialEq, Clone)]
 struct LobbySignature {
     view: PartyView,
@@ -147,13 +200,16 @@ struct LobbySignature {
     public: bool,
     friends: bool,
     server: String,
-    field: super::server_field::ServerField,
+    /// The running connection profile, only when this build offers a selector.
+    connection: Option<crate::connection_profile::ProfileId>,
     /// The locale generation: a language change rebuilds the screen.
     locale: u32,
     viewport: (u32, u32),
     scale: u32,
     avatar: Option<String>,
     character: crate::team::CharacterChoice,
+    /// A fresh refusal or notice (`crate::party`), shown under the online list.
+    notice: Option<PartyNotice>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -161,25 +217,32 @@ fn signature(
     party: &PartyClient,
     career: &crate::career::CareerClient,
     session: &ClientSession,
-    field: &super::server_field::ServerField,
+    connection: Option<&crate::connection_profile::ActiveConnection>,
     locale: Option<&Locale>,
     viewport: Vec2,
     scale: f32,
     avatar: Option<String>,
     character: crate::team::CharacterChoice,
 ) -> LobbySignature {
+    let now = std::time::Instant::now();
     LobbySignature {
         view: party.view.clone(),
-        live: party.is_live(std::time::Instant::now()),
+        live: party.is_live(now),
         public: career.view.match_service.is_some(),
         friends: career.view.storage_enabled,
         server: session.server_addr().to_owned(),
-        field: field.clone(),
+        connection: crate::mobile_ui::offers_connection(connection).then(|| {
+            connection.map_or_else(
+                || crate::connection_profile::active().id,
+                |connection| connection.profile.id,
+            )
+        }),
         locale: locale.map_or(0, Locale::generation),
         viewport: (viewport.x.to_bits(), viewport.y.to_bits()),
         scale: scale.to_bits(),
         avatar,
         character,
+        notice: party.notice(now).cloned(),
     }
 }
 
@@ -341,7 +404,7 @@ fn spawn_lobby(
     selection: Res<crate::team::TeamSelection>,
     mut stage: ResMut<PartyStage>,
     platform: Res<crate::ui::UiPlatform>,
-    field: Res<super::server_field::ServerField>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     locale: Option<Res<Locale>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     scale: Res<UiScale>,
@@ -357,7 +420,7 @@ fn spawn_lobby(
         &party,
         &career,
         &session,
-        &field,
+        connection.as_deref(),
         locale.as_deref(),
         viewport,
         scale.0,
@@ -537,20 +600,34 @@ fn spawn_lobby(
                                         button(
                                             actions,
                                             tr("lobby.button.play_bots"),
-                                            if phone { 212.0 } else { 272.0 },
+                                            if phone { 176.0 } else { 272.0 },
                                             ButtonKind::Primary,
                                             LobbyAction::Play(MatchPreference::BotPractice),
                                             "LobbyPlayBots",
                                         );
+                                        // The public lobby's PvP queues (LR-08).
                                         if sig.public {
-                                            button(
-                                                actions,
-                                                tr("lobby.button.quick_match"),
-                                                if phone { 160.0 } else { 208.0 },
-                                                ButtonKind::Secondary,
-                                                LobbyAction::Play(MatchPreference::Quick),
-                                                "LobbyQuickMatch",
-                                            );
+                                            for (label, queue, id) in [
+                                                (
+                                                    "queue.casual",
+                                                    MatchPreference::Casual,
+                                                    "LobbyCasual",
+                                                ),
+                                                (
+                                                    "queue.ranked",
+                                                    MatchPreference::Ranked,
+                                                    "LobbyRanked",
+                                                ),
+                                            ] {
+                                                button(
+                                                    actions,
+                                                    tr(label),
+                                                    if phone { 142.0 } else { 208.0 },
+                                                    ButtonKind::Secondary,
+                                                    LobbyAction::Play(queue),
+                                                    id,
+                                                );
+                                            }
                                         }
                                     } else {
                                         let waiting = view
@@ -665,6 +742,15 @@ fn spawn_nameplates(
                             theme::IVORY,
                         ),
                         TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                        Node {
+                            // Do not let the measured text shrink its own
+                            // available width on every elision pass.
+                            width: Val::Percent(100.0),
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
+                        widgets::FittedLabel,
+                        Name::new(format!("LobbyMemberName-{index}")),
                     ));
                     plate.spawn((
                         label(
@@ -673,6 +759,15 @@ fn spawn_nameplates(
                             if you { theme::GOLD } else { color },
                         ),
                         TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                        Node {
+                            // Do not let the measured text shrink its own
+                            // available width on every elision pass.
+                            width: Val::Percent(100.0),
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
+                        widgets::FittedLabel,
+                        Name::new(format!("LobbyMemberStatus-{index}")),
                     ));
                 });
             }
@@ -681,7 +776,7 @@ fn spawn_nameplates(
 
 /// Conservative glyph budget keeps the beginning and a visible ellipsis.
 /// Full names remain in the scrolling member list. CJK/wide glyphs use a full em.
-fn plate_name(name: &str, width: f32, size: f32) -> String {
+pub(super) fn plate_name(name: &str, width: f32, size: f32) -> String {
     let weight = |c: char| {
         if c as u32 >= 0x2e80 {
             1.05
@@ -819,6 +914,7 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                         if let Some(party) = &view.party {
                             column.spawn(label(tr("lobby.social.members"), 11.0, theme::GOLD));
                             for member in &party.members {
+                                let (nickname, tag) = roster_identity(member);
                                 column
                                     .spawn((social_card(), BackgroundColor(theme::TILE)))
                                     .with_children(|card| {
@@ -831,13 +927,38 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                                         .with_children(
                                             |row| {
                                                 row.spawn((
-                                                    label(&member.nickname, 13.0, theme::IVORY),
+                                                    label(nickname, 13.0, theme::IVORY),
+                                                    TextLayout::new(
+                                                        Justify::Start,
+                                                        LineBreak::NoWrap,
+                                                    ),
                                                     Node {
                                                         flex_grow: 1.0,
                                                         flex_basis: Val::Px(0.0),
                                                         min_width: Val::Px(0.0),
+                                                        overflow: Overflow::clip(),
                                                         ..default()
                                                     },
+                                                    widgets::FittedLabel,
+                                                    Name::new(format!(
+                                                        "LobbyRosterName-{}",
+                                                        member.player_id
+                                                    )),
+                                                ));
+                                                row.spawn((
+                                                    label(tag, 11.0, theme::MUTED),
+                                                    TextLayout::new(
+                                                        Justify::Start,
+                                                        LineBreak::NoWrap,
+                                                    ),
+                                                    Node {
+                                                        flex_shrink: 0.0,
+                                                        ..default()
+                                                    },
+                                                    Name::new(format!(
+                                                        "LobbyRosterTag-{}",
+                                                        member.player_id
+                                                    )),
                                                 ));
                                                 if view.is_leader() && member.player_id != view.you
                                                 {
@@ -877,100 +998,17 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                         for player in &view.online {
                             spawn_online_row(column, view, player);
                         }
-                        // Connection details are secondary and scroll with the social list.
-                        column
-                            .spawn(Node {
-                                flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(6.0),
-                                margin: UiRect::top(Val::Px(8.0)),
-                                flex_shrink: 0.0,
-                                ..default()
-                            })
-                            .with_children(|server| {
-                                server.spawn(label(tr("lobby.server.title"), 11.0, theme::MUTED));
-                                server.spawn(label(
-                                    if sig.field.editing {
-                                        format!("{}▏", sig.field.text)
-                                    } else {
-                                        sig.server.clone()
-                                    },
-                                    12.0,
-                                    theme::MUTED,
-                                ));
-                                if sig.field.editing {
-                                    server
-                                        .spawn(Node {
-                                            column_gap: Val::Px(6.0),
-                                            flex_wrap: FlexWrap::Wrap,
-                                            ..default()
-                                        })
-                                        .with_children(|row| {
-                                            for (preset, key, id) in [
-                                                (
-                                                    crate::session_config::ServerPreset::Beta,
-                                                    "phone.server.beta",
-                                                    "LobbyServerBeta",
-                                                ),
-                                                (
-                                                    crate::session_config::ServerPreset::Local,
-                                                    "phone.server.local",
-                                                    "LobbyServerLocal",
-                                                ),
-                                            ] {
-                                                button(
-                                                    row,
-                                                    tr(key),
-                                                    112.0,
-                                                    ButtonKind::Secondary,
-                                                    super::server_field::ServerFieldAction::Preset(
-                                                        preset,
-                                                    ),
-                                                    id,
-                                                );
-                                            }
-                                        });
-                                    server.spawn(label(
-                                        tr("lobby.server.hint"),
-                                        11.0,
-                                        theme::MUTED,
-                                    ));
-                                    if let Some(error) = sig.field.error {
-                                        server.spawn(label(tr(error), 12.0, theme::DANGER_HOVER));
-                                    }
-                                    server
-                                        .spawn(Node {
-                                            column_gap: Val::Px(6.0),
-                                            ..default()
-                                        })
-                                        .with_children(|row| {
-                                            button(
-                                                row,
-                                                tr("lobby.server.connect"),
-                                                100.0,
-                                                ButtonKind::Secondary,
-                                                super::server_field::ServerFieldAction::Connect,
-                                                "LobbyServerConnect",
-                                            );
-                                            button(
-                                                row,
-                                                tr("common.cancel"),
-                                                96.0,
-                                                ButtonKind::Link,
-                                                super::server_field::ServerFieldAction::Cancel,
-                                                "LobbyServerCancel",
-                                            );
-                                        });
-                                } else if !phone {
-                                    button(
-                                        server,
-                                        tr("lobby.server.change"),
-                                        112.0,
-                                        ButtonKind::Link,
-                                        super::server_field::ServerFieldAction::Edit,
-                                        "LobbyServerChange",
-                                    );
-                                }
-                            });
+                        if let Some(notice) = &sig.notice {
+                            column.spawn((
+                                label(notice_text(notice), 12.0, theme::GOLD),
+                                Name::new("LobbyNotice"),
+                            ));
+                        }
+                        // A contour build's connection is secondary and scrolls with
+                        // the social list; production shows none (no server selection).
+                        if let Some(profile) = sig.connection {
+                            spawn_connection_row(column, profile, &sig.server);
+                        }
                     });
                     body.spawn((
                         Node {
@@ -999,6 +1037,45 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                         ));
                     });
                 });
+        });
+}
+
+/// The running connection profile and lobby, and the button that opens the
+/// connection panel (contour builds only).
+fn spawn_connection_row(
+    column: &mut ChildSpawnerCommands,
+    profile: crate::connection_profile::ProfileId,
+    server: &str,
+) {
+    column
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                margin: UiRect::top(Val::Px(8.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Name::new("LobbyConnection"),
+        ))
+        .with_children(|row| {
+            row.spawn(label(tr("lobby.connection.title"), 11.0, theme::MUTED));
+            row.spawn(label(
+                trf(
+                    "lobby.connection.line",
+                    &[("profile", &tr(profile.label_key())), ("lobby", &server)],
+                ),
+                12.0,
+                theme::MUTED,
+            ));
+            button(
+                row,
+                tr("lobby.connection.change"),
+                112.0,
+                ButtonKind::Link,
+                LobbyAction::Connection,
+                "LobbyConnectionChange",
+            );
         });
 }
 
@@ -1082,10 +1159,17 @@ fn lobby_actions(
     session: Res<ClientSession>,
     party: Res<PartyClient>,
     mut career: ResMut<crate::career::CareerClient>,
+    mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
 ) {
     for Activated { action, .. } in activated.read() {
         match *action {
             LobbyAction::Back => next.set(AppScreen::Home),
+            LobbyAction::Connection => {
+                if let Some(entry) = server_entry.as_deref_mut() {
+                    crate::mobile_ui::open_connection_panel(entry, &session, connection.as_deref());
+                }
+            }
             LobbyAction::Friends => crate::career::open_friends_modal(&mut career, &mut requests),
             LobbyAction::Play(preference) => {
                 if party.view.is_leader() {
@@ -1131,7 +1215,7 @@ fn refresh_lobby(
     selection: Res<crate::team::TeamSelection>,
     stage: ResMut<PartyStage>,
     platform: Res<crate::ui::UiPlatform>,
-    field: Res<super::server_field::ServerField>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     roots: Query<Entity, With<LobbyRoot>>,
     locale: Option<Res<Locale>>,
     mut last: Local<Option<LobbySignature>>,
@@ -1145,7 +1229,7 @@ fn refresh_lobby(
         &party,
         &career,
         &session,
-        &field,
+        connection.as_deref(),
         locale.as_deref(),
         viewport,
         scale.0,
@@ -1168,8 +1252,8 @@ fn refresh_lobby(
         .despawn_related::<Children>()
         .despawn();
     spawn_lobby(
-        commands, party, career, session, card, selection, stage, platform, field, locale, windows,
-        scale,
+        commands, party, career, session, card, selection, stage, platform, connection, locale,
+        windows, scale,
     );
 }
 
@@ -1212,6 +1296,126 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    /// LR-08: the lobby's queue buttons launch the party into that queue,
+    /// or send a solo player to hero select for it.
+    #[test]
+    fn queue_buttons_launch_the_party_or_pick_the_solo_queue() {
+        use crate::ui::{Activated, UiActionAppExt};
+        let run = |view: PartyView, queue: MatchPreference| {
+            let mut app = App::new();
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<AppScreen>()
+                .init_resource::<ClientSession>()
+                .init_resource::<crate::career::CareerClient>()
+                .init_resource::<crate::match_service::MatchServiceClient>()
+                .insert_resource({
+                    let mut party = PartyClient::default();
+                    party.view = view;
+                    party
+                })
+                .add_message::<NetworkCommand>()
+                .add_message::<crate::net::SessionUiCommand>()
+                .add_ui_action::<LobbyAction>()
+                .add_systems(Update, lobby_actions);
+            app.world_mut().write_message(Activated {
+                action: LobbyAction::Play(queue),
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            let launched: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter_map(|command| match command {
+                    NetworkCommand::Party(PartyCommand::Launch { preference }) => Some(preference),
+                    _ => None,
+                })
+                .collect();
+            let picked = app
+                .world()
+                .resource::<crate::match_service::MatchServiceClient>()
+                .preference;
+            (launched, picked)
+        };
+        for queue in [
+            MatchPreference::Ranked,
+            MatchPreference::Casual,
+            MatchPreference::BotPractice,
+        ] {
+            assert_eq!(run(party_view(1, 1, &[1, 2]), queue).0, [queue]);
+            let (launched, picked) = run(PartyView::default(), queue);
+            assert!(launched.is_empty());
+            assert_eq!(picked, queue);
+            assert!(
+                run(party_view(2, 1, &[1, 2]), queue).0.is_empty(),
+                "a member waits"
+            );
+        }
+    }
+
+    #[test]
+    fn refusal_codes_have_text_and_unknown_codes_fall_back() {
+        for code in [
+            "not_online",
+            "self_invite",
+            "already_member",
+            "party_full",
+            "no_invite",
+            "not_leader",
+            "no_party",
+            "invite_declined",
+            "invite_rate",
+        ] {
+            let text = party_error_text(code);
+            assert!(
+                !text.is_empty() && !text.starts_with("party."),
+                "{code}: {text}"
+            );
+            assert_ne!(text, party_error_text("no_such_code"), "{code}");
+        }
+        assert_eq!(party_error_text("no_such_code"), tr("party.error.unknown"));
+        assert_eq!(
+            notice_text(&PartyNotice::Error("party_full".into())),
+            tr("party.error.party_full")
+        );
+        assert_eq!(
+            notice_text(&PartyNotice::LobbyRestarted),
+            tr("party.notice.lobby_restarted")
+        );
+    }
+
+    /// Friends are marked on the first visit: entering the lobby asks the
+    /// server for the friend list, for a signed-in player only.
+    #[test]
+    fn entering_the_lobby_requests_friends_for_a_signed_in_player() {
+        let run = |signed_in: bool, storage: bool| {
+            let mut app = App::new();
+            let mut career = crate::career::CareerClient::default();
+            career.view.storage_enabled = storage;
+            career.view.profile = signed_in
+                .then(|| shared::career::ProfileSummary::new("p".repeat(64), "Ann".into()));
+            app.insert_resource(career)
+                .add_message::<NetworkCommand>()
+                .add_systems(Update, request_friends_on_enter);
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter(|command| {
+                    matches!(
+                        command,
+                        NetworkCommand::Career(shared::career::CareerRequest::Friends {
+                            request_id: LOBBY_FRIENDS_REQUEST_ID,
+                        })
+                    )
+                })
+                .count()
+        };
+        assert_eq!(run(true, true), 1);
+        assert_eq!(run(false, true), 0, "a guest has no friends to ask for");
+        assert_eq!(run(true, false), 0, "no storage, no friends");
     }
 
     #[test]
@@ -1263,6 +1467,21 @@ mod tests {
         m.away = true;
         assert_eq!(member_status(&m).0, "Away");
     }
+    #[test]
+    fn roster_identity_keeps_public_tags_beside_elided_names() {
+        let mut first = member(2, false);
+        first.nickname = "WWWWWWWWWWWWWWWWWWWW#1001".into();
+        let mut second = member(3, false);
+        second.nickname = "WWWWWWWWWWWWWWWWWWWW#1002".into();
+        assert_eq!(
+            roster_identity(&first),
+            ("WWWWWWWWWWWWWWWWWWWW", "#1001".into())
+        );
+        assert_eq!(roster_identity(&first).1, "#1001");
+        assert_eq!(roster_identity(&second).1, "#1002");
+        assert_eq!(roster_identity(&member(7, false)), ("P7", "#7".into()));
+    }
+
     #[test]
     fn five_members_keep_identity_and_centre_even_when_someone_else_leads() {
         let mut view = party_view(4, 2, &[1, 2, 3, 4, 5]);
@@ -1326,6 +1545,56 @@ mod tests {
             spawn_online_row(root, &party_view(1, 1, &[1, 2, 3, 4, 5]), &player)
         });
         assert!(harness::find(full.world_mut(), "LobbyInvite42").is_none());
+    }
+
+    /// Production's party lobby has no server field or connection row; a
+    /// contour build's names its running profile and opens the panel.
+    #[test]
+    fn no_player_build_lobby_exposes_a_server_or_connection_row() {
+        use crate::connection_profile::ActiveConnection;
+        use crate::ui::test_id::harness;
+        for contour in [None, Some("dev")] {
+            let connection = ActiveConnection::for_contour(contour, None);
+            let sig = signature(
+                &PartyClient::default(),
+                &crate::career::CareerClient::default(),
+                &ClientSession::default(),
+                Some(&connection),
+                None,
+                Vec2::new(1280.0, 720.0),
+                1.0,
+                None,
+                crate::team::CharacterChoice::default(),
+            );
+            assert_eq!(sig.connection, None);
+            for phone in [false, true] {
+                let mut app = harness::kit_app();
+                app.add_ui_action::<LobbyAction>();
+                harness::spawn_ui(app.world_mut(), |root| spawn_social(root, &sig, phone));
+                app.update();
+                let names: Vec<String> = app
+                    .world_mut()
+                    .query::<crate::ui::test_id::NodeKey>()
+                    .iter(app.world())
+                    .map(|key| key.as_str().to_owned())
+                    .collect();
+                let server_ui = names
+                    .iter()
+                    .filter(|name| {
+                        name.starts_with("LobbyServer") || name.starts_with("LobbyConnection")
+                    })
+                    .count();
+                assert_eq!(server_ui, 0, "{contour:?} phone {phone}");
+                if server_ui > 0 {
+                    harness::press(app.world_mut(), "LobbyConnectionChange");
+                    app.update();
+                    assert_eq!(
+                        harness::drain_actions::<LobbyAction>(app.world_mut()),
+                        vec![LobbyAction::Connection]
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -1,0 +1,9 @@
+{
+  "tier.status.step_down": "Уровень Hero «{tier}» до {until} UTC, затем «{next}».",
+  "tier.status.until": "Уровень Hero «{tier}» до {until} UTC.",
+  "tier.status.none": "Каждая поддержка действует 30 дней, и вся поддержка за эти 30 дней складывается в более высокий уровень.",
+  "tier.style.locked": "{aura} · закрыто",
+  "tier.purchase.website": "Поддержать на сайте",
+  "tier.website.unavailable": "Сайт не настроен в этой сборке.",
+  "tier.website.opened": "Страница поддержки открыта в браузере. После оплаты нажмите «Обновить»."
+}

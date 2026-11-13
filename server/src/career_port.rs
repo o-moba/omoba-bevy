@@ -16,12 +16,34 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use shared::career::{CareerRequest, CareerView, MatchResult, ProfileSummary};
+use shared::match_service::MatchPreference;
+
+/// One signed `FindMatch` for the public lobby.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MatchRequest {
+    pub addr: SocketAddr,
+    pub request_id: u64,
+    pub preference: MatchPreference,
+    /// A Ranked search that also searches Casual PvP (LR-08).
+    pub also_casual: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReadyRequest {
+    pub addr: SocketAddr,
+    pub request_id: u64,
+    pub check_id: String,
+    pub accepted: bool,
+}
 
 pub(crate) trait CareerPort {
     /// Whether durable storage is configured; disabled stores accept nothing
     /// and report guest play in the view.
     fn enabled(&self) -> bool;
     fn new_result_id(&self) -> String;
+    fn shared_ready_enabled(&self) -> bool;
+    fn submit_ready(&mut self, work: crate::career_backend::consent::Work) -> bool;
+    fn take_ready_completions(&mut self) -> Vec<crate::career_backend::consent::Completion>;
 
     // Account state per endpoint.
     fn profile(&self, addr: SocketAddr) -> Option<ProfileSummary>;
@@ -32,6 +54,12 @@ pub(crate) trait CareerPort {
         addr: SocketAddr,
     ) -> Option<shared::public_transport::GameplayPrincipal>;
     fn view(&self, addr: SocketAddr) -> CareerView;
+    /// The endpoint's active moderation sanctions (LR-15): read at sign-in
+    /// (also kept from a refused one) and with every access refresh.
+    fn sanctions(&self, addr: SocketAddr) -> Vec<shared::moderation::Sanction>;
+    /// The database-wide chat switch as last read; `None` before the first
+    /// read or without a database.
+    fn chat_switch(&self) -> Option<bool>;
     fn forget(&mut self, addr: SocketAddr);
     fn touch(&mut self, addr: SocketAddr);
     fn set_playing(&mut self, addr: SocketAddr, playing: bool);
@@ -40,9 +68,9 @@ pub(crate) trait CareerPort {
     // Signed requests in, side effects out (drained by the runtime each tick).
     fn handle(&mut self, addr: SocketAddr, request: CareerRequest);
     fn poll(&mut self);
-    fn take_match_requests(
-        &mut self,
-    ) -> Vec<(SocketAddr, u64, shared::match_service::MatchPreference)>;
+    fn take_match_requests(&mut self) -> Vec<MatchRequest>;
+    fn take_match_refusals(&mut self) -> Vec<(MatchRequest, String)>;
+    fn take_ready_requests(&mut self) -> Vec<ReadyRequest>;
     fn take_cancelled(&mut self) -> Vec<SocketAddr>;
     fn take_social(&mut self) -> Vec<(SocketAddr, shared::social::SocialRequest)>;
     fn take_settled(&mut self) -> Vec<MatchResult>;
@@ -52,7 +80,25 @@ pub(crate) trait CareerPort {
     fn start(&mut self, result: MatchResult) -> bool;
     fn checkpoint(&mut self, result: MatchResult) -> bool;
     fn settle(&mut self, result: MatchResult) -> bool;
+    /// Channel acceptance is not a SQL/durability acknowledgement. The producer
+    /// retains its stable event until take_queue_dodge_committed returns its ID.
+    fn record_queue_dodge(&mut self, event: crate::career_backend::queue_dodges::Event) -> bool;
+    fn take_queue_dodge_committed(&mut self) -> Vec<String>;
+    /// Startup-only aggregate import. The lobby retains its persisted snapshot
+    /// and blocks new admission until all exact SQL acknowledgements arrive.
+    fn record_queue_floor(
+        &mut self,
+        floor: omoba_career_store::career_store::QueuePenaltyFloor,
+    ) -> bool;
+    fn take_queue_floor_committed(
+        &mut self,
+    ) -> Vec<omoba_career_store::career_store::QueuePenaltyFloor>;
+    /// Non-blocking barrier: all previously accepted records are fsynced in
+    /// the local outbox (or already settled). Does not require a live database.
+    fn flush_outbox(&mut self) -> bool;
     fn started(&self, id: &str) -> bool;
+    /// SQL acknowledged the gameplay-start checkpoint, distinct from allocation.
+    fn gameplay_committed(&self, id: &str) -> bool;
     fn start_rejected(&self, id: &str) -> Option<String>;
     fn start_error(&self, id: &str) -> Option<String>;
     fn forget_start(&mut self, id: &str);
@@ -63,11 +109,32 @@ pub(crate) trait CareerPort {
     #[cfg(test)]
     fn test_authenticated(&mut self, addr: SocketAddr, profile: ProfileSummary, session_id: &str);
     #[cfg(test)]
+    fn test_complete_ready(&mut self, completion: crate::career_backend::consent::Completion);
+    #[cfg(test)]
     fn test_ack_start(&mut self, id: &str);
+    #[cfg(test)]
+    fn test_ack_gameplay(&mut self, id: &str);
     #[cfg(test)]
     fn test_ack_settle(&mut self, result: MatchResult);
     #[cfg(test)]
     fn test_reject_start(&mut self, id: &str, error: &str);
     #[cfg(test)]
     fn test_is_playing(&self, addr: SocketAddr) -> bool;
+    #[cfg(test)]
+    fn test_set_play_cooldown(
+        &mut self,
+        addr: SocketAddr,
+        cooldown: Option<shared::career::PlayCooldown>,
+    );
+    #[cfg(test)]
+    fn test_set_sanctions(
+        &mut self,
+        addr: SocketAddr,
+        sanctions: Vec<shared::moderation::Sanction>,
+    );
+    #[cfg(test)]
+    fn test_set_chat_switch(&mut self, enabled: Option<bool>);
+    /// Start the next access refresh (presence, key and Supporter status) now.
+    #[cfg(test)]
+    fn test_refresh_now(&mut self);
 }

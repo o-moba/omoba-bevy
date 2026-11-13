@@ -186,8 +186,15 @@ fn music_has_one_pending_loop_without_device_and_updates_pause_and_gain_in_place
 
 // Voices from the rows of the skill registry.
 
-use crate::skill_presentation::cast::CastKey;
-use shared::HeroClass;
+use crate::skill_presentation::{
+    cast::CastKey,
+    stage::{OwnerSeen, StageChange, TelegraphSeen, Transition},
+};
+use shared::{
+    HeroClass,
+    combat::{CombatEntity, CombatEntityKind, CombatEvent, ProjectileStyle},
+    loadout::{EffectVisualKind, SkillEffectState, SkillId},
+};
 
 const ME: u64 = 7;
 
@@ -198,13 +205,18 @@ fn skill_setup(registry: SkillPresentation) -> App {
     app.insert_resource(registry)
         .insert_resource(ClientSession::admitted_for_test())
         .add_message::<SkillCastObserved>()
-        .add_message::<StageEvent>();
+        .add_message::<StageEvent>()
+        .add_message::<TelegraphSeen>();
     let mut runtime = app.world_mut().resource_mut::<GameAudioRuntime>();
     for cue in [
         AudioCue::Melee,
         AudioCue::Holy,
         AudioCue::Kill,
         AudioCue::LevelUp,
+        AudioCue::RadiantCharge,
+        AudioCue::RadiantBeam,
+        AudioCue::RadiantCore,
+        AudioCue::RadianceBurst,
     ] {
         runtime.cues.insert(
             cue,
@@ -458,42 +470,42 @@ fn another_hero_is_heard_with_one_note_by_its_distance() {
     assert_eq!(diagnostics(&app).played, 1);
 }
 
-#[test]
-fn receipts_and_releases_are_voiced_by_their_rows_and_the_packaged_rows_add_nothing() {
-    let ms = Duration::from_millis;
-    let receipt = |id: u64, slot: u8| shared::combat::CombatEvent {
+/// A receipt of damage the local hero dealt to a minion with the action on `slot`.
+fn receipt(id: u64, slot: u8) -> CombatEvent {
+    CombatEvent {
         id,
-        source: shared::combat::CombatEntity {
-            kind: shared::combat::CombatEntityKind::Player,
+        source: CombatEntity {
+            kind: CombatEntityKind::Player,
             id: ME,
         },
-        target: shared::combat::CombatEntity {
-            kind: shared::combat::CombatEntityKind::Minion,
+        target: CombatEntity {
+            kind: CombatEntityKind::Minion,
             id: 40,
         },
         amount: 10.0,
-        style: shared::combat::ProjectileStyle::Crescent,
+        style: ProjectileStyle::Crescent,
         action_slot: Some(slot),
         ..Default::default()
-    };
-    let beam = StageEvent {
-        effect: shared::loadout::SkillEffectState {
+    }
+}
+
+/// A Horizon Ray of the local hero as `kind`, lying along +X from the origin.
+fn ray(kind: EffectVisualKind, remaining_secs: f32) -> (SkillEffectState, Option<OwnerSeen>) {
+    (
+        SkillEffectState {
             id: 31,
             owner_id: ME,
             owner_team: shared::map::Team::Green,
-            skill: shared::loadout::SkillId::DawnRay,
-            kind: shared::loadout::EffectVisualKind::Beam,
+            skill: SkillId::DawnRay,
+            kind,
             position: [0.0, 0.0],
             end: [6.0, 0.0],
             radius: 0.6,
-            remaining_secs: 0.4,
+            remaining_secs,
             armed: false,
             consumed_segments: 0,
         },
-        change: crate::skill_presentation::stage::StageChange::Transition(
-            crate::skill_presentation::stage::Transition::KindFlipped,
-        ),
-        owner: Some(crate::skill_presentation::stage::OwnerSeen {
+        Some(OwnerSeen {
             visible: true,
             alive: true,
             parrying: None,
@@ -501,7 +513,23 @@ fn receipts_and_releases_are_voiced_by_their_rows_and_the_packaged_rows_add_noth
             slot: Some(3),
             local: true,
         }),
-    };
+    )
+}
+
+/// The ray of the local hero firing.
+fn fired_ray() -> StageEvent {
+    let (effect, owner) = ray(EffectVisualKind::Beam, 0.15);
+    StageEvent {
+        effect,
+        change: StageChange::Transition(Transition::KindFlipped),
+        owner,
+    }
+}
+
+#[test]
+fn receipts_and_releases_are_voiced_by_their_rows_and_the_packaged_rows_add_nothing() {
+    let ms = Duration::from_millis;
+    let beam = fired_ray();
 
     let mut app = skill_setup(SkillPresentation::target());
     // Shield Bash is on the first slot of the Warrior: its hit is `melee` 0.75 `tail`.
@@ -515,23 +543,18 @@ fn receipts_and_releases_are_voiced_by_their_rows_and_the_packaged_rows_add_noth
     assert!(near(hit[0].0, 0.75 * policy::detune(1)));
     assert_eq!((hit[0].1, hit[0].2), (Some(ms(200)), None));
     assert!(near(hit[0].3, 0.8 * 0.7 * 0.5));
-    // The beam of Dawn Ray: `holy` 0.70 with one note beside it and one 40 ms later.
+    // The beam of Horizon Ray: the whole `radiant_beam`, one note that holds the chord.
     advance(&mut app, 0.4);
     assert_eq!(handed(&mut app).len(), 0);
     app.world_mut().write_message(beam.clone());
     advance(&mut app, 0.01);
-    let detune = policy::detune(31);
-    let mut chord: Vec<f32> = handed(&mut app).iter().map(|voice| voice.0).collect();
-    chord.sort_by(f32::total_cmp);
-    assert_eq!(chord.len(), 2);
-    assert!(near(chord[0], 0.70 * detune) && near(chord[1], 1.05 * detune));
-    assert_eq!(diagnostics(&app).pending_notes, 1);
-    advance(&mut app, 0.04);
-    let mut chord: Vec<f32> = handed(&mut app).iter().map(|voice| voice.0).collect();
-    chord.sort_by(f32::total_cmp);
-    assert_eq!(chord.len(), 3);
-    assert!(near(chord[2], 1.40 * detune));
-    assert_eq!(diagnostics(&app).cue_plays.get("holy"), Some(&3));
+    let fired = handed(&mut app);
+    assert_eq!(fired.len(), 1);
+    assert!(near(fired[0].0, policy::detune(31)));
+    assert_eq!((fired[0].1, fired[0].2), (None, None));
+    assert!(near(fired[0].3, 0.8 * 0.7 * 0.5));
+    assert_eq!(diagnostics(&app).pending_notes, 0);
+    assert_eq!(diagnostics(&app).cue_plays.get("radiant_beam"), Some(&1));
 
     // A registry without the rows names no voice: the receipt keeps the cue of its wire
     // style, played as recorded, and neither the cast nor the beam is heard.
@@ -554,9 +577,87 @@ fn receipts_and_releases_are_voiced_by_their_rows_and_the_packaged_rows_add_noth
     assert!(diagnostics(&app).row_voices.is_empty());
 }
 
-/// The length in seconds of what the decoder yields for one slice of the packaged sample
-/// of `cue`, cut as the mixer cuts it.
-fn decoded_secs(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSlice) -> f64 {
+#[test]
+fn the_ray_is_cast_with_the_ignition_warned_with_the_swell_and_fired_into_it() {
+    let ms = Duration::from_millis;
+    let mut app = skill_setup(SkillPresentation::target());
+    // The local hero casts the ray; its warning reaches the client in the same snapshot.
+    let (warning, owner) = ray(EffectVisualKind::BeamWarning, 0.9);
+    let key = CastKey::of(HeroClass::Dawnweaver, None, 3).unwrap();
+    assert_eq!(key.skill().map(|skill| skill.id()), Some("dawn_ray"));
+    app.world_mut().write_message(SkillCastObserved {
+        actor_id: ME,
+        key,
+        slot: 3,
+        sequence: 6,
+        recast: false,
+        origin: Vec3::ZERO,
+        position: Vec3::ZERO,
+        yaw: None,
+        forward: Vec3::NEG_Z,
+        local: true,
+    });
+    app.world_mut().write_message(TelegraphSeen {
+        effect: warning,
+        owner,
+    });
+    advance(&mut app, 0.01);
+    // The cast is the first 0.12 s of the charge, the warning the rest of it from 0.20 s:
+    // the two never sound the same part of the sample.
+    let level = 0.8 * 0.7 * 0.5;
+    let mut charge = handed(&mut app);
+    charge.sort_by_key(|voice| voice.1);
+    assert_eq!(charge.len(), 2);
+    assert!(near(charge[0].0, policy::detune(6)));
+    assert_eq!((charge[0].1, charge[0].2), (None, Some(ms(120))));
+    assert!(near(charge[0].3, level * 0.8));
+    assert!(near(charge[1].0, policy::detune(31)));
+    assert_eq!((charge[1].1, charge[1].2), (Some(ms(200)), None));
+    assert!(near(charge[1].3, level * 0.9));
+    assert_eq!(diagnostics(&app).cue_plays.get("radiant_charge"), Some(&2));
+    // The windup later the ray fires, in a voice of its own.
+    advance(&mut app, 0.79);
+    app.world_mut().write_message(fired_ray());
+    advance(&mut app, 0.01);
+    assert_eq!(diagnostics(&app).cue_plays.get("radiant_beam"), Some(&1));
+    assert_eq!(diagnostics(&app).dropped_rate, 0);
+}
+
+#[test]
+fn a_full_frame_keeps_the_release_and_drops_what_only_adds_to_a_hit() {
+    let mut app = skill_setup(SkillPresentation::target());
+    // The ray kills a hero inside its core and bursts a mark on a minion, all in the frame
+    // it fires: a kill, a hit, the release, a burst and a core note are five voices.
+    let kill = CombatEvent {
+        target: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: 8,
+        },
+        killed: true,
+        core_hit: true,
+        ..receipt(1, 0)
+    };
+    let burst = CombatEvent {
+        radiance_burst: true,
+        ..receipt(2, 0)
+    };
+    app.world_mut()
+        .resource_mut::<GameStateSnapshot>()
+        .combat_events
+        .extend([burst, kill]);
+    app.world_mut().write_message(fired_ray());
+    advance(&mut app, 0.01);
+    let report = diagnostics(&app);
+    assert_eq!((report.played, report.dropped_rate), (4, 1));
+    for cue in ["kill", "melee", "radiant_beam", "radiance_burst"] {
+        assert_eq!(report.cue_plays.get(cue), Some(&1), "{cue}");
+    }
+    assert!(!report.cue_plays.contains_key("radiant_core"));
+}
+
+/// The samples the decoder yields for one slice of the packaged sample of `cue`, cut as
+/// the mixer cuts it, and how many of them make a second.
+fn decoded(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSlice) -> (Vec<f32>, f64) {
     use bevy::audio::{Decodable, Source};
     let catalog = CueCatalog::parse(include_str!("../../assets/audio/manifest.json")).unwrap();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -573,14 +674,21 @@ fn decoded_secs(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSli
     }
     .span();
     let samples = match (start, duration) {
-        (Some(start), Some(duration)) => {
-            decoder.skip_duration(start).take_duration(duration).count()
-        }
-        (Some(start), None) => decoder.skip_duration(start).count(),
-        (None, Some(duration)) => decoder.take_duration(duration).count(),
-        (None, None) => decoder.count(),
+        (Some(start), Some(duration)) => decoder
+            .skip_duration(start)
+            .take_duration(duration)
+            .collect(),
+        (Some(start), None) => decoder.skip_duration(start).collect(),
+        (None, Some(duration)) => decoder.take_duration(duration).collect(),
+        (None, None) => decoder.collect(),
     };
-    samples as f64 / per_second
+    (samples, per_second)
+}
+
+/// The length in seconds of one slice of the packaged sample of `cue`.
+fn decoded_secs(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSlice) -> f64 {
+    let (samples, per_second) = decoded(cue, slice);
+    samples.len() as f64 / per_second
 }
 
 #[test]
@@ -594,6 +702,8 @@ fn every_slice_of_every_base_sample_sounds() {
         AudioCue::Caster,
         AudioCue::Tower,
         AudioCue::Bluff,
+        AudioCue::RadiantCharge,
+        AudioCue::RadiantBeam,
     ] {
         let about = |secs: f64, wanted: f64| (secs - wanted).abs() < 0.002;
         let full = decoded_secs(cue, AudioSlice::Full);
@@ -605,5 +715,39 @@ fn every_slice_of_every_base_sample_sounds() {
         assert!(about(body, 0.34), "{} body {body:.3}", cue.id());
         let tail = decoded_secs(cue, AudioSlice::Tail);
         assert!(about(tail, full - 0.20), "{} tail {tail:.3}", cue.id());
+    }
+}
+
+#[test]
+fn the_charge_peaks_when_the_ray_fires_and_the_cues_of_receipts_sound() {
+    use crate::skill_presentation::vocab::AudioSlice;
+    // The warning is the tail of the charge. It lasts the catalog windup of the ray, with a
+    // short ring after it, and is loudest as the ray fires.
+    let windup = f64::from(shared::loadout::skill(SkillId::DawnRay).windup_secs);
+    let (tail, per_second) = decoded(AudioCue::RadiantCharge, AudioSlice::Tail);
+    let secs = tail.len() as f64 / per_second;
+    assert!(
+        (windup..=windup + 0.2).contains(&secs),
+        "tail {secs:.3} s, windup {windup:.2} s"
+    );
+    let step = 0.02;
+    let energy = |window: &[f32]| window.iter().map(|value| value * value).sum::<f32>();
+    let (loudest, _) = tail
+        .chunks((step * per_second) as usize)
+        .enumerate()
+        .max_by(|(_, a), (_, b)| energy(a).total_cmp(&energy(b)))
+        .unwrap();
+    let loudest = loudest as f64 * step;
+    assert!(
+        (loudest - windup).abs() <= 0.06,
+        "loudest at {loudest:.2} s, windup {windup:.2} s"
+    );
+    for cue in [AudioCue::RadiantCore, AudioCue::RadianceBurst] {
+        let full = decoded_secs(cue, AudioSlice::Full);
+        assert!(
+            (0.3..=0.6).contains(&full),
+            "{} lasts {full:.3} s",
+            cue.id()
+        );
     }
 }

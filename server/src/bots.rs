@@ -2,11 +2,44 @@ use crate::{formation::joined_count, runtime::ServerRuntime, session::normalize_
 pub(crate) use common::bots::*;
 use shared::{
     HeroClass,
+    bot_profile::BotDifficulty,
     map::Team,
     wire::{ClientPacket, GameState},
 };
 use std::{net::SocketAddr, time::Instant};
+
+/// The practice bot level a server plays from boot, set by
+/// `OMOBA_BOT_DIFFICULTY` (`read`). Only a standalone server that fills with
+/// bots takes it. A lobby or match worker plays Elite and never reads the
+/// value, so an operator setting there cannot weaken online bots.
+pub(crate) fn boot_bot_difficulty(
+    public: bool,
+    fills_with_bots: bool,
+    read: impl FnOnce() -> Option<String>,
+) -> Result<Option<BotDifficulty>, String> {
+    if public || !fills_with_bots {
+        return Ok(None);
+    }
+    BotDifficulty::from_env_value(read().as_deref()).map_err(|value| {
+        format!(
+            "Invalid {}={value:?}: use recruit, regular, veteran or elite",
+            BotDifficulty::ENV
+        )
+    })
+}
+
 impl ServerRuntime {
+    /// Practice level for both teams; live bots are retuned in place.
+    /// Public roles stay Elite.
+    pub(crate) fn set_bot_difficulty(&mut self, level: BotDifficulty) {
+        if self.match_service.is_public() {
+            return;
+        }
+        for team in [Team::Green, Team::Blue] {
+            self.bots.set_difficulty(team, level, &self.world.players);
+        }
+    }
+
     pub(crate) fn prepare_practice_join(
         &mut self,
         addr: SocketAddr,

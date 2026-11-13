@@ -336,6 +336,16 @@ fn spawn_splash(
                         shadow,
                         Name::new("BootBuildInfo"),
                     ));
+                    // The region's age sign on every boot (LR-07; RU `12+`).
+                    if let Some(age) = crate::legal::age_rating() {
+                        body.spawn((
+                            Text::new(age),
+                            theme::styled_text(TextStyle::keep_case(TextRole::Label)),
+                            TextColor(theme::GOLD),
+                            shadow,
+                            Name::new("BootAgeRating"),
+                        ));
+                    }
                 })
                 .id(),
             );

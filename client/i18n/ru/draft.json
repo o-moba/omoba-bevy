@@ -18,7 +18,7 @@
   "draft.subtitle": "Герой · класс · линия · 30 секунд на выбор",
   "draft.your_team": "ВАША КОМАНДА",
   "draft.avatars.included": "ВСТРОЕННЫЕ ГЕРОИ",
-  "draft.avatars.studio": "EKZA STUDIO · БИБЛИОТЕКА",
+  "draft.avatars.studio": "EKZA STUDIO",
   "draft.button.refresh": "Обновить",
   "draft.button.connect_ekza": "Подключить Ekza",
   "draft.button.syncing": "Синхронизация…",
@@ -28,5 +28,14 @@
   "draft.timer.gathering": "Ожидаем команду…",
   "draft.stage.rotate": "Потяни, чтобы повернуть",
   "draft.tab.avatars": "Аватары",
-  "draft.tab.classes": "Классы"
+  "draft.tab.classes": "Классы",
+  "draft.error.roster_changed": "Состав изменился. Проверьте команду и подтвердите выбор снова.",
+  "draft.error.loading_timeout": "Не все игроки загрузились вовремя. Подтвердите выбор снова или выйдите.",
+  "draft.error.start_timeout": "Старт матча занял слишком долго. Подтвердите выбор снова или выйдите.",
+  "draft.timer.join_remaining": "Ждём игроков · {seconds} с",
+  "draft.error.allocation_cancelled_or_expired": "Игрок не подключился. Возвращаемся в поиск…",
+  "draft.error.durable_start_pending": "Сохраняем начало матча. Подождите…",
+  "draft.class_taken": "{hero} · Занят",
+  "draft.error.hero_taken": "Союзник подтвердил этот класс. Выберите другой или дождитесь отмены выбора.",
+  "draft.error.hero_auto_picked": "Ваш класс занят. Доступный класс выбран автоматически."
 }

@@ -94,7 +94,11 @@ impl Plugin for FrontendQaPlugin {
                 dimension("OMOBA_QA_WIDTH", 1280),
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
-            stage: if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1") {
+            stage: if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1") {
+                4
+            } else if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
+                && crate::connection_profile::selectable()
+            {
                 10
             } else {
                 0
@@ -116,6 +120,18 @@ impl Plugin for FrontendQaPlugin {
             prepare_help_buttons.after(bevy::ui::UiSystems::Focus),
         )
         .add_systems(Update, accept_party_invite)
+        .add_systems(
+            Update,
+            seed_home_fixture
+                .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                .before(crate::frontend::home::HomeViews),
+        )
+        .add_systems(
+            Update,
+            seed_ready_fixture
+                .after(crate::net::SessionReactions)
+                .before(crate::frontend::searching::SearchingViews),
+        )
         .add_systems(
             Update,
             drive
@@ -232,6 +248,62 @@ fn result_fixture_label(mut commands: Commands) {
     ));
 }
 
+fn seed_ready_fixture(
+    mut matchmaking: ResMut<crate::match_service::MatchServiceClient>,
+    mut career: ResMut<crate::career::CareerClient>,
+) {
+    if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1") {
+        career.view.storage_enabled = true;
+        career.view.error = None;
+        career.view.error_code = None;
+        matchmaking.active = true;
+        matchmaking.preference = shared::match_service::MatchPreference::Ranked;
+        career.view.match_service_request_id = Some(0);
+        career.view.match_service = Some(shared::match_service::MatchServiceView::ReadyCheck {
+            check_id: "qa-only".into(),
+            preference: shared::match_service::MatchPreference::Ranked,
+            accepted: false,
+            accepted_count: 6,
+            needed: 10,
+            remaining_secs: 15,
+        });
+    }
+}
+
+/// The returning-player capture has no live account. A known admitted profile
+/// is a render fixture only; no key, server admission or career credit is made.
+fn seed_home_fixture(mut career: ResMut<crate::career::CareerClient>) {
+    if std::env::var("OMOBA_HOME_ONLY_QA").as_deref() != Ok("1")
+        || std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() != Ok("1")
+    {
+        return;
+    }
+    let mut profile = shared::career::ProfileSummary::new("qa-render-only".into(), "Игрок".into());
+    profile.rating = 1234;
+    profile.completed_public_matches = std::env::var("OMOBA_HOME_COMPLETED_PUBLIC_QA")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|count| *count <= 10)
+        .unwrap_or(10);
+    profile.rated_matches = 19;
+    profile.matches_played = 19;
+    profile.wins = 10;
+    profile.losses = 9;
+    profile.progression_xp = 1900;
+    super::ranked_fixture::apply_profile(&mut profile);
+    career.view.ranked_season_open = super::ranked_fixture::season_open_hint();
+    career.view.profile = Some(profile);
+    career.view.storage_enabled = true;
+    career.view.error = None;
+    career.view.error_code = None;
+    career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
+    career.protection.status = Some(shared::device_account::AccountProtection {
+        recovery_codes_remaining: 8,
+        active_devices: 1,
+        ..default()
+    });
+}
+
 fn drive(
     session: Res<crate::net::ClientSession>,
     mut qa: ResMut<FrontendQa>,
@@ -241,6 +313,7 @@ fn drive(
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
     mut settings_tab: ResMut<crate::pause_menu::SelectedSettingsTab>,
     server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     mut scrolls: Query<(crate::qa::QaName, &ComputedNode, &mut ScrollPosition)>,
     mut career: ResMut<crate::career::CareerClient>,
     mut fixture_labels: Query<&mut Node, With<ResultFixtureLabel>>,
@@ -284,7 +357,7 @@ fn drive(
     };
     if let Some(mut server) = server {
         if qa.stage == 10 && !server.open {
-            server.open_for(&session);
+            crate::mobile_ui::open_connection_panel(&mut server, &session, connection.as_deref());
         } else if qa.stage != 10 {
             server.open = false;
         }
@@ -377,13 +450,20 @@ fn observe(
     )>,
     buttons: Query<crate::qa::QaName, With<Button>>,
     preview_cameras: Query<&Camera, With<crate::frontend::preview::PreviewCamera>>,
+    career: Res<crate::career::CareerClient>,
+    text: Query<(&Name, &Text)>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.finished {
         return;
     }
     if qa.started.elapsed() > Duration::from_secs(180) {
-        fail(&mut qa, "180-second capture deadline", &mut exit);
+        let reason = format!(
+            "180-second capture deadline (profile={}, preview={:?})",
+            career.view.profile.is_some(),
+            preview.status
+        );
+        fail(&mut qa, &reason, &mut exit);
         return;
     }
     if qa.in_flight {
@@ -397,6 +477,10 @@ fn observe(
             return;
         }
         qa.stage += 1;
+        // Production builds have no connection panel to capture.
+        if qa.stage == 10 && !crate::connection_profile::selectable() {
+            qa.stage += 1;
+        }
         if std::env::var("OMOBA_PLAYTEST_UI_QA").as_deref() == Ok("1") {
             while qa.stage < VIEWS.len() && ![0, 1, 2, 6, 7, 11, 12, 13].contains(&qa.stage) {
                 qa.stage += 1;
@@ -406,6 +490,7 @@ fn observe(
         qa.applied_stage = None;
         if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
             || std::env::var("OMOBA_HOME_ONLY_QA").as_deref() == Ok("1")
+            || std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1")
         {
             qa.stage = VIEWS.len();
         } else if qa.stage == 11 && !mobile.enabled {
@@ -440,6 +525,21 @@ fn observe(
         return;
     }
     if qa.applied_stage != Some(qa.stage) || *screen.get() != VIEWS[qa.stage].1 {
+        return;
+    }
+    if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1")
+        && !text.iter().any(|(name, label)| {
+            name.as_str() == "SearchingStatus" && label.0.contains("6/10") && label.0.contains("15")
+        })
+    {
+        // Correct controls alone do not prove the timer: a backend error may
+        // have replaced the actual ready status. Wait for the complete state.
+        return;
+    }
+    if qa.stage == 0
+        && std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1")
+        && career.view.profile.is_none()
+    {
         return;
     }
     if qa.stage == 0
@@ -487,6 +587,7 @@ fn observe(
             || name.as_str().starts_with("Searching")
             || name.as_str().starts_with("PostMatch")
             || name.as_str().starts_with("Server")
+            || name.as_str().starts_with("Connection")
             || name.as_str().starts_with("Help")
             || name.as_str() == "PhoneMenuBar"
             || name.as_str().starts_with("HeroSelect")
@@ -504,21 +605,41 @@ fn observe(
         }
     }
     let required: &[&str] = match qa.stage {
+        0 if mobile.enabled
+            && viewport.y < 600.0
+            && std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") =>
+        {
+            &[
+                "HomePlay",
+                "HomeAccount",
+                "HomeCollection",
+                "HomeHistory",
+                "HomeParty",
+                "HomeRanked",
+                "HomeBotPractice",
+                "HomeLeaderboard",
+                "HomeRating",
+            ]
+        }
         0 if mobile.enabled && viewport.y < 600.0 => &[
             "HomePlay",
             "HomeAccount",
             "HomeCollection",
             "HomeHistory",
             "HomeParty",
+            "HomeLeaderboard",
+            "HomeRating",
         ],
         0 if std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") => &[
             "HomePlay",
+            "HomeRanked",
             "HomeBotPractice",
             "HomeCustomizeCard",
             "HomeAccount",
             "HomeCollection",
             "HomeHistory",
             "HomeParty",
+            "HomeLeaderboard",
         ],
         0 => &[
             "HomePlay",
@@ -527,6 +648,7 @@ fn observe(
             "HomeCollection",
             "HomeHistory",
             "HomeParty",
+            "HomeLeaderboard",
         ],
         1 => &["CardBack", "CardOpenCollection"],
         2 if viewport.y < 600.0 => &["CollectionBack", "AvatarShowcase", "AvatarEquip"],
@@ -537,6 +659,9 @@ fn observe(
             "AvatarEquip",
         ],
         3 => &["HeroSelectBack", "FindMatchButton"],
+        4 if std::env::var("OMOBA_READY_CHECK_QA").as_deref() == Ok("1") => {
+            &["SearchingAccept", "SearchingDecline"]
+        }
         4 => &["SearchingCancel"],
         6 => &["PostMatchPlayAgain", "PostMatchBackToMenu"],
         7 if mobile.enabled => &[
@@ -559,12 +684,13 @@ fn observe(
             "PauseMenuResetGraphicsButton",
             "BackButton",
         ],
+        // A contour build's connection panel (production builds skip stage 10).
         10 => &[
-            "ServerPresetBeta",
-            "ServerPresetLocal",
-            "ServerConnectButton",
-            "ServerCloseButton",
-            "ServerKeyboardButton",
+            "ConnectionProfileDev",
+            "ConnectionProfileLocal",
+            "ConnectionProfileCustom",
+            "ConnectionUse",
+            "ServerEntryClose",
         ],
         11 => &["HelpDismissButton"],
         12 if mobile.enabled && viewport.y < 600.0 => &[
@@ -691,12 +817,36 @@ fn observe(
     qa.in_flight = true;
 }
 
-fn readback(captured: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMut<FrontendQa>) {
+fn has_rendered_rgba_pixels(bytes: &[u8]) -> bool {
+    bytes
+        .chunks_exact(4)
+        .any(|pixel| pixel[..3].iter().any(|&value| value != 0))
+}
+
+fn readback(
+    captured: On<ScreenshotCaptured>,
+    shots: Query<&Shot>,
+    mut qa: ResMut<FrontendQa>,
+    mut exit: MessageWriter<AppExit>,
+) {
     if let Ok(shot) = shots.get(captured.entity)
         && captured.image.width() == qa.pixels.x
         && captured.image.height() == qa.pixels.y
         && !qa.readbacks.contains(&shot.0)
     {
+        if !captured
+            .image
+            .data
+            .as_deref()
+            .is_some_and(has_rendered_rgba_pixels)
+        {
+            fail(
+                &mut qa,
+                "capture has no rendered color pixels; unlock the display and verify renderer readiness",
+                &mut exit,
+            );
+            return;
+        }
         qa.readbacks.push(shot.0);
     }
 }
@@ -704,6 +854,21 @@ fn readback(captured: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn black_or_alpha_only_readback_is_not_successful_visual_evidence() {
+        for bytes in [
+            vec![],
+            vec![0; 16],
+            vec![0, 0, 0, 255, 0, 0, 0, 255],
+            vec![0, 0, 0, 1],
+        ] {
+            assert!(!has_rendered_rgba_pixels(&bytes));
+        }
+        assert!(has_rendered_rgba_pixels(&[
+            0, 0, 0, 255, 240, 200, 160, 255
+        ]));
+    }
 
     #[test]
     fn every_captured_screen_has_a_distinct_file_and_root() {

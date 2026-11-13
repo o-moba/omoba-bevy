@@ -484,6 +484,8 @@ async fn settle(app: &App, q: &Quote, signature: &str) -> Result<()> {
         revoked_at: None,
         event_version: now() * 1000,
         renewal_enabled: Some(false),
+        amount_minor: None,
+        refunded_minor: None,
     };
     apply_event_tx(&mut tx, &q.profile_id, &event).await?;
     sqlx::query("UPDATE portal.supporter_orders SET confirmed_signature=$2,confirmed_at=$3 WHERE order_id=$1").bind(&q.order_id).bind(signature).bind(now()).execute(&mut *tx).await?;

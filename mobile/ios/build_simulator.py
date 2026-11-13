@@ -75,6 +75,9 @@ def main():
     info["CFBundleSupportedPlatforms"] = ["iPhoneSimulator"]
     with (bundle / "Info.plist").open("wb") as destination:
         plistlib.dump(info, destination)
+    subprocess.run(["xcrun", "ibtool", "--sdk", sdk, "--target-device", "iphone",
+                    "--target-device", "ipad", "--minimum-deployment-target", "15.0", "--compile",
+                    str(bundle / "OmobaAppDelegate.nib"), str(ROOT / "mobile/ios/OmobaAppDelegate.xib")], check=True)
     subprocess.run(["codesign", "--force", "--sign", "-", bundle], check=True)
     print(f"Simulator artifact: {bundle}")
     print(f"Install into a running simulator: xcrun simctl install booted {bundle}")

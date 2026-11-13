@@ -1,5 +1,7 @@
 # Архитектурный отчёт: итоги программы рефакторинга omoba
 
+> **Historical snapshot (2026-09-25).** This document predates connection profiles, markets, sign in with VK ID and the `common` crate. Do not cite it for current behaviour: the current architecture is in [architecture/](architecture/README.md) and the code map in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 | Параметр | Значение |
 |---|---|
 | Базовая точка | **b6fad0e**, последний коммит до программы. В нём уже есть offline practice, исправление K/D/A и practice sandbox |

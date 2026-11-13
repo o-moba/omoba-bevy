@@ -194,6 +194,9 @@ pub(crate) const fn unit_radius(shape: Shape) -> f32 {
         _ => 0.5,
     }
 }
+/// Half of the width of the streak mesh at size 1, across its own axis: a streak is as wide
+/// as its length allows.
+pub(crate) const STREAK_HALF_WIDTH: f32 = 0.18;
 /// How far ahead of its mesh origin the middle of a curved blade lies at size 1. Every
 /// other shape is centred on its origin.
 pub(crate) const fn blade_depth(shape: Shape) -> f32 {
@@ -759,7 +762,9 @@ pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
         // The stroke is a fifth of the radius: a small ring is still a line that is seen.
         Shape::Ringlet => Annulus::new(0.4, 0.5).into(),
         Shape::Slash => band_mesh(-1.2, 1.2, 0.7, 20, |t| (PI * t).sin() * 0.16),
-        Shape::Streak => Rectangle::new(1.7, 0.36).into(),
+        Shape::Streak => {
+            Rectangle::new(2. * unit_radius(Shape::Streak), 2. * STREAK_HALF_WIDTH).into()
+        }
         Shape::Star => {
             let rim: Vec<_> = (0..8)
                 .map(|i| {

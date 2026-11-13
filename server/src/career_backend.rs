@@ -9,7 +9,7 @@
 //! `MemoryCareer` runs the identical account logic without a database.
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -17,16 +17,50 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{Duration, Instant};
 
 use ed25519_dalek::{Signature, VerifyingKey};
-use omoba_career_store::career_store::CareerStore;
+use omoba_career_store::career_store::{CareerStore, QueuePenaltyFloor};
 use serde::{Deserialize, Serialize};
 use shared::career::*;
+use shared::moderation::{Sanction, SanctionKind};
 
+use crate::admission::{Limits, SourceIp};
 use crate::career_port::CareerPort;
 
-const MAX_CLIENTS: usize = 512;
+#[path = "ready_consent.rs"]
+pub(crate) mod consent;
+#[path = "critical_replies.rs"]
+mod critical;
+#[path = "worker_health.rs"]
+mod health;
+#[path = "queue_dodge_outbox.rs"]
+pub(crate) mod queue_dodges;
+
+/// Career clients one lobby keeps (its player ceiling together with
+/// `public_transport::MAX_ENDPOINTS`); a newcomer beyond it gets `server_full`.
+pub(crate) const MAX_CLIENTS: usize = 2048;
+/// The English fallback of [`shared::career::error_code::SERVER_FULL`].
+const SERVER_FULL_TEXT: &str = "The server is full right now. Signing in again shortly.";
+/// A client of an IP at its limit gives way to a newcomer from that IP once
+/// it was idle this long (a reconnect leaves its old endpoint behind).
+const STALE_CLIENT: Duration = Duration::from_secs(30);
+/// One Login job per endpoint and challenge at a time; a lost reply is
+/// retried after this long.
+const LOGIN_IN_FLIGHT: Duration = Duration::from_secs(10);
+/// A Login or account action waits this long for the database to connect
+/// before it is answered "unavailable".
+const STORE_WAIT: Duration = Duration::from_secs(10);
+/// How often the lobby runs the retention job, and its batch.
+const RETENTION_INTERVAL: Duration = Duration::from_secs(3600);
+const RETENTION_BATCH: u32 = 200;
 const MAX_JOBS: usize = 256;
 const COSMETIC_CACHE_TTL: Duration = Duration::from_secs(30);
+const ACCESS_REFRESH_AFTER: Duration = Duration::from_secs(10);
+const ACCESS_REFRESH_STEP: Duration = Duration::from_millis(100);
+const ACCESS_REFRESH_RETRY: Duration = Duration::from_secs(5);
+const ACCESS_REFRESH_BATCH: usize = 16;
+const PRESENCE_BATCH_SIZE: usize = 512;
 const CHALLENGE_TTL: Duration = Duration::from_secs(30);
+/// How often the worker reads the database-wide chat switch (LR-15).
+const CHAT_SWITCH_POLL: Duration = Duration::from_secs(5);
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -65,12 +99,16 @@ struct Client {
     challenge: Option<(AuthChallenge, Instant)>,
     auth: Option<AuthChallenge>,
     sequence: u64,
+    queue_sequence: Option<u64>,
     last_request: Option<Instant>,
     touched: Instant,
     playing: bool,
     profile_ready: bool,
     supporter_checked: Option<Instant>,
+    access_refresh_sent: Option<Instant>,
     key_checked: Option<Instant>,
+    /// When a Login job for the current challenge went to the worker.
+    login_sent: Option<Instant>,
 }
 impl Default for Client {
     fn default() -> Self {
@@ -79,17 +117,27 @@ impl Default for Client {
             challenge: None,
             auth: None,
             sequence: 0,
+            queue_sequence: None,
             last_request: None,
             touched: Instant::now(),
             playing: false,
             profile_ready: false,
             supporter_checked: None,
+            access_refresh_sent: None,
             key_checked: None,
+            login_sent: None,
         }
     }
 }
 
 pub(crate) enum Job {
+    QueueAccess {
+        request: crate::career_port::MatchRequest,
+        nonce: String,
+        sequence: u64,
+        public_key: String,
+        profile_id: String,
+    },
     RefreshAccess {
         addr: SocketAddr,
         nonce: String,
@@ -108,21 +156,44 @@ pub(crate) enum Job {
         action: CareerAction,
     },
     Record(Box<PendingRecord>),
+    QueueDodge(queue_dodges::Event),
+    QueueFloor(QueuePenaltyFloor),
+    Ready(consent::Work),
+    Flush(u64),
     Presence(Vec<(String, Option<String>)>),
 }
 pub(crate) enum Reply {
+    QueueAccess {
+        request: crate::career_port::MatchRequest,
+        nonce: String,
+        sequence: u64,
+        access: Result<Option<omoba_career_store::career_store::moderation::Access>, String>,
+    },
     RecoveryChecked,
+    QueueDodgeCommitted(queue_dodges::Event),
+    QueueFloorCommitted(QueuePenaltyFloor),
+    Ready(consent::Completion),
+    Flushed(u64, bool),
     RefreshAccess {
+        profile: Option<ProfileSummary>,
+        completed_public_matches: Option<u32>,
         addr: SocketAddr,
         nonce: String,
         key_active: Option<bool>,
         supporter: Option<shared::supporter::SupporterStatus>,
+        /// The profile's current name and active sanctions (LR-15); `None`
+        /// when the database could not be read.
+        nickname: Option<String>,
+        sanctions: Option<Vec<Sanction>>,
+        play_cooldown: Option<Option<shared::career::PlayCooldown>>,
     },
     Login {
         addr: SocketAddr,
         challenge: AuthChallenge,
-        result: Result<CareerView, String>,
+        result: Result<CareerView, LoginRefusal>,
     },
+    /// The database-wide chat switch (LR-15).
+    ChatSwitch(bool),
     Action {
         addr: SocketAddr,
         nonce: String,
@@ -130,12 +201,33 @@ pub(crate) enum Reply {
         request_id: Option<u64>,
     },
     Started(String),
+    GameplayStarted(String),
     RecordError(String, String),
     Rejected(String, String),
     Settled {
         result: MatchResult,
         profiles: Vec<ProfileSummary>,
     },
+}
+
+/// A refused sign-in: the English text, and the sanctions that refused it
+/// (an account ban), so the client can say until when.
+pub(crate) struct LoginRefusal {
+    pub(crate) error: String,
+    pub(crate) sanctions: Vec<Sanction>,
+}
+impl From<String> for LoginRefusal {
+    fn from(error: String) -> Self {
+        Self {
+            error,
+            sanctions: Vec::new(),
+        }
+    }
+}
+impl From<&str> for LoginRefusal {
+    fn from(error: &str) -> Self {
+        error.to_owned().into()
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -161,6 +253,11 @@ enum RecoveryScope {
     Disabled,
     Epoch(u64),
 }
+impl RecoveryScope {
+    fn requires_ready_consent(self) -> bool {
+        !matches!(self, Self::Global)
+    }
+}
 
 /// The exchange between the game-thread state machine and whatever performs
 /// the store I/O. `try_send` never blocks and returns whether the job was
@@ -168,6 +265,9 @@ enum RecoveryScope {
 /// "busy" or retries later).
 pub(crate) trait JobLink {
     fn enabled(&self) -> bool;
+    fn durable_ready(&self) -> bool {
+        self.enabled()
+    }
     fn try_send(&mut self, job: Job) -> bool;
     fn try_recv(&mut self) -> Option<Reply>;
 }
@@ -231,6 +331,19 @@ impl MemoryLink {
     }
     fn acknowledge(&mut self, job: Job) {
         match job {
+            Job::QueueAccess {
+                request,
+                nonce,
+                sequence,
+                ..
+            } => {
+                self.replies.push_back(Reply::QueueAccess {
+                    request,
+                    nonce,
+                    sequence,
+                    access: Ok(None),
+                });
+            }
             Job::Login { addr, challenge } => {
                 let profile = self
                     .profiles
@@ -251,10 +364,15 @@ impl MemoryLink {
             }
             Job::RefreshAccess { addr, nonce, .. } => {
                 self.replies.push_back(Reply::RefreshAccess {
+                    profile: None,
+                    completed_public_matches: None,
                     addr,
                     nonce,
                     key_active: Some(true),
                     supporter: Some(Default::default()),
+                    nickname: None,
+                    sanctions: None,
+                    play_cooldown: None,
                 });
             }
             Job::Action {
@@ -300,14 +418,30 @@ impl MemoryLink {
                         .collect();
                     self.replies.push_back(Reply::Settled { result, profiles });
                 }
-                RecordKind::Checkpoint | RecordKind::Rejected => {}
+                RecordKind::Checkpoint => {
+                    if record.result.gameplay_started {
+                        self.replies
+                            .push_back(Reply::GameplayStarted(record.result.result_id));
+                    }
+                }
+                RecordKind::Rejected => {}
             },
+            Job::QueueDodge(event) => self.replies.push_back(Reply::QueueDodgeCommitted(event)),
+            Job::QueueFloor(floor) => self.replies.push_back(Reply::QueueFloorCommitted(floor)),
+            Job::Ready(work) => self.replies.push_back(Reply::Ready(consent::Completion {
+                work,
+                result: Err(STORE_UNAVAILABLE.into()),
+            })),
+            Job::Flush(generation) => self.replies.push_back(Reply::Flushed(generation, true)),
             Job::Presence(_) => {}
         }
     }
 }
 #[cfg(test)]
 impl JobLink for MemoryLink {
+    fn durable_ready(&self) -> bool {
+        false
+    }
     fn enabled(&self) -> bool {
         self.enabled
     }
@@ -338,19 +472,82 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     pub(crate) link: L,
     clients: HashMap<SocketAddr, Client>,
     starts: HashMap<String, Result<(), String>>,
+    gameplay_starts: HashSet<String>,
     settled: Vec<MatchResult>,
     cancelled: Vec<SocketAddr>,
     social: Vec<(SocketAddr, shared::social::SocialRequest)>,
-    match_requests: Vec<(SocketAddr, u64, shared::match_service::MatchPreference)>,
+    match_requests: Vec<crate::career_port::MatchRequest>,
+    ready_requests: Vec<crate::career_port::ReadyRequest>,
     last_presence: Instant,
+    last_access_refresh: Option<Instant>,
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
+    queue_dodges: HashMap<String, queue_dodges::Event>,
+    queue_dodge_acks: HashMap<String, queue_dodges::Event>,
+    queue_floors: HashMap<String, QueuePenaltyFloor>,
+    queue_floor_acks: HashMap<String, QueuePenaltyFloor>,
+    ready_jobs: HashMap<(String, u64), consent::Work>,
+    ready_completions: Vec<consent::Completion>,
+    match_refusals: Vec<(crate::career_port::MatchRequest, String)>,
+    record_generation: u64,
+    flush_requested: Option<u64>,
+    flushed_generation: Option<u64>,
     rejected: HashMap<String, String>,
+    limits: Limits,
+    /// The database-wide chat switch as last read; `None` before the first
+    /// read or without a database (LR-15).
+    chat_switch: Option<bool>,
 }
 #[cfg(test)]
 pub(crate) type MemoryCareer = CareerBackend<MemoryLink>;
 
 impl<L: JobLink> CareerBackend<L> {
+    /// Pace refresh across the bounded link. Oldest due clients get the next
+    /// slot, including after congestion; submission alone never extends auth.
+    fn refresh_access(&mut self, now: Instant) {
+        if !self.link.enabled()
+            || self
+                .last_access_refresh
+                .is_some_and(|at| now.saturating_duration_since(at) < ACCESS_REFRESH_STEP)
+        {
+            return;
+        }
+        self.last_access_refresh = Some(now);
+        let mut due: Vec<_> = self
+            .clients
+            .iter()
+            .filter_map(|(&addr, c)| {
+                c.auth.as_ref()?;
+                c.view.profile.as_ref()?;
+                let checked = match (c.key_checked, c.supporter_checked) {
+                    (Some(key), Some(supporter)) => key.min(supporter),
+                    _ => now - ACCESS_REFRESH_AFTER,
+                };
+                if now.saturating_duration_since(checked) < ACCESS_REFRESH_AFTER
+                    || c.access_refresh_sent
+                        .is_some_and(|at| now.saturating_duration_since(at) < ACCESS_REFRESH_RETRY)
+                {
+                    return None;
+                }
+                Some((c.access_refresh_sent.unwrap_or(checked), checked, addr))
+            })
+            .collect();
+        due.sort_unstable();
+        for (_, _, addr) in due.into_iter().take(ACCESS_REFRESH_BATCH) {
+            let c = self.clients.get_mut(&addr).unwrap();
+            let auth = c.auth.as_ref().unwrap();
+            let profile = c.view.profile.as_ref().unwrap();
+            if !self.link.try_send(Job::RefreshAccess {
+                addr,
+                nonce: auth.nonce.clone(),
+                public_key: auth.public_key.clone(),
+                profile_id: profile.profile_id.clone(),
+            }) {
+                break;
+            }
+            c.access_refresh_sent = Some(now);
+        }
+    }
     fn over(epoch: u64, link: L) -> Self {
         Self {
             epoch,
@@ -358,14 +555,29 @@ impl<L: JobLink> CareerBackend<L> {
             link,
             clients: HashMap::new(),
             starts: HashMap::new(),
+            gameplay_starts: HashSet::new(),
             settled: Vec::new(),
             cancelled: Vec::new(),
             social: Vec::new(),
             match_requests: Vec::new(),
+            ready_requests: Vec::new(),
             last_presence: Instant::now(),
+            last_access_refresh: None,
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
+            queue_dodges: HashMap::new(),
+            queue_dodge_acks: HashMap::new(),
+            queue_floors: HashMap::new(),
+            queue_floor_acks: HashMap::new(),
+            ready_jobs: HashMap::new(),
+            ready_completions: Vec::new(),
+            match_refusals: Vec::new(),
+            record_generation: 0,
+            flush_requested: None,
+            flushed_generation: None,
             rejected: HashMap::new(),
+            limits: Limits::default(),
+            chat_switch: None,
         }
     }
 }
@@ -391,7 +603,7 @@ impl MemoryCareer {
     }
 }
 impl CareerBackend {
-    pub fn new(epoch: u64) -> Self {
+    pub fn new(epoch: u64, limits: Limits) -> Self {
         let url = std::env::var("OMOBA_DATABASE_URL")
             .ok()
             .filter(|v| !v.trim().is_empty());
@@ -413,34 +625,50 @@ impl CareerBackend {
             Some("match") => RecoveryScope::Epoch(epoch),
             _ => RecoveryScope::Global,
         };
-        Self::with_recovery(epoch, url, outbox, scope)
+        Self::with_recovery(epoch, url, outbox, scope, limits)
     }
     #[cfg(test)]
     fn with_config(epoch: u64, url: Option<String>, outbox: PathBuf) -> Self {
-        Self::with_recovery(epoch, url, outbox, RecoveryScope::Global)
+        let limits = Limits {
+            new_profiles: Admission::for_test().new_profiles,
+            ..Limits::default()
+        };
+        Self::with_recovery(epoch, url, outbox, RecoveryScope::Global, limits)
     }
     fn with_recovery(
         epoch: u64,
         url: Option<String>,
         outbox: PathBuf,
         scope: RecoveryScope,
+        limits: Limits,
     ) -> Self {
         let (reply_tx, rx) = mpsc::sync_channel(MAX_JOBS * 2);
+        // Match workers are many short processes: only the lobby (and a
+        // standalone server) runs the retention job.
+        let admission = Admission {
+            require_ready_consent: scope.requires_ready_consent(),
+            new_profiles: limits.new_profiles,
+            retention_days: limits
+                .retention_days
+                .filter(|_| !matches!(scope, RecoveryScope::Epoch(_))),
+        };
         let tx = url.map(|url| {
             let (tx, jobs) = mpsc::sync_channel(MAX_JOBS);
             std::thread::Builder::new()
                 .name("omoba-career".into())
-                .spawn(move || worker(url, outbox, jobs, reply_tx, scope))
+                .spawn(move || worker(url, outbox, jobs, reply_tx, scope, admission))
                 .expect("career worker starts");
             tx
         });
-        Self::over(
+        let mut backend = Self::over(
             epoch,
             WorkerLink {
                 tx,
                 rx: Mutex::new(rx),
             },
-        )
+        );
+        backend.limits = limits;
+        backend
     }
     #[cfg(test)]
     pub fn test_with_database(epoch: u64, url: String, outbox: PathBuf) -> Self {
@@ -449,6 +677,29 @@ impl CareerBackend {
 }
 
 impl<L: JobLink> CareerBackend<L> {
+    /// Whether a new client at `addr` fits: at most [`MAX_CLIENTS`] in all and
+    /// `endpoints_per_ip` per IP (LR-16). At its IP's limit, that IP's stalest
+    /// client gives way once idle for [`STALE_CLIENT`] and not in a match: a
+    /// reconnecting device leaves its old endpoint behind.
+    fn make_room(&mut self, addr: SocketAddr) -> bool {
+        let ip = SourceIp::of(addr);
+        let mut same_ip = self
+            .clients
+            .iter()
+            .filter(|(other, _)| SourceIp::of(**other) == ip)
+            .map(|(other, client)| (*other, client.touched, client.playing))
+            .collect::<Vec<_>>();
+        if same_ip.len() >= self.limits.endpoints_per_ip {
+            same_ip.retain(|(_, touched, playing)| !playing && touched.elapsed() >= STALE_CLIENT);
+            let Some((stalest, _, _)) = same_ip.into_iter().min_by_key(|(_, touched, _)| *touched)
+            else {
+                return false;
+            };
+            self.clients.remove(&stalest);
+        }
+        self.clients.len() < MAX_CLIENTS
+    }
+
     fn record(&mut self, kind: RecordKind, result: MatchResult) -> bool {
         if self.rejected.contains_key(&result.result_id) {
             return false;
@@ -463,6 +714,7 @@ impl<L: JobLink> CareerBackend<L> {
             recovered_live: false,
         })));
         if accepted {
+            self.record_generation = self.record_generation.saturating_add(1);
             self.pending_ids.insert(result.result_id.clone());
         }
         if accepted && matches!(kind, RecordKind::Start) {
@@ -504,9 +756,22 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         );
     }
     #[cfg(test)]
+    fn test_complete_ready(&mut self, completion: consent::Completion) {
+        let key = (completion.work.check_id.clone(), completion.work.sequence);
+        if self.ready_jobs.get(&key) == Some(&completion.work) {
+            self.ready_jobs.remove(&key);
+            self.ready_completions.push(completion);
+        }
+    }
+    #[cfg(test)]
     fn test_ack_start(&mut self, id: &str) {
         self.starts.insert(id.into(), Ok(()));
     }
+    #[cfg(test)]
+    fn test_ack_gameplay(&mut self, id: &str) {
+        self.gameplay_starts.insert(id.to_owned());
+    }
+
     #[cfg(test)]
     fn test_ack_settle(&mut self, result: MatchResult) {
         self.settled.push(result);
@@ -518,6 +783,34 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     #[cfg(test)]
     fn test_is_playing(&self, addr: SocketAddr) -> bool {
         self.clients.get(&addr).is_some_and(|client| client.playing)
+    }
+    #[cfg(test)]
+    fn test_set_play_cooldown(
+        &mut self,
+        addr: SocketAddr,
+        cooldown: Option<shared::career::PlayCooldown>,
+    ) {
+        if let Some(client) = self.clients.get_mut(&addr) {
+            client.view.play_cooldown = cooldown;
+        }
+    }
+    #[cfg(test)]
+    fn test_set_sanctions(&mut self, addr: SocketAddr, sanctions: Vec<Sanction>) {
+        if let Some(client) = self.clients.get_mut(&addr) {
+            client.view.sanctions = sanctions;
+        }
+    }
+    #[cfg(test)]
+    fn test_set_chat_switch(&mut self, enabled: Option<bool>) {
+        self.chat_switch = enabled;
+    }
+    #[cfg(test)]
+    fn test_refresh_now(&mut self) {
+        self.last_presence = Instant::now() - Duration::from_secs(10);
+        self.last_access_refresh = None;
+        for c in self.clients.values_mut() {
+            c.supporter_checked = Some(Instant::now() - ACCESS_REFRESH_AFTER);
+        }
     }
     fn enabled(&self) -> bool {
         self.link.enabled()
@@ -557,6 +850,13 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     }
     fn view(&self, addr: SocketAddr) -> CareerView {
         let mut view = self.clients.get(&addr).map(|c|c.view.clone()).unwrap_or_else(|| CareerView {error:(!self.enabled()).then(||"Career storage is not configured on this server. Guest matches are unranked.".into()),..Default::default()});
+        // At the client ceiling a new endpoint's requests are not taken: say
+        // so, and its retries get in once a place frees (LR-09).
+        if self.enabled() && !self.clients.contains_key(&addr) && self.clients.len() >= MAX_CLIENTS
+        {
+            view.error = Some(SERVER_FULL_TEXT.into());
+            view.error_code = Some(shared::career::error_code::SERVER_FULL.into());
+        }
         view.storage_enabled = self.enabled();
         if let Some(status) = &mut view.supporter {
             if status
@@ -568,7 +868,24 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 status.active_until = None;
             }
         }
+        let now = unix_seconds();
+        view.sanctions.retain(|sanction| sanction.active_at(now));
+        view.play_cooldown = view.play_cooldown.filter(|p| p.until > now);
         view
+    }
+    fn sanctions(&self, addr: SocketAddr) -> Vec<Sanction> {
+        let now = unix_seconds();
+        self.clients.get(&addr).map_or_else(Vec::new, |c| {
+            c.view
+                .sanctions
+                .iter()
+                .filter(|sanction| sanction.active_at(now))
+                .copied()
+                .collect()
+        })
+    }
+    fn chat_switch(&self) -> Option<bool> {
+        self.chat_switch
     }
     fn forget(&mut self, addr: SocketAddr) {
         self.clients.remove(&addr);
@@ -586,9 +903,10 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn recovery_confirmed_since(&self, since: Instant) -> bool {
         self.recovery_checked.is_some_and(|at| at >= since)
     }
-    fn take_match_requests(
-        &mut self,
-    ) -> Vec<(SocketAddr, u64, shared::match_service::MatchPreference)> {
+    fn take_ready_requests(&mut self) -> Vec<crate::career_port::ReadyRequest> {
+        std::mem::take(&mut self.ready_requests)
+    }
+    fn take_match_requests(&mut self) -> Vec<crate::career_port::MatchRequest> {
         std::mem::take(&mut self.match_requests)
     }
     fn gameplay_principal(
@@ -620,6 +938,9 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn take_settled(&mut self) -> Vec<MatchResult> {
         std::mem::take(&mut self.settled)
     }
+    fn gameplay_committed(&self, id: &str) -> bool {
+        self.gameplay_starts.contains(id)
+    }
     fn started(&self, id: &str) -> bool {
         matches!(self.starts.get(id), Some(Ok(())))
     }
@@ -628,6 +949,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     }
     fn forget_start(&mut self, id: &str) {
         self.starts.remove(id);
+        self.gameplay_starts.remove(id);
         self.rejected.remove(id);
     }
     fn start_error(&self, id: &str) -> Option<String> {
@@ -642,11 +964,109 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn settle(&mut self, result: MatchResult) -> bool {
         self.record(RecordKind::Settle, result)
     }
+    fn take_match_refusals(&mut self) -> Vec<(crate::career_port::MatchRequest, String)> {
+        std::mem::take(&mut self.match_refusals)
+    }
+    fn shared_ready_enabled(&self) -> bool {
+        self.link.durable_ready()
+    }
+    fn submit_ready(&mut self, work: consent::Work) -> bool {
+        if !self.enabled() || !work.valid() {
+            return false;
+        }
+        let key = (work.check_id.clone(), work.sequence);
+        if let Some(old) = self.ready_jobs.get(&key) {
+            return old == &work;
+        }
+        if let Some(old) = self
+            .ready_completions
+            .iter()
+            .find(|c| c.work.check_id == work.check_id && c.work.sequence == work.sequence)
+        {
+            return old.work == work;
+        }
+        if self.ready_jobs.len() + self.ready_completions.len() >= MAX_JOBS
+            || !self.link.try_send(Job::Ready(work.clone()))
+        {
+            return false;
+        }
+        self.ready_jobs.insert(key, work);
+        self.record_generation = self.record_generation.saturating_add(1);
+        true
+    }
+    fn take_ready_completions(&mut self) -> Vec<consent::Completion> {
+        std::mem::take(&mut self.ready_completions)
+    }
+    fn record_queue_dodge(&mut self, event: queue_dodges::Event) -> bool {
+        if event.validate().is_err() || !self.enabled() {
+            return false;
+        }
+        if let Some(old) = self
+            .queue_dodges
+            .get(&event.event_id)
+            .or_else(|| self.queue_dodge_acks.get(&event.event_id))
+        {
+            return old == &event;
+        }
+        if self.queue_dodges.len() + self.queue_dodge_acks.len() >= MAX_JOBS {
+            return false;
+        }
+        if !self.link.try_send(Job::QueueDodge(event.clone())) {
+            return false;
+        }
+        self.queue_dodges.insert(event.event_id.clone(), event);
+        self.record_generation = self.record_generation.saturating_add(1);
+        true
+    }
+    fn record_queue_floor(&mut self, floor: QueuePenaltyFloor) -> bool {
+        if !self.enabled() || floor.validate().is_err() {
+            return false;
+        }
+        if let Some(old) = self
+            .queue_floors
+            .get(&floor.profile_id)
+            .or_else(|| self.queue_floor_acks.get(&floor.profile_id))
+        {
+            return old == &floor;
+        }
+        if self.queue_floors.len() + self.queue_floor_acks.len() >= MAX_JOBS
+            || !self.link.try_send(Job::QueueFloor(floor.clone()))
+        {
+            return false;
+        }
+        self.queue_floors.insert(floor.profile_id.clone(), floor);
+        self.record_generation = self.record_generation.saturating_add(1);
+        true
+    }
+    fn take_queue_floor_committed(&mut self) -> Vec<QueuePenaltyFloor> {
+        self.queue_floor_acks
+            .drain()
+            .map(|(_, floor)| floor)
+            .collect()
+    }
+    fn take_queue_dodge_committed(&mut self) -> Vec<String> {
+        self.queue_dodge_acks.drain().map(|(id, _)| id).collect()
+    }
+    fn flush_outbox(&mut self) -> bool {
+        if !self.enabled()
+            || self
+                .flushed_generation
+                .is_some_and(|g| g >= self.record_generation)
+        {
+            return true;
+        }
+        if self.flush_requested != Some(self.record_generation)
+            && self.link.try_send(Job::Flush(self.record_generation))
+        {
+            self.flush_requested = Some(self.record_generation);
+        }
+        false
+    }
     fn handle(&mut self, addr: SocketAddr, request: CareerRequest) {
         if !self.enabled() {
             return;
         }
-        if !self.clients.contains_key(&addr) && self.clients.len() >= MAX_CLIENTS {
+        if !self.clients.contains_key(&addr) && !self.make_room(addr) {
             return;
         }
         let c = self.clients.entry(addr).or_default();
@@ -699,6 +1119,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 };
                 // A new handshake invalidates old authorization on this endpoint.
                 c.auth = None;
+                c.login_sent = None;
                 c.sequence = 0;
                 c.view = CareerView::default();
                 c.challenge = Some((challenge.clone(), now));
@@ -722,9 +1143,19 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     return;
                 }
                 c.view.loading = true;
-                if !self.link.try_send(Job::Login { addr, challenge }) {
-                    c.view.error = Some("Account service is busy. Retry shortly.".into());
-                    c.view.loading = false;
+                c.view.error = None;
+                c.view.error_code = None;
+                // One Login per challenge at a time: retries of a sign-in that is
+                // still being answered add no database work (LR-16).
+                if c.login_sent
+                    .is_some_and(|at| now.duration_since(at) < LOGIN_IN_FLIGHT)
+                {
+                    return;
+                }
+                // A full queue is not an error: the client retries the same
+                // signed challenge shortly, as it does for a lost reply.
+                if self.link.try_send(Job::Login { addr, challenge }) {
+                    c.login_sent = Some(now);
                 }
             }
             CareerRequest::Authorized {
@@ -752,17 +1183,58 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 }
                 c.sequence = sequence;
                 c.view.error = None;
+                c.view.error_code = None;
                 if let CareerAction::FindMatch {
                     request_id,
                     preference,
+                    also_casual,
                 } = action
                 {
-                    if c.view.profile.is_some() && self.match_requests.len() < MAX_JOBS {
-                        self.match_requests.push((addr, request_id, preference));
+                    c.view.match_service = None;
+                    c.view.match_service_request_id = None;
+                    if let Some(profile) = &c.view.profile {
+                        c.queue_sequence = Some(sequence);
+                        let request = crate::career_port::MatchRequest {
+                            addr,
+                            request_id,
+                            preference,
+                            also_casual,
+                        };
+                        if !self.link.try_send(Job::QueueAccess {
+                            request,
+                            nonce: session_nonce,
+                            sequence,
+                            public_key: auth.public_key.clone(),
+                            profile_id: profile.profile_id.clone(),
+                        }) {
+                            c.view.error = Some("Account service is busy. Retry shortly.".into());
+                        }
+                    }
+                    return;
+                }
+                if let CareerAction::ReadyMatch {
+                    request_id,
+                    check_id,
+                    accepted,
+                } = action
+                {
+                    if c.view.profile.is_some()
+                        && check_id.len() == 32
+                        && self.ready_requests.len() < MAX_JOBS
+                    {
+                        self.ready_requests.push(crate::career_port::ReadyRequest {
+                            addr,
+                            request_id,
+                            check_id,
+                            accepted,
+                        });
                     }
                     return;
                 }
                 if matches!(action, CareerAction::CancelQueue) {
+                    c.queue_sequence = None;
+                    c.view.match_service = None;
+                    c.view.match_service_request_id = None;
                     self.cancelled.push(addr);
                     return;
                 }
@@ -801,14 +1273,124 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn poll(&mut self) {
         while let Some(reply) = self.link.try_recv() {
             match reply {
+                Reply::QueueAccess {
+                    request,
+                    nonce,
+                    sequence,
+                    access,
+                } => {
+                    let Some(c) = self.clients.get_mut(&request.addr) else {
+                        continue;
+                    };
+                    if c.auth.as_ref().is_none_or(|a| a.nonce != nonce)
+                        || c.queue_sequence != Some(sequence)
+                    {
+                        continue;
+                    }
+                    c.queue_sequence = None;
+                    match access {
+                        Ok(access) => {
+                            c.view.match_service = None;
+                            c.view.match_service_request_id = None;
+                            if let Some(access) = access {
+                                if !access.key_active {
+                                    c.auth = None;
+                                    c.challenge = None;
+                                    c.profile_ready = false;
+                                    c.key_checked = None;
+                                    c.view.auth_nonce = None;
+                                    c.view.challenge = None;
+                                    c.view.error = Some("This device has been revoked.".into());
+                                    continue;
+                                }
+                                c.key_checked = Some(Instant::now());
+                                if let Some(profile) = access.profile {
+                                    accept_profile_snapshot(&mut c.view.profile, profile, true);
+                                }
+                                c.view.sanctions = access.sanctions;
+                                c.view.play_cooldown = access.play_cooldown;
+                                if let Some(profile) = c.view.profile.as_mut() {
+                                    profile.completed_public_matches = profile
+                                        .completed_public_matches
+                                        .max(access.completed_public_matches);
+                                }
+                                if let (Some(nickname), Some(profile)) =
+                                    (access.nickname, c.view.profile.as_mut())
+                                {
+                                    profile.nickname = nickname;
+                                }
+                            }
+                            if self.match_requests.len() < MAX_JOBS {
+                                self.match_requests.push(request);
+                            } else {
+                                c.view.error =
+                                    Some("Account service is busy. Retry shortly.".into());
+                            }
+                        }
+                        Err(error) => {
+                            c.view.error_code = queue_refusal_code(&error).map(str::to_owned);
+                            if let Some(code) = queue_refusal_code(&error) {
+                                if self.match_refusals.len() < MAX_JOBS {
+                                    self.match_refusals.push((request, code.into()));
+                                }
+                                c.view.match_service =
+                                    Some(shared::match_service::MatchServiceView::Failed {
+                                        code: code.into(),
+                                    });
+                                c.view.match_service_request_id = Some(request.request_id);
+                            }
+                            c.view.error = Some(error);
+                        }
+                    }
+                }
+                Reply::Flushed(generation, success) => {
+                    if success {
+                        self.flushed_generation =
+                            Some(self.flushed_generation.unwrap_or(0).max(generation));
+                    } else if self.flush_requested == Some(generation) {
+                        self.flush_requested = None;
+                    }
+                }
+                Reply::Ready(completion) => {
+                    let key = (completion.work.check_id.clone(), completion.work.sequence);
+                    if self.ready_jobs.get(&key) == Some(&completion.work) {
+                        self.ready_jobs.remove(&key);
+                        self.ready_completions.push(completion);
+                    }
+                }
                 Reply::RecoveryChecked => {
                     self.recovery_checked = Some(Instant::now());
                 }
+                Reply::QueueDodgeCommitted(event) => {
+                    // A recovered receipt can share an ID with conflicting
+                    // producer state. Only the full committed payload is an ACK.
+                    if self
+                        .queue_dodges
+                        .get(&event.event_id)
+                        .is_some_and(|expected| expected == &event)
+                    {
+                        self.queue_dodges.remove(&event.event_id);
+                        self.queue_dodge_acks.insert(event.event_id.clone(), event);
+                    }
+                }
+                Reply::QueueFloorCommitted(floor) => {
+                    if self.queue_floors.get(&floor.profile_id) == Some(&floor) {
+                        self.queue_floors.remove(&floor.profile_id);
+                        self.queue_floor_acks
+                            .insert(floor.profile_id.clone(), floor);
+                    }
+                }
+                Reply::ChatSwitch(enabled) => self.chat_switch = Some(enabled),
                 Reply::RefreshAccess {
+                    profile,
+                    completed_public_matches,
                     addr,
                     nonce,
                     key_active,
                     supporter,
+                    nickname,
+                    sanctions,
+                    play_cooldown,
                 } => {
                     let Some(c) = self.clients.get_mut(&addr) else {
                         continue;
@@ -816,12 +1398,50 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     if c.auth.as_ref().is_none_or(|auth| auth.nonce != nonce) {
                         continue;
                     }
+                    c.access_refresh_sent = None;
+                    if key_active == Some(true)
+                        && let Some(profile) = profile
+                    {
+                        accept_profile_snapshot(&mut c.view.profile, profile, true);
+                    }
+                    if let (Some(count), Some(profile)) =
+                        (completed_public_matches, c.view.profile.as_mut())
+                    {
+                        profile.completed_public_matches =
+                            profile.completed_public_matches.max(count);
+                    }
+                    if let Some(cooldown) = play_cooldown {
+                        c.view.play_cooldown = cooldown;
+                    }
+                    if let Some(sanctions) = sanctions {
+                        c.view.sanctions = sanctions;
+                    }
+                    // A moderator's name reset shows in the next presence (LR-15).
+                    if let (Some(name), Some(profile)) = (nickname, c.view.profile.as_mut()) {
+                        profile.nickname = name;
+                    }
+                    let banned = shared::moderation::active(
+                        &c.view.sanctions,
+                        SanctionKind::AccountBan,
+                        unix_seconds(),
+                    )
+                    .is_some();
                     if key_active == Some(false) {
                         c.auth = None;
                         c.profile_ready = false;
                         c.view.auth_nonce = None;
                         c.view.supporter = Some(Default::default());
                         c.view.error = Some("This device was revoked. Authorize this device again from your account.".into());
+                    } else if banned {
+                        // An account ban ends the signed session at once, as a
+                        // revoked key does; signing in again is refused while
+                        // it lasts (LR-15).
+                        c.auth = None;
+                        c.profile_ready = false;
+                        c.view.auth_nonce = None;
+                        c.view.supporter = Some(Default::default());
+                        c.view.error = Some(shared::moderation::ACCOUNT_BANNED_TEXT.into());
+                        c.view.error_code = Some(error_code::ACCOUNT_BANNED.into());
                     } else {
                         if key_active == Some(true) {
                             c.key_checked = Some(Instant::now());
@@ -847,6 +1467,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                         continue;
                     }
                     c.view.loading = false;
+                    c.login_sent = None;
                     match result {
                         Ok(mut view) => {
                             view.auth_nonce = Some(challenge.nonce.clone());
@@ -857,7 +1478,12 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             c.profile_ready = true;
                             c.sequence = 0;
                         }
-                        Err(e) => c.view.error = Some(e),
+                        Err(refusal) => {
+                            c.view.error_code =
+                                sign_in_error_code(&refusal.error).map(str::to_owned);
+                            c.view.error = Some(refusal.error);
+                            c.view.sanctions = refusal.sanctions;
+                        }
                     }
                 }
                 Reply::Action {
@@ -874,6 +1500,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     }
                     c.view.response_id = request_id;
                     c.view.error = None;
+                    c.view.error_code = None;
                     c.view.history.clear();
                     c.view.history_loaded = false;
                     c.view.history_next = None;
@@ -886,8 +1513,8 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                                 c.view.supporter = Some(supporter);
                                 c.supporter_checked = Some(Instant::now());
                             }
-                            if view.profile.is_some() {
-                                c.view.profile = view.profile;
+                            if let Some(profile) = view.profile {
+                                accept_profile_snapshot(&mut c.view.profile, profile, false);
                                 c.profile_ready = true;
                                 c.view.loading = false;
                             }
@@ -909,8 +1536,14 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                                 c.view.visited_profile = view.visited_profile;
                             }
                         }
-                        Err(e) => c.view.error = Some(e),
+                        Err(e) => {
+                            c.view.error_code = action_error_code(&e).map(str::to_owned);
+                            c.view.error = Some(e);
+                        }
                     }
+                }
+                Reply::GameplayStarted(id) => {
+                    self.gameplay_starts.insert(id);
                 }
                 Reply::Started(id) => {
                     self.starts.insert(id, Ok(()));
@@ -953,7 +1586,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             if let Some(fresh) =
                                 profiles.iter().find(|p| p.profile_id == current.profile_id)
                             {
-                                c.view.profile = Some(fresh.clone());
+                                accept_profile_snapshot(&mut c.view.profile, fresh.clone(), false);
                                 c.profile_ready = true;
                                 c.view.last_result = Some(result.clone());
                                 c.view.error = None;
@@ -963,6 +1596,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     self.pending_ids.remove(&result.result_id);
                     self.matches.retain(|_, id| *id != result.result_id);
                     self.starts.remove(&result.result_id);
+                    self.gameplay_starts.remove(&result.result_id);
                     self.settled.push(result);
                 }
             }
@@ -983,33 +1617,28 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         }
         self.clients
             .retain(|_, c| c.touched.elapsed() < Duration::from_secs(120));
+        self.refresh_access(Instant::now());
         if self.last_presence.elapsed() >= Duration::from_secs(10) {
             self.last_presence = Instant::now();
-            let presence = self
-                .clients
-                .values()
-                .filter_map(|c| {
-                    c.view.profile.as_ref().map(|p| {
-                        (
-                            p.profile_id.clone(),
-                            c.playing
-                                .then(|| self.matches.get(&p.profile_id).cloned())
-                                .flatten(),
-                        )
-                    })
-                })
-                .collect();
+            // Multiple device endpoints may represent one profile. Its live
+            // allocation takes precedence over an idle duplicate session.
+            let mut presence = BTreeMap::<String, Option<String>>::new();
+            for c in self.clients.values() {
+                if let Some(profile) = &c.view.profile {
+                    let game = c
+                        .playing
+                        .then(|| self.matches.get(&profile.profile_id).cloned())
+                        .flatten();
+                    let entry = presence.entry(profile.profile_id.clone()).or_default();
+                    if game.is_some() {
+                        *entry = game;
+                    }
+                }
+            }
+            let presence = presence.into_iter().collect();
             if self.link.enabled() {
                 self.link.try_send(Job::Presence(presence));
                 for (addr, c) in &self.clients {
-                    if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
-                        self.link.try_send(Job::RefreshAccess {
-                            addr: *addr,
-                            nonce: auth.nonce.clone(),
-                            public_key: auth.public_key.clone(),
-                            profile_id: profile.profile_id.clone(),
-                        });
-                    }
                     if !c.profile_ready {
                         if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
                             self.link.try_send(Job::Action {
@@ -1035,18 +1664,19 @@ fn unix_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64)
 }
+/// The aura a player may show at `now`: re-checked against the grant window
+/// and, for a tier style, the Hero tier points every time (LR-67).
 fn authorized_supporter_aura(
     status: &shared::supporter::SupporterStatus,
     now: i64,
 ) -> Option<shared::supporter::AuraStyle> {
-    (status.active && status.active_until.is_some_and(|until| until > now))
-        .then_some(status.equipped_aura)
-        .flatten()
+    status.authorized_aura(now)
 }
 
 fn action_id(action: &CareerAction) -> Option<u64> {
     match action {
-        CareerAction::FindMatch { request_id, .. }
+        CareerAction::ReadyMatch { request_id, .. }
+        | CareerAction::FindMatch { request_id, .. }
         | CareerAction::SupporterStatus { request_id }
         | CareerAction::EquipSupporterAura { request_id, .. }
         | CareerAction::History { request_id, .. }
@@ -1103,7 +1733,9 @@ async fn account_action(
         CareerAction::Rename { nickname, .. } => {
             view.profile = Some(store.rename(id, &nickname).await?)
         }
-        CareerAction::CancelQueue | CareerAction::FindMatch { .. } => {}
+        CareerAction::CancelQueue
+        | CareerAction::FindMatch { .. }
+        | CareerAction::ReadyMatch { .. } => {}
         CareerAction::Social { .. } => {
             return Err("Social requests are handled by the game server.".into());
         }
@@ -1139,6 +1771,28 @@ fn write_record(root: &Path, record: &PendingRecord) -> Result<(), String> {
     let temp = path.with_extension("tmp");
     let data =
         serde_json::to_vec(record).map_err(|_| "Cannot encode match receipt.".to_string())?;
+    // Delivery retries must not reset the pending-result alert clock. Bound the
+    // comparison and accept only a regular local file, never a symlink target.
+    if fs::symlink_metadata(&path).is_ok_and(|meta| {
+        meta.is_file() && !meta.file_type().is_symlink() && meta.len() == data.len() as u64
+    }) && let Ok(mut existing) = fs::File::open(&path)
+    {
+        let mut bytes = Vec::with_capacity(data.len());
+        if Read::by_ref(&mut existing)
+            .take(data.len() as u64 + 1)
+            .read_to_end(&mut bytes)
+            .is_ok()
+            && bytes == data
+        {
+            existing
+                .sync_all()
+                .map_err(|_| "Cannot sync career outbox.".to_string())?;
+            fs::File::open(root)
+                .and_then(|file| file.sync_all())
+                .map_err(|_| "Cannot sync career outbox directory.".to_string())?;
+            return Ok(());
+        }
+    }
     let mut file =
         fs::File::create(&temp).map_err(|_| "Cannot write career outbox.".to_string())?;
     file.write_all(&data)
@@ -1218,12 +1872,326 @@ fn recover_outbox(outbox: &Path) -> RecoveredOutbox {
     }
 }
 
+/// What the worker needs of the admission limits (LR-16).
+#[derive(Clone, Copy)]
+pub(crate) struct Admission {
+    /// Public lobby and match roles may never use standalone admission, even
+    /// while replaying a pre-upgrade outbox or a missing SQL allocation.
+    require_ready_consent: bool,
+    new_profiles: omoba_career_store::career_store::NewProfileLimits,
+    /// Retention of profiles that never played; `None` in match workers.
+    retention_days: Option<u32>,
+}
+
+#[cfg(test)]
+impl Admission {
+    pub(crate) fn for_test() -> Self {
+        Self {
+            require_ready_consent: false,
+            // Live fixtures share a reusable loopback database with load
+            // probes. Their synthetic identities must not exhaust the real
+            // network's daily signup quota; quota behavior has store tests.
+            new_profiles: omoba_career_store::career_store::NewProfileLimits {
+                per_source: 1_000_000,
+                total: 10_000_000,
+            },
+            retention_days: None,
+        }
+    }
+}
+
+const STORE_UNAVAILABLE: &str = "Profile storage is unavailable. Retry shortly.";
+
+/// A sign-in or account action that waited [`STORE_WAIT`] for the database.
+fn unavailable(job: Job) -> Option<Reply> {
+    match job {
+        Job::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            ..
+        } => Some(Reply::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            access: Err(STORE_UNAVAILABLE.into()),
+        }),
+        Job::Login { addr, challenge } => Some(Reply::Login {
+            addr,
+            challenge,
+            result: Err(STORE_UNAVAILABLE.into()),
+        }),
+        Job::Action {
+            addr,
+            nonce,
+            action,
+            ..
+        } => Some(Reply::Action {
+            addr,
+            nonce,
+            request_id: action_id(&action),
+            result: Err(STORE_UNAVAILABLE.into()),
+        }),
+        _ => None,
+    }
+}
+
+/// Answers a sign-in or an account action with a connected store. A sign-in
+/// of a new key counts against the new-profile limits of its source IP.
+fn answer(
+    rt: &tokio::runtime::Runtime,
+    store: &CareerStore,
+    job: Job,
+    admission: &Admission,
+) -> Option<Reply> {
+    match job {
+        Job::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            public_key,
+            profile_id,
+        } => Some(Reply::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            access: rt
+                .block_on(store.queue_access(&public_key, &profile_id))
+                .map(Some),
+        }),
+        Job::Login { addr, challenge } => {
+            let source = SourceIp::of(addr).key();
+            let result = rt.block_on(async {
+                let profile = store
+                    .authenticate_from(
+                        &challenge.public_key,
+                        &challenge.nickname,
+                        &source,
+                        admission.new_profiles,
+                    )
+                    .await?;
+                // An account ban refuses the sign-in itself (LR-15).
+                let access = store
+                    .access(&challenge.public_key, &profile.profile_id)
+                    .await?;
+                let sanctions = access.sanctions;
+                if shared::moderation::active(&sanctions, SanctionKind::AccountBan, unix_seconds())
+                    .is_some()
+                {
+                    return Err(LoginRefusal {
+                        error: shared::moderation::ACCOUNT_BANNED_TEXT.into(),
+                        sanctions,
+                    });
+                }
+                let (history, _) = store.history(&profile.profile_id, None).await?;
+                let last_result = match history.first() {
+                    Some(last) => store
+                        .detail(&profile.profile_id, &last.result_id)
+                        .await
+                        .ok(),
+                    None => None,
+                };
+                Ok(CareerView {
+                    supporter: store.supporter_status(&profile.profile_id).await.ok(),
+                    profile: Some(profile),
+                    last_result,
+                    play_cooldown: access.play_cooldown,
+                    sanctions,
+                    ..Default::default()
+                })
+            });
+            Some(Reply::Login {
+                addr,
+                challenge,
+                result,
+            })
+        }
+        Job::Action {
+            addr,
+            nonce,
+            profile_id,
+            public_key,
+            action,
+        } => {
+            let request_id = action_id(&action);
+            let result = rt.block_on(async {
+                if !store.key_is_active(&public_key, &profile_id).await? {
+                    return Err("This device has been revoked.".into());
+                }
+                account_action(store, &profile_id, action).await
+            });
+            Some(Reply::Action {
+                addr,
+                nonce,
+                result,
+                request_id,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The client's code for a refused sign-in (`CareerView::error_code`).
+fn sign_in_error_code(error: &str) -> Option<&'static str> {
+    use omoba_career_store::career_store::{NEW_PROFILE_LIMIT_ERROR, NEW_PROFILES_PAUSED_ERROR};
+    use shared::career::error_code;
+    match error {
+        NEW_PROFILE_LIMIT_ERROR => Some(error_code::NEW_PROFILE_LIMIT),
+        NEW_PROFILES_PAUSED_ERROR => Some(error_code::NEW_PROFILES_PAUSED),
+        shared::moderation::ACCOUNT_BANNED_TEXT => Some(error_code::ACCOUNT_BANNED),
+        _ => None,
+    }
+}
+
+/// The client's code for a refused account action (LR-15: a locked rename).
+fn action_error_code(error: &str) -> Option<&'static str> {
+    (error == omoba_career_store::career_store::moderation::NAME_LOCKED_ERROR)
+        .then_some(shared::career::error_code::NAME_LOCKED)
+}
+
+const ACCESS_READ_BATCH: usize = 4;
+
+fn collect_access_reads(first: Job, jobs: &Receiver<Job>, deferred: &mut Option<Job>) -> Vec<Job> {
+    let mut batch = vec![first];
+    while batch.len() < ACCESS_READ_BATCH {
+        match jobs.try_recv() {
+            Ok(job @ (Job::QueueAccess { .. } | Job::RefreshAccess { .. })) => batch.push(job),
+            Ok(barrier) => {
+                *deferred = Some(barrier);
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    batch
+}
+
+async fn answer_access_read(store: CareerStore, job: Job) -> Reply {
+    match job {
+        Job::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            public_key,
+            profile_id,
+        } => Reply::QueueAccess {
+            request,
+            nonce,
+            sequence,
+            access: store.queue_access(&public_key, &profile_id).await.map(Some),
+        },
+        Job::RefreshAccess {
+            addr,
+            nonce,
+            public_key,
+            profile_id,
+        } => {
+            let access = store.access(&public_key, &profile_id).await.ok();
+            let key_active = access.as_ref().map(|a| a.key_active);
+            let supporter = if key_active == Some(true) {
+                store.supporter_status(&profile_id).await.ok()
+            } else {
+                None
+            };
+            let (profile, nickname, sanctions, play_cooldown, completed_public_matches) = access
+                .map(|a| {
+                    (
+                        a.profile,
+                        a.nickname,
+                        Some(a.sanctions),
+                        Some(a.play_cooldown),
+                        Some(a.completed_public_matches),
+                    )
+                })
+                .unwrap_or_default();
+            Reply::RefreshAccess {
+                profile,
+                completed_public_matches,
+                addr,
+                nonce,
+                key_active,
+                supporter,
+                nickname,
+                sanctions,
+                play_cooldown,
+            }
+        }
+        _ => unreachable!("only access reads enter a concurrent batch"),
+    }
+}
+
+async fn answer_access_reads(store: &CareerStore, batch: Vec<Job>) -> Vec<Reply> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for job in batch {
+        tasks.spawn(answer_access_read(store.clone(), job));
+    }
+    let mut replies = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        match result {
+            Ok(reply) => replies.push(reply),
+            Err(_) => eprintln!("Account read task failed; authorization remains fail-closed."),
+        }
+    }
+    replies
+}
+
+fn queue_refusal_code(error: &str) -> Option<&str> {
+    use shared::career::error_code::{
+        ALLOCATION_CANCELLED_OR_EXPIRED, DODGE_COOLDOWN, PROFILE_HAS_ANOTHER_SESSION,
+    };
+    matches!(
+        error,
+        DODGE_COOLDOWN | PROFILE_HAS_ANOTHER_SESSION | ALLOCATION_CANCELLED_OR_EXPIRED
+    )
+    .then_some(error)
+}
+
+fn persist_queue_dodges(
+    journal: &mut Option<queue_dodges::Journal>,
+    staged: &mut BTreeMap<String, queue_dodges::Event>,
+    storage_ready: &mut bool,
+) -> bool {
+    let Some(journal) = journal else {
+        *storage_ready = false;
+        return false;
+    };
+    let attempted = !staged.is_empty();
+    let events: Vec<_> = staged.values().cloned().collect();
+    for event in events {
+        match journal.record(event.clone()) {
+            Ok(()) => {
+                staged.remove(&event.event_id);
+            }
+            Err(error) => eprintln!("Cannot persist queue-dodge journal: {error:?}"),
+        }
+    }
+    if attempted {
+        *storage_ready = staged.is_empty();
+    }
+    staged.is_empty()
+}
+
+fn persist_match_record(
+    outbox: &Path,
+    record: &PendingRecord,
+    unpersisted: &mut HashSet<String>,
+) -> Result<(), String> {
+    let result = write_record(outbox, record);
+    if result.is_ok() {
+        unpersisted.remove(&record.result.result_id);
+    } else {
+        unpersisted.insert(record.result.result_id.clone());
+    }
+    result
+}
+
 fn worker(
     url: String,
     outbox: PathBuf,
     jobs: Receiver<Job>,
     replies: SyncSender<Reply>,
     scope: RecoveryScope,
+    admission: Admission,
 ) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1234,15 +2202,122 @@ fn worker(
         mut pending,
         mut rejected_ids,
     } = recover_outbox(&outbox);
+    let recovered_record_ids: HashSet<_> = pending.keys().cloned().collect();
+    let queue_root = outbox.join("queue-dodges");
+    let mut queue_journal = queue_dodges::Journal::open(queue_root.clone()).ok();
+    let mut queue_storage_ready = queue_journal.is_some();
+    let mut unpersisted_records = HashSet::new();
+    let mut worker_health = health::Health::default();
+    let health_probe = std::sync::Arc::new(Mutex::new(health::Probe::default()));
+    let mut queue_staged: BTreeMap<String, queue_dodges::Event> = BTreeMap::new();
+    let mut last_queue_open = Instant::now();
+    let mut queue_retry_at = Instant::now();
     let mut last_retry = Instant::now() - Duration::from_secs(10);
+    // Result delivery retries must not continually postpone a failed startup
+    // connection. These schedules have independent lifetimes.
+    let mut last_connect = Instant::now() - Duration::from_secs(10);
     let mut heartbeat = Instant::now();
     let mut connected = true;
     let mut _heartbeat_task = None;
-    while connected || !pending.is_empty() {
-        if store.is_none() && last_retry.elapsed() >= Duration::from_secs(2) {
-            last_retry = Instant::now();
+    let mut _ready_maintenance_task = None;
+    let mut _health_probe_task = None;
+    let mut critical_replies = critical::CriticalReplies::new();
+    // Sign-ins and account actions that arrived while the database was not
+    // connected (after a host reboot): answered once it is, or "unavailable"
+    // after STORE_WAIT, instead of failing at once.
+    let mut parked: VecDeque<(Instant, Job)> = VecDeque::new();
+    // The first retention run waits out a restart's reconnect storm.
+    let mut next_retention = Instant::now() + Duration::from_secs(300);
+    let mut queue_floors: BTreeMap<String, QueuePenaltyFloor> = BTreeMap::new();
+    let mut last_chat_poll: Option<Instant> = None;
+    let mut deferred_job: Option<Job> = None;
+    while connected
+        || !pending.is_empty()
+        || !queue_staged.is_empty()
+        || !queue_floors.is_empty()
+        || queue_journal.as_ref().is_some_and(|j| !j.is_empty())
+    {
+        critical_replies.poll(&replies);
+        worker_health.publish(
+            &outbox,
+            crate::match_allocation::unix_ms(),
+            health::Sample {
+                epoch: match scope {
+                    RecoveryScope::Epoch(epoch) => Some(epoch),
+                    _ => None,
+                },
+                probe: health_probe.lock().map(|probe| *probe).unwrap_or_default(),
+                journal_ready: queue_journal.is_some() && queue_storage_ready,
+                staged_dodges: queue_staged.len(),
+                legacy_floors: queue_floors.len(),
+                unpersisted_results: unpersisted_records.len(),
+                critical_replies: critical_replies.len(),
+                reply_receiver_closed: critical_replies.receiver_closed(),
+            },
+        );
+        if queue_journal.is_none() && last_queue_open.elapsed() >= Duration::from_secs(2) {
+            last_queue_open = Instant::now();
+            queue_journal = queue_dodges::Journal::open(queue_root.clone()).ok();
+            queue_storage_ready = queue_journal.is_some();
+            if queue_journal.is_none() {
+                eprintln!("Queue-dodge journal unavailable; new queue access remains fail-closed.");
+            }
+        }
+        if store.is_none() && last_connect.elapsed() >= Duration::from_secs(2) {
+            last_connect = Instant::now();
             store = rt.block_on(CareerStore::connect_runtime(&url)).ok();
             if let Some(s) = &store {
+                let probe_store = s.clone();
+                let probe = health_probe.clone();
+                _health_probe_task = Some(rt.spawn(async move {
+                    let mut timer = tokio::time::interval(Duration::from_secs(10));
+                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    loop {
+                        timer.tick().await;
+                        let ok = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            probe_store.matchmaking_available(),
+                        )
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                        .unwrap_or(false);
+                        if let Ok(mut probe) = probe.lock() {
+                            *probe = health::Probe {
+                                checked_ms: Some(crate::match_allocation::unix_ms()),
+                                ok,
+                            };
+                        }
+                    }
+                }));
+                // One bounded async background task per lobby/standalone. Never
+                // serialize maintenance SQL ahead of15-second consent jobs.
+                if !matches!(scope, RecoveryScope::Epoch(_)) {
+                    let maintenance_store = s.clone();
+                    _ready_maintenance_task = Some(rt.spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(300)).await;
+                        let mut timer = tokio::time::interval(Duration::from_secs(60));
+                        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                        loop {
+                            timer.tick().await;
+                            match tokio::time::timeout(
+                                Duration::from_secs(5),
+                                maintenance_store.maintain_ready(32),
+                            )
+                            .await
+                            {
+                                Ok(Ok(report)) if report != Default::default() => println!(
+                                    "READY_MAINTENANCE reconciled={} pruned={} deferred={}",
+                                    report.reconciled, report.pruned, report.deferred
+                                ),
+                                Ok(Ok(_)) => {}
+                                Ok(Err(_)) | Err(_) => eprintln!(
+                                    "Ready maintenance unavailable; consent records retained."
+                                ),
+                            }
+                        }
+                    }));
+                }
                 let s = s.clone();
                 _heartbeat_task = Some(rt.spawn(async move {
                     let mut timer = tokio::time::interval(Duration::from_secs(10));
@@ -1253,7 +2328,126 @@ fn worker(
                 }));
             }
         }
-        match jobs.recv_timeout(Duration::from_millis(100)) {
+        // A reconnect drains older parked operations before any fresh read.
+        let next = if !critical_replies.can_take_job() {
+            // Keep timers/SQL/health live, without growing the completion buffer
+            // or spinning a CPU while the game thread temporarily stops reading.
+            rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
+            Err(mpsc::RecvTimeoutError::Timeout)
+        } else if store.is_some() && !parked.is_empty() {
+            Err(mpsc::RecvTimeoutError::Timeout)
+        } else {
+            deferred_job
+                .take()
+                .map(Ok)
+                .unwrap_or_else(|| jobs.recv_timeout(Duration::from_millis(100)))
+        };
+        match next {
+            Ok(job @ (Job::QueueAccess { .. } | Job::RefreshAccess { .. })) if store.is_some() => {
+                let batch = collect_access_reads(job, &jobs, &mut deferred_job);
+                let ready = queue_staged.is_empty()
+                    && queue_floors.is_empty()
+                    && queue_journal.as_ref().is_some_and(|j| j.is_empty());
+                let mut allowed = Vec::new();
+                for job in batch {
+                    if matches!(job, Job::QueueAccess { .. }) && !ready {
+                        if let Some(reply) = unavailable(job) {
+                            let _ = replies.try_send(reply);
+                        }
+                    } else {
+                        allowed.push(job);
+                    }
+                }
+                for reply in rt.block_on(answer_access_reads(store.as_ref().unwrap(), allowed)) {
+                    let _ = replies.try_send(reply);
+                }
+            }
+            Ok(Job::Ready(work)) => {
+                let mut batch = vec![work];
+                while batch.len() < ACCESS_READ_BATCH {
+                    match jobs.try_recv() {
+                        Ok(Job::Ready(work)) => batch.push(work),
+                        Ok(other) => {
+                            deferred_job = Some(other);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let completed = match &store {
+                    Some(s) => rt.block_on(async {
+                        let mut tasks = tokio::task::JoinSet::new();
+                        for work in batch {
+                            tasks.spawn(consent::execute(s.clone(), work));
+                        }
+                        let mut completed = Vec::new();
+                        while let Some(result) = tasks.join_next().await {
+                            if let Ok(reply) = result {
+                                completed.push(reply);
+                            }
+                        }
+                        completed
+                    }),
+                    None => batch
+                        .into_iter()
+                        .map(|work| consent::Completion {
+                            work,
+                            result: Err(STORE_UNAVAILABLE.into()),
+                        })
+                        .collect(),
+                };
+                for completion in completed {
+                    critical_replies.retain(Reply::Ready(completion));
+                }
+            }
+            Ok(Job::Flush(generation)) => {
+                let matches_flushed = pending.values().all(|record| {
+                    persist_match_record(&outbox, record, &mut unpersisted_records).is_ok()
+                });
+                let queue_flushed = persist_queue_dodges(
+                    &mut queue_journal,
+                    &mut queue_staged,
+                    &mut queue_storage_ready,
+                ) && queue_journal.as_ref().is_some_and(|j| j.flush().is_ok());
+                queue_storage_ready = queue_flushed;
+                let flushed = matches_flushed && queue_flushed;
+                // Keep the exact barrier result until its live recipient reads;
+                // delivery pressure must not park lease/probe timers or SQL I/O.
+                critical_replies.retain(Reply::Flushed(generation, flushed));
+            }
+            Ok(Job::QueueFloor(floor)) => {
+                if queue_floors.len() >= MAX_JOBS && !queue_floors.contains_key(&floor.profile_id) {
+                    deferred_job = Some(Job::QueueFloor(floor));
+                } else {
+                    match queue_floors.get(&floor.profile_id) {
+                        Some(old) if old != &floor => {
+                            eprintln!("Conflicting legacy matchmaking floor; original retained.")
+                        }
+                        _ => {
+                            queue_floors.insert(floor.profile_id.clone(), floor);
+                        }
+                    }
+                }
+            }
+            Ok(Job::QueueDodge(event)) => {
+                if queue_staged.len() >= MAX_JOBS && !queue_staged.contains_key(&event.event_id) {
+                    deferred_job = Some(Job::QueueDodge(event));
+                } else {
+                    match queue_staged.get(&event.event_id) {
+                        Some(old) if old != &event => {
+                            eprintln!("Conflicting queue-dodge event identity; original retained.")
+                        }
+                        _ => {
+                            queue_staged.insert(event.event_id.clone(), event);
+                        }
+                    }
+                    persist_queue_dodges(
+                        &mut queue_journal,
+                        &mut queue_staged,
+                        &mut queue_storage_ready,
+                    );
+                }
+            }
             Ok(Job::Record(record)) => {
                 let mut record = *record;
                 let id = record.result.result_id.clone();
@@ -1277,58 +2471,13 @@ fn worker(
                 pending.insert(id, record);
                 last_retry = Instant::now() - Duration::from_secs(3);
             }
-            Ok(Job::Login { addr, challenge }) => {
-                let result = match &store {
-                    Some(store) => rt.block_on(async {
-                        let profile = store
-                            .authenticate(&challenge.public_key, &challenge.nickname)
-                            .await?;
-                        let (history, _) = store.history(&profile.profile_id, None).await?;
-                        let last_result = match history.first() {
-                            Some(last) => store
-                                .detail(&profile.profile_id, &last.result_id)
-                                .await
-                                .ok(),
-                            None => None,
-                        };
-                        Ok(CareerView {
-                            supporter: store.supporter_status(&profile.profile_id).await.ok(),
-                            profile: Some(profile),
-                            last_result,
-                            ..Default::default()
-                        })
-                    }),
-                    None => Err("Profile storage is unavailable. Retry shortly.".into()),
-                };
-                let _ = replies.try_send(Reply::Login {
-                    addr,
-                    challenge,
-                    result,
-                });
-            }
-            Ok(Job::Action {
-                addr,
-                nonce,
-                profile_id,
-                public_key,
-                action,
-            }) => {
-                let request_id = action_id(&action);
-                let result = match &store {
-                    Some(s) => rt.block_on(async {
-                        if !s.key_is_active(&public_key, &profile_id).await? {
-                            return Err("This device has been revoked.".into());
-                        }
-                        account_action(s, &profile_id, action).await
-                    }),
-                    None => Err("Profile storage is unavailable. Retry shortly.".into()),
-                };
-                let _ = replies.try_send(Reply::Action {
-                    addr,
-                    nonce,
-                    result,
-                    request_id,
-                });
+            Ok(job @ (Job::Login { .. } | Job::Action { .. } | Job::QueueAccess { .. })) => {
+                if parked.len() >= MAX_JOBS
+                    && let Some(reply) = parked.pop_front().and_then(|(_, job)| unavailable(job))
+                {
+                    let _ = replies.try_send(reply);
+                }
+                parked.push_back((Instant::now(), job));
             }
             Ok(Job::RefreshAccess {
                 addr,
@@ -1336,32 +2485,149 @@ fn worker(
                 public_key,
                 profile_id,
             }) => {
-                let (key_active, supporter) = match &store {
-                    Some(s) => rt.block_on(async {
-                        let active = s.key_is_active(&public_key, &profile_id).await.ok();
-                        let supporter = if active == Some(true) {
-                            s.supporter_status(&profile_id).await.ok()
-                        } else {
-                            None
-                        };
-                        (active, supporter)
-                    }),
-                    None => (None, None),
+                // One query: the key, the current name and the sanctions.
+                let access = match &store {
+                    Some(s) => rt.block_on(s.access(&public_key, &profile_id)).ok(),
+                    None => None,
                 };
+                let key_active = access.as_ref().map(|a| a.key_active);
+                let supporter = match &store {
+                    Some(s) if key_active == Some(true) => {
+                        rt.block_on(s.supporter_status(&profile_id)).ok()
+                    }
+                    _ => None,
+                };
+                let (profile, nickname, sanctions, play_cooldown, completed_public_matches) =
+                    access
+                        .map(|a| {
+                            (
+                                a.profile,
+                                a.nickname,
+                                Some(a.sanctions),
+                                Some(a.play_cooldown),
+                                Some(a.completed_public_matches),
+                            )
+                        })
+                        .unwrap_or_default();
                 let _ = replies.try_send(Reply::RefreshAccess {
+                    profile,
+                    completed_public_matches,
                     addr,
                     nonce,
                     key_active,
                     supporter,
+                    nickname,
+                    sanctions,
+                    play_cooldown,
                 });
             }
             Ok(Job::Presence(presence)) => {
                 if let Some(s) = &store {
-                    let _ = rt.block_on(s.touch_presences(&presence));
+                    for batch in presence.chunks(PRESENCE_BATCH_SIZE) {
+                        let _ = rt.block_on(s.touch_presences(batch));
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => connected = false,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        while let Some((at, _)) = parked.front() {
+            let waited = at.elapsed() >= STORE_WAIT;
+            let reply = match &store {
+                Some(s) => parked.pop_front().and_then(|(_, job)| {
+                    let ready = queue_staged.is_empty()
+                        && queue_floors.is_empty()
+                        && queue_journal.as_ref().is_some_and(|j| j.is_empty());
+                    if matches!(job, Job::QueueAccess { .. }) && !ready {
+                        unavailable(job)
+                    } else {
+                        answer(&rt, s, job, &admission)
+                    }
+                }),
+                None if waited => parked.pop_front().and_then(|(_, job)| unavailable(job)),
+                None => break,
+            };
+            if let Some(reply) = reply {
+                let _ = replies.try_send(reply);
+            }
+        }
+        if let Some(s) = &store
+            && last_chat_poll.is_none_or(|at| at.elapsed() >= CHAT_SWITCH_POLL)
+        {
+            last_chat_poll = Some(Instant::now());
+            if let Ok(enabled) = rt.block_on(s.chat_enabled()) {
+                let _ = replies.try_send(Reply::ChatSwitch(enabled));
+            }
+        }
+        if let (Some(days), Some(s)) = (admission.retention_days, &store)
+            && Instant::now() >= next_retention
+        {
+            next_retention = Instant::now() + RETENTION_INTERVAL;
+            match rt.block_on(s.prune_unplayed_profiles(days, RETENTION_BATCH)) {
+                Ok(0) => {}
+                Ok(pruned) => println!(
+                    "PROFILE_RETENTION pruned={pruned} min_age_days={days} (never played, unlinked)"
+                ),
+                Err(error) => eprintln!("Profile retention failed: {error}"),
+            }
+        }
+        if Instant::now() >= queue_retry_at || !connected {
+            persist_queue_dodges(
+                &mut queue_journal,
+                &mut queue_staged,
+                &mut queue_storage_ready,
+            );
+            let mut failed = false;
+            if let (Some(journal), Some(s)) = (&mut queue_journal, &store) {
+                let events: Vec<_> = journal.pending().take(16).cloned().collect();
+                for event in events {
+                    match rt.block_on(s.record_queue_dodge(
+                        &event.event_id,
+                        &event.profile_id,
+                        event.observed_at_ms,
+                    )) {
+                        Ok(_) => {
+                            if replies
+                                .try_send(Reply::QueueDodgeCommitted(event.clone()))
+                                .is_ok()
+                                && let Err(error) = journal.complete(&event.event_id)
+                            {
+                                failed = true;
+                                eprintln!("Cannot retire committed queue-dodge receipt: {error:?}");
+                            }
+                        }
+                        Err(error) => {
+                            failed = true;
+                            eprintln!("Queue-dodge SQL delivery pending: {error}");
+                        }
+                    }
+                }
+            }
+            if let Some(s) = &store {
+                let floors: Vec<_> = queue_floors.values().take(16).cloned().collect();
+                for floor in floors {
+                    match rt.block_on(s.import_queue_penalty_floor(&floor)) {
+                        Ok(_) => {
+                            if replies
+                                .try_send(Reply::QueueFloorCommitted(floor.clone()))
+                                .is_ok()
+                            {
+                                queue_floors.remove(&floor.profile_id);
+                            }
+                        }
+                        Err(error) => {
+                            failed = true;
+                            eprintln!("Legacy matchmaking floor SQL delivery pending: {error}");
+                        }
+                    }
+                }
+            }
+            queue_retry_at = Instant::now()
+                + if failed || store.is_none() {
+                    Duration::from_secs(2)
+                } else {
+                    Duration::from_millis(100)
+                };
         }
         if last_retry.elapsed() >= Duration::from_secs(2) || !connected {
             last_retry = Instant::now();
@@ -1382,43 +2648,61 @@ fn worker(
                     }
                     continue;
                 }
-                let result = write_record(&outbox, record).and_then(|_| match &store {
-                    None => Err("Match result is pending: PostgreSQL is unavailable.".into()),
-                    Some(s) => rt.block_on(async {
-                        if record.recovered_live {
-                            if let Some(result) = s.settled_result(&record.result.result_id).await?
-                            {
-                                let profiles = settled_profiles(s, &result).await?;
-                                return Ok(Some((result, profiles)));
+                let result = persist_match_record(&outbox, record, &mut unpersisted_records)
+                    .and_then(|_| match &store {
+                        None => Err("Match result is pending: PostgreSQL is unavailable.".into()),
+                        Some(s) => rt.block_on(async {
+                            if record.recovered_live {
+                                if let Some(result) =
+                                    s.settled_result(&record.result.result_id).await?
+                                {
+                                    let profiles = settled_profiles(s, &result).await?;
+                                    return Ok(Some((result, profiles)));
+                                }
                             }
-                        }
-                        if let Some(allocation) = &record.recovery_allocation {
-                            s.ensure_allocation(allocation.clone()).await?;
-                        }
-                        match record.kind {
-                            RecordKind::Start => {
-                                s.start(record.result.clone()).await?;
-                                Ok(None)
+                            if let Some(allocation) = &record.recovery_allocation {
+                                if admission.require_ready_consent {
+                                    s.ensure_public_allocation(allocation.clone()).await?;
+                                } else {
+                                    s.ensure_allocation(allocation.clone()).await?;
+                                }
                             }
-                            RecordKind::Checkpoint => {
-                                s.checkpoint(record.result.clone()).await?;
-                                Ok(None)
+                            match record.kind {
+                                RecordKind::Start => {
+                                    if admission.require_ready_consent {
+                                        s.start_public(record.result.clone()).await?;
+                                    } else {
+                                        s.start(record.result.clone()).await?;
+                                    }
+                                    Ok(None)
+                                }
+                                RecordKind::Checkpoint => {
+                                    s.checkpoint(record.result.clone()).await?;
+                                    Ok(None)
+                                }
+                                RecordKind::Rejected => Ok(None),
+                                RecordKind::Settle => {
+                                    let result = s.settle(record.result.clone()).await?;
+                                    let profiles = settled_profiles(s, &result).await?;
+                                    Ok(Some((result, profiles)))
+                                }
                             }
-                            RecordKind::Rejected => Ok(None),
-                            RecordKind::Settle => {
-                                let result = s.settle(record.result.clone()).await?;
-                                let profiles = settled_profiles(s, &result).await?;
-                                Ok(Some((result, profiles)))
-                            }
-                        }
-                    }),
-                });
+                        }),
+                    });
                 match result {
                     Ok(result) => {
                         if matches!(record.kind, RecordKind::Start) {
                             if replies.try_send(Reply::Started(id.clone())).is_err() {
                                 continue;
                             }
+                        }
+                        if matches!(record.kind, RecordKind::Checkpoint)
+                            && record.result.gameplay_started
+                            && replies
+                                .try_send(Reply::GameplayStarted(id.clone()))
+                                .is_err()
+                        {
+                            continue; // This ACK gates Running; retain and retry the durable record.
                         }
                         if let Some((result, profiles)) = result {
                             if replies
@@ -1434,13 +2718,22 @@ fn worker(
                         pending.remove(&id);
                     }
                     Err(error) => {
-                        if matches!(record.kind, RecordKind::Start)
+                        // A live unacknowledged start can be retired. Every
+                        // recovered receipt remains durable for restore review,
+                        // including old terminal records without newer flags.
+                        if (matches!(record.kind, RecordKind::Start)
+                            || (admission.require_ready_consent
+                                && record.recovery_allocation.is_some()
+                                && !recovered_record_ids.contains(&id)))
                             && (error
                                 == "A conflicting career identity or active assignment already exists."
                                 || error
-                                    == "Queued ratings changed. Clear the queue and try again.")
+                                    == "Queued ratings changed. Clear the queue and try again."
+                                || queue_refusal_code(&error).is_some())
                         {
-                            let message = if error.starts_with("Queued ratings") {
+                            let message = if error.starts_with("Queued ratings")
+                                || queue_refusal_code(&error).is_some()
+                            {
                                 error.clone()
                             } else {
                                 "An account in this roster already has an active match. Clear the queue and retry after that match is saved.".into()
@@ -1454,7 +2747,9 @@ fn worker(
                             rejected.result.unrated_reason = Some(message.clone());
                             // A durable tombstone must precede rejection: an undeletable
                             // old Start must never allocate a canceled roster on restart.
-                            if write_record(&outbox, &rejected).is_ok() {
+                            if persist_match_record(&outbox, &rejected, &mut unpersisted_records)
+                                .is_ok()
+                            {
                                 rejected_ids.push_back(id.clone());
                                 if rejected_ids.len() > MAX_JOBS * 2 {
                                     rejected_ids.pop_front();
@@ -1520,11 +2815,376 @@ fn worker(
     }
 }
 
+/// Periodic reads adopt a reset, not an older award from the same season.
+/// Every own-profile reply also refuses a cross-season downgrade: concurrent
+/// access reads may overtake a pre-reset action/settlement reply.
+fn accept_profile_snapshot(
+    current: &mut Option<ProfileSummary>,
+    fresh: ProfileSummary,
+    only_newer_season: bool,
+) {
+    if let Some(old) = current.as_ref() {
+        let season = |p: &ProfileSummary| p.ranked.as_ref().map_or(0, |s| s.season_id);
+        if fresh.profile_id != old.profile_id
+            || season(&fresh) < season(old)
+            || (only_newer_season && season(&fresh) == season(old))
+        {
+            return;
+        }
+    } else if only_newer_season {
+        return;
+    }
+    *current = Some(fresh);
+}
+
 #[cfg(test)]
 mod tests {
     use ed25519_dalek::{Signer, SigningKey};
 
     use super::*;
+
+    fn challenge_request(n: u8) -> CareerRequest {
+        CareerRequest::Challenge {
+            public_key: hex(SigningKey::from_bytes(&[n; 32]).verifying_key().as_bytes()),
+            nickname: "Player".into(),
+            session_id: format!("session-{n}"),
+        }
+    }
+    fn at(ip: [u8; 4], port: u16) -> SocketAddr {
+        SocketAddr::from((ip, port))
+    }
+
+    /// LR-16: one IP holds at most `endpoints_per_ip` career clients; another
+    /// IP is not affected, and an idle client of that IP gives way.
+    #[test]
+    fn queue_access_is_fresh_correlated_and_fails_closed() {
+        let mut backend = MemoryCareer::test_backend(7);
+        let addr = at([127, 0, 0, 1], 50101);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("c".repeat(64), "Player".into()),
+            "session",
+        );
+        let request = crate::career_port::MatchRequest {
+            addr,
+            request_id: 1,
+            preference: shared::match_service::MatchPreference::Ranked,
+            also_casual: false,
+        };
+        let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
+        let until = unix_seconds() + 300;
+        let fresh = || omoba_career_store::career_store::moderation::Access {
+            profile: None,
+            completed_public_matches: 10,
+            key_active: true,
+            nickname: None,
+            sanctions: Vec::new(),
+            play_cooldown: Some(shared::career::PlayCooldown { until, strikes: 1 }),
+        };
+        backend.clients.get_mut(&addr).unwrap().queue_sequence = Some(1);
+        backend.link.replies.push_back(Reply::QueueAccess {
+            request,
+            nonce: nonce.clone(),
+            sequence: 1,
+            access: Ok(Some(fresh())),
+        });
+        backend.poll();
+        assert_eq!(backend.take_match_requests(), vec![request]);
+        assert_eq!(backend.view(addr).play_cooldown.unwrap().until, until);
+        assert_eq!(
+            backend.view(addr).profile.unwrap().completed_public_matches,
+            10,
+            "fresh QueueAccess must replace the stale login's zero progress"
+        );
+        for (sequence, current, valid_nonce, access) in [
+            (1, Some(2), true, Ok(Some(fresh()))),  // replaced search
+            (2, None, true, Ok(Some(fresh()))),     // cancellation
+            (2, Some(2), false, Ok(Some(fresh()))), // old sign-in
+            (2, Some(2), true, Err(STORE_UNAVAILABLE.to_owned())),
+            (
+                3,
+                Some(3),
+                true,
+                Ok(Some(omoba_career_store::career_store::moderation::Access {
+                    key_active: false,
+                    ..fresh()
+                })),
+            ),
+        ] {
+            backend.clients.get_mut(&addr).unwrap().queue_sequence = current;
+            backend.link.replies.push_back(Reply::QueueAccess {
+                request,
+                nonce: if valid_nonce {
+                    nonce.clone()
+                } else {
+                    "old".into()
+                },
+                sequence,
+                access,
+            });
+            backend.poll();
+            assert!(backend.take_match_requests().is_empty());
+        }
+        assert!(backend.authenticated_session(addr).is_none());
+        assert!(backend.view(addr).auth_nonce.is_none());
+    }
+
+    #[test]
+    fn one_ip_holds_at_most_n_career_clients() {
+        let limit = Limits::default().endpoints_per_ip;
+        let mut backend = MemoryCareer::test_backend(7);
+        for port in 0..20 {
+            backend.handle(at([203, 0, 113, 9], 50000 + port), challenge_request(1));
+        }
+        let admitted = (0..20)
+            .filter(|port| {
+                backend
+                    .view(at([203, 0, 113, 9], 50000 + port))
+                    .challenge
+                    .is_some()
+            })
+            .count();
+        assert_eq!(admitted, limit);
+        backend.handle(at([203, 0, 113, 10], 50000), challenge_request(2));
+        assert!(
+            backend
+                .view(at([203, 0, 113, 10], 50000))
+                .challenge
+                .is_some()
+        );
+        // A reconnect after the old endpoint went quiet takes its place.
+        let idle = at([203, 0, 113, 9], 50000);
+        backend.clients.get_mut(&idle).unwrap().touched =
+            Instant::now().checked_sub(STALE_CLIENT).unwrap();
+        let returning = at([203, 0, 113, 9], 60000);
+        backend.handle(returning, challenge_request(1));
+        assert!(backend.view(returning).challenge.is_some());
+        assert!(!backend.clients.contains_key(&idle));
+    }
+
+    /// LR-09: at the career-client ceiling a new endpoint's sign-in is
+    /// answered "server full" instead of silence; clients already in keep
+    /// their view, and the retry gets in once a place frees.
+    #[test]
+    fn a_sign_in_at_the_client_ceiling_gets_server_full() {
+        use shared::career::error_code;
+        let mut backend = MemoryCareer::test_backend(7);
+        for index in 0..MAX_CLIENTS {
+            let index = u16::try_from(index).unwrap();
+            backend.handle(
+                at([10, (index >> 8) as u8, index as u8, 1], 40000),
+                challenge_request(1),
+            );
+        }
+        assert_eq!(backend.clients.len(), MAX_CLIENTS);
+        let inside = at([10, 0, 0, 1], 40000);
+        assert!(backend.view(inside).challenge.is_some());
+        assert_eq!(backend.view(inside).error_code, None);
+        let newcomer = at([198, 51, 100, 7], 50000);
+        backend.handle(newcomer, challenge_request(2));
+        let view = backend.view(newcomer);
+        assert!(view.challenge.is_none());
+        assert_eq!(view.error_code.as_deref(), Some(error_code::SERVER_FULL));
+        assert_eq!(view.error.as_deref(), Some(SERVER_FULL_TEXT));
+        assert!(!backend.clients.contains_key(&newcomer));
+        // A place frees (the endpoint went away): the retry signs in.
+        backend.forget(inside);
+        backend.handle(newcomer, challenge_request(2));
+        let view = backend.view(newcomer);
+        assert!(view.challenge.is_some());
+        assert_eq!(view.error_code, None);
+        // Without career storage nothing is full.
+        let disabled = MemoryCareer::disabled(7);
+        assert_eq!(disabled.view(newcomer).error_code, None);
+    }
+
+    /// LR-16: retries of one sign-in queue one Login, a full queue is no
+    /// error (the client retries), and a refused new profile carries its code.
+    #[test]
+    fn a_sign_in_queues_one_login_and_a_refusal_carries_its_code() {
+        use omoba_career_store::career_store::NEW_PROFILE_LIMIT_ERROR;
+        let key = SigningKey::from_bytes(&[3; 32]);
+        let addr = at([203, 0, 113, 9], 50000);
+        let mut backend = MemoryCareer::test_backend(7);
+        backend.handle(addr, challenge_request(3));
+        let challenge = backend.view(addr).challenge.unwrap();
+        let authenticate = CareerRequest::Authenticate {
+            challenge: challenge.clone(),
+            signature: hex(&key.sign(&challenge.signing_bytes()).to_bytes()),
+        };
+        // Fill the worker queue: the sign-in waits without an error.
+        for _ in 0..MAX_JOBS {
+            backend.link.jobs.push_back(Job::Presence(Vec::new()));
+        }
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate.clone());
+        assert_eq!(backend.view(addr).error, None);
+        backend.link.jobs.clear();
+        for _ in 0..3 {
+            backend.clients.get_mut(&addr).unwrap().last_request = None;
+            backend.handle(addr, authenticate.clone());
+        }
+        let logins = |backend: &MemoryCareer| {
+            backend
+                .link
+                .jobs
+                .iter()
+                .filter(|job| matches!(job, Job::Login { .. }))
+                .count()
+        };
+        assert_eq!(logins(&backend), 1);
+        backend.link.replies.push_back(Reply::Login {
+            addr,
+            challenge,
+            result: Err(NEW_PROFILE_LIMIT_ERROR.into()),
+        });
+        backend.poll();
+        let view = backend.view(addr);
+        assert_eq!(
+            view.error_code.as_deref(),
+            Some(shared::career::error_code::NEW_PROFILE_LIMIT)
+        );
+        assert_eq!(view.error.as_deref(), Some(NEW_PROFILE_LIMIT_ERROR));
+        assert!(view.profile.is_none());
+        // Answered: a later retry asks the store again.
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate);
+        assert_eq!(logins(&backend), 2);
+    }
+    #[test]
+    fn an_account_ban_refuses_sign_in_with_its_end_and_lifting_it_needs_no_restart() {
+        use shared::moderation::{ACCOUNT_BANNED_TEXT, Sanction, SanctionKind};
+        let key = SigningKey::from_bytes(&[4; 32]);
+        let addr = at([203, 0, 113, 10], 50000);
+        let mut backend = MemoryCareer::test_backend(7);
+        backend.handle(addr, challenge_request(4));
+        let challenge = backend.view(addr).challenge.unwrap();
+        let authenticate = CareerRequest::Authenticate {
+            challenge: challenge.clone(),
+            signature: hex(&key.sign(&challenge.signing_bytes()).to_bytes()),
+        };
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate.clone());
+        let until = unix_seconds() + 3600;
+        let ban = Sanction {
+            kind: SanctionKind::AccountBan,
+            until: Some(until),
+        };
+        backend.link.replies.push_back(Reply::Login {
+            addr,
+            challenge: challenge.clone(),
+            result: Err(LoginRefusal {
+                error: ACCOUNT_BANNED_TEXT.into(),
+                sanctions: vec![ban],
+            }),
+        });
+        backend.poll();
+        let view = backend.view(addr);
+        assert_eq!(
+            view.error_code.as_deref(),
+            Some(shared::career::error_code::ACCOUNT_BANNED)
+        );
+        assert_eq!(view.sanctions, vec![ban], "the client can say until when");
+        assert!(view.profile.is_none() && backend.authenticated_session(addr).is_none());
+        // Party presence still sees the refused endpoint's ban.
+        assert_eq!(backend.sanctions(addr), vec![ban]);
+        // Lifted: the next sign-in (the client retries) goes to the store again.
+        backend.link.jobs.clear();
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate);
+        assert!(
+            backend
+                .link
+                .jobs
+                .iter()
+                .any(|job| matches!(job, Job::Login { .. }))
+        );
+    }
+
+    #[test]
+    fn access_refreshes_apply_and_lift_sanctions_and_a_name_reset() {
+        use shared::moderation::{Sanction, SanctionKind};
+        let addr = "127.0.0.1:30031".parse().unwrap();
+        let mut backend = MemoryCareer::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Rude#0001".into()),
+            "session",
+        );
+        let mute = Sanction {
+            kind: SanctionKind::ChatMute,
+            until: Some(unix_seconds() + 600),
+        };
+        let refresh = |sanctions: Vec<Sanction>, nickname: Option<&str>| Reply::RefreshAccess {
+            profile: None,
+            completed_public_matches: None,
+            addr,
+            nonce: "b".repeat(64),
+            key_active: Some(true),
+            supporter: None,
+            nickname: nickname.map(str::to_owned),
+            sanctions: Some(sanctions),
+            play_cooldown: Some(None),
+        };
+        backend
+            .link
+            .replies
+            .push_back(refresh(vec![mute], Some("Player#0042")));
+        backend.poll();
+        assert_eq!(backend.sanctions(addr), vec![mute]);
+        assert_eq!(backend.profile(addr).unwrap().nickname, "Player#0042");
+        assert!(backend.authenticated_session(addr).is_some());
+        // An expired sanction is gone from the view at once, a lifted one at
+        // the next refresh.
+        backend.clients.get_mut(&addr).unwrap().view.sanctions = vec![Sanction {
+            kind: SanctionKind::RankedBan,
+            until: Some(unix_seconds() - 1),
+        }];
+        assert!(backend.view(addr).sanctions.is_empty());
+        assert!(backend.sanctions(addr).is_empty());
+        backend.link.replies.push_back(refresh(vec![mute], None));
+        backend.poll();
+        backend.link.replies.push_back(refresh(Vec::new(), None));
+        backend.poll();
+        assert!(backend.sanctions(addr).is_empty());
+        // A database outage keeps what was last read.
+        backend.link.replies.push_back(refresh(vec![mute], None));
+        backend.poll();
+        backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
+            completed_public_matches: None,
+            addr,
+            nonce: "b".repeat(64),
+            key_active: None,
+            supporter: None,
+            nickname: None,
+            sanctions: None,
+            play_cooldown: None,
+        });
+        backend.poll();
+        assert_eq!(backend.sanctions(addr), vec![mute]);
+        // An account ban applied while signed in ends the session at once.
+        backend.link.replies.push_back(refresh(
+            vec![Sanction {
+                kind: SanctionKind::AccountBan,
+                until: None,
+            }],
+            None,
+        ));
+        backend.poll();
+        assert!(backend.authenticated_session(addr).is_none());
+        assert!(backend.profile(addr).is_none());
+        assert_eq!(
+            backend.view(addr).error_code.as_deref(),
+            Some(shared::career::error_code::ACCOUNT_BANNED)
+        );
+        // The chat switch as the worker last read it.
+        assert_eq!(backend.chat_switch(), None);
+        backend.link.replies.push_back(Reply::ChatSwitch(false));
+        backend.poll();
+        assert_eq!(backend.chat_switch(), Some(false));
+    }
+
     #[test]
     fn supporter_is_denied_for_free_expired_disabled_stale_and_unauthenticated_profiles() {
         use shared::supporter::{AuraStyle, SupporterStatus};
@@ -1532,7 +3192,7 @@ mod tests {
             active: true,
             active_until: Some(101),
             equipped_aura: Some(AuraStyle::Solar),
-            grants: vec![],
+            ..Default::default()
         };
         assert_eq!(
             authorized_supporter_aura(&status, 100),
@@ -1556,7 +3216,7 @@ mod tests {
             active: true,
             active_until: Some(unix_seconds() + 60),
             equipped_aura: Some(AuraStyle::Verdant),
-            grants: vec![],
+            ..Default::default()
         });
         c.supporter_checked = Some(Instant::now());
         assert_eq!(backend.supporter_aura(addr), Some(AuraStyle::Verdant));
@@ -1570,6 +3230,78 @@ mod tests {
     }
 
     #[test]
+    fn tier_auras_need_points_and_end_with_the_tier() {
+        use shared::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
+        let grant = |until: i64, points: u32| SupporterGrantSummary {
+            provider: "yookassa".into(),
+            valid_from: 0,
+            valid_until: until,
+            revoked: false,
+            renewal_enabled: Some(false),
+            tier_points: points,
+        };
+        // 1000 ₽ this month: Crimson; Prism I (2500) is refused even if a stale
+        // or forged status names it.
+        let crimson = SupporterStatus::from_grants(
+            vec![grant(200, 1000)],
+            100,
+            1000,
+            Some(Some(AuraStyle::Crimson)),
+        );
+        assert_eq!(
+            authorized_supporter_aura(&crimson, 100),
+            Some(AuraStyle::Crimson)
+        );
+        let forged = SupporterStatus {
+            equipped_aura: Some(AuraStyle::PrismI),
+            ..crimson.clone()
+        };
+        assert_eq!(authorized_supporter_aura(&forged, 100), None);
+        // Expiry removes the aura without waiting for a refresh.
+        assert_eq!(authorized_supporter_aura(&crimson, 200), None);
+        // A Solana grant (0 points) keeps base styles only.
+        let solana =
+            SupporterStatus::from_grants(vec![grant(200, 0)], 100, 0, Some(Some(AuraStyle::Rose)));
+        assert_eq!(solana.equipped_aura, Some(AuraStyle::Solar));
+        assert_eq!(
+            authorized_supporter_aura(&solana, 100),
+            Some(AuraStyle::Solar)
+        );
+        let addr = "127.0.0.1:30024".parse().unwrap();
+        let mut backend = MemoryCareer::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Tester".into()),
+            "session",
+        );
+        let now = unix_seconds();
+        let c = backend.clients.get_mut(&addr).unwrap();
+        c.view.supporter = Some(SupporterStatus::from_grants(
+            vec![grant(now + 60, 1000)],
+            now,
+            1000,
+            Some(Some(AuraStyle::Crimson)),
+        ));
+        c.supporter_checked = Some(Instant::now());
+        assert_eq!(backend.supporter_aura(addr), Some(AuraStyle::Crimson));
+        // The next refresh reports the grant gone: the aura goes with it.
+        let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
+        backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
+            completed_public_matches: None,
+            addr,
+            nonce,
+            key_active: Some(true),
+            supporter: Some(SupporterStatus::default()),
+            nickname: None,
+            sanctions: None,
+            play_cooldown: None,
+        });
+        backend.poll();
+        assert_eq!(backend.supporter_aura(addr), None);
+    }
+
+    #[test]
     fn revoked_key_refresh_clears_cached_authority_and_cannot_resurrect_via_profile_ready() {
         let addr = "127.0.0.1:30021".parse().unwrap();
         let mut backend = MemoryCareer::test_backend(9);
@@ -1579,10 +3311,15 @@ mod tests {
             "session",
         );
         backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
+            completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
             key_active: Some(false),
             supporter: None,
+            nickname: None,
+            sanctions: None,
+            play_cooldown: None,
         });
         backend.poll();
         assert!(backend.authenticated_session(addr).is_none());
@@ -1604,10 +3341,15 @@ mod tests {
         let expired = Instant::now() - COSMETIC_CACHE_TTL;
         backend.clients.get_mut(&addr).unwrap().key_checked = Some(expired);
         backend.link.replies.push_back(Reply::RefreshAccess {
+            profile: None,
+            completed_public_matches: None,
             addr,
             nonce: "b".repeat(64),
             key_active: None,
             supporter: None,
+            nickname: None,
+            sanctions: None,
+            play_cooldown: None,
         });
         backend.poll();
         assert_eq!(backend.clients[&addr].key_checked, Some(expired));
@@ -1663,6 +3405,9 @@ mod tests {
     }
     fn outbox_result(id: &str, outcome: MatchOutcome) -> MatchResult {
         MatchResult {
+            ranked_season_id: None,
+            gameplay_started: true,
+            end_reason: None,
             result_id: id.into(),
             server_epoch: 1,
             match_id: 1,
@@ -1684,6 +3429,158 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("omoba-outbox-unit-{}", random_id::<16>()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn failed_result_persistence_is_reported_until_the_exact_record_is_durable() {
+        let dir = outbox_dir();
+        let root = dir.join("blocked-outbox");
+        fs::write(&root, b"owned fixture blocks outbox directory creation").unwrap();
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result: outbox_result("pre-persistence-health", MatchOutcome::Completed),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        let mut unpersisted = HashSet::new();
+        assert!(persist_match_record(&root, &record, &mut unpersisted).is_err());
+        assert_eq!(unpersisted.len(), 1);
+        fs::remove_file(&root).unwrap();
+        persist_match_record(&root, &record, &mut unpersisted).unwrap();
+        assert!(unpersisted.is_empty());
+        let saved: PendingRecord = serde_json::from_slice(
+            &fs::read(spool_path(&root, &record.result.result_id).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved.result, record.result);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn identical_outbox_retries_keep_the_original_age_and_exact_durable_bytes() {
+        let dir = outbox_dir();
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result: outbox_result("retry-age", MatchOutcome::Completed),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        write_record(&dir, &record).unwrap();
+        let path = spool_path(&dir, &record.result.result_id).unwrap();
+        let file = fs::File::open(&path).unwrap();
+        file.set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
+        )
+        .unwrap();
+        let before = file.metadata().unwrap().modified().unwrap();
+        let bytes = fs::read(&path).unwrap();
+        for _ in 0..3 {
+            write_record(&dir, &record).unwrap();
+        }
+        assert_eq!(
+            fs::metadata(&path).unwrap().modified().unwrap(),
+            before,
+            "a delivery retry must not reset the pending-result alert clock"
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn changed_checkpoint_still_replaces_the_exact_outbox_record() {
+        let dir = outbox_dir();
+        let mut record = PendingRecord {
+            kind: RecordKind::Checkpoint,
+            result: outbox_result("changed-checkpoint", MatchOutcome::Interrupted),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        write_record(&dir, &record).unwrap();
+        record.result.duration_ms += 1000;
+        write_record(&dir, &record).unwrap();
+        let saved: PendingRecord = serde_json::from_slice(
+            &fs::read(spool_path(&dir, &record.result.result_id).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved.result, record.result);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_symlink_is_not_accepted_as_an_identical_local_receipt() {
+        let dir = outbox_dir();
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result: outbox_result("symlink-retry", MatchOutcome::Completed),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        let bytes = serde_json::to_vec(&record).unwrap();
+        let outside = dir.join("outside.txt");
+        fs::write(&outside, &bytes).unwrap();
+        let path = spool_path(&dir, &record.result.result_id).unwrap();
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        write_record(&dir, &record).unwrap();
+        assert!(
+            !fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&outside).unwrap(), bytes);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_native_receipts_interoperate_with_the_read_only_ru_monitor() {
+        let root = outbox_dir();
+        let outbox = root.join("var/lib/omoba-ru/lobby-outbox");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let observed = now - 600_000;
+        let mut result = outbox_result("native-monitor", MatchOutcome::Completed);
+        result.started_at_ms = observed - 1000;
+        result.ended_at_ms = observed;
+        result.duration_ms = 1000;
+        let record = PendingRecord {
+            kind: RecordKind::Settle,
+            result,
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        write_record(&outbox, &record).unwrap();
+        write_record(&outbox, &record).unwrap();
+        let mut journal = queue_dodges::Journal::open(outbox.join("queue-dodges")).unwrap();
+        journal
+            .record(queue_dodges::Event::new(&"b".repeat(64), observed).unwrap())
+            .unwrap();
+        let helper = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("scripts/check_monitor_fixture.py");
+        let output = std::process::Command::new("python3")
+            .arg(helper)
+            .arg("--root")
+            .arg(&root)
+            .arg("--now-ms")
+            .arg(now.to_string())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "monitor interoperability: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["status"], "PASS");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(&"b".repeat(64)));
+        drop(journal);
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// O29: a missing outbox is empty; a terminal receipt is kept as is; a
@@ -1962,6 +3859,9 @@ mod tests {
                 .unwrap()
                 .as_millis() as u64;
             let mut result = MatchResult {
+                ranked_season_id: None,
+                gameplay_started: true,
+                end_reason: None,
                 result_id: random_id::<16>(),
                 server_epoch: now,
                 match_id: if terminal { 1 } else { 2 },
@@ -1976,6 +3876,8 @@ mod tests {
                 unrated_reason: Some("test".into()),
                 saved: false,
                 participants: vec![ParticipantResult {
+                    input_kind: Default::default(),
+                    participation: None,
                     is_bot: false,
                     player_id: 1,
                     profile_id: Some(profile.profile_id.clone()),
@@ -2049,8 +3951,90 @@ mod tests {
         rt.block_on(pool.close());
         fs::remove_dir_all(directory).unwrap();
     }
+    #[test]
+    fn ready_answers_require_a_signature_and_bind_check_identity_and_acceptance() {
+        let addr = "127.0.0.1:30009".parse().unwrap();
+        let mut backend = MemoryCareer::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Player".into()),
+            "session",
+        );
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let nonce = "b".repeat(64);
+        let action = CareerAction::ReadyMatch {
+            request_id: 7,
+            check_id: "c".repeat(32),
+            accepted: true,
+        };
+        let signature = hex(&key
+            .sign(&authorized_signing_bytes(9, &nonce, 1, &action))
+            .to_bytes());
+        backend.handle(
+            addr,
+            CareerRequest::ReadyMatch {
+                request_id: 7,
+                check_id: "c".repeat(32),
+                accepted: true,
+            },
+        );
+        assert!(backend.take_ready_requests().is_empty());
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(
+            addr,
+            CareerRequest::Authorized {
+                session_nonce: nonce.clone(),
+                sequence: 1,
+                action: CareerAction::ReadyMatch {
+                    request_id: 7,
+                    check_id: "d".repeat(32),
+                    accepted: true,
+                },
+                signature: signature.clone(),
+            },
+        );
+        assert!(backend.take_ready_requests().is_empty());
+        let valid = CareerRequest::Authorized {
+            session_nonce: nonce,
+            sequence: 1,
+            action,
+            signature,
+        };
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, valid.clone());
+        let answers = backend.take_ready_requests();
+        assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0].request_id, 7);
+        assert!(answers[0].accepted);
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, valid);
+        assert!(backend.take_ready_requests().is_empty());
+    }
+    #[test]
+    fn flush_barrier_requires_an_ack_and_is_invalidated_by_a_later_record() {
+        let mut backend = MemoryCareer::immediate(9);
+        assert!(!backend.flush_outbox());
+        backend.poll();
+        assert!(backend.flush_outbox());
+        let result = outbox_result("flush-order", MatchOutcome::Interrupted);
+        assert!(backend.start(result));
+        assert!(
+            !backend.flush_outbox(),
+            "a previous barrier cannot cover a later record"
+        );
+        backend.poll();
+        assert!(backend.flush_outbox());
+    }
 }
 
 #[cfg(test)]
 #[path = "career_backend_resilience_tests.rs"]
 mod resilience_tests;
+
+#[cfg(test)]
+#[path = "career_refresh_tests.rs"]
+mod refresh_tests;
+
+#[cfg(test)]
+#[path = "career_dodge_tests.rs"]
+mod dodge_tests;

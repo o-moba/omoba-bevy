@@ -1,0 +1,10 @@
+# Every minute, on the minute (LR-17): `systemctl enable --now omoba-probe@ru.timer`.
+[Unit]
+Description=Every-minute OMOBA external probe of the %i market
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

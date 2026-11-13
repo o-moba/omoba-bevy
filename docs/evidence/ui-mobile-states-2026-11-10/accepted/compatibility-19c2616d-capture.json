@@ -1,0 +1,629 @@
+{
+  "status": "captured_pending_visual_inspection",
+  "scene": "compatibility",
+  "language": "ru",
+  "nickname_fixture": null,
+  "region": "ru",
+  "viewport": [
+    852,
+    393
+  ],
+  "binary_sha256": "7261729a6805e0efd8df069b920b3f92d74916508af60b9c2445958b78316399",
+  "head_at_capture": "19c2616d5150f4a1256eb85a8cb7cf2ea2009478",
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "source_hashes": {
+    "client/src/lib.rs": "24d7ec59fe68ee1153cbf44630bf0cb886f822b7354ecd9e32d48b819f6b1a5f",
+    "client/src/qa/mod.rs": "c630fd60edd77f2ba97cdadc90f0c81657b38c1681a114b261291effd0e5ebf2",
+    "client/src/qa/offscreen.rs": "a3d2067f99c5e7136816626bfee872a6ae86f90783c08896d7b02af267197504",
+    "client/src/qa/fair_play_qa.rs": "5fa6f08f3b946192d6c673ffdb6469af61f8e86f180a04d373b3b85d177a742e",
+    "client/src/qa/result_qa.rs": "1ab50f42695ded4c3015ac118dab9b150ce97b5c290d4e97d4a168d4d0f5366e",
+    "client/src/qa/creator_loop_qa.rs": "1f3695a26724b0f9c5fc2f98f52ae81edac1d5a4e29684a1097abcaeb96b6e4b",
+    "client/src/net/session.rs": "cb974750f46bbabfe3b580f7f55726db1b7a6a16cfd9f706a1b8652c70960fa5",
+    "client/src/pause_menu/match_votes.rs": "104a12aeccd5b481872b2aaa489d8911b26f2c58899411b07e5e2608712cc13e",
+    "client/src/world.rs": "24613bd3c250fef5d67d4aa8971bf59f9289a74815a3579594227c98dabf4bcb",
+    "client/src/platform.rs": "2934dd6113615624ffe8a3259a643998d471e3e5625b94a0cc687ab36a4fdd37",
+    "client/src/platform/ui_profile.rs": "640d4d817ee798690851cc2ab075b1083c2ff8025e3ffe150aca71517dd020a2",
+    "client/src/frontend/mod.rs": "1cef58effd974fe2bf068d1b4eb681cc063e020172e42918a98cebcec157f239",
+    "client/src/frontend/home.rs": "ecddaa925df39e6f114460027827652802a240a7c96b34821f41d722190be814",
+    "client/src/frontend/widgets.rs": "b1cd1e78596dd8d182d706b00e53dec57c05a546bc7ee90a06c703af1639f5d3",
+    "client/src/frontend/lobby.rs": "e563ef8d5464d364dcfb0ffc6c22b8f1663fed79b87d618717e85fef8963a8d6",
+    "client/src/frontend/draft.rs": "f754cf1ed17b18b35fdf6b91fac3f2af5463187c12e653fb34924df37bfa26c8",
+    "client/src/frontend/draft/stage.rs": "c5d1e44b2f9c950fb9f9631ffb10494103d378d003280bcbbaa9601ed87d4b43",
+    "client/src/party.rs": "76e10c44c5c72827b0bd2bdc7b8cc27b7d86024d7159a962794732832b444696",
+    "client/src/ui/widgets/surfaces.rs": "7c800f9dc551adac8d2831fef22e20545e982bad6508f7af7e10999412c9cd2c"
+  },
+  "runner_sha256": "de0dae8451231c3394e13e221b158ccc7a4eebc41adc4a6b73c5b5ea39d8ad4a",
+  "screen_locked_at_launch": false,
+  "scope": "production offscreen renderer and real UI-kit actions; synthetic RU session/views/settings; no live match/account, desktop/window, physical phone or keep-awake/haptic proof",
+  "build_source_parent": "19c2616d5150f4a1256eb85a8cb7cf2ea2009478",
+  "source_binary_link": "caller-provided build; paths alone do not prove matching sources",
+  "summary": {
+    "color_pixels": true,
+    "controls": [
+      {
+        "disabled": false,
+        "fits": true,
+        "id": "HomeOfflinePractice",
+        "min": [
+          566.0692138671875,
+          179.8692169189453
+        ],
+        "size": [
+          221.69232177734375,
+          44.338462829589844
+        ]
+      }
+    ],
+    "debug_assertions": true,
+    "expected_visible_text": "Не удалось проверить совместимость: сервер недоступен или обновляется. Повторите попытку чуть позже.",
+    "locale": "ru",
+    "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+    "physical_device": false,
+    "real_admission_or_gameplay": false,
+    "render_surface": "offscreen image with virtual window metrics",
+    "scene": "Compatibility",
+    "screen": "Home",
+    "status": "passed",
+    "synthetic_state": true,
+    "ui_profile": "Mobile",
+    "viewport": [
+      852,
+      393
+    ]
+  },
+  "observed": {
+    "screen": "Home",
+    "labels": {
+      "HomeCompatibilityDetail": "Не удалось проверить совместимость: сервер недоступен или обновляется. Повторите попытку чуть позже.",
+      "HomeConnectionStatus": "Не проверено",
+      "HomeNickname": "Player",
+      "HomeOfflineNotice": "На телефоне · Без истории и прогресса",
+      "HomeRating": "Рейтинг · Таблица игроков"
+    },
+    "label_geometry": {
+      "HomeCompatibilityDetail": {
+        "center": [
+          215.39230346679688,
+          115.37692260742188
+        ],
+        "clip": null,
+        "font_size": "Px(12.0)",
+        "glyph_count": 100,
+        "last_glyphs": [
+          {
+            "center": [
+              120.19921875,
+              39.5
+            ],
+            "line": 2,
+            "size": [
+              3.0,
+              3.0
+            ]
+          },
+          {
+            "center": [
+              115.203125,
+              37.0
+            ],
+            "line": 2,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              107.251953125,
+              36.5
+            ],
+            "line": 2,
+            "size": [
+              10.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              99.322265625,
+              37.0
+            ],
+            "line": 2,
+            "size": [
+              6.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              92.626953125,
+              37.0
+            ],
+            "line": 2,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              85.572265625,
+              36.5
+            ],
+            "line": 2,
+            "size": [
+              7.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              78.697265625,
+              40.0
+            ],
+            "line": 2,
+            "size": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "center": [
+              75.494140625,
+              36.5
+            ],
+            "line": 2,
+            "size": [
+              7.0,
+              7.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          282.0,
+          44.0
+        ],
+        "node_size": [
+          300.0,
+          60.0
+        ]
+      },
+      "HomeConnectionStatus": {
+        "center": [
+          735.361572265625,
+          79.60384368896484
+        ],
+        "clip": null,
+        "font_size": "Px(12.0)",
+        "glyph_count": 12,
+        "last_glyphs": [
+          {
+            "center": [
+              79.56640625,
+              8.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              72.505859375,
+              7.5
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              65.509765625,
+              8.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              58.162109375,
+              9.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              10.0
+            ]
+          },
+          {
+            "center": [
+              51.166015625,
+              8.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              44.38671875,
+              7.5
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              37.19140625,
+              8.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              29.84375,
+              9.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              10.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          84.0,
+          15.0
+        ],
+        "node_size": [
+          84.0,
+          15.0
+        ]
+      },
+      "HomeNickname": {
+        "center": [
+          227.484619140625,
+          27.70768928527832
+        ],
+        "clip": [
+          [
+            122.484619140625,
+            15.823074340820312
+          ],
+          [
+            332.484619140625,
+            69.82307434082031
+          ]
+        ],
+        "font_size": "Px(20.0)",
+        "glyph_count": 6,
+        "last_glyphs": [
+          {
+            "center": [
+              55.564453125,
+              13.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              12.0
+            ]
+          },
+          {
+            "center": [
+              45.404296875,
+              13.5
+            ],
+            "line": 0,
+            "size": [
+              10.0,
+              13.0
+            ]
+          },
+          {
+            "center": [
+              34.0546875,
+              16.0
+            ],
+            "line": 0,
+            "size": [
+              11.0,
+              16.0
+            ]
+          },
+          {
+            "center": [
+              22.6171875,
+              13.5
+            ],
+            "line": 0,
+            "size": [
+              10.0,
+              13.0
+            ]
+          },
+          {
+            "center": [
+              15.2734375,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              3.0,
+              15.0
+            ]
+          },
+          {
+            "center": [
+              6.5,
+              11.5
+            ],
+            "line": 0,
+            "size": [
+              11.0,
+              15.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          59.0,
+          24.0
+        ],
+        "node_size": [
+          210.0,
+          24.0
+        ]
+      },
+      "HomeOfflineNotice": {
+        "center": [
+          677.4192504882812,
+          244.86538696289062
+        ],
+        "clip": null,
+        "font_size": "Px(12.0)",
+        "glyph_count": 37,
+        "last_glyphs": [
+          {
+            "center": [
+              112.7255859375,
+              22.0
+            ],
+            "line": 1,
+            "size": [
+              6.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              106.2529296875,
+              22.0
+            ],
+            "line": 1,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              99.3974609375,
+              22.0
+            ],
+            "line": 1,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              92.4013671875,
+              22.0
+            ],
+            "line": 1,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              85.0537109375,
+              23.0
+            ],
+            "line": 1,
+            "size": [
+              7.0,
+              10.0
+            ]
+          },
+          {
+            "center": [
+              78.6337890625,
+              21.5
+            ],
+            "line": 1,
+            "size": [
+              5.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              72.4384765625,
+              22.0
+            ],
+            "line": 1,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              65.0908203125,
+              23.0
+            ],
+            "line": 1,
+            "size": [
+              7.0,
+              10.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          171.0,
+          29.0
+        ],
+        "node_size": [
+          171.0,
+          29.0
+        ]
+      },
+      "HomeRating": {
+        "center": [
+          227.484619140625,
+          62.47307586669922
+        ],
+        "clip": [
+          [
+            122.484619140625,
+            15.823074340820312
+          ],
+          [
+            332.484619140625,
+            69.82307434082031
+          ]
+        ],
+        "font_size": "Px(12.0)",
+        "glyph_count": 25,
+        "last_glyphs": [
+          {
+            "center": [
+              153.060546875,
+              7.5
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              145.865234375,
+              8.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              139.630859375,
+              7.5
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              132.435546875,
+              8.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              8.0
+            ]
+          },
+          {
+            "center": [
+              125.087890625,
+              9.0
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              10.0
+            ]
+          },
+          {
+            "center": [
+              118.66796875,
+              7.5
+            ],
+            "line": 0,
+            "size": [
+              5.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              112.572265625,
+              7.5
+            ],
+            "line": 0,
+            "size": [
+              7.0,
+              7.0
+            ]
+          },
+          {
+            "center": [
+              105.697265625,
+              11.0
+            ],
+            "line": 0,
+            "size": [
+              0.0,
+              0.0
+            ]
+          }
+        ],
+        "layout_scale": 1.0,
+        "layout_size": [
+          157.0,
+          15.0
+        ],
+        "node_size": [
+          210.0,
+          15.0
+        ]
+      }
+    }
+  },
+  "screenshot": {
+    "file": "fair-play.png",
+    "sha256": "4e1243a1ec05bcd3cb581b5f77f07414f15441cd57ad58e45400e8b938b744d2",
+    "bytes": 603254
+  },
+  "seconds": 1.44,
+  "guide_actions_submitted": false
+}

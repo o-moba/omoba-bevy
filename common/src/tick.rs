@@ -1,7 +1,7 @@
 //! One simulation tick: prepare, simulate, then broadcast.
 
+use shared::clock::Instant;
 use std::collections::HashSet;
-use std::time::Instant;
 
 use shared::wire::TargetKind;
 

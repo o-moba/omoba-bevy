@@ -50,8 +50,11 @@ different key. Four distinct ultimates are legal and remain locked until level 6
 
 The recipe supports twelve passive IDs. The first website interface keeps each
 core's default passive; a valid imported passive is still part of the strict
-recipe and must not be silently replaced. Avatar and handheld choice remain
+recipe and must not be silently replaced. Avatar and handheld choices in this controlled workshop remain
 separate. Borrowing a Wildspark skill does not equip its gun on another core.
+Classic instead requires its canonical class-bound hero design and an approved
+skin binding; see [hero design policy](hero-designs.md). A saved workshop build
+does not bypass that Classic gate.
 
 Generate and verify the web snapshot with the existing shared build cache:
 

@@ -3,6 +3,7 @@
   "web.instructions": "Open the player website and enter its eight-character code here. Only approve a login you started yourself.",
   "web.code_field": "Code: {code}",
   "web.challenge": "Website: {origin}\nAccount: {account}\nRead career history; manage friends, nickname and privacy.\nAuthorize and revoke devices, create recovery codes, manage Supporter. This grants account control.\nExpires: {expires} (Unix seconds).",
+  "web.challenge_free": "Website: {origin}\nAccount: {account}\nRead career history; manage friends, nickname and privacy.\nAuthorize and revoke devices, create recovery codes. This grants account control.\nExpires: {expires} (Unix seconds).",
   "web.busy": "Contacting website…",
   "web.decision_sent": "Decision sent. Return to the website.",
   "web.button.lookup": "Look up code",

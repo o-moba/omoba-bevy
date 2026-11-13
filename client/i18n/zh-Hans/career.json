@@ -25,6 +25,8 @@
   "career.result.my_progress": "你的排位分：{rating}  ·  生涯经验 +{xp}",
   "career.unrated.allocated_bots": "电脑玩家补足了空位，本局不计排位。",
   "career.unrated.server_interrupted": "服务器在对局结束前中断，本局不计排位。",
+  "career.unrated.casual_queue": "匹配对战不计排位。",
+  "career.unrated.not_completed": "对局未正常结束，因此不计排位。",
   "career.queue.waiting": "正在寻找公平对局 · {compatible}/{needed} 名匹配玩家 · {elapsed}\n{hint}",
   "career.queue.hint_newcomer": "新玩家会与其他新手匹配。",
   "career.queue.hint_rating": "正在等待经验和排位分相近的玩家。",
@@ -46,7 +48,7 @@
   "career.team.winners": "{team} · 获胜",
   "career.team.defeated": "{team} · 落败",
   "career.profile.title": "你的资料",
-  "career.profile.progress": "生涯等级 {level} · {xp} 经验\n排位分 {rating} · {rated} 场排位赛\n{wins} 胜 · {losses} 负 · 共 {played} 场对局",
+  "career.profile.progress": "生涯等级 {level} · {xp} 经验\n排位分 {rating} · {rated} 场排位赛\n{wins} 胜 · {losses} 负 · 共 {played} 场对局\n离开对局 / 挂机：{abandons}",
   "career.profile.newcomer": "新手匹配",
   "career.profile.connecting": "正在连接你的资料…",
   "career.profile.unavailable": "暂时无法使用已保存的进度。请连接支持玩家资料的服务器。",
@@ -107,5 +109,10 @@
   "career.button.back_to_friends": "返回好友",
   "career.button.details": "详情",
   "career.button.previous": "上一页",
-  "career.button.older": "更早"
+  "career.button.older": "更早",
+  "career.player.progress_abandoned": "{rating} · +{xp}生涯经验 · 离开对局 / 挂机",
+  "career.unrated.abandoned_reaped": "对局因没有活跃玩家而结束。已确认的离开或挂机仍会受罚。",
+  "career.unrated.duration_capped": "对局已达到时间上限，不会处罚离开或挂机。",
+  "career.result.remade": "重新比赛",
+  "career.unrated.remake": "提前重新比赛，不发放常规奖励。"
 }

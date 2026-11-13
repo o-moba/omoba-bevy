@@ -184,6 +184,7 @@ async fn device_enrollment_proves_new_key_preserves_profile_and_rejects_reassign
     .await
     .unwrap();
     assert_eq!(recovered["state"], "consumed");
+    assert_eq!(recovered["account_region"], shared::market::MARKET.key());
     assert_eq!(recovered["profile_id"], profile.profile_id);
     // A candidate registered in the game while its portal approval was pending
     // is never silently moved away from that progressed account.
@@ -372,6 +373,70 @@ async fn fresh_confirmation_and_expiry_are_required() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn approval_refuses_an_account_switch_after_device_review_without_writing() {
+    let app = app().await;
+    let first = app
+        .career
+        .authenticate(&public(&random_key()), "Reviewed account")
+        .await
+        .unwrap();
+    let second = app
+        .career
+        .authenticate(&public(&random_key()), "Other account")
+        .await
+        .unwrap();
+    let reviewed_session = session(&app, &first.profile_id).await;
+    let changed_session = session(&app, &second.profile_id).await;
+    let (e, created) = start(&app, &random_key()).await;
+    let preview = devices::lookup(
+        &app,
+        &reviewed_session,
+        &serde_json::to_vec(&json!({"code":created["code"]})).unwrap(),
+    )
+    .await
+    .unwrap();
+    let approval = serde_json::to_vec(&json!({"enrollment_id":preview["enrollment_id"],
+        "public_key":preview["public_key"],"profile_id":preview["profile_id"]}))
+    .unwrap();
+    let error = devices::approve(&app, &changed_session, &approval)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        (error.0, error.1),
+        (StatusCode::CONFLICT, "account_changed")
+    );
+    let (state, profile, approved): (String, Option<String>, Option<i64>) = sqlx::query_as(
+        "SELECT state,profile_id,approved_at FROM portal.device_enrollments WHERE enrollment_id=$1",
+    )
+    .bind(&e.enrollment_id)
+    .fetch_one(&app.pool)
+    .await
+    .unwrap();
+    assert_eq!((state.as_str(), profile, approved), ("pending", None, None));
+    let approvals: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM portal.audit_events WHERE profile_id=$1 AND event='device_approved'",
+    )
+    .bind(&second.profile_id)
+    .fetch_one(&app.pool)
+    .await
+    .unwrap();
+    assert_eq!(approvals, 0);
+    // The unchanged reviewed account can still explicitly approve this request.
+    devices::approve(&app, &reviewed_session, &approval)
+        .await
+        .unwrap();
+    let profile: String = sqlx::query_scalar(
+        "SELECT profile_id FROM portal.device_enrollments WHERE enrollment_id=$1",
+    )
+    .bind(e.enrollment_id)
+    .fetch_one(&app.pool)
+    .await
+    .unwrap();
+    assert_eq!(profile, first.profile_id);
 }
 
 #[tokio::test]

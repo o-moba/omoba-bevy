@@ -74,6 +74,11 @@ pub enum PublicServerDatagram {
         path_nonce: String,
         lobby: bool,
     },
+    /// The server holds as many endpoints as it can (LR-09): this probe got
+    /// no challenge, retry later. Echoes the probe's nonce so an off-path
+    /// sender cannot fake it, and is never larger than the probe. Additive:
+    /// older clients drop a datagram they cannot read.
+    ServerFull { client_nonce: String },
 }
 
 pub fn hex(bytes: &[u8]) -> String {

@@ -115,6 +115,8 @@ async fn login(app: &App, key: &SigningKey) -> (auth::Session, String) {
 }
 fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResult {
     let p = |profile: &ProfileSummary, player_id, team| ParticipantResult {
+        input_kind: Default::default(),
+        participation: None,
         player_id,
         is_bot: false,
         profile_id: Some(profile.profile_id.clone()),
@@ -136,6 +138,9 @@ fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResu
         progression_xp_gained: 0,
     };
     MatchResult {
+        ranked_season_id: None,
+        gameplay_started: true,
+        end_reason: None,
         result_id: id.into(),
         server_epoch: u64::MAX,
         match_id: n,
@@ -153,6 +158,17 @@ fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResu
     }
 }
 async fn start(app: &App, r: &MatchResult) {
+    // Explicit maturity snapshots keep these history/ACL fixtures focused on
+    // their original counters. Actual qualifying settlement has separate proof.
+    if r.rated {
+        let ids: Vec<_> = r
+            .participants
+            .iter()
+            .filter_map(|p| p.profile_id.as_deref())
+            .collect();
+        sqlx::query("UPDATE career_profiles SET completed_public_matches=GREATEST(completed_public_matches,10) WHERE profile_id=ANY($1)")
+            .bind(&ids).execute(&app.pool).await.unwrap();
+    }
     let mut allocation = r.clone();
     allocation.ended_at_ms = 0;
     allocation.duration_ms = 0;
@@ -328,7 +344,11 @@ async fn portal_postgres_contract_and_security() {
         .0,
         StatusCode::CONFLICT
     );
-    let rename = bytes(json!({"nickname":"Новый Ник"}));
+    // Keep the Unicode prefix unique even after repeated integration/load
+    // fixtures; the discoverable search endpoint deliberately bounds its page.
+    let nickname_suffix = crypto::random::<8>();
+    let nickname = format!("Нов{nickname_suffix}");
+    let rename = bytes(json!({"nickname":nickname}));
     accounts::mutate(
         &app,
         &sa,
@@ -340,7 +360,7 @@ async fn portal_postgres_contract_and_security() {
     .unwrap();
     assert_eq!(
         app.career.profile(&a.profile_id).await.unwrap().nickname,
-        format!("Новый Ник#{}", a.nickname.rsplit_once('#').unwrap().1)
+        format!("{nickname}#{}", a.nickname.rsplit_once('#').unwrap().1)
     );
     let bad = bytes(json!({"nickname":"Hacker","rating":5000}));
     assert!(
@@ -355,7 +375,7 @@ async fn portal_postgres_contract_and_security() {
         .is_err()
     );
     let settings = bytes(
-        json!({"public_profile_enabled":true,"public_stats_enabled":false,"discoverable":true,"locale":"en","timezone":"Asia/Shanghai","expected_version":"1"}),
+        json!({"public_profile_enabled":true,"public_stats_enabled":false,"discoverable":true,"leaderboard_listed":true,"locale":"en","timezone":"Asia/Shanghai","expected_version":"1"}),
     );
     accounts::mutate(
         &app,
@@ -372,9 +392,13 @@ async fn portal_postgres_contract_and_security() {
             .is_none()
     );
     assert!(
-        accounts::search(&app, &sb, Some("query=%D0%9D%D0%BE"))
-            .await
-            .unwrap()["players"]
+        accounts::search(
+            &app,
+            &sb,
+            Some(&format!("query=%D0%BD%D0%BE%D0%B2{nickname_suffix}"))
+        )
+        .await
+        .unwrap()["players"]
             .as_array()
             .unwrap()
             .iter()
@@ -452,7 +476,7 @@ async fn portal_postgres_contract_and_security() {
             .fetch_all(&app.pool)
             .await
             .unwrap(),
-        vec![1, 2, 3]
+        omoba_career_store::career_store::SCHEMA_VERSIONS
     );
     println!(
         "PASS: real PostgreSQL migration, browser-bound pairing, concurrent completion, profile identity, strict writes, contact ACL, public opt-in, search, stale friendship protection, game/web synchronization, settlement, late projection, stats, u64, private match ACL and logout."
@@ -477,6 +501,9 @@ async fn runtime_roles_cannot_rewrite_game_rewards() {
     for query in [
         "UPDATE career_profiles SET rating=5000 WHERE false",
         "UPDATE career_profiles SET progression_xp=999999 WHERE false",
+        "UPDATE career_profiles SET abandons=999999 WHERE false",
+        "UPDATE career_play_penalties SET strikes=999 WHERE false",
+        "INSERT INTO career_abandon_events(profile_id,result_id) SELECT repeat('f',64),'forged' WHERE false",
         "UPDATE career_matches SET result='{}'::jsonb WHERE false",
         "INSERT INTO career_profiles(profile_id,nickname) VALUES(repeat('f',64),'Intruder')",
         "CREATE TABLE portal.unauthorized(id integer)",
@@ -838,4 +865,585 @@ async fn player_handles_defaults_uniqueness_rename_lookup_and_friend_identity() 
     println!(
         "PASS: random default, stable account, exact Unicode/case-insensitive lookup, explicit tag edit, collision rollback, concurrent uniqueness and preserved friendship."
     );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn leaderboard_orders_ties_hides_newcomers_and_opt_outs_and_ranks_caller() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    migrate(&url).await.unwrap();
+    let app = App::connect(
+        &url,
+        Config {
+            origin: "https://players.example".into(),
+            secret: [47; 32],
+            trust_loopback_proxy: false,
+            release_file: None,
+        },
+    )
+    .await
+    .unwrap();
+    let fresh = || {
+        let mut seed = [0; 32];
+        getrandom::fill(&mut seed).unwrap();
+        SigningKey::from_bytes(&seed)
+    };
+    // Ratings near the 5000 cap keep this ladder above every other fixture's
+    // profile in the shared database; a previous run's profiles are demoted
+    // first. The game role owns these columns; the test seeds them as the
+    // migration owner.
+    sqlx::query("UPDATE career_profiles SET rating=1000 WHERE nickname LIKE 'Ladder-%'")
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let seed = |nickname: &'static str, rating: i32, rated: i64, wins: i64| {
+        let key = fresh();
+        let app = &app;
+        async move {
+            let profile = app
+                .career
+                .authenticate(&crypto::hex(key.verifying_key().as_bytes()), nickname)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$3,wins=$4,losses=$3-$4,season_rated_matches=$3,season_wins=$4,season_losses=$3-$4,season_completed_matches=$3 WHERE profile_id=$1")
+                .bind(&profile.profile_id).bind(rating).bind(rated).bind(wins)
+                .execute(&app.pool).await.unwrap();
+            (profile.profile_id, key)
+        }
+    };
+    let (first, _) = seed("Ladder-first", 4990, 40, 30).await;
+    let (second, _) = seed("Ladder-second", 4980, 30, 20).await;
+    let (third, _) = seed("Ladder-third", 4980, 25, 12).await;
+    let (tie_a, key_a) = seed("Ladder-tie-a", 4970, 25, 13).await;
+    let (tie_b, key_b) = seed("Ladder-tie-b", 4970, 25, 14).await;
+    let (newcomer, newcomer_key) = seed("Ladder-newcomer", 5000, 19, 19).await;
+    let (hidden, hidden_key) = seed("Ladder-hidden", 5000, 50, 50).await;
+    // Lifetime experience neither bypasses seasonal placement nor wins a tie.
+    sqlx::query("UPDATE career_profiles SET rated_matches=1000,matches_played=1000 WHERE profile_id=ANY($1)")
+        .bind(vec![&newcomer, &third]).execute(&app.pool).await.unwrap();
+    let without_ranked = |value: &Value| {
+        let mut value = value.clone();
+        value.as_object_mut().unwrap().remove("ranked");
+        value
+    };
+    let (fourth, fifth, fourth_key, fifth_key) = if tie_a < tie_b {
+        (tie_a, tie_b, key_a, key_b)
+    } else {
+        (tie_b, tie_a, key_b, key_a)
+    };
+    let (fourth_session, _) = login(&app, &fourth_key).await;
+    let (fifth_session, _) = login(&app, &fifth_key).await;
+    let (newcomer_session, _) = login(&app, &newcomer_key).await;
+    let (hidden_session, _) = login(&app, &hidden_key).await;
+
+    // Opting out: the default is listed, the flag flips with the version check.
+    let me = accounts::me(&app, &hidden_session).await.unwrap();
+    assert_eq!(me["settings"]["leaderboard_listed"], true);
+    assert_eq!(me["settings"]["version"], "1");
+    let hide = |version: &str| {
+        bytes(
+            json!({"public_profile_enabled":false,"public_stats_enabled":false,"discoverable":false,"leaderboard_listed":false,"locale":"ru","timezone":"UTC","expected_version":version}),
+        )
+    };
+    accounts::mutate(
+        &app,
+        &hidden_session,
+        "me/settings",
+        &header("leaderboard-hide-000001"),
+        &hide("1"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        accounts::mutate(
+            &app,
+            &hidden_session,
+            "me/settings",
+            &header("leaderboard-hide-000002"),
+            &hide("1"),
+        )
+        .await
+        .unwrap_err()
+        .0,
+        StatusCode::CONFLICT
+    );
+    let me = accounts::me(&app, &hidden_session).await.unwrap();
+    assert_eq!(me["settings"]["leaderboard_listed"], false);
+    assert_eq!(me["settings"]["version"], "2");
+    assert!(
+        accounts::mutate(
+            &app,
+            &hidden_session,
+            "me/settings",
+            &header("leaderboard-hide-000003"),
+            &bytes(json!({"public_profile_enabled":false,"public_stats_enabled":false,"discoverable":false,"locale":"ru","timezone":"UTC","expected_version":"2"})),
+        )
+        .await
+        .is_err(),
+        "leaderboard_listed is a required field"
+    );
+
+    // Order: rating, then rated matches, then profile id; newcomers and
+    // opted-out profiles are absent, and unknown parameters are refused.
+    let board = accounts::leaderboard(&app, &fourth_session, None)
+        .await
+        .unwrap();
+    let entries = board["entries"].as_array().unwrap();
+    let ids: Vec<&str> = entries
+        .iter()
+        .map(|e| e["profile_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        &ids[..5],
+        &[
+            first.as_str(),
+            second.as_str(),
+            third.as_str(),
+            fourth.as_str(),
+            fifth.as_str()
+        ]
+    );
+    assert!(!ids.contains(&newcomer.as_str()));
+    assert!(!ids.contains(&hidden.as_str()));
+    for (index, entry) in entries.iter().enumerate() {
+        assert_eq!(entry["rank"], index as i64 + 1);
+        assert!(entry["rated_matches"].as_i64().unwrap() >= 20);
+    }
+    assert_eq!(
+        without_ranked(&entries[0]),
+        json!({"rank":1,"profile_id":first,"nickname":entries[0]["nickname"],"rating":4990,"rated_matches":40,"wins":30,"losses":10})
+    );
+    assert_eq!(
+        without_ranked(&board["me"]),
+        json!({"rank":4,"rating":4970,"rated_matches":25,"listed":true})
+    );
+    assert_eq!(entries[0]["ranked"]["rated_matches"], 40);
+    assert_eq!(entries[2]["ranked"]["rated_matches"], 25);
+    assert_eq!(entries[2]["rated_matches"], 1000);
+    assert_eq!(board["me"]["ranked"]["rated_matches"], 25);
+    assert_eq!(board["min_rated_matches"], NEWCOMER_MATCHES);
+    assert!(board["data_as_of"].as_str().unwrap().ends_with('Z'));
+    for bad in [
+        "limit=0",
+        "limit=101",
+        "limit=x",
+        "page=1",
+        "limit=2&limit=3",
+    ] {
+        assert_eq!(
+            accounts::leaderboard(&app, &fourth_session, Some(bad))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+
+    // The caller's rank is computed outside the page it asked for.
+    let page = accounts::leaderboard(&app, &fifth_session, Some("limit=2"))
+        .await
+        .unwrap();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(page["entries"][1]["profile_id"], second);
+    assert_eq!(page["me"]["rank"], 5);
+    assert_eq!(page["me"]["listed"], true);
+
+    // A newcomer and an opted-out profile have no rank, their numbers are shown.
+    let mine = accounts::leaderboard(&app, &newcomer_session, Some("limit=1"))
+        .await
+        .unwrap()["me"]
+        .clone();
+    assert_eq!(
+        without_ranked(&mine),
+        json!({"rank":null,"rating":5000,"rated_matches":1000,"listed":true})
+    );
+    let mine = accounts::leaderboard(&app, &hidden_session, None)
+        .await
+        .unwrap()["me"]
+        .clone();
+    assert_eq!(
+        without_ranked(&mine),
+        json!({"rank":null,"rating":5000,"rated_matches":50,"listed":false})
+    );
+
+    // The restricted portal role can serve the same read (SELECT on
+    // career_profiles, portal.profile_settings) when the local roles exist.
+    if let Ok(role_url) = std::env::var("OMOBA_PORTAL_ROLE_TEST_URL") {
+        let limited = App::connect(
+            &role_url,
+            Config {
+                origin: "https://players.example".into(),
+                secret: [47; 32],
+                trust_loopback_proxy: false,
+                release_file: None,
+            },
+        )
+        .await
+        .unwrap();
+        let board = accounts::leaderboard(&limited, &fourth_session, Some("limit=3"))
+            .await
+            .unwrap();
+        assert_eq!(board["entries"][2]["profile_id"], third);
+        assert_eq!(board["me"]["rank"], 4);
+    }
+
+    // History and statistics filters accept every playable class, nothing else.
+    for class in HeroClass::ALL {
+        let filter = format!("days=all&hero_class={}", class.id());
+        read::history(&app, &fourth_session, Some(&filter))
+            .await
+            .unwrap();
+        read::statistics(&app, &fourth_session, Some(&filter))
+            .await
+            .unwrap();
+    }
+    assert_eq!(HeroClass::ALL.len(), 17);
+    for bad in ["days=all&hero_class=paladin", "days=all&hero_class=Warrior"] {
+        assert_eq!(
+            read::history(&app, &fourth_session, Some(bad))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            read::statistics(&app, &fourth_session, Some(bad))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    println!("SAMPLE leaderboard limit=2: {page}");
+    println!(
+        "PASS: ladder order with both tie-breakers, newcomer and opt-out exclusion, own rank beyond the page, null rank when ineligible or hidden, versioned opt-out, strict query, 17-class filters."
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn an_unplayed_draft_never_enters_history_or_analytics() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    let app = App::connect(
+        &url,
+        Config {
+            origin: "https://players.example".into(),
+            secret: [41; 32],
+            trust_loopback_proxy: false,
+            release_file: None,
+        },
+    )
+    .await
+    .unwrap();
+    let mut seed = [0; 32];
+    getrandom::fill(&mut seed).unwrap();
+    let key = SigningKey::from_bytes(&seed);
+    let a = app
+        .career
+        .authenticate(&crypto::hex(key.verifying_key().as_bytes()), "Draft One")
+        .await
+        .unwrap();
+    getrandom::fill(&mut seed).unwrap();
+    let b = app
+        .career
+        .authenticate(
+            &crypto::hex(SigningKey::from_bytes(&seed).verifying_key().as_bytes()),
+            "Draft Two",
+        )
+        .await
+        .unwrap();
+    let mut r = result(&a, &b, &format!("unplayed-{}", crypto::random::<8>()), 1);
+    r.gameplay_started = false;
+    start(&app, &r).await;
+    r.outcome = MatchOutcome::Abandoned;
+    r.winner = None;
+    r.rated = false;
+    r.unrated_reason = Some("prematch_abandoned".into());
+    app.career.settle(r.clone()).await.unwrap();
+    projected(&app, &r.result_id).await;
+    let (session, _) = login(&app, &key).await;
+    let history = read::history(&app, &session, Some("days=all"))
+        .await
+        .unwrap();
+    assert_eq!(history["matches"].as_array().unwrap().len(), 0);
+    let facts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM portal.player_match_facts WHERE result_id=$1")
+            .bind(&r.result_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(facts, 0);
+    assert_eq!(
+        app.career
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .matches_played,
+        0
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated local roles installed by ops/grants.sql"]
+async fn fair_play_game_runtime_can_append_but_cannot_rewrite_incidents() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").expect("isolated owner URL");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::query("SET ROLE omoba_game_test")
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&url)
+        .await
+        .unwrap();
+    for query in [
+        "SELECT 1 FROM public.career_abandon_events LIMIT 0",
+        "SELECT 1 FROM public.career_play_penalties LIMIT 0",
+        "INSERT INTO public.career_abandon_events(profile_id,result_id) SELECT repeat('f',64),'fixture' WHERE false",
+        "UPDATE public.career_profiles SET completed_public_matches=10 WHERE false",
+        "INSERT INTO public.career_play_penalties(profile_id,cooldown_until,strikes) SELECT repeat('f',64),clock_timestamp(),1 WHERE false",
+        "UPDATE public.career_play_penalties SET strikes=strikes WHERE false",
+    ] {
+        sqlx::query(query).execute(&pool).await.unwrap();
+    }
+    for query in [
+        "UPDATE public.career_abandon_events SET created_at=clock_timestamp() WHERE false",
+        "DELETE FROM public.career_abandon_events WHERE false",
+        "DELETE FROM public.career_play_penalties WHERE false",
+    ] {
+        let error = sqlx::query(query).execute(&pool).await.unwrap_err();
+        assert_eq!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("42501"),
+            "{query}"
+        );
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn fair_play_personal_history_filters_and_projection_agree() {
+    let url = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    let app = App::connect(
+        &url,
+        Config {
+            origin: "https://players.example".into(),
+            secret: [91; 32],
+            trust_loopback_proxy: false,
+            release_file: None,
+        },
+    )
+    .await
+    .unwrap();
+    let fresh = || {
+        let mut seed = [0; 32];
+        getrandom::fill(&mut seed).unwrap();
+        SigningKey::from_bytes(&seed)
+    };
+    let (key, other) = (fresh(), fresh());
+    let a = app
+        .career
+        .authenticate(&crypto::hex(key.verifying_key().as_bytes()), "Fair-play-a")
+        .await
+        .unwrap();
+    let b = app
+        .career
+        .authenticate(
+            &crypto::hex(other.verifying_key().as_bytes()),
+            "Fair-play-b",
+        )
+        .await
+        .unwrap();
+    let (sa, _) = login(&app, &key).await;
+    let (sb, _) = login(&app, &other).await;
+    for n in 1..=3 {
+        sqlx::query("UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second' WHERE profile_id=$1")
+            .bind(&a.profile_id).execute(&app.pool).await.unwrap();
+        let id = crypto::random::<16>();
+        let mut terminal = result(&a, &b, &id, n);
+        start(&app, &terminal).await;
+        terminal.participants[0].participation = Some(Participation {
+            connected_ms: 30_000,
+            disconnected_ms: 90_000,
+            afk_ms: 0,
+            abandoned: true,
+        });
+        if n == 2 {
+            terminal.outcome = MatchOutcome::Interrupted;
+            terminal.winner = None;
+            terminal.rated = false;
+            terminal.unrated_reason = Some("abandoned_reaped".into());
+        }
+        if n == 3 {
+            terminal.outcome = MatchOutcome::Remade;
+            terminal.winner = None;
+            terminal.rated = false;
+            terminal.unrated_reason = Some("remake".into());
+            terminal.end_reason = Some("remake".into());
+        }
+        app.career.settle(terminal).await.unwrap();
+        projected(&app, &id).await;
+        let card = accounts::me(&app, &sa).await.unwrap();
+        assert_eq!(card["profile"]["abandons"], n);
+        let detail = read::detail(&app, &sa, &id).await.unwrap();
+        let own = detail["match"]["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["profile_id"].as_str() == Some(a.profile_id.as_str()))
+            .unwrap();
+        assert_eq!(own["participation"]["disconnected_ms"], "90000");
+        let losses = read::history(&app, &sa, Some("days=all&outcome=loss"))
+            .await
+            .unwrap();
+        assert_eq!(losses["matches"].as_array().unwrap().len(), n as usize);
+        assert!(
+            losses["matches"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["won"] == false)
+        );
+        let wins = read::history(&app, &sa, Some("days=all&outcome=win"))
+            .await
+            .unwrap();
+        assert!(wins["matches"].as_array().unwrap().is_empty());
+        let stats = read::statistics(&app, &sa, Some("days=all&outcome=loss"))
+            .await
+            .unwrap();
+        assert_eq!(stats["summary"]["matches"], n);
+        assert_eq!(stats["summary"]["losses"], n);
+        let other_losses = read::history(&app, &sb, Some("days=all&outcome=loss"))
+            .await
+            .unwrap();
+        assert_eq!(other_losses["matches"].as_array().unwrap().len(), 1);
+        if n == 3 {
+            assert_eq!(detail["match"]["end_reason"], "remake");
+            let remakes = read::history(&app, &sb, Some("days=all&outcome=remade"))
+                .await
+                .unwrap();
+            assert_eq!(remakes["matches"].as_array().unwrap().len(), 1);
+            assert!(remakes["matches"][0]["won"].is_null());
+            let innocent = accounts::me(&app, &sb).await.unwrap();
+            assert_eq!(innocent["profile"]["matches_played"], 2);
+            let innocent_stats = read::statistics(&app, &sb, Some("days=all&rated=all"))
+                .await
+                .unwrap();
+            assert_eq!(
+                innocent_stats["summary"]["matches"], 2,
+                "neutral remake must not enter ordinary statistics"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner and restricted portal PostgreSQL URLs"]
+async fn ranked_season_reads_preserve_privacy_bound_archives_and_use_runtime_grants() {
+    let owner = std::env::var("OMOBA_PORTAL_TEST_DATABASE_URL").unwrap();
+    let restricted = std::env::var("OMOBA_PORTAL_ROLE_TEST_URL").unwrap();
+    let config = || Config {
+        origin: "https://players.example".into(),
+        secret: [47; 32],
+        trust_loopback_proxy: false,
+        release_file: None,
+    };
+    let app = App::connect(&owner, config()).await.unwrap();
+    let mut seed = [0; 32];
+    getrandom::fill(&mut seed).unwrap();
+    let key = SigningKey::from_bytes(&seed);
+    let profile = app
+        .career
+        .authenticate(
+            &crypto::hex(key.verifying_key().as_bytes()),
+            "Season-reader",
+        )
+        .await
+        .unwrap();
+    let (session, _) = login(&app, &key).await;
+    // Synthetic historical records exercise reads without closing/resetting the
+    // shared fixture's active season. Store tests prove the real close operation.
+    let mut ids = Vec::new();
+    for n in 0..12_i64 {
+        let start = n * 7776000000;
+        let id: i64 = sqlx::query_scalar("INSERT INTO career_ranked_seasons(started_at_ms,ends_at_ms,closed_at_ms) VALUES($1,$1+7776000000,$1+7776000000) RETURNING season_id")
+            .bind(start).fetch_one(&app.pool).await.unwrap();
+        sqlx::query("INSERT INTO career_ranked_archives(season_id,profile_id,rating,rated_matches,wins,losses,completed_matches,badge) VALUES($1,$2,2300,20,12,8,20,$3)")
+            .bind(id).bind(&profile.profile_id).bind(json!({"season_id":id,"ended_at_ms":start+7776000000,"rating":2300,"rated_matches":20,"tier":"platinum"}))
+            .execute(&app.pool).await.unwrap();
+        ids.push(id);
+    }
+    let badge = json!({"season_id":ids[11],"ended_at_ms":12_i64*7776000000,"rating":2300,"rated_matches":20,"tier":"platinum"});
+    sqlx::query("UPDATE career_profiles SET rated_matches=100,matches_played=100,completed_public_matches=10,season_rated_matches=20,season_completed_matches=20,latest_ranked_badge=$2 WHERE profile_id=$1")
+        .bind(&profile.profile_id).bind(&badge).execute(&app.pool).await.unwrap();
+    sqlx::query("INSERT INTO portal.profile_settings(profile_id,public_profile_enabled,public_stats_enabled) VALUES($1,true,false) ON CONFLICT(profile_id) DO UPDATE SET public_profile_enabled=true,public_stats_enabled=false")
+        .bind(&profile.profile_id).execute(&app.pool).await.unwrap();
+    let limited = App::connect(&restricted, config()).await.unwrap();
+    let public = accounts::player(&limited, None, &profile.profile_id)
+        .await
+        .unwrap();
+    for field in ["rating", "ranked", "ranked_archive"] {
+        assert!(public["profile"].get(field).is_none(), "hidden {field}");
+    }
+    let me = accounts::me(&limited, &session).await.unwrap();
+    assert_eq!(me["profile"]["rated_matches"], 100);
+    assert_eq!(me["profile"]["completed_public_matches"], 10);
+    assert_eq!(me["profile"]["ranked"]["rated_matches"], 20);
+    assert_eq!(me["profile"]["ranked"]["latest_badge"], badge);
+    let archive = me["profile"]["ranked_archive"].as_array().unwrap();
+    assert_eq!(archive.len(), 10);
+    assert_eq!(archive[0]["season_id"], ids[11]);
+    assert_eq!(archive[9]["season_id"], ids[2]);
+    assert_eq!(archive[0]["badge"], badge);
+    assert_eq!(archive[0]["rating"], 2300);
+    let board = accounts::leaderboard(&limited, &session, None)
+        .await
+        .unwrap();
+    assert!(board["me"]["ranked"].get("latest_badge").is_none());
+    assert!(
+        board["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["ranked"].get("latest_badge").is_none())
+    );
+    sqlx::query("UPDATE portal.profile_settings SET public_stats_enabled=true WHERE profile_id=$1")
+        .bind(&profile.profile_id)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let public = accounts::player(&limited, None, &profile.profile_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        public["profile"]["ranked_archive"],
+        me["profile"]["ranked_archive"]
+    );
+    assert_eq!(public["profile"]["ranked"], me["profile"]["ranked"]);
+    sqlx::query(
+        "UPDATE portal.profile_settings SET public_profile_enabled=false,public_stats_enabled=false WHERE profile_id=$1",
+    )
+    .bind(&profile.profile_id)
+    .execute(&app.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        accounts::player(&limited, None, &profile.profile_id)
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        accounts::me(&limited, &session).await.unwrap()["profile"]["ranked_archive"],
+        me["profile"]["ranked_archive"]
+    );
+    limited.pool.close().await;
+    app.pool.close().await;
 }

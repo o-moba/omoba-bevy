@@ -12,5 +12,6 @@
   "common.no": "Нет",
   "common.on": "Вкл.",
   "common.off": "Выкл.",
-  "common.loading": "Загрузка…"
+  "common.loading": "Загрузка…",
+  "common.contour_badge": "{contour}"
 }

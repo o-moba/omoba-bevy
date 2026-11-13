@@ -5,9 +5,12 @@ One ordinary Q per champion scenario; normal mixed waves and production movement
 in --waves. No synthetic damage, held VFX, browser, or physical-device claims.
 Run --self-test for bounded verifier checks without launching the game.
 """
+from qa_account_fixture import prepare_capture_account
+
 import argparse
 import copy
 import json
+from snapshot_payload import decode_snapshot_payload
 import math
 import os
 from pathlib import Path
@@ -84,7 +87,7 @@ class CombatObserver(SnapshotObserver):
                 del self.pending[key]
                 if len(data) != total:
                     raise RuntimeError("Incomplete observer frame reconstruction")
-            packet = json.loads(data)
+            packet = json.loads(decode_snapshot_payload(data))
             if packet.get("type") == "snapshot":
                 self.joined = any(player["id"] == packet.get("your_id")
                                   for player in packet.get("players", []))
@@ -334,6 +337,7 @@ def main():
     children, peers, observer = [], [], None
     started=time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-combat-qa-") as isolated:
+        prepare_capture_account(isolated)
         env=dict(os.environ, SERVER_ADDR=f"{address[0]}:{address[1]}",GAME_SERVER_ADDR=f"{address[0]}:{address[1]}",
                  OMOBA_MATCH_MODE="dev",OMOBA_TEAM_SIZE="5",OMOBA_CLIENT_CONFIG_DIR=str(Path(isolated)/"config"),
                  OMOBA_ASSET_DIR=str(assets),OMOBA_PLAYER_VISUAL_MODE=args.mode,OMOBA_DEBUG_UI="0",

@@ -1,6 +1,7 @@
 mod apply;
 mod commands;
 mod components;
+pub(crate) mod directory;
 mod ingest;
 mod interpolate;
 mod offline;
@@ -30,12 +31,13 @@ pub(crate) use interpolate::NetworkGroundingSet;
 pub use session::{
     ClientConnectionState, ClientSession, NetIncomingDisconnected, SessionEvent, SessionUiCommand,
 };
-pub(crate) use status_ui::{LinkStatus, link_status};
+pub(crate) use status_ui::{CompatibilityVerdict, LinkStatus, compatibility_reason, link_status};
 
 use apply::{
     StagedSnapshot, respawn_players_with_new_store_models, respawn_sandbox_models,
     snapshot_apply_systems,
 };
+pub(crate) use commands::latch_movement_input;
 use commands::{LocalStateSendTimer, send_local_state, send_network_commands};
 use ingest::{PendingServerSnapshotFrame, ingest_server_snapshot_packets};
 use interpolate::{
@@ -157,26 +159,51 @@ impl Plugin for NetworkingPlugin {
             .init_resource::<PendingServerSnapshotFrame>()
             .init_resource::<StagedSnapshot>()
             .init_resource::<ClientSession>()
+            .init_resource::<directory::DirectoryRouting>()
             .init_resource::<NetIncomingDisconnected>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
             )))
+            // The lobby transport opens at boot only once the region's legal
+            // documents are accepted, else in the frame the player accepts
+            // them (LR-06, `crate::legal`).
             .add_systems(
                 Startup,
                 (
-                    start_networking.after(crate::persistence::load_persistent_client_settings),
+                    start_networking
+                        .after(crate::persistence::load_persistent_client_settings)
+                        .run_if(crate::legal::bound_and_accepted),
                     setup_connection_status_ui,
                     offline::setup_banner,
                 ),
             )
             .add_systems(
                 Update,
-                send_local_state.in_set(ClientNetPipeline::SendLocalState),
+                start_networking
+                    .after(crate::account_region::ActivateRegion)
+                    .run_if(on_message::<crate::legal::LegalAccepted>)
+                    .before(ClientNetPipeline::SendLocalState),
             )
             .add_systems(
                 Update,
-                send_network_commands.in_set(ClientNetPipeline::SendCommands),
+                directory::poll_directory
+                    .after(crate::account_region::ActivateRegion)
+                    .after(start_networking)
+                    .before(ClientNetPipeline::SendLocalState)
+                    .run_if(crate::legal::bound_and_accepted),
+            )
+            .add_systems(
+                Update,
+                send_local_state
+                    .run_if(crate::account_region::bound)
+                    .in_set(ClientNetPipeline::SendLocalState),
+            )
+            .add_systems(
+                Update,
+                send_network_commands
+                    .run_if(crate::account_region::bound)
+                    .in_set(ClientNetPipeline::SendCommands),
             )
             .add_systems(Update, offline::sync_banner)
             .add_systems(
@@ -221,6 +248,8 @@ impl Plugin for NetworkingPlugin {
                     flush_session_events,
                 )
                     .chain()
+                    // Every transport (re)start but the boot one is here.
+                    .distributive_run_if(crate::legal::bound_and_accepted)
                     .in_set(ClientNetPipeline::SessionLifecycle),
             )
             .add_systems(
@@ -233,5 +262,61 @@ impl Plugin for NetworkingPlugin {
                     .in_set(NetworkGroundingSet)
                     .before(bevy::transform::TransformSystems::Propagate),
             );
+    }
+}
+
+/// A region switch takes effect only at the next cold start. Dropping the sole
+/// outgoing channel closes its UDP thread; no old account traffic continues.
+pub(crate) fn stop_for_region_switch(world: &mut World) {
+    // A pending directory fetch must not reopen transport after account/region
+    // switch. The process exits/restarts before a new region is installed.
+    if world.contains_resource::<directory::DirectoryRouting>() {
+        world.insert_resource(directory::DirectoryRouting::default());
+    }
+    if world
+        .remove_resource::<transport::NetworkChannels>()
+        .is_some()
+    {
+        world.insert_resource(ClientSession::default());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::legal::gate_tests::{assert_carries, gate, on_acceptance};
+
+    /// LR-06: no lobby transport opens before the region's legal documents
+    /// are accepted. The boot start waits for the acceptance and runs again
+    /// in its frame; every later (re)start is in the gated session lifecycle.
+    #[test]
+    fn the_lobby_waits_for_the_legal_acceptance() {
+        let mut app = App::new();
+        app.add_plugins(NetworkingPlugin);
+        let start = IntoSystem::system_type_id(&start_networking);
+        assert_carries(&app, Startup, start, gate(), "start_networking at boot");
+        assert_carries(
+            &app,
+            Update,
+            start,
+            on_acceptance(),
+            "start_networking on acceptance",
+        );
+        for (system, what) in [
+            (
+                IntoSystem::system_type_id(&directory::poll_directory),
+                "directory::poll_directory",
+            ),
+            (
+                IntoSystem::system_type_id(&update_session_lifecycle),
+                "update_session_lifecycle",
+            ),
+            (
+                IntoSystem::system_type_id(&retry_pending_join),
+                "retry_pending_join",
+            ),
+        ] {
+            assert_carries(&app, Update, system, gate(), what);
+        }
     }
 }

@@ -30,5 +30,6 @@
   "loading.tip.objective": "摧毁一条路线上的防御塔，再摧毁敌方主塔。跟随己方小兵前进。",
   "loading.tip.previous": "‹",
   "loading.tip.next": "›",
-  "loading.tip.counter": "提示 {current} / {total}"
+  "loading.tip.counter": "提示 {current} / {total}",
+  "loading.waiting_players": "等待：{names}"
 }

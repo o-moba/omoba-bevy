@@ -1,0 +1,6 @@
+{
+  "rejoin.status": "You are still in a match · it ends in {minutes} min at the latest.\nResume it, or wait here: the search starts when it ends.",
+  "rejoin.status_open": "You are still in a match.\nResume it, or wait here: the search starts when it ends.",
+  "rejoin.closing": "Your previous match is closing.\nThe search starts when it ends.",
+  "rejoin.resume": "Resume match"
+}

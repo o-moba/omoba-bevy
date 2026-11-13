@@ -8,3 +8,9 @@ LICENSES/*.txt whitespace=-blank-at-eol
 # Shipped assets are byte-exact: the asset review gate pins their hashes, so a
 # Windows checkout must not rewrite line endings.
 client/assets/** -text
+
+# The game contract and its conformance fixtures are byte-pinned (revision,
+# fixture manifest hashes): never rewrite their line endings.
+shared/assets/catalog/game-contract*.json -text
+shared/assets/catalog/*.schema.json -text
+shared/assets/catalog/game-contract-fixtures/** -text

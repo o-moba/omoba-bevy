@@ -1,0 +1,7 @@
+{
+  "capacity.line": "所有竞技场均已占用 · 你在队列中排第 {position} 位",
+  "capacity.line_eta": "所有竞技场均已占用 · 你在队列中排第 {position} 位 · 预计还需 {minutes} 分钟",
+  "capacity.offline": "等待时进行离线练习",
+  "capacity.offline_hint": "离线练习会退出队列，结束后可重新匹配。",
+  "capacity.server_full": "服务器已满，正在重试…"
+}

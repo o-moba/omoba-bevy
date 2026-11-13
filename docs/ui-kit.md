@@ -261,7 +261,7 @@ the same schedule constraints, so the same overlay takes a press as before
 | `supporter::keyboard_close` | `Modal`, before `toggle_pause_menu` | supporter panel |
 | `career::dismiss_with_escape` | `Modal`, before `toggle_pause_menu` | career modal |
 | `sandbox::ui::keys` | `Modal`, before `toggle_pause_menu` | Combat Test panel, teleport, field edit |
-| `frontend::server_field::type_address` | before `PauseMenuSet::Close` | lobby server field edit |
+| `mobile_ui::close_server_entry_on_back` | `Modal`, before `PauseMenuSet::Close` | connection panel (confirm step first; dev builds only) |
 | `pause_menu::toggle_pause_menu` | `PauseMenuSet::Close`, after help and the shop | toggles the pause menu |
 
 The pause menu is the last reader: `Esc` opens or closes it; a back press
@@ -639,7 +639,9 @@ The match HUD is built from `omoba-ui/handoff/screens/hud.md` (+ the
   row `GoldShopButton` and `EquipmentHud`; phone `QuickBuyHud`), `social`
   (`SocialEntry`, `SocialStatus`), `minimap`, `team_vision`
   (`BrushStatus`), `net::offline` (practice badge / toast),
-  `mobile_controls` (phone combat group).
+  `contour_badge` (a dev-contour build's `DEV` badge `HudContourBadge` under
+  the score strip; also beside the Home title), `mobile_controls` (phone
+  combat group).
 - **Kit additions**: `KitSkin::Plate` + `plate_button` (a HUD plate that is
   a button: glass kept, border `gold.500` on hover), `live_portrait` /
   `PortraitView` / `paint_portraits` (art or icon, XP ring, level disc,

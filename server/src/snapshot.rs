@@ -103,6 +103,7 @@ impl ServerRuntime {
             return;
         }
         self.snapshot_tick = self.snapshot_tick.saturating_add(1);
+        self.load_metrics.broadcast(snapshot_now);
         let world = &self.world;
         for (addr, player) in world.players.iter().filter(|(_, p)| p.joined) {
             self.combat_log.ledger.update_player(
@@ -168,32 +169,32 @@ impl ServerRuntime {
 
         // Recipients are fixed before sending: the combat log is drained per
         // recipient below, which needs it mutably. A standalone server sends
-        // the world only to verified endpoints (joined, or career-authenticated).
-        let recipients =
-            world
-                .players
-                .iter()
-                .filter(|(addr, player)| {
-                    !player.hero.identity.is_bot
-                        && (!self.match_service.is_public() && self.endpoint_verified(**addr)
-                            || self.match_service.is_public()
-                                && self.public_transport.validated(**addr, now)
-                                && self.career.backend.gameplay_principal(**addr).is_some_and(
-                                    |p| {
-                                        self.match_service.can_observe(
-                                            &p.session_id,
-                                            self.career
-                                                .backend
-                                                .profile(**addr)
-                                                .as_ref()
-                                                .map(|p| p.profile_id.as_str())
-                                                .unwrap_or(""),
-                                        )
-                                    },
-                                ))
-                })
-                .map(|(addr, _)| *addr)
-                .collect::<Vec<_>>();
+        // the world only to verified endpoints (joined, or career-authenticated);
+        // no role ever addresses an internal bot/detached-seat actor.
+        let recipients = world
+            .players
+            .keys()
+            .filter(|addr| {
+                self.live_match_endpoint(**addr, now)
+                    && (!self.match_service.is_public()
+                        || self
+                            .career
+                            .backend
+                            .gameplay_principal(**addr)
+                            .is_some_and(|p| {
+                                self.match_service.can_observe(
+                                    &p.session_id,
+                                    self.career
+                                        .backend
+                                        .profile(**addr)
+                                        .as_ref()
+                                        .map(|p| p.profile_id.as_str())
+                                        .unwrap_or(""),
+                                )
+                            }))
+            })
+            .copied()
+            .collect::<Vec<_>>();
 
         // Step 11f: the same for every recipient of this match, but only a
         // joined player gets it (see `snapshot_debug_access`).
@@ -244,7 +245,7 @@ impl ServerRuntime {
                 vision::filter_snapshot(&mut packet, player, world, now);
             }
 
-            send_snapshot(
+            if send_snapshot(
                 self.transport.as_ref(),
                 &mut self.snapshot_send_diagnostic,
                 &packet,
@@ -253,7 +254,9 @@ impl ServerRuntime {
                 self.snapshot_tick,
                 addr,
                 now,
-            );
+            ) {
+                self.load_metrics.snapshot_sent(addr, now);
+            }
         }
 
         // Unverified standalone endpoints get a small status snapshot, one
@@ -294,11 +297,13 @@ impl ServerRuntime {
         }
 
         self.last_snapshot_at = snapshot_now;
+        self.load_metrics.emit_if_due(snapshot_now);
     }
 }
 
 /// Serializes `packet` (framed for a recipient that said Hello) and sends it
 /// to `addr`, reporting failures through the rate-limited `diagnostic`.
+/// Returns true only after every fragment reaches kernel send.
 fn send_snapshot(
     transport: &dyn Transport,
     diagnostic: &mut RateLimitedDiagnostic,
@@ -308,12 +313,12 @@ fn send_snapshot(
     snapshot_tick: u64,
     addr: SocketAddr,
     now: Instant,
-) {
+) -> bool {
     let payloads = if framed {
         serialize_snapshot_datagram(packet)
             .map_err(|error| error.to_string())
             .and_then(|payload| {
-                shared::transport::encode_snapshot(&payload, server_epoch, snapshot_tick)
+                shared::transport::encode_world_snapshot(&payload, server_epoch, snapshot_tick)
                     .map_err(|error| error.to_string())
             })
     } else {
@@ -341,9 +346,10 @@ fn send_snapshot(
                             payload.len()
                         );
                     }
-                    break;
+                    return false;
                 }
             }
+            true
         }
         Err(error) => {
             if let Some(suppressed) = diagnostic.record(now) {
@@ -351,6 +357,7 @@ fn send_snapshot(
                     "Rejected snapshot for {addr}: {error}; suppressed {suppressed} similar errors"
                 );
             }
+            false
         }
     }
 }

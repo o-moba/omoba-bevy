@@ -237,6 +237,11 @@ kits, base HP, growth caps and basic attacks in
 `shared/assets/catalog/items.json`; the shared progression curve in
 `shared/src/hero_balance.rs`.
 
+Bot behaviour levels are measured separately, with full bot-only 5v5 rounds
+rather than duels: the difficulty simulator `common/tests/bot_difficulty_sim.rs`
+(docs/plans/bot-personas.md, S3). Re-run it after a balance change that moves
+fights or tower pushes, because its calibrated level knobs assume today's kits.
+
 ## Five classes and the Warden (0.23.0-rc.6)
 
 The Warden fills the Jungle duty. Its duel strength sits deliberately just below

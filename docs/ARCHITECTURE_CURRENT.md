@@ -1,5 +1,7 @@
 # Текущая архитектура omoba
 
+> **Historical snapshot (2026-09-25).** This document predates connection profiles, markets, sign in with VK ID and the `common` crate. Do not cite it for current behaviour: the current architecture is in [architecture/](architecture/README.md) and the code map in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Этот документ описывает, **как устроен код сейчас**, после завершения программы
 рефакторинга (шаги 1–15 и 9b, пункты отчёта O1–O30 и Q1–Q9, где они сделаны).
 Сначала идёт обзор на одну страницу, потом подробности по крейтам. Все
