@@ -28,7 +28,7 @@ def git(repo, *args):
 def manifest(rev, url=URL):
     return (
         "[workspace.dependencies]\n"
-        'bevy = "0.19.1"\n'
+        'bevy = "0.20.0"\n'
         f'ekza-bevy-sdk = {{ git = "{url}", rev = "{rev}", default-features = false }}\n'
     )
 
@@ -50,7 +50,7 @@ def lock(rev, url=URL):
 
 
 class ParseTests(unittest.TestCase):
-    REV = "d18ec7227a8c72c4dedfb8aca825bd656bf6d02c"
+    REV = "b67b33fde4ceba3084a771905d9660ca6659dfb0"
 
     def test_manifest_and_lock_name_the_url_and_commit(self):
         self.assertEqual(check_sdk_pin.manifest_pin(manifest(self.REV)), (URL, self.REV))

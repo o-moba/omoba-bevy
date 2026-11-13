@@ -649,7 +649,7 @@ pub(crate) fn test_app(mode: PlayerVisualMode) -> App {
              meshes: Res<Assets<Mesh>>,
              parts: Query<(Entity, &Mesh3d), Without<Aabb>>| {
                 for (entity, mesh) in &parts {
-                    if let Some(bounds) = meshes.get(&mesh.0).and_then(MeshAabb::compute_aabb) {
+                    if let Some(bounds) = meshes.get(&mesh.0).and_then(MeshAabb::get_aabb) {
                         commands.entity(entity).insert(bounds);
                     }
                 }
