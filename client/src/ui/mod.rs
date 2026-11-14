@@ -1,8 +1,9 @@
 //! Client UI kit: one theme, one tap recognizer, one scroll system, a modal
 //! registry, typed button actions and the widgets built on them. `docs/ui-kit.md` describes the API and the
 //! migration state; the pause menu and the practice sandbox are the pilot.
-use bevy::{prelude::*, ui::FocusPolicy};
+use bevy::{a11y::AccessibilityNode, prelude::*, ui::FocusPolicy};
 
+mod accessibility;
 pub(crate) mod action;
 pub(crate) mod back;
 pub(crate) mod focus;
@@ -31,35 +32,41 @@ use crate::platform::UiProfile;
 /// exposes a private type, so the UI kit owns the marker while it retains its
 /// established `Interaction` behavior.
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
-#[require(Node, FocusPolicy::Block, Interaction)]
+#[require(Node, FocusPolicy::Block, Interaction, AccessibilityNode = accessibility::button_node())]
 pub(crate) struct Button;
 
-/// World-space bounds of all inherited clipping rectangles. `None` means no
-/// clipping; a fully clipped node produces an empty rectangle.
-pub(crate) fn calculated_clip_rect(clip: &CalculatedClip) -> Option<Rect> {
-    match clip {
-        CalculatedClip::FullyClipped => Some(Rect::default()),
-        CalculatedClip::Rects(rects) if rects.is_empty() => None,
-        CalculatedClip::Rects(rects) => rects.iter().fold(None, |bounds, clip| {
-            let local_to_world = clip.world_to_clip_local.inverse();
-            let rect = clip.rect;
-            let corners = [
-                rect.min,
-                Vec2::new(rect.max.x, rect.min.y),
-                rect.max,
-                Vec2::new(rect.min.x, rect.max.y),
-            ];
-            let mut min = Vec2::splat(f32::INFINITY);
-            let mut max = Vec2::splat(f32::NEG_INFINITY);
-            for corner in corners {
-                let point = local_to_world.transform_point2(corner);
-                min = min.min(point);
-                max = max.max(point);
-            }
-            let bounds_rect = Rect::from_corners(min, max);
-            Some(bounds.map_or(bounds_rect, |bounds: Rect| bounds.intersect(bounds_rect)))
-        }),
+/// Bounds of the visible portion of a physical-pixel rectangle. Focus rings and
+/// QA use these axis-aligned bounds; pointer hit tests use the clip itself.
+pub(crate) fn clipped_ui_rect(mut bounds: Rect, clip: Option<&CalculatedClip>) -> Rect {
+    let Some(clip) = clip else { return bounds };
+    let Some(rects) = clip.rects() else {
+        return Rect::default();
+    };
+    for clip in rects {
+        // Start from finite node bounds. A one-axis scroll clip has infinite
+        // edges in its local space, which cannot be transformed into points.
+        let local = transform_rect_bounds(bounds, clip.world_to_clip_local).intersect(clip.rect);
+        if local.is_empty() {
+            return Rect::default();
+        }
+        bounds = bounds.intersect(transform_rect_bounds(
+            local,
+            clip.world_to_clip_local.inverse(),
+        ));
     }
+    bounds
+}
+
+pub(super) fn transform_rect_bounds(rect: Rect, transform: bevy::math::Affine2) -> Rect {
+    let mut bounds = Rect::from_center_size(transform.transform_point2(rect.min), Vec2::ZERO);
+    for corner in [
+        Vec2::new(rect.max.x, rect.min.y),
+        rect.max,
+        Vec2::new(rect.min.x, rect.max.y),
+    ] {
+        bounds = bounds.union_point(transform.transform_point2(corner));
+    }
+    bounds
 }
 
 /// The compile-target interface family, resolved once at startup. Systems
@@ -143,6 +150,7 @@ impl Plugin for UiKitPlugin {
                 ),
             );
         app.add_plugins(living_background::LivingBackgroundPlugin);
+        accessibility::add_systems(app);
         widgets::controls::add_systems(app);
         widgets::surfaces::add_systems(app);
         widgets::game::add_systems(app);

@@ -190,14 +190,13 @@ fn interact(
         let hit = (!over_ui)
             .then(|| picking.sculpture(touch.position, &desired))
             .flatten();
-        let targets = hit.map(|entity| (entity, Rect::from_center_size(touch.position, Vec2::ONE)));
         if touch.phase == TouchPhase::Started && hit.is_some() && info.captured_touch.is_none() {
             info.captured_touch = Some(touch.id);
         }
         if info.captured_touch == Some(touch.id) {
             info.consumed_frame = true;
             activate |= tracker
-                .event(touch.id, touch.phase, touch.position, targets.as_slice())
+                .event(touch.id, touch.phase, touch.position, |_| hit)
                 .is_some();
             if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Canceled) {
                 info.captured_touch = None;

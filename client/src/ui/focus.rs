@@ -204,10 +204,7 @@ pub(crate) fn directional_neighbor(
 
 /// Physical-pixel rectangle of a node (unclipped).
 pub(crate) fn node_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
-    Rect::from_center_size(
-        transform.translation,
-        node.size() * transform.to_scale_angle_translation().0.abs(),
-    )
+    super::transform_rect_bounds(node.border_box(), transform.affine())
 }
 
 type Hierarchy<'a> = (
@@ -350,10 +347,7 @@ pub(crate) fn navigate_focus(
             }
             // Clipped out of sight is fine inside a scroll area (focus
             // scrolls it into view); anywhere else it is not a candidate.
-            let mut shown = rect;
-            if let Some(clip) = clip.and_then(super::calculated_clip_rect) {
-                shown = shown.intersect(clip);
-            }
+            let mut shown = super::clipped_ui_rect(rect, clip);
             if let Some(viewport) = viewport {
                 shown = shown.intersect(viewport);
             }

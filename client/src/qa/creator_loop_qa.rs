@@ -1163,7 +1163,10 @@ fn return_state(
             label_geometry.insert(key.as_str().to_owned(), serde_json::json!({
                 "node_size": node.map(|n| n.size().to_array()),
                 "center": transform.map(|t| t.translation.to_array()),
-                "clip": clip.and_then(crate::ui::calculated_clip_rect).map(|clip| [clip.min.to_array(), clip.max.to_array()]),
+                "clip": clip.zip(node.zip(transform)).map(|(clip, (node, transform))| {
+                    let rect = crate::ui::clipped_ui_rect(crate::ui::focus::node_rect(node, transform), Some(clip));
+                    [rect.min.to_array(), rect.max.to_array()]
+                }),
                 "font_size": font.map(|f| format!("{:?}", f.font_size)),
                 "layout_size": layout.map(|l| l.size.to_array()),
                 "layout_scale": layout.map(|l| l.scale_factor),

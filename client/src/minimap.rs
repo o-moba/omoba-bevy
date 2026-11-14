@@ -595,6 +595,7 @@ fn update_minimap_icons_system(
     sprites: Res<SpriteVisualAssets>,
     mode: Res<PlayerVisualMode>,
     game: Option<Res<crate::net::GameStateSnapshot>>,
+    mut markers: Query<(&mut Node, &mut BackgroundColor)>,
 ) {
     let Some(container) = state.container else {
         return;
@@ -659,8 +660,10 @@ fn update_minimap_icons_system(
         node.align_items = AlignItems::Center;
         if let Some((icon, previous_key)) = state.player_icons.get(&entity) {
             if previous_key == &key {
-                commands.entity(*icon).insert(node);
-                continue;
+                if let Ok((mut current, _)) = markers.get_mut(*icon) {
+                    current.set_if_neq(node);
+                    continue;
+                }
             }
             commands.entity(*icon).despawn();
         }
@@ -764,6 +767,7 @@ fn update_minimap_icons_system(
         };
         sync_dot(
             &mut commands,
+            &mut markers,
             container,
             &mut state.structure_icons,
             entity,
@@ -782,6 +786,7 @@ fn update_minimap_icons_system(
         seen.insert(entity);
         sync_dot(
             &mut commands,
+            &mut markers,
             container,
             &mut state.minion_icons,
             entity,
@@ -971,6 +976,7 @@ fn hero_marker_visible(
 }
 fn sync_dot(
     commands: &mut Commands,
+    markers: &mut Query<(&mut Node, &mut BackgroundColor)>,
     container: Entity,
     icons: &mut HashMap<Entity, Entity>,
     world: Entity,
@@ -980,23 +986,25 @@ fn sync_dot(
     name: &'static str,
 ) {
     let node = marker_node(point, size);
-    if let Some(icon) = icons.get(&world) {
-        commands
-            .entity(*icon)
-            .insert((node, BackgroundColor(color)));
-    } else {
-        let icon = commands
-            .spawn((
-                node,
-                BackgroundColor(color),
-                ZIndex(2),
-                Name::new(name),
-                ChildOf(container),
-            ))
-            .id();
-        icons.insert(world, icon);
+    if let Some(&icon) = icons.get(&world)
+        && let Ok((mut current, mut tint)) = markers.get_mut(icon)
+    {
+        current.set_if_neq(node);
+        tint.set_if_neq(BackgroundColor(color));
+        return;
     }
+    let icon = commands
+        .spawn((
+            node,
+            BackgroundColor(color),
+            ZIndex(2),
+            Name::new(name),
+            ChildOf(container),
+        ))
+        .id();
+    icons.insert(world, icon);
 }
+
 fn despawn_removed_icons(
     commands: &mut Commands,
     icons: &mut HashMap<Entity, Entity>,

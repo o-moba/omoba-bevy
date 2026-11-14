@@ -51,9 +51,12 @@ impl Plugin for TeamVisionPlugin {
             )
             .add_systems(
                 PostUpdate,
-                update_mask
-                    .after(bevy::camera::CameraUpdateSystems)
-                    .after(bevy::transform::TransformSystems::Propagate),
+                (
+                    update_world_mask
+                        .after(bevy::camera::CameraUpdateSystems)
+                        .after(bevy::transform::TransformSystems::Propagate),
+                    update_minimap_mask,
+                ),
             );
     }
 }
@@ -68,6 +71,9 @@ pub(crate) struct VisionPresentation {
     elapsed: f32,
     identity: Option<(u64, u64)>,
     camera_matrix: Option<Mat4>,
+    minimap_elapsed: f32,
+    minimap_identity: Option<(u64, u64)>,
+    minimap_bounds: Option<(Vec2, Vec2)>,
 }
 #[derive(Component)]
 struct FogOverlay;
@@ -258,6 +264,9 @@ fn setup(
         elapsed: UPDATE_SECS,
         identity: None,
         camera_matrix: None,
+        minimap_elapsed: UPDATE_SECS,
+        minimap_identity: None,
+        minimap_bounds: None,
     });
     commands.spawn((
         Name::new("Team fog of war"),
@@ -615,30 +624,53 @@ fn sync_visibility(
     if !art.active {
         art.identity = None;
         art.elapsed = UPDATE_SECS;
+        art.minimap_identity = None;
+        art.minimap_elapsed = UPDATE_SECS;
     }
 }
 /// Only presentation feathers the hard authoritative boundary; hidden enemies
 /// have already been removed from the recipient snapshot.
-fn fog_alpha(sources: &[VisionSource], point: [f32; 2]) -> u8 {
-    fog_alpha_with_brush(sources, point, true)
+fn prepare_fog_sources(
+    sources: &[VisionSource],
+    include_brush: bool,
+) -> Vec<(VisionSource, Option<u16>)> {
+    sources
+        .iter()
+        .take(MAX_RENDER_SOURCES)
+        .filter(|source| {
+            source.radius.is_finite()
+                && source.radius > 0.0
+                && source.position.iter().all(|value| value.is_finite())
+        })
+        .map(|source| {
+            (
+                *source,
+                include_brush.then(|| brush_at(source.position)).flatten(),
+            )
+        })
+        .collect()
 }
-fn fog_alpha_with_brush(sources: &[VisionSource], point: [f32; 2], include_brush: bool) -> u8 {
+
+#[cfg(test)]
+fn fog_alpha(sources: &[VisionSource], point: [f32; 2]) -> u8 {
+    fog_alpha_with_brush(&prepare_fog_sources(sources, true), point, true)
+}
+
+fn fog_alpha_with_brush(
+    sources: &[(VisionSource, Option<u16>)],
+    point: [f32; 2],
+    include_brush: bool,
+) -> u8 {
     if !point.iter().all(|x| x.is_finite()) {
         return (DARK_ALPHA * 255.) as u8;
     }
     let brush = include_brush.then(|| brush_at(point)).flatten();
     let mut light = 0.0_f32;
-    for source in sources.iter().take(MAX_RENDER_SOURCES) {
-        if !source.radius.is_finite()
-            || source.radius <= 0.
-            || !source.position.iter().all(|x| x.is_finite())
-        {
-            continue;
-        }
+    for (source, source_brush) in sources {
         let distance = (point[0] - source.position[0]).hypot(point[1] - source.position[1]);
         let t = ((source.radius + 1.5 - distance) / 3.).clamp(0., 1.);
         let mut strength = t * t * (3. - 2. * t);
-        if brush.is_some() && brush_at(source.position) != brush {
+        if brush.is_some() && *source_brush != brush {
             strength *= 0.35;
         }
         light = light.max(strength);
@@ -660,12 +692,11 @@ fn ground_point(view_from_clip: Mat4, world_from_view: Mat4, uv: Vec2) -> Option
     let t = -origin.y / direction.y;
     (t >= 0.).then(|| (origin + direction * t).xz().to_array())
 }
-fn update_mask(
+fn update_world_mask(
     time: Res<Time>,
     game: Option<Res<GameStateSnapshot>>,
     mut art: ResMut<VisionPresentation>,
     cameras: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    layout: Res<MapLayout>,
     mut images: ResMut<Assets<Image>>,
 ) {
     if !art.active {
@@ -700,6 +731,7 @@ fn update_mask(
     art.camera_matrix = Some(camera_matrix);
     art.elapsed = 0.;
     art.identity = Some(identity);
+    let sources = prepare_fog_sources(&vision.sources, false);
     let mut darkest = 0;
     let mut clearest = 255;
     if let Some(mut image) = images.get_mut(&art.texture)
@@ -712,7 +744,7 @@ fn update_mask(
                     (y as f32 + 0.5) / MASK_HEIGHT as f32,
                 );
                 let alpha = ground_point(view, world, uv).map_or((DARK_ALPHA * 255.) as u8, |p| {
-                    fog_alpha_with_brush(&vision.sources, p, false)
+                    fog_alpha_with_brush(&sources, p, false)
                 });
                 let i = ((y * MASK_WIDTH + x) * 4) as usize;
                 data[i..i + 4].copy_from_slice(&[8, 18, 24, alpha]);
@@ -721,29 +753,60 @@ fn update_mask(
             }
         }
     }
-    if let Some(mut image) = images.get_mut(&art.minimap)
-        && let Some(data) = image.data.as_mut()
-    {
-        for y in 0..MAP_SIZE {
-            for x in 0..MAP_SIZE {
-                let uv = Vec2::new(
-                    (x as f32 + 0.5) / MAP_SIZE as f32,
-                    (y as f32 + 0.5) / MAP_SIZE as f32,
-                );
-                let p = layout.min + Vec2::new(1. - uv.y, uv.x) * layout.size();
-                let i = ((y * MAP_SIZE + x) * 4) as usize;
-                data[i..i + 4].copy_from_slice(&[
-                    4,
-                    10,
-                    16,
-                    fog_alpha(&vision.sources, p.to_array()),
-                ]);
-            }
-        }
-    }
     art.darkest = darkest;
     art.clearest = clearest;
     art.updates += 1;
+}
+
+fn update_minimap_mask(
+    time: Res<Time>,
+    game: Option<Res<GameStateSnapshot>>,
+    mut art: ResMut<VisionPresentation>,
+    layout: Res<MapLayout>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    if !art.active {
+        return;
+    }
+    let Some(game) = game else { return };
+    let Some(vision) = game.vision.as_ref() else {
+        return;
+    };
+    art.minimap_elapsed += time.delta_secs();
+    let identity = (game.meta.server_epoch, game.meta.match_id);
+    let bounds = (layout.min, layout.max);
+    if art.minimap_elapsed < UPDATE_SECS
+        && art.minimap_identity == Some(identity)
+        && art.minimap_bounds == Some(bounds)
+    {
+        return;
+    }
+    let Some(mut image) = images.get_mut(&art.minimap) else {
+        return;
+    };
+    let Some(data) = image.data.as_mut() else {
+        return;
+    };
+    let sources = prepare_fog_sources(&vision.sources, true);
+    for y in 0..MAP_SIZE {
+        for x in 0..MAP_SIZE {
+            let uv = Vec2::new(
+                (x as f32 + 0.5) / MAP_SIZE as f32,
+                (y as f32 + 0.5) / MAP_SIZE as f32,
+            );
+            let p = layout.min + Vec2::new(1. - uv.y, uv.x) * layout.size();
+            let i = ((y * MAP_SIZE + x) * 4) as usize;
+            data[i..i + 4].copy_from_slice(&[
+                4,
+                10,
+                16,
+                fog_alpha_with_brush(&sources, p.to_array(), true),
+            ]);
+        }
+    }
+    art.minimap_elapsed = 0.;
+    art.minimap_identity = Some(identity);
+    art.minimap_bounds = Some(bounds);
 }
 #[cfg(test)]
 mod tests {
@@ -757,7 +820,10 @@ mod tests {
             radius: 40.0,
         };
         assert!(fog_alpha(&[source], brush.center) > 0);
-        assert_eq!(fog_alpha_with_brush(&[source], brush.center, false), 0);
+        assert_eq!(
+            fog_alpha_with_brush(&prepare_fog_sources(&[source], false), brush.center, false),
+            0
+        );
     }
 
     #[test]
@@ -919,6 +985,108 @@ mod tests {
             .map(|x| fog_alpha(std::slice::from_ref(&source), [x as f32, 0.]))
             .collect();
         assert!(alphas.windows(2).all(|p| p[0] <= p[1]));
+    }
+    #[test]
+    fn moving_camera_refreshes_only_world_mask_until_minimap_update_is_due() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<MapLayout>()
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                vision: Some(shared::vision::TeamVision {
+                    sources: vec![VisionSource {
+                        position: [0.0, 0.0],
+                        radius: 32.0,
+                    }],
+                    ..default()
+                }),
+                ..default()
+            })
+            .add_systems(Update, (update_world_mask, update_minimap_mask));
+        let world = app.world_mut();
+        let layout = *world.resource::<MapLayout>();
+        let mid = (MAP_SIZE as f32 * 0.5 + 0.5) / MAP_SIZE as f32;
+        world
+            .resource_mut::<GameStateSnapshot>()
+            .vision
+            .as_mut()
+            .unwrap()
+            .sources[0]
+            .position = (layout.min + Vec2::new(1.0 - mid, mid) * layout.size()).to_array();
+        let mut images = world.resource_mut::<Assets<Image>>();
+        let texture = images.add(mask_image(MASK_WIDTH, MASK_HEIGHT));
+        let minimap = images.add(mask_image(MAP_SIZE, MAP_SIZE));
+        world.insert_resource(VisionPresentation {
+            active: true,
+            texture,
+            minimap: minimap.clone(),
+            updates: 0,
+            darkest: 0,
+            clearest: 0,
+            elapsed: UPDATE_SECS,
+            identity: None,
+            camera_matrix: None,
+            minimap_elapsed: UPDATE_SECS,
+            minimap_identity: None,
+            minimap_bounds: None,
+        });
+        let camera = world
+            .spawn((
+                MainCamera,
+                Camera {
+                    computed: ComputedCameraValues {
+                        clip_from_view: Mat4::perspective_infinite_reverse_rh(0.8, 1.6, 0.1),
+                        target_info: Some(RenderTargetInfo {
+                            physical_size: UVec2::new(852, 393),
+                            scale_factor: 1.0,
+                        }),
+                        ..default()
+                    },
+                    ..default()
+                },
+                GlobalTransform::from(
+                    Transform::from_xyz(0.0, 30.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
+                ),
+            ))
+            .id();
+
+        app.update();
+        let pixel = ((MAP_SIZE / 2 * MAP_SIZE + MAP_SIZE / 2) * 4 + 3) as usize;
+        let alpha = |app: &App| {
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&minimap)
+                .unwrap()
+                .data
+                .as_ref()
+                .unwrap()[pixel]
+        };
+        assert_eq!(alpha(&app), 0);
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .vision
+            .as_mut()
+            .unwrap()
+            .sources
+            .clear();
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(GlobalTransform::from(
+                Transform::from_xyz(10.0, 30.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ));
+        let original_alpha = alpha(&app);
+        app.update();
+        assert_eq!(app.world().resource::<VisionPresentation>().updates, 2);
+        assert_eq!(alpha(&app), original_alpha);
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(80));
+        app.update();
+        assert!(alpha(&app) > 150);
     }
     #[test]
     fn projected_ground_roundtrip_matches_camera_ray_and_orbit() {

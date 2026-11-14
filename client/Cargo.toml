@@ -12,6 +12,8 @@ default = ["qa"]
 qa = []
 
 [dependencies]
+# Use the same AccessKit already resolved by Bevy UI and winit.
+accesskit = "=0.24.1"
 common = { path = "../common" }
 ed25519-dalek = "2.2.0"
 getrandom = "0.3.4"

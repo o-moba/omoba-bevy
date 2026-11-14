@@ -312,17 +312,10 @@ fn click(name: &str, window: Entity, mobile: bool, input: &mut Input, qa: &mut Q
     if !visible.get() || node.size().min_element() <= 0.0 {
         return false;
     }
-    let rect = Rect::from_center_size(
-        transform.translation * node.inverse_scale_factor(),
-        node.size() * node.inverse_scale_factor(),
-    );
-    let visible_rect = clip.and_then(crate::ui::calculated_clip_rect).map(|clip| {
-        Rect::from_corners(
-            clip.min * node.inverse_scale_factor(),
-            clip.max * node.inverse_scale_factor(),
-        )
-    });
-    if visible_rect.is_some_and(|clip| !clip.contains(rect.center()) || rect.max.y > clip.max.y) {
+    let dpi = 1.0 / node.inverse_scale_factor();
+    let rect = crate::ui::gesture::logical_ui_rect(node, transform, None, dpi);
+    let shown = crate::ui::gesture::logical_ui_rect(node, transform, clip, dpi);
+    if shown.is_empty() || !shown.contains(rect.center()) || rect.max.y > shown.max.y {
         for (n, panel, transform, mut scroll) in &mut input.panels {
             if n.as_str() == "PauseMenuPanel" {
                 let panel_rect = Rect::from_center_size(

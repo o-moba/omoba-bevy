@@ -9,7 +9,9 @@ All notable changes are recorded here. The canonical version is
   (`=0.20.1` in every manifest) with Rust 1.97.1. Migrate mesh AABB accessors, keep the existing Linux cpal
   recovery patch, and preserve the client/server network protocol and gameplay
   contracts. Desktop, Android, browser and server checks run through the normal
-  CI gates; no deployment or release publication is included.
+  CI gates. Fix taps escaping one-axis scroll clips and restore accessible
+  button labels. Use Bevy picking for practice buttons in the browser and
+  reduce redundant HUD, transform, particle and minimap fog updates.
 
 - Externalize bulky Ranked evidence without deleting the local proof: a private
   draft asset in `o-moba/omoba-bevy-archive` preserves all 1,321 evidence files

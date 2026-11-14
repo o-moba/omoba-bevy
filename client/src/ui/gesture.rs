@@ -9,6 +9,7 @@
 use bevy::{
     input::touch::{TouchInput, TouchPhase},
     prelude::*,
+    ui::CalculatedClip,
     window::{AppLifecycle, PrimaryWindow},
 };
 
@@ -88,14 +89,14 @@ impl TapTracker {
         self.held = None;
     }
 
-    /// Feeds one touch phase; `buttons` are the hit rects in front-to-back
-    /// order. Returns the button whose tap completed on this event.
+    /// Feeds one touch phase. On touch-down, hit-test the front-most button.
+    /// On release, check only the button that originally held the tap.
     pub(crate) fn event(
         &mut self,
         id: u64,
         phase: TouchPhase,
         point: Vec2,
-        buttons: &[(Entity, Rect)],
+        hit: impl FnOnce(Option<Entity>) -> Option<Entity>,
     ) -> Option<Entity> {
         if !point.is_finite() {
             self.held = None;
@@ -103,10 +104,10 @@ impl TapTracker {
         }
         if phase == TouchPhase::Started {
             if self.held.is_none() {
-                if let Some((button, _)) = buttons.iter().find(|(_, rect)| rect.contains(point)) {
+                if let Some(button) = hit(None) {
                     self.held = Some(Tap {
                         id,
-                        button: *button,
+                        button,
                         start: point,
                         canceled: false,
                     });
@@ -118,11 +119,8 @@ impl TapTracker {
         // Sticky cancellation: scrolling away then back cannot revive a tap.
         tap.canceled |= tap.start.distance(point) > TAP_SLOP;
         let candidate = tap.button;
-        let released = phase == TouchPhase::Ended
-            && !tap.canceled
-            && buttons
-                .iter()
-                .any(|(entity, rect)| *entity == candidate && rect.contains(point));
+        let released =
+            phase == TouchPhase::Ended && !tap.canceled && hit(Some(candidate)) == Some(candidate);
         if matches!(phase, TouchPhase::Ended | TouchPhase::Canceled) {
             self.held = None;
         }
@@ -130,21 +128,30 @@ impl TapTracker {
     }
 }
 
-/// Window-logical rectangle of a UI node, clipped by its scroll ancestors.
+/// Hit test in physical window coordinates, including every transformed scroll clip.
+pub(super) fn ui_contains_point(
+    node: &ComputedNode,
+    transform: &UiGlobalTransform,
+    clip: Option<&CalculatedClip>,
+    point: Vec2,
+) -> bool {
+    point.is_finite()
+        && node.contains_point(*transform, point)
+        && clip.is_none_or(|clip| clip.contains_point(point))
+}
+
+/// Window-logical bounds of a UI node, clipped by its scroll ancestors.
 pub(crate) fn logical_ui_rect(
     node: &ComputedNode,
     transform: &UiGlobalTransform,
-    clip: Option<&bevy::ui::CalculatedClip>,
+    clip: Option<&CalculatedClip>,
     dpi: f32,
 ) -> Rect {
-    let mut rect = Rect::from_center_size(
-        transform.translation / dpi,
-        node.size() * transform.to_scale_angle_translation().0.abs() / dpi,
-    );
-    if let Some(clip) = clip.and_then(super::calculated_clip_rect) {
-        rect = rect.intersect(Rect::from_corners(clip.min / dpi, clip.max / dpi));
+    let rect = super::clipped_ui_rect(super::focus::node_rect(node, transform), clip);
+    Rect {
+        min: rect.min / dpi,
+        max: rect.max / dpi,
     }
-    rect
 }
 
 #[derive(Default)]
@@ -243,42 +250,42 @@ pub(crate) fn recognize_presses(
         events.clear();
         return;
     }
-    let dpi = window.scale_factor();
-    let mut visible: Vec<_> = buttons
-        .iter()
-        .filter_map(
-            |(entity, pressable, node, transform, visibility, clip, stack)| {
-                if pressable.disabled || pressable.blocked || visibility.is_some_and(|v| !v.get()) {
-                    return None;
-                }
-                let (Some(node), Some(transform)) = (node, transform) else {
-                    return None;
-                };
-                if node.size().min_element() <= 0.0 {
-                    return None;
-                }
-                let rect = logical_ui_rect(node, transform, clip, dpi);
-                (rect.width() > 0.0 && rect.height() > 0.0).then_some((
-                    stack.map_or(0, |index| index.0),
-                    entity,
-                    rect,
-                ))
-            },
-        )
-        .collect();
-    // Front-most first, so an overlapping button on top wins the touch.
-    visible.sort_by_key(|entry| std::cmp::Reverse(entry.0));
-    let visible: Vec<_> = visible
-        .into_iter()
-        .map(|(_, entity, rect)| (entity, rect))
-        .collect();
+    let mut event = |id, phase, point: Vec2| {
+        state.tracker.event(id, phase, point, |target| {
+            let physical = point * window.scale_factor();
+            let hit = |pressable: &Pressable,
+                       node: Option<&ComputedNode>,
+                       transform: Option<&UiGlobalTransform>,
+                       visibility: Option<&InheritedVisibility>,
+                       clip| {
+                !pressable.disabled
+                    && !pressable.blocked
+                    && visibility.is_none_or(|visibility| visibility.get())
+                    && node.zip(transform).is_some_and(|(node, transform)| {
+                        ui_contains_point(node, transform, clip, physical)
+                    })
+            };
+            if let Some(target) = target {
+                let (_, pressable, node, transform, visibility, clip, _) =
+                    buttons.get(target).ok()?;
+                return hit(pressable, node, transform, visibility, clip).then_some(target);
+            }
+            buttons
+                .iter()
+                .filter_map(
+                    |(entity, pressable, node, transform, visibility, clip, stack)| {
+                        hit(pressable, node, transform, visibility, clip)
+                            .then_some((stack.map_or(0, |index| index.0), entity))
+                    },
+                )
+                .min_by_key(|(stack, _)| std::cmp::Reverse(*stack))
+                .map(|(_, entity)| entity)
+        })
+    };
     let mut activated = Vec::new();
-    for event in events.read() {
-        if event.window == window_entity
-            && let Some(entity) =
-                state
-                    .tracker
-                    .event(event.id, event.phase, event.position, &visible)
+    for touch in events.read() {
+        if touch.window == window_entity
+            && let Some(entity) = event(touch.id, touch.phase, touch.position)
         {
             activated.push(entity);
         }
@@ -302,7 +309,7 @@ pub(crate) fn recognize_presses(
             None
         };
         if let Some(phase) = phase
-            && let Some(entity) = state.tracker.event(u64::MAX, phase, point, &visible)
+            && let Some(entity) = event(u64::MAX, phase, point)
         {
             activated.push(entity);
         }
@@ -418,6 +425,120 @@ mod tests {
         app.update();
         let pressable = app.world().get::<Pressable>(button).unwrap();
         assert!(!pressable.activated && pressable.disabled);
+    }
+
+    #[test]
+    fn scroll_y_clipping_respects_dpi_and_ui_scale_on_press_and_release() {
+        for (dpi, ui_scale) in [(1.0, 1.0), (2.0, 0.75), (3.0, 1.2)] {
+            let (mut app, window, button) = touch_app();
+            app.add_systems(PostUpdate, bevy::ui::update::update_clipping_system);
+            let world = app.world_mut();
+            world
+                .get_mut::<Window>(window)
+                .unwrap()
+                .resolution
+                .set_scale_factor_override(Some(dpi));
+            let scale = dpi * ui_scale;
+            let panel = world
+                .spawn((
+                    Node {
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    ComputedNode {
+                        size: Vec2::new(100.0, 100.0) * scale,
+                        inverse_scale_factor: scale.recip(),
+                        ..default()
+                    },
+                    UiGlobalTransform::from_translation(Vec2::new(100.0, 100.0) * scale),
+                ))
+                .id();
+            // The button extends beyond the panel on both axes. Its bottom
+            // half is clipped, but the panel's horizontal overflow is visible.
+            world.entity_mut(button).insert((
+                Node::default(),
+                ChildOf(panel),
+                ComputedNode {
+                    size: Vec2::new(140.0, 40.0) * scale,
+                    inverse_scale_factor: scale.recip(),
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(100.0, 150.0) * scale),
+            ));
+            app.update();
+            let world = app.world();
+            let clip = world.get::<CalculatedClip>(button).unwrap();
+            let visible = logical_ui_rect(
+                world.get::<ComputedNode>(button).unwrap(),
+                world.get::<UiGlobalTransform>(button).unwrap(),
+                Some(clip),
+                dpi,
+            );
+            assert!(
+                visible
+                    .min
+                    .abs_diff_eq(Vec2::new(30.0, 130.0) * ui_scale, 0.001)
+            );
+            assert!(
+                visible
+                    .max
+                    .abs_diff_eq(Vec2::new(170.0, 150.0) * ui_scale, 0.001)
+            );
+
+            let inside = Vec2::new(160.0, 148.0) * ui_scale;
+            let outside = Vec2::new(160.0, 152.0) * ui_scale;
+            for (start, end, activated) in [
+                (inside, inside, true),
+                (outside, inside, false),
+                (inside, outside, false),
+            ] {
+                for (phase, position) in [(TouchPhase::Started, start), (TouchPhase::Ended, end)] {
+                    app.world_mut().write_message(TouchInput {
+                        id: 1,
+                        phase,
+                        position,
+                        window,
+                        force: None,
+                    });
+                }
+                app.update();
+                assert_eq!(
+                    app.world().get::<Pressable>(button).unwrap().activated,
+                    activated
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hits_use_rotated_clip_geometry_and_reject_fully_clipped_nodes() {
+        let rect = Rect::new(-50.0, -10.0, 50.0, 10.0);
+        let transform =
+            UiGlobalTransform::from(bevy::math::Affine2::from_angle(std::f32::consts::FRAC_PI_4));
+        let clip = CalculatedClip::default().with_rect(rect, &transform);
+        let node = ComputedNode {
+            size: Vec2::splat(100.0),
+            ..default()
+        };
+        let origin = UiGlobalTransform::default();
+        assert!(ui_contains_point(
+            &node,
+            &origin,
+            Some(&clip),
+            Vec2::new(20.0, 20.0)
+        ));
+        assert!(!ui_contains_point(
+            &node,
+            &origin,
+            Some(&clip),
+            Vec2::new(-20.0, 20.0)
+        ));
+        assert!(!ui_contains_point(
+            &node,
+            &origin,
+            Some(&CalculatedClip::FullyClipped),
+            Vec2::ZERO
+        ));
     }
 
     #[test]

@@ -3178,48 +3178,29 @@ mod tests {
         use crate::ui::gesture::TapTracker;
         let entity = Entity::PLACEHOLDER;
         let rect = Rect::from_center_size(Vec2::new(100.0, 100.0), Vec2::new(180.0, 46.0));
-        let buttons = [(entity, rect)];
+        let hit = |_| Some(entity);
         let mut state = TapTracker::default();
         assert_eq!(
-            state.event(1, TouchPhase::Started, rect.center(), &buttons),
+            state.event(1, TouchPhase::Started, rect.center(), hit),
             None
         );
+        assert_eq!(state.event(2, TouchPhase::Ended, rect.center(), hit), None);
         assert_eq!(
-            state.event(2, TouchPhase::Ended, rect.center(), &buttons),
+            state.event(1, TouchPhase::Moved, rect.center() + Vec2::Y * 30.0, hit),
             None
         );
+        assert_eq!(state.event(1, TouchPhase::Ended, rect.center(), hit), None);
+        state.event(3, TouchPhase::Started, rect.center(), hit);
         assert_eq!(
-            state.event(
-                1,
-                TouchPhase::Moved,
-                rect.center() + Vec2::Y * 30.0,
-                &buttons
-            ),
+            state.event(3, TouchPhase::Canceled, rect.center(), hit),
             None
         );
+        state.event(4, TouchPhase::Started, rect.center(), hit);
         assert_eq!(
-            state.event(1, TouchPhase::Ended, rect.center(), &buttons),
-            None
-        );
-        state.event(3, TouchPhase::Started, rect.center(), &buttons);
-        assert_eq!(
-            state.event(3, TouchPhase::Canceled, rect.center(), &buttons),
-            None
-        );
-        state.event(4, TouchPhase::Started, rect.center(), &buttons);
-        assert_eq!(
-            state.event(
-                4,
-                TouchPhase::Ended,
-                rect.center() + Vec2::X * 4.0,
-                &buttons
-            ),
+            state.event(4, TouchPhase::Ended, rect.center() + Vec2::X * 4.0, hit),
             Some(entity)
         );
-        assert_eq!(
-            state.event(4, TouchPhase::Ended, rect.center(), &buttons),
-            None
-        );
+        assert_eq!(state.event(4, TouchPhase::Ended, rect.center(), hit), None);
     }
 
     #[test]

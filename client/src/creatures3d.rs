@@ -564,6 +564,9 @@ pub(crate) fn animate_creatures(
     mut parts: Query<(&CreaturePart, &mut Transform)>,
 ) {
     for (part, mut transform) in &mut parts {
+        if matches!(part.motion, PartMotion::Still) {
+            continue;
+        }
         let Ok((scale, minion, neutral, attack)) = owners.get(part.owner) else {
             continue;
         };
@@ -584,17 +587,17 @@ pub(crate) fn animate_creatures(
                 (pulse.remaining / MINION_ATTACK_POSE_SECONDS).sqrt()
             }
         });
-        *transform = part.rest;
+        let mut pose = part.rest;
         let phase = time.elapsed_secs() * 8.0 + part.owner.index_u32() as f32 * 0.7;
         match part.motion {
             PartMotion::Leg(side) if walking => {
                 // Feet only lift; the rest-ground plane is never penetrated.
-                transform.translation.y += (phase.sin() * side).max(0.0) * 0.10;
-                transform.translation.z += phase.sin() * side * 0.14;
+                pose.translation.y += (phase.sin() * side).max(0.0) * 0.10;
+                pose.translation.z += phase.sin() * side * 0.14;
             }
             PartMotion::Arm(side) if walking => {
                 let angle = phase.sin() * side * 0.28;
-                transform.rotation = part.rest.rotation * Quat::from_rotation_x(angle);
+                pose.rotation = part.rest.rotation * Quat::from_rotation_x(angle);
             }
             PartMotion::MinionHand(side, role) if walking || attack_strength > 0.0 => {
                 let walk_angle = if walking {
@@ -613,11 +616,12 @@ pub(crate) fn animate_creatures(
                 // The hand, shield/blade or staff rotate as one rigid assembly
                 // around the shoulder, rather than each weapon's own centre.
                 let pivot = Vec3::new(side * 0.59, 1.095, 0.04);
-                transform.translation = pivot + rotation * (part.rest.translation - pivot);
-                transform.rotation = rotation * part.rest.rotation;
+                pose.translation = pivot + rotation * (part.rest.translation - pivot);
+                pose.rotation = rotation * part.rest.rotation;
             }
             _ => {}
         }
+        transform.set_if_neq(pose);
     }
 }
 

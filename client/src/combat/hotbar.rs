@@ -412,29 +412,43 @@ pub(super) fn update_skill_bar_system(
             continue;
         };
         let definition = skills.ability(slot);
-        if let Some(assets) = assets.as_ref() {
-            image.image = assets.load(crate::skill_icons::atlas_path(definition.id));
+        let atlas_path = crate::skill_icons::atlas_path(definition.id);
+        if let Some(assets) = assets.as_ref()
+            && image
+                .image
+                .path()
+                .is_none_or(|path| path.path() != std::path::Path::new(atlas_path))
+        {
+            image.image = assets.load(atlas_path);
         }
-        image.rect = images
+        let rect = images
             .as_ref()
             .and_then(|images| images.get(&image.image))
             .and_then(|atlas| crate::skill_icons::icon_rect(definition.id, atlas.size().as_vec2()));
-        node.display = if image.rect.is_some() {
+        if image.rect != rect {
+            image.rect = rect;
+        }
+        let display = if rect.is_some() {
             Display::Flex
         } else {
             Display::None
         };
+        node.map_unchanged(|node| &mut node.display)
+            .set_if_neq(display);
         let rank = prog.ranks[icon.slot].max(1);
         let available = equipped_skills::unlocked(&skills, &prog)[icon.slot]
             && cooldowns.remaining_secs[icon.slot] <= 0.0
             && local.is_none_or(|(_, _, stats, ..)| {
                 stats.mana >= skills.mana_cost(rank, slot, cooldowns.recast[icon.slot])
             });
-        image.color = if available {
+        let color = if available {
             Color::WHITE
         } else {
             Color::srgb(0.3, 0.3, 0.3)
         };
+        image
+            .map_unchanged(|image| &mut image.color)
+            .set_if_neq(color);
     }
 
     for (label, mut text) in &mut name_labels {

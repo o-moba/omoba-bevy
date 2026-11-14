@@ -660,10 +660,7 @@ pub(crate) fn paint_focus_ring(
         .and_then(|focus| focus.focused())
         .and_then(|entity| buttons.get(entity).ok())
         .and_then(|(node, transform, clip, offset)| {
-            let mut rect = super::focus::node_rect(node, transform);
-            if let Some(clip) = clip.and_then(super::calculated_clip_rect) {
-                rect = rect.intersect(clip);
-            }
+            let rect = super::clipped_ui_rect(super::focus::node_rect(node, transform), clip);
             let scale = node.inverse_scale_factor();
             let offset = offset.map_or(border::FOCUS_OFFSET, |offset| offset.0);
             let corner = node.border_radius().top_left.x * scale;
