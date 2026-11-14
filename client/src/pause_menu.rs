@@ -2387,9 +2387,18 @@ mod tests {
         for id in ids {
             let row = named(&mut app, id);
             let label = app.world().get::<Children>(row).unwrap()[0];
-            let label_rect = rect(&app, label, 2.0);
+            // Compare the layout columns even for rows below the scroll viewport.
+            let layout_rect = |entity| {
+                crate::ui::gesture::logical_ui_rect(
+                    app.world().get::<ComputedNode>(entity).unwrap(),
+                    app.world().get::<UiGlobalTransform>(entity).unwrap(),
+                    None,
+                    2.0,
+                )
+            };
+            let label_rect = layout_rect(label);
             let parts = *app.world().get::<widgets::KitParts>(row).unwrap();
-            let track_rect = rect(&app, parts.track.unwrap(), 2.0);
+            let track_rect = layout_rect(parts.track.unwrap());
             if let Some(x) = label_x {
                 assert!((label_rect.min.x - x).abs() < 1.0);
             }
