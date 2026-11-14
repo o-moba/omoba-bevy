@@ -10,6 +10,7 @@ use crate::net::{
 };
 use crate::player::Player;
 use crate::team::TeamSelection;
+use crate::ui::Button;
 use crate::ui::{
     Activated, TestId, UiAction,
     kit_assets::Icon,
@@ -122,7 +123,7 @@ pub(super) fn setup_combat_ui(
     commands
         .spawn((
             // A Button keeps world clicks off the plate between the slots.
-            Button::default(),
+            Button,
             game::hud_plate(false),
             HudRegion::AbilityBar,
             ZIndex(12),

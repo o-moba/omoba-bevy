@@ -1,5 +1,6 @@
 //! Screen-space combat identity, allied vitals and global identity-only kill notices.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     camera::MainCamera,
     combat::CombatStats,
@@ -420,7 +421,7 @@ pub(super) fn update_tactical_hud(
                             row_gap: Val::Px(if phone { 2.0 } else { 3.0 }),
                             ..default()
                         },
-                        Button::default(),
+                        Button,
                         Interaction::None,
                         AlliedPortrait(p.player_id),
                         crate::ui::TestId::new(format!("AllyCamera-{}", p.player_id)),

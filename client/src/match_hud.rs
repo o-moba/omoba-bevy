@@ -3,6 +3,7 @@
 //! HUD visibility (`omoba-ui/handoff/screens/hud.md`).
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use crate::i18n::{data, tr, trf};
@@ -207,7 +208,7 @@ fn spawn_player_status(commands: &mut Commands, form: Form) {
     commands
         .spawn((
             // A Button keeps world clicks off the plate.
-            Button::default(),
+            Button,
             game::hud_plate(true),
             HudRegion::PlayerStatus,
             ZIndex(12),
@@ -231,8 +232,7 @@ fn spawn_player_status(commands: &mut Commands, form: Form) {
                 grey: false,
                 strong_rim: false,
             };
-            let entity =
-                game::live_portrait(plate, view, portrait, (HudPortrait, Button::default()));
+            let entity = game::live_portrait(plate, view, portrait, (HudPortrait, Button));
             if !phone {
                 plate.commands().entity(entity).insert((
                     Tooltip {

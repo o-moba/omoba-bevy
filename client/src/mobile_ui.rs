@@ -8,6 +8,7 @@
 //! running process, so an account link or a store cache never crosses
 //! profiles.
 // i18n-strict
+use crate::ui::Button;
 use bevy::{
     input::keyboard::{Key, KeyboardInput},
     prelude::*,
@@ -218,7 +219,7 @@ fn phone_button(
 ) {
     parent
         .spawn((
-            Button::default(),
+            Button,
             Node {
                 min_width: Val::Px(48.0),
                 height: Val::Px(44.0),

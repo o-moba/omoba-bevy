@@ -4,6 +4,8 @@
 //! and the systems here only consume `Activated<PauseAction>`.
 // i18n-strict
 mod match_votes;
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::{
     app::AppExit,
     prelude::*,
@@ -2957,7 +2959,7 @@ mod tests {
             .spawn((Window::default(), PrimaryWindow))
             .id();
         app.world_mut().spawn((
-            Button::default(),
+            Button,
             Node::default(),
             UiAction(PauseAction::Audio(AudioButton::Mute)),
             Interaction::Pressed,
@@ -3254,7 +3256,7 @@ mod tests {
         let button = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 Node::default(),
                 UiAction(PauseAction::Exit),
                 Interaction::Pressed,
@@ -3305,7 +3307,7 @@ mod tests {
             .entity_mut(button)
             .insert(bevy::ui::CalculatedClip::default().with_rect(
                 Rect::from_corners(Vec2::ZERO, Vec2::splat(10.0)),
-                &UiGlobalTransform::IDENTITY,
+                &UiGlobalTransform::from_translation(Vec2::ZERO),
             ));
         app.world_mut()
             .write_message(event(3, TouchPhase::Started, center));

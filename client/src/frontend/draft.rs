@@ -5,6 +5,7 @@
 //! prematch error that is a stable code (`roster_changed`) shows its
 //! `draft.error.<code>` text; server-authored sentences stay English.
 // i18n-strict
+use crate::ui::Button;
 use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{
     HeroClass,
@@ -511,7 +512,7 @@ pub(super) fn action_button<T: UiActionT>(
     };
     parent
         .spawn((
-            Button::default(),
+            Button,
             Node {
                 width: Val::Px(width),
                 min_width: Val::Px(width),
@@ -1174,7 +1175,7 @@ fn render_draft(
                                                 };
                                                 tiles
                                                     .spawn((
-                                                        Button::default(),
+                                                        Button,
                                                         Node {
                                                             width: Val::Px(84.0),
                                                             height: Val::Px(78.0),

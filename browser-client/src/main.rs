@@ -4,13 +4,18 @@
 // Keep the legacy UI interaction semantics during the Bevy 0.20 engine upgrade.
 #![allow(deprecated)]
 
-use bevy::{camera::ScalingMode, prelude::*};
+use bevy::{camera::ScalingMode, prelude::*, ui::FocusPolicy};
 use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
 use shared::{HeroClass, clock::Instant, map::Team, wire::*};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicU32, Ordering},
 };
+
+// Own the legacy marker because Bevy 0.20's deprecated alias has a private type.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[require(Node, FocusPolicy::Block, Interaction)]
+struct Button;
 
 const CLASSES: [HeroClass; 7] = [
     HeroClass::Dawnweaver,
@@ -353,7 +358,7 @@ fn setup(
         .with_children(|parent| {
             for (i, class) in CLASSES.into_iter().enumerate() {
                 parent.spawn((
-                    Button::default(),
+                    Button,
                     ClassButton(i),
                     Node {
                         padding: UiRect::axes(px(10), px(12)),
@@ -372,7 +377,7 @@ fn setup(
                 ));
             }
             parent.spawn((
-                Button::default(),
+                Button,
                 PauseButton,
                 Node {
                     padding: UiRect::axes(px(10), px(12)),
@@ -388,7 +393,7 @@ fn setup(
                 )],
             ));
             parent.spawn((
-                Button::default(),
+                Button,
                 RestartButton,
                 Node {
                     padding: UiRect::axes(px(10), px(12)),

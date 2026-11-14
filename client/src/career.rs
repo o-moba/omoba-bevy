@@ -1,5 +1,6 @@
 //! Authoritative career UI. Match receipts outlive live entities and connections.
 // i18n-strict
+use crate::ui::Button;
 use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::{
     i18n::{Locale, data, lookup, tr, trf},
@@ -1085,7 +1086,7 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
     });
     parent
         .spawn((
-            Button::default(),
+            Button,
             // This compact control owns its native rounded fill and border.
             // Do not layer a second textured slab inside its padded content.
             crate::ui::widgets::NoSlab,
@@ -2740,7 +2741,7 @@ fn render(
                                 selected,
                             };
                             p.spawn((
-                                Button::default(),
+                                Button,
                                 style,
                                 UiAction(action),
                                 TestId::new(name),

@@ -6,6 +6,7 @@
 //! collections, authors, licences and clip names are data and stay as authored.
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::input::mouse::MouseMotion;
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
@@ -715,7 +716,7 @@ fn spawn_collection(
                 ))
                 .with_children(|column| {
                     column.spawn((
-                        Button::default(),
+                        Button,
                         ImageNode::new(image),
                         Node {
                             // Height-driven so the clip buttons and the
@@ -770,7 +771,7 @@ fn spawn_avatar_tile(
         selected,
     };
     grid.spawn((
-        Button::default(),
+        Button,
         Node {
             width: Val::Px(if phone { 96.0 } else { 124.0 }),
             height: Val::Px(if phone { 116.0 } else { 146.0 }),
@@ -2107,7 +2108,7 @@ mod tests {
         harness::spawn_ui(app.world_mut(), |grid| {
             for slug in ["first", "second"] {
                 grid.spawn((
-                    Button::default(),
+                    Button,
                     ButtonStyle::new(ButtonKind::Tile),
                     BackgroundColor(theme::TILE),
                     UiAction(CollectionAction::Select(slug.into())),

@@ -15,6 +15,8 @@
 //! next confirm must be a fresh press. A focused button inside a
 //! [`ScrollArea`] scrolls into view. The ring is drawn by
 //! [`super::widgets::paint_focus_ring`].
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use super::{GestureEpoch, Pressable, ScrollArea, SyntheticPress, modal::ModalGate};
@@ -551,7 +553,7 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 UiAction(probe),
                 Node::default(),
                 InheritedVisibility::VISIBLE,
@@ -689,7 +691,7 @@ mod tests {
             .entity_mut(low)
             .insert(bevy::ui::CalculatedClip::default().with_rect(
                 Rect::new(0.0, 0.0, 300.0, 100.0),
-                &UiGlobalTransform::IDENTITY,
+                &UiGlobalTransform::from_translation(Vec2::ZERO),
             ));
         app.update();
         assert_eq!(focused(&app), Some(top));

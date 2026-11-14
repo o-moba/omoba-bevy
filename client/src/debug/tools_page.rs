@@ -12,6 +12,8 @@
 //! server command, so the local client never fakes bots, levels or
 //! invulnerability. The toggle lines read and write [`DebugToggles`]. Entity
 //! `Name`s keep their `PauseMenuPractice*` prefix.
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 use shared::debug::DebugCommand;
 use shared::practice::{
@@ -624,7 +626,7 @@ mod tests {
         let open_button = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 UiAction(PauseAction::OpenPractice),
                 Node::default(),
                 Visibility::Inherited,
@@ -636,7 +638,7 @@ mod tests {
         let dummy_button = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 UiAction(PracticeAction::SpawnDummy),
                 Interaction::None,
                 BackgroundColor(theme::TILE),

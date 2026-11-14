@@ -15,6 +15,7 @@
 //! `crate::i18n::Localized` key, which the widget spawns filled in the active
 //! language and which follows later language changes.
 // i18n-strict
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use super::{
@@ -784,7 +785,7 @@ pub(crate) fn button_bundle<T: UiActionT>(
 ) -> impl Bundle {
     let style = ButtonStyle::new(kind);
     (
-        Button::default(),
+        Button,
         node,
         BorderColor::all(Color::NONE),
         BackgroundColor(style.idle_color()),
@@ -804,7 +805,7 @@ pub(crate) fn plate_button<T: UiActionT>(
     parts: KitParts,
 ) -> impl Bundle {
     (
-        Button::default(),
+        Button,
         Node {
             border: UiRect::all(Val::Px(border::HAIRLINE)),
             border_radius: BorderRadius::all(Val::Px(radius::MD)),
@@ -1370,7 +1371,7 @@ mod tests {
         let primary = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Primary),
             ))
@@ -1378,7 +1379,7 @@ mod tests {
         let team = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Team(Team::Blue)),
             ))
@@ -1386,7 +1387,7 @@ mod tests {
         let owned = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Secondary),
                 ImageNode::default(),
@@ -1395,7 +1396,7 @@ mod tests {
         let tile = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Tile),
             ))
@@ -1441,7 +1442,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Button::default(),
+                Button,
                 Pressable::default(),
                 ButtonStyle::new(ButtonKind::Tile),
                 KitSkin::Tab { rail: true },

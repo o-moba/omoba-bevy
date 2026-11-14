@@ -1,5 +1,6 @@
 //! Nearby visible enemy locks and position-free public enemy death timers.
 // i18n-strict
+use crate::ui::Button;
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
@@ -460,7 +461,7 @@ pub(super) fn sync_enemy_portraits(
         // A disappearing target never transfers its pending tap to a replacement.
         commands
             .spawn((
-                Button::default(),
+                Button,
                 portrait_node(slot),
                 BackgroundColor(color::SURFACE_1_OPAQUE),
                 BorderColor::all(color::STATE_DANGER),

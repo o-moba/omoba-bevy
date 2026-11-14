@@ -250,7 +250,7 @@ fn capture(
         let viewport = Rect::from_corners(Vec2::ZERO, Vec2::new(852.0, 393.0));
         let shown = rect.intersect(viewport).intersect(
             clip.and_then(crate::ui::calculated_clip_rect)
-                .map_or(viewport, |clip| clip),
+                .unwrap_or(viewport),
         );
         (shown.width() >= rect.width() - 1.0 && shown.height() >= rect.height() - 1.0)
             .then_some([rect.min.x, rect.min.y, rect.max.x, rect.max.y])

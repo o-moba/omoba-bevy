@@ -9,6 +9,7 @@
 #![cfg_attr(not(feature = "qa"), allow(dead_code))]
 use std::{collections::HashMap, time::Duration};
 
+use crate::ui::Button;
 use bevy::{
     ecs::message::MessageCursor,
     input::touch::{TouchInput, TouchPhase},
@@ -542,7 +543,7 @@ pub(crate) fn slider(
     let mut parts = KitParts::default();
     let thumb = size::SLIDER_THUMB.at(form);
     let mut row = parent.spawn((
-        Button::default(),
+        Button,
         Pressable::default(),
         Node {
             min_height: Val::Px(if form == Form::Phone {
@@ -897,7 +898,7 @@ pub(crate) fn cycle_row<T: UiActionT, M: Component>(
             let mut parts = KitParts::default();
             let mut chevrons = [Entity::PLACEHOLDER; 2];
             let mut control = row.spawn((
-                Button::default(),
+                Button,
                 Pressable::default(),
                 Node {
                     width: Val::Px(CYCLE_W.at(form)),

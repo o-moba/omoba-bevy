@@ -1,6 +1,7 @@
 //! Floating connection status panel and its Retry button.
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use crate::i18n::{Localized, data, tr, trf};
@@ -56,7 +57,7 @@ pub(in crate::net) fn setup_connection_status_ui(mut commands: Commands) {
             ));
             parent
                 .spawn((
-                    Button::default(),
+                    Button,
                     Node {
                         display: Display::None,
                         width: Val::Px(120.0),

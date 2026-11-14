@@ -8,6 +8,7 @@
 //! [`ClientDebugAccess::toggles`] allows the toggles (step 11e). Without the
 //! env var the same toggles live on the pause menu's tools page.
 
+use crate::ui::Button;
 use bevy::prelude::*;
 use shared::debug::DebugCommand;
 
@@ -130,7 +131,7 @@ fn spawn_toggle_button<L: Component>(
     }));
     commands
         .spawn((
-            Button::default(),
+            Button,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(left),

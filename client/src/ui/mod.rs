@@ -1,7 +1,7 @@
 //! Client UI kit: one theme, one tap recognizer, one scroll system, a modal
 //! registry, typed button actions and the widgets built on them. `docs/ui-kit.md` describes the API and the
 //! migration state; the pause menu and the practice sandbox are the pilot.
-use bevy::prelude::*;
+use bevy::{prelude::*, ui::FocusPolicy};
 
 pub(crate) mod action;
 pub(crate) mod back;
@@ -27,8 +27,15 @@ pub(crate) use test_id::TestId;
 
 use crate::platform::UiProfile;
 
-/// World-space bounds of all inherited clipping rectangles. An empty result
-/// means no clipping; a fully clipped node produces an empty rectangle.
+/// OMOBA's legacy button marker. Bevy 0.20's deprecated compatibility alias
+/// exposes a private type, so the UI kit owns the marker while it retains its
+/// established `Interaction` behavior.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[require(Node, FocusPolicy::Block, Interaction)]
+pub(crate) struct Button;
+
+/// World-space bounds of all inherited clipping rectangles. `None` means no
+/// clipping; a fully clipped node produces an empty rectangle.
 pub(crate) fn calculated_clip_rect(clip: &CalculatedClip) -> Option<Rect> {
     match clip {
         CalculatedClip::FullyClipped => Some(Rect::default()),
@@ -156,5 +163,21 @@ impl Plugin for UiKitPlugin {
                     .chain()
                     .in_set(UiSet::Paint),
             );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_button_preserves_required_interaction_components() {
+        let mut world = World::new();
+        let button = world.spawn(Button).id();
+        let entity = world.entity(button);
+
+        assert!(entity.contains::<Node>());
+        assert_eq!(entity.get::<FocusPolicy>(), Some(&FocusPolicy::Block));
+        assert_eq!(entity.get::<Interaction>(), Some(&Interaction::None));
     }
 }

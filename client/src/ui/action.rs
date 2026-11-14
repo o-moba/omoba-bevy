@@ -1,6 +1,8 @@
 //! Typed button actions: a button carries `UiAction<T>`, the kit turns each
 //! press into one `Activated<T>` message and the owning module handles it
 //! without touching `Interaction`, gestures or colours.
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use super::{Pressable, UiSet};
@@ -71,7 +73,7 @@ mod tests {
         app.add_ui_action::<Probe>();
         let button = app
             .world_mut()
-            .spawn((Button::default(), UiAction(Probe::Go), Interaction::None))
+            .spawn((Button, UiAction(Probe::Go), Interaction::None))
             .id();
         app.update();
         let count = |app: &mut App| {

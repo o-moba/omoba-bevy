@@ -10,6 +10,7 @@
 //! customization screen is rebuilt on a language change.
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use shared::HeroClass;
@@ -422,7 +423,7 @@ fn spawn_card_screen(
                         .with_children(|row| {
                             for (index, (name, color)) in theme::ACCENTS.iter().enumerate() {
                                 row.spawn((
-                                    Button::default(),
+                                    Button,
                                     Node {
                                         width: Val::Px(if phone { 74.0 } else { 46.0 }),
                                         height: Val::Px(if phone { 74.0 } else { 46.0 }),

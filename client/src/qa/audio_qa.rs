@@ -2,6 +2,7 @@
 //! Input and UI scrolling are scripted; no combat or server snapshots are fabricated.
 use std::{path::PathBuf, time::Instant};
 
+use crate::ui::Button;
 use bevy::{
     ecs::system::NonSendMarker,
     input::{

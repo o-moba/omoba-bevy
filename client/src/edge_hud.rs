@@ -1,5 +1,6 @@
 //! Compact match chrome, selected-target health and the live two-team scoreboard.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     combat::{CombatStats, TargetState},
     hud_layout::HudRegion,
@@ -446,7 +447,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
         ))
         .with_children(|overlay| {
             overlay.spawn((
-                Button::default(),
+                Button,
                 Node {
                     position_type: PositionType::Absolute,
                     width: Val::Percent(100.0),
@@ -503,7 +504,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                 }
                             });
                             row.spawn((
-                                Button::default(),
+                                Button,
                                 button_node(64.0),
                                 BackgroundColor(ui::TILE),
                                 BorderColor::all(ui::EDGE),

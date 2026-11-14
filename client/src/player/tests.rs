@@ -4,6 +4,7 @@ use crate::combat::{CombatStats, PendingCast, WorldPointerState};
 use crate::minimap::MinimapNavigationState;
 use crate::net::{GameState, GameStateSnapshot, NetworkStructure, StructureKind};
 use crate::targeting::BasicAttackState;
+use crate::ui::Button;
 use bevy::input::mouse::MouseButton;
 
 #[test]
@@ -204,8 +205,7 @@ fn right_minimap_order_cancels_pending_cast_and_replaces_route_without_camera_ra
     let (mut app, player) = navigation_input_app();
     app.insert_resource(PendingCast::queued_for_movement_test());
     // Minimap hover must allow its own move order even though it is UI.
-    app.world_mut()
-        .spawn((Button::default(), Interaction::Hovered));
+    app.world_mut().spawn((Button, Interaction::Hovered));
     minimap_order(&mut app, Vec3::new(8.0, 0.0, 0.0));
     app.update();
     assert!(!app.world().resource::<PendingCast>().has_queued_request());

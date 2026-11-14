@@ -14,6 +14,8 @@
 //! keys it shares; the screen is rebuilt on a language change.
 // i18n-strict
 
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 use shared::career::{MatchOutcome, MatchResult, ParticipantResult};
 use shared::live_score::LiveScorePlayer;
@@ -2860,7 +2862,7 @@ mod tests {
         app.update();
         assert!(app.world().get_entity(panel).is_ok());
         app.world_mut().spawn((
-            Button::default(),
+            Button,
             Interaction::Pressed,
             crate::ui::UiAction(PostMatchAction::PlayAgain),
         ));
@@ -2937,7 +2939,7 @@ mod tests {
             app.world_mut()
                 .spawn(PostMatchRoot(Some(accepted.clone()), true));
             app.world_mut().spawn((
-                Button::default(),
+                Button,
                 Interaction::Pressed,
                 crate::ui::UiAction(PostMatchAction::Details),
             ));
@@ -2961,7 +2963,7 @@ mod tests {
             .add_systems(Update, post_match_actions.after(UiSet::Dispatch));
         app.world_mut().spawn(PostMatchRoot(None, true));
         app.world_mut().spawn((
-            Button::default(),
+            Button,
             Interaction::Pressed,
             crate::ui::UiAction(PostMatchAction::Details),
         ));
@@ -3000,7 +3002,7 @@ mod tests {
                 true,
             ));
             app.world_mut().spawn((
-                Button::default(),
+                Button,
                 Interaction::Pressed,
                 crate::ui::UiAction(PostMatchAction::PlayAgain),
             ));

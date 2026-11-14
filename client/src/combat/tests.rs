@@ -17,6 +17,7 @@ use crate::net::{
 use crate::player::{MovementTarget, Player};
 use crate::sprite::PlayerVisualMode;
 use crate::team::{Team, TeamSelection};
+use crate::ui::Button;
 use bevy::{input::mouse::MouseButton, window::PrimaryWindow};
 use shared::{HeroClass, SkillSlot, ability_for_class_slot};
 
@@ -1815,10 +1816,7 @@ fn desktop_mouse_select_attack_ground_and_ui_are_distinct() {
     );
     assert!(!app.world().resource::<PendingCast>().is_pending());
     app.world_mut().resource_mut::<BasicAttackState>().cancel();
-    let ui = app
-        .world_mut()
-        .spawn((Button::default(), Interaction::Hovered))
-        .id();
+    let ui = app.world_mut().spawn((Button, Interaction::Hovered)).id();
     app.update();
     assert!(app.world().resource::<BasicAttackState>().order.is_none());
     app.world_mut().despawn(ui);

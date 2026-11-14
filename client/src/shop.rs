@@ -1,5 +1,6 @@
 //! Server-authoritative base shop. Browsing is always safe; a receipt confirms payment.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     combat::{ActionFeedback, CombatStats},
     help_overlay::HelpOverlayVisible,
@@ -444,7 +445,7 @@ fn spawn_equipment_plate(commands: &mut Commands) {
     commands
         .spawn((
             // A Button keeps world clicks off the plate.
-            Button::default(),
+            Button,
             game::hud_plate(false),
             HudRegion::Equipment,
             ZIndex(12),
@@ -478,7 +479,7 @@ fn spawn_equipment_plate(commands: &mut Commands) {
                         let slot = game::item_slot(slots, None, None, form);
                         slots.commands().entity(slot).insert((
                             // Hover shows the item tooltip.
-                            Button::default(),
+                            Button,
                             EquipmentSlot(index),
                             Name::new(format!("InventorySlot-{index}")),
                         ));
@@ -798,7 +799,7 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                                 TextColor(ui::IVORY),
                             ));
                             row.spawn((
-                                Button::default(),
+                                Button,
                                 Node {
                                     padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
                                     ..default()
@@ -842,7 +843,7 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                             for definition in shop::items() {
                                 cards
                                     .spawn((
-                                        Button::default(),
+                                        Button,
                                         Node {
                                             width: Val::Px(264.0),
                                             height: Val::Px(150.0),

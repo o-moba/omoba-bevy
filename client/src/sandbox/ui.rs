@@ -2,6 +2,7 @@
 mod qa;
 use super::*;
 use crate::frontend::widgets as w;
+use crate::ui::Button;
 use crate::ui::{
     Activated, TestId, UiAction, UiActionAppExt, UiSet,
     theme::{self, ButtonKind},
@@ -359,7 +360,7 @@ fn row() -> Node {
 fn button(parent: &mut ChildSpawnerCommands, label: impl Into<String>, action: Action) {
     parent
         .spawn((
-            Button::default(),
+            Button,
             Node {
                 min_height: Val::Px(32.0),
                 padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
@@ -384,7 +385,7 @@ fn number(parent: &mut ChildSpawnerCommands, field: Field, s: &SandboxClient) {
         ));
         button(r, "-", Action::Step(field, -field.step()));
         r.spawn((
-            Button::default(),
+            Button,
             Node {
                 min_width: Val::Px(84.0),
                 min_height: Val::Px(32.0),
@@ -410,7 +411,7 @@ fn toggle(parent: &mut ChildSpawnerCommands, t: Toggle, s: &SandboxClient) {
     node.padding = UiRect::axes(Val::Px(9.0), Val::Px(6.0));
     parent
         .spawn((
-            Button::default(),
+            Button,
             node,
             BackgroundColor(theme::TILE),
             TestId::new(Action::Toggle(t).test_id()),
@@ -499,7 +500,7 @@ fn build_panel(
             Tab::Presets=>{
                 heading(p,"Start from a scenario");for name in presets::BUILTINS{button(p,name,Action::Load(name.into()));}
                 p.spawn(w::label("duel: both level 10 · late-game: max build + waves · dps: infinite target · animation: 0.25x",13.0,theme::MUTED));
-                heading(p,"Save your complete test configuration");p.spawn((Button::default(),row(),BackgroundColor(theme::TILE),TestId::new(Action::Edit(Field::PresetName).test_id()),UiAction(Action::Edit(Field::PresetName)))).with_child((w::label(&state.preset_name,14.0,theme::IVORY),Label::Field(Field::PresetName)));
+                heading(p,"Save your complete test configuration");p.spawn((Button,row(),BackgroundColor(theme::TILE),TestId::new(Action::Edit(Field::PresetName).test_id()),UiAction(Action::Edit(Field::PresetName)))).with_child((w::label(&state.preset_name,14.0,theme::IVORY),Label::Field(Field::PresetName)));
                 button(p,"Save named preset",Action::Save);button(p,"Load named preset",Action::LoadNamed);
                 p.spawn(w::label(&format!("Files: {}",presets::directory().display()),12.0,theme::MUTED));
             }

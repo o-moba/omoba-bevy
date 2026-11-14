@@ -7,6 +7,7 @@
 //! packet).
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 use omoba_passport::avatars::avatar_roster;
 use shared::HeroClass;
@@ -575,7 +576,7 @@ pub fn spawn_team_select_ui(
                 .with_children(|header| {
                     header
                         .spawn((
-                            Button::default(),
+                            Button,
                             Node {
                                 padding: UiRect::axes(Val::Px(16.0), Val::Px(7.0)),
                                 justify_content: JustifyContent::Center,
@@ -737,7 +738,7 @@ pub fn spawn_team_select_ui(
                         crate::i18n::data::catalogue_status(&catalogue.status),
                     );
                     grid.spawn((
-                        Button::default(),
+                        Button,
                         Node {
                             min_width: Val::Px(120.0),
                             min_height: Val::Px(44.0),
@@ -1195,7 +1196,7 @@ fn spawn_connect_button(
     target: ConnectTarget,
 ) {
     let mut button = row.spawn((
-        Button::default(),
+        Button,
         Node {
             padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
             justify_content: JustifyContent::Center,
@@ -1297,7 +1298,7 @@ fn spawn_sprite_button(
     ));
     if !draft {
         tile.insert((
-            Button::default(),
+            Button,
             ButtonStyle {
                 kind: ButtonKind::Tile,
                 selected,
@@ -1399,7 +1400,7 @@ fn spawn_avatar_group_hint(grid: &mut ChildSpawnerCommands, hint: impl crate::i1
 
 fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected: bool) {
     row.spawn((
-        Button::default(),
+        Button,
         Node {
             width: Val::Px(CLASS_BUTTON_WIDTH),
             height: Val::Px(CLASS_BUTTON_HEIGHT),
@@ -1446,7 +1447,7 @@ fn spawn_avatar_button(
     selected: bool,
 ) {
     grid.spawn((
-        Button::default(),
+        Button,
         Node {
             width: Val::Px(AVATAR_BUTTON_WIDTH),
             height: Val::Px(AVATAR_BUTTON_HEIGHT),
@@ -1534,7 +1535,7 @@ fn attach_avatar_thumbnails(
 
 fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     row.spawn((
-        Button::default(),
+        Button,
         Node {
             width: Val::Px(230.0),
             height: Val::Px(TEAM_BUTTON_SIZE),
