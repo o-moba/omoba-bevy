@@ -60,7 +60,7 @@ against that protocol-11 production endpoint.
 | RU account service and portal | Deploy the matching API and portal with all current migrations/grants and strict loopback ingress; reconcile the existing `omoba-ru-lobby` service with the host kit's `omoba-lobby-ru` naming before adopting the kit | Ops |
 | DNS, TLS and downloads | Resolve omoba.ru/account/lobby to the RU host, validate HTTPS, current release catalog, direct downloads and checksums | Owner + ops |
 | Real login | Configure the owner's VK ID app/callback and verify a real first login, existing login, cancellation, device pairing and recovery end to end | Owner credentials + device test |
-| Player documents | Replace `0-draft` legal documents/placeholders with approved operator details, support contacts and final accepted version; confirm publication requirements | Owner |
+| Player documents | Requisites filled (omoba-web #29); the offer is published as edition 1 (2026-11-05, owner-approved without counsel). Still open: the user agreement and privacy policy stay `0-draft` (RKN number, retention periods, support contacts, final accepted version) | Owner |
 | Android identity and packages | Confirm the public app identity and existing durable signing key, increment build code, build candidates from frozen main and record hashes | Owner + build |
 | Physical-device acceptance | Install candidates on actual supported devices; verify first run, sign-in, online match, disconnect/reconnect, backgrounding and account recovery | Device QA |
 | Operations | Recurring off-host backup, scheduled restore proof, monitoring/alerts, disk/log limits and measured room/RAM limits | Ops |
