@@ -9,6 +9,7 @@
 #![cfg_attr(not(feature = "qa"), allow(dead_code))]
 use std::{collections::HashMap, time::Duration};
 
+use crate::ui::Button;
 use bevy::{
     ecs::message::MessageCursor,
     input::touch::{TouchInput, TouchPhase},

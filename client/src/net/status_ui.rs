@@ -1,6 +1,7 @@
 //! Floating connection status panel and its Retry button.
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use crate::i18n::{Localized, data, tr, trf};

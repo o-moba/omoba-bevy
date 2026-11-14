@@ -2,6 +2,7 @@
 mod qa;
 use super::*;
 use crate::frontend::widgets as w;
+use crate::ui::Button;
 use crate::ui::{
     Activated, TestId, UiAction, UiActionAppExt, UiSet,
     theme::{self, ButtonKind},

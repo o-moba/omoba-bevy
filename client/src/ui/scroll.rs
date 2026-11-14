@@ -19,7 +19,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 
-use super::gesture::{TAP_SLOP, logical_ui_rect};
+use super::gesture::{TAP_SLOP, ui_contains_point};
 use super::modal::ModalGate;
 use super::widgets::{
     KitParts,
@@ -253,7 +253,7 @@ pub(crate) fn scroll_areas(
             }
             if config.hover_only
                 && !cursor.zip(transform).is_some_and(|(point, transform)| {
-                    logical_ui_rect(node, transform, clip, dpi).contains(point)
+                    ui_contains_point(node, transform, clip, point * dpi)
                 })
             {
                 continue;
@@ -299,7 +299,7 @@ pub(crate) fn scroll_areas(
                         let transform = transform?;
                         (live(entity, node, visibility)
                             && node.content_size().y > node.size().y
-                            && logical_ui_rect(node, transform, clip, dpi).contains(event.position))
+                            && ui_contains_point(node, transform, clip, event.position * dpi))
                         .then(|| {
                             (
                                 node.size().x * node.size().y,

@@ -1,3 +1,7 @@
+// Bevy 0.20 deprecates the legacy UI interaction model used throughout the client.
+// Keep its established semantics during this engine-only upgrade.
+#![allow(deprecated)]
+
 use bevy::{asset::AssetPlugin, prelude::*};
 mod skill_presentation;
 

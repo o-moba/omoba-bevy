@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::ui::Button;
 use bevy::{
     app::AppExit,
     prelude::*,

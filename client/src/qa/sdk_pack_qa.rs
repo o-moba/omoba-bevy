@@ -151,8 +151,8 @@ fn prepare(
     }
     qa.frames += 1;
     if qa.stage < 10 {
-        // Bevy 0.18 re-enters identical states with set(), resetting the preview.
-        next.as_mut().set_if_neq(AppScreen::Collection);
+        // Avoid re-entering the current state and resetting the preview.
+        next.as_mut().set_if_different(AppScreen::Collection);
     }
     if qa.stage == 0 {
         let weapon = std::env::var("OMOBA_SDK_PACK_QA_WEAPON").ok();

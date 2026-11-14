@@ -8,6 +8,7 @@
 //! stronger sparkles, Prism III a crown ring in place of one spark). How a
 //! player can buy access comes from [`payment_surface`].
 // i18n-strict
+use crate::ui::Button;
 use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::{
     career::{CareerClient, CareerModal},

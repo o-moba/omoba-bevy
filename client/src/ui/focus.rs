@@ -15,6 +15,8 @@
 //! next confirm must be a fresh press. A focused button inside a
 //! [`ScrollArea`] scrolls into view. The ring is drawn by
 //! [`super::widgets::paint_focus_ring`].
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use super::{GestureEpoch, Pressable, ScrollArea, SyntheticPress, modal::ModalGate};
@@ -202,10 +204,7 @@ pub(crate) fn directional_neighbor(
 
 /// Physical-pixel rectangle of a node (unclipped).
 pub(crate) fn node_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
-    Rect::from_center_size(
-        transform.translation,
-        node.size() * transform.to_scale_angle_translation().0.abs(),
-    )
+    super::transform_rect_bounds(node.border_box(), transform.affine())
 }
 
 type Hierarchy<'a> = (
@@ -348,10 +347,7 @@ pub(crate) fn navigate_focus(
             }
             // Clipped out of sight is fine inside a scroll area (focus
             // scrolls it into view); anywhere else it is not a candidate.
-            let mut shown = rect;
-            if let Some(clip) = clip {
-                shown = shown.intersect(clip.clip);
-            }
+            let mut shown = super::clipped_ui_rect(rect, clip);
             if let Some(viewport) = viewport {
                 shown = shown.intersect(viewport);
             }
@@ -687,9 +683,10 @@ mod tests {
         );
         app.world_mut()
             .entity_mut(low)
-            .insert(bevy::ui::CalculatedClip {
-                clip: Rect::new(0.0, 0.0, 300.0, 100.0),
-            });
+            .insert(bevy::ui::CalculatedClip::default().with_rect(
+                Rect::new(0.0, 0.0, 300.0, 100.0),
+                &UiGlobalTransform::from_translation(Vec2::ZERO),
+            ));
         app.update();
         assert_eq!(focused(&app), Some(top));
         nav(&mut app, FocusNav::Down);

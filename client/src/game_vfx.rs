@@ -1525,15 +1525,16 @@ fn animate_particles(
             Shape::Glow | Shape::Streak => Some(assets.glow_texture.clone()),
             _ => None,
         };
-        if let Some(mut m) = materials.get_mut(&slot.material) {
-            m.base_color = hdr_tint(p.color, p.gain);
-            m.base_color_texture = texture.clone();
-            m.alpha_mode = AlphaMode::Blend;
-            m.depth_bias = if p.dense { -DENSE_BEHIND } else { 0. };
-        }
-        if let Some(mut m) = flats.get_mut(&slot.flat) {
-            m.color = p.color;
-            m.texture = texture;
+        if flat {
+            if let Some(mut material) = flats.get_mut(&slot.flat) {
+                material.color = p.color;
+                material.texture = texture;
+            }
+        } else if let Some(mut material) = materials.get_mut(&slot.material) {
+            material.base_color = hdr_tint(p.color, p.gain);
+            material.base_color_texture = texture;
+            material.alpha_mode = AlphaMode::Blend;
+            material.depth_bias = if p.dense { -DENSE_BEHIND } else { 0. };
         }
         if flat {
             commands
@@ -1551,22 +1552,33 @@ fn animate_particles(
     for (_, slot, mut transform, mut global, mut visibility, mut inherited) in &mut slots {
         // Staggered particles (negative age) hold their slot but stay hidden.
         let Some(p) = slot.active.as_ref().filter(|p| p.age >= 0.) else {
-            *visibility = Visibility::Hidden;
-            *inherited = InheritedVisibility::HIDDEN;
+            visibility.set_if_neq(Visibility::Hidden);
+            inherited.set_if_neq(InheritedVisibility::HIDDEN);
             continue;
         };
-        *transform = p.pose(flat, facing);
-        *global = GlobalTransform::from(*transform);
-        *visibility = Visibility::Visible;
-        *inherited = InheritedVisibility::VISIBLE;
+        let pose = p.pose(flat, facing);
+        transform.set_if_neq(pose);
+        global.set_if_neq(GlobalTransform::from(pose));
+        visibility.set_if_neq(Visibility::Visible);
+        inherited.set_if_neq(InheritedVisibility::VISIBLE);
         let life = p.age / p.lifetime;
         let opacity = p.opacity(life);
         let Tint { color, gain } = p.tint(life.clamp(0., 1.));
-        if let Some(mut m) = materials.get_mut(&slot.material) {
-            m.base_color = hdr_tint(color, gain).with_alpha(color.alpha() * opacity);
-        }
-        if let Some(mut m) = flats.get_mut(&slot.flat) {
-            m.color = color.with_alpha(color.alpha() * opacity);
+        let alpha = color.alpha() * opacity;
+        if flat {
+            let color = color.with_alpha(alpha);
+            if let Some(mut material) = flats.get_mut(&slot.flat)
+                && material.color != color
+            {
+                material.color = color;
+            }
+        } else {
+            let color = hdr_tint(color, gain).with_alpha(alpha);
+            if let Some(mut material) = materials.get_mut(&slot.material)
+                && material.base_color != color
+            {
+                material.base_color = color;
+            }
         }
     }
 }
@@ -2168,6 +2180,19 @@ mod tests {
                     ..Particle::BASE
                 }]));
             app.update();
+            let inactive_hdr = app
+                .world_mut()
+                .query::<&ParticleSlot>()
+                .iter(app.world())
+                .find_map(|slot| slot.active.as_ref().map(|_| slot.material.clone()))
+                .map(|handle| {
+                    app.world()
+                        .resource::<Assets<StandardMaterial>>()
+                        .get(&handle)
+                        .unwrap()
+                        .base_color
+                })
+                .unwrap();
             for mut slot in app
                 .world_mut()
                 .query::<&mut ParticleSlot>()
@@ -2203,17 +2228,22 @@ mod tests {
                 .resource::<Assets<StandardMaterial>>()
                 .get(&material)
                 .unwrap();
-            let hdr = material.base_color.to_linear();
-            assert!((hdr.red - 2.5).abs() < 0.0001);
-            assert!((hdr.green - color.to_linear().green * 2.5).abs() < 0.0001);
-            assert!((hdr.alpha - expected_alpha).abs() < 0.0001);
-            assert!(!material.fog_enabled);
             let flat = app
                 .world()
                 .resource::<Assets<ColorMaterial>>()
                 .get(&flat)
                 .unwrap();
-            assert_eq!(flat.color, color.with_alpha(expected_alpha));
+            if is_3d {
+                let hdr = material.base_color.to_linear();
+                assert!((hdr.red - 2.5).abs() < 0.0001);
+                assert!((hdr.green - color.to_linear().green * 2.5).abs() < 0.0001);
+                assert!((hdr.alpha - expected_alpha).abs() < 0.0001);
+                assert!(!material.fog_enabled);
+                assert_eq!(flat.color, Color::WHITE);
+            } else {
+                assert_eq!(flat.color, color.with_alpha(expected_alpha));
+                assert_eq!(material.base_color, inactive_hdr);
+            }
         }
     }
     /// Budget of shared meshes: the particle pool and the skill bodies draw the nine flat

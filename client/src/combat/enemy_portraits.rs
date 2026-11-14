@@ -1,5 +1,6 @@
 //! Nearby visible enemy locks and position-free public enemy death timers.
 // i18n-strict
+use crate::ui::Button;
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{

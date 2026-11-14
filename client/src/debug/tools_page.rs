@@ -12,6 +12,8 @@
 //! server command, so the local client never fakes bots, levels or
 //! invulnerability. The toggle lines read and write [`DebugToggles`]. Entity
 //! `Name`s keep their `PauseMenuPractice*` prefix.
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 use shared::debug::DebugCommand;
 use shared::practice::{

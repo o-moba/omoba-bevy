@@ -248,9 +248,7 @@ fn capture(
         }
         let rect = crate::ui::focus::node_rect(computed, transform);
         let viewport = Rect::from_corners(Vec2::ZERO, Vec2::new(852.0, 393.0));
-        let shown = rect
-            .intersect(viewport)
-            .intersect(clip.map_or(viewport, |clip| clip.clip));
+        let shown = crate::ui::clipped_ui_rect(rect, clip).intersect(viewport);
         (shown.width() >= rect.width() - 1.0 && shown.height() >= rect.height() - 1.0)
             .then_some([rect.min.x, rect.min.y, rect.max.x, rect.max.y])
     };

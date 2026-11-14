@@ -10,6 +10,7 @@
 //! customization screen is rebuilt on a language change.
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use shared::HeroClass;

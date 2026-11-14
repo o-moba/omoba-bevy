@@ -1,5 +1,6 @@
 //! Authoritative career UI. Match receipts outlive live entities and connections.
 // i18n-strict
+use crate::ui::Button;
 use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::{
     i18n::{Locale, data, lookup, tr, trf},

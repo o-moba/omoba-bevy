@@ -7,6 +7,7 @@
 //! packet).
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 use omoba_passport::avatars::avatar_roster;
 use shared::HeroClass;

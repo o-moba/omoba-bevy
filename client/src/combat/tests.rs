@@ -17,6 +17,7 @@ use crate::net::{
 use crate::player::{MovementTarget, Player};
 use crate::sprite::PlayerVisualMode;
 use crate::team::{Team, TeamSelection};
+use crate::ui::Button;
 use bevy::{input::mouse::MouseButton, window::PrimaryWindow};
 use shared::{HeroClass, SkillSlot, ability_for_class_slot};
 

@@ -2858,7 +2858,7 @@ mod tests {
                 .get::<TextFont>(number)
                 .unwrap()
                 .font_size
-                .eval(Vec2::ONE, 16.0)
+                .eval(Vec2::ONE, bevy::text::RemSize(16.0))
                 <= height
         );
         assert!(
@@ -2866,7 +2866,7 @@ mod tests {
                 .get::<TextFont>(parts.seconds)
                 .unwrap()
                 .font_size
-                .eval(Vec2::ONE, 16.0)
+                .eval(Vec2::ONE, bevy::text::RemSize(16.0))
                 < COOLDOWN_TEXT.phone
         );
     }

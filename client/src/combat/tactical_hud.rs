@@ -1,5 +1,6 @@
 //! Screen-space combat identity, allied vitals and global identity-only kill notices.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     camera::MainCamera,
     combat::CombatStats,

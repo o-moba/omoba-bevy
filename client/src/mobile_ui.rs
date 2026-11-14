@@ -8,6 +8,7 @@
 //! running process, so an account link or a store cache never crosses
 //! profiles.
 // i18n-strict
+use crate::ui::Button;
 use bevy::{
     input::keyboard::{Key, KeyboardInput},
     prelude::*,

@@ -631,7 +631,7 @@ fn capture(
             watched.then(|| {
                 let rect = Rect::from_center_size(pose.translation, computed.size() * pose.to_scale_angle_translation().0.abs());
                 let viewport = Rect::from_corners(Vec2::ZERO, qa.viewport().as_vec2());
-                let shown = rect.intersect(viewport).intersect(clip.map_or(viewport, |c| c.clip));
+                let shown = crate::ui::clipped_ui_rect(rect, clip).intersect(viewport);
                 serde_json::json!({"name":name, "visible":node.display != Display::None && shown.width() > 1.0 && shown.height() > 1.0 && computed.size().min_element() > 0.0 && inherited.is_none_or(|v| v.get()),
                     "rect":[rect.min.x,rect.min.y,rect.max.x,rect.max.y], "rotation_radians":pose.to_scale_angle_translation().1, "text":text.map(|t|t.0.as_str())})
             })
