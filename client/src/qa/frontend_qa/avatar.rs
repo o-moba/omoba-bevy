@@ -321,20 +321,19 @@ fn capture(
                 "visible":visible.is_none_or(|value| value.get()), "fits_viewport":fits(min, size, viewport)}));
         }
     }
-    let required = [
-        "CollectionScreen",
-        "CollectionBack",
-        "AvatarPreviewSurface",
-        "AvatarAutoSpin",
-    ];
-    if required.iter().any(|name| {
+    let mut required = vec!["CollectionScreen", "CollectionBack", "AvatarPreviewSurface"];
+    // Collection intentionally hides the animation row on short windows.
+    if qa.pixels.y >= 600 {
+        required.push("AvatarAutoSpin");
+    }
+    if let Some(missing) = required.into_iter().find(|name| {
         !records.iter().any(|record| {
             record["name"] == *name && record["visible"] == true && record["fits_viewport"] == true
         })
     }) {
         abort(
             &mut qa,
-            "Collection essential controls leave viewport",
+            &format!("Collection control {missing} is missing or outside the viewport"),
             &mut exit,
         );
         return;

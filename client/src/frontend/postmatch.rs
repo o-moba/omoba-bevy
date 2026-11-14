@@ -14,6 +14,8 @@
 //! keys it shares; the screen is rebuilt on a language change.
 // i18n-strict
 
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 use shared::career::{MatchOutcome, MatchResult, ParticipantResult};
 use shared::live_score::LiveScorePlayer;

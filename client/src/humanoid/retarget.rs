@@ -1,5 +1,5 @@
 use super::{SharedHumanoidMotion, humanoid_target_id, motion::MotionClip};
-use bevy::{animation::animated_field, math::curve::UnevenSampleAutoCurve, prelude::*};
+use bevy::{animation::animated_field, curve::UnevenSampleAutoCurve, prelude::*};
 use omoba_passport::humanoid::{HumanoidRig, VrmVersion};
 use std::collections::BTreeMap;
 

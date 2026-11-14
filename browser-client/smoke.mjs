@@ -46,8 +46,21 @@ try {
   await page.keyboard.press('3',{delay:100});
   await page.waitForFunction(round=>window.__omobaPractice.omoba_practice_round()>round,restarted.round);
   const selected = await state();
+  // Exercise the actual canvas buttons. The top edge of the bottom bar
+  // is stable at this viewport, including when the labels fill less space.
+  const buttons = await page.evaluate(() => {
+    const { x, y, width, height } = document.querySelector('canvas').getBoundingClientRect();
+    return { first: { x: x + 72, y: y + height - 37 }, viewport: [width, height] };
+  });
+  await page.mouse.click(buttons.first.x, buttons.first.y, {button:'right'});
+  if ((await state()).round !== selected.round) throw Error('Secondary pointer restarted the match');
+  await page.mouse.move(buttons.first.x, buttons.first.y);
+  await page.mouse.down();
+  await page.waitForFunction(round=>window.__omobaPractice.omoba_practice_round()===round+1, selected.round);
+  await page.mouse.up();
+  const pointerSelected = await state();
   await page.screenshot({path:output+'/browser-practice-1280x720.png'});
-  const result={viewport:'1280x720',locale:'en-US',url,before,moved,combat,paused,still,restarted,selected,errors,messages};
+  const result={viewport:'1280x720',locale:'en-US',url,before,moved,combat,paused,still,restarted,selected,pointerSelected,errors,messages};
   await writeFile(output+'/browser-smoke.json',JSON.stringify(result,null,2)+'\n');
   if (errors.length) throw Error(errors.join('\n'));
   console.log(JSON.stringify(result,null,2));

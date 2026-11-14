@@ -81,7 +81,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.95.0
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.platform }}
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.95.0
+          toolchain: 1.97.1
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:

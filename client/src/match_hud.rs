@@ -3,6 +3,7 @@
 //! HUD visibility (`omoba-ui/handoff/screens/hud.md`).
 // i18n-strict
 
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use crate::i18n::{data, tr, trf};
@@ -545,7 +546,9 @@ fn update_match_hud(
         return;
     };
     let Some((stats, replicated_class)) = player.iter().next() else {
-        status_text.0.clear();
+        if !status_text.is_empty() {
+            status_text.0.clear();
+        }
         return;
     };
     let hero_class = replicated_class
@@ -555,7 +558,7 @@ fn update_match_hud(
         .as_ref()
         .is_some_and(|g| matches!(g.state, GameState::Running));
     if !running {
-        status_text.0 = trf(
+        let next = trf(
             "hud.prematch",
             &[
                 ("help_key", &help_key_display()),
@@ -563,6 +566,9 @@ fn update_match_hud(
                 ("skills", &skill_keys_display()),
             ],
         );
+        status_text
+            .map_unchanged(|text| &mut text.0)
+            .set_if_neq(next);
         return;
     }
     let objective_line = enemy_base_objective_line(&local_team, &enemy_bases);
@@ -581,7 +587,9 @@ fn update_match_hud(
             (true, false, true) => "hud.target.none_phone",
         },
     );
-    status_text.0 = format!("{objective_line}\n{target}");
+    status_text
+        .map_unchanged(|text| &mut text.0)
+        .set_if_neq(format!("{objective_line}\n{target}"));
 }
 
 /// One line per active buff of the LOCAL player's team, with the remaining

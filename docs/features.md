@@ -1613,6 +1613,10 @@ Allied portraits also show remaining respawn seconds. Nexus motion rotates the o
 
 The game and Ekza SDK use Bevy 0.19.1 with Rust 1.95.0. Existing avatar/weapon account flows, humanoid animation and 0.42 gameplay remain supported. GLB scene labels are retained while engine scene types move to world serialization. The upgrade does not claim improved phone FPS without physical-device measurement.
 
+### Engine baseline — 0.46.0
+
+The desktop/mobile client, browser client, wasm shared clock and Ekza SDK use exactly Bevy 0.20.1 (`=0.20.1`) with Rust 1.97.1. Mesh bounds use the renamed `MeshAabb::get_aabb` API. The server remains renderer-free, the client/server protocol is unchanged, and the local cpal 0.17.3 recovery patch remains necessary with Bevy's rodio 0.22 audio stack. This dependency upgrade does not claim visual, performance or physical-device certification.
+
 
 ## Community class workshop prototype
 

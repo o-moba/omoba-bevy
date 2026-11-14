@@ -1,5 +1,6 @@
 //! Compact match chrome, selected-target health and the live two-team scoreboard.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     combat::{CombatStats, TargetState},
     hud_layout::HudRegion,

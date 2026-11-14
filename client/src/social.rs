@@ -1,5 +1,6 @@
 //! Ephemeral match communication: local debug feedback offline, server authority online.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     camera::MainCamera,
     combat::{CombatStats, PendingCast},

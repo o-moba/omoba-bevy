@@ -442,7 +442,7 @@ fn accumulate_node_bounds(
         let gltf_mesh = gltf_meshes.get(mesh_handle)?;
         for primitive in &gltf_mesh.primitives {
             let mesh = meshes.get(&primitive.mesh)?;
-            let Some(aabb) = mesh.compute_aabb() else {
+            let Some(aabb) = mesh.get_aabb() else {
                 continue;
             };
             fold_aabb_corners(&aabb, &world, min, max);

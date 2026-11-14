@@ -1,6 +1,13 @@
 //! Browser-local renderer for the real OMOBA practice authority.
 //! No socket, account, identity key, career write, or simulated online session.
-use bevy::{camera::ScalingMode, prelude::*};
+
+use bevy::{
+    camera::ScalingMode,
+    picking::{events::PointerPress, hover::Hovered, pointer::PointerButton},
+    prelude::*,
+    ui::Pressed,
+    ui_widgets::Button,
+};
 use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
 use shared::{HeroClass, clock::Instant, map::Team, wire::*};
 use std::{
@@ -164,10 +171,11 @@ fn main() {
                     ..default()
                 }),
         )
+        .add_observer(activate_button)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (buttons, input, simulate, actors, draw, hud).chain(),
+            (paint_buttons, input, simulate, actors, draw, hud).chain(),
         )
         .run();
 }
@@ -348,8 +356,11 @@ fn setup(
         ))
         .with_children(|parent| {
             for (i, class) in CLASSES.into_iter().enumerate() {
+                let label = format!("{}  {}", i + 1, class.display_name());
                 parent.spawn((
                     Button,
+                    Hovered::default(),
+                    AccessibleLabel::new(label.clone()),
                     ClassButton(i),
                     Node {
                         padding: UiRect::axes(px(10), px(12)),
@@ -358,7 +369,8 @@ fn setup(
                     },
                     BackgroundColor(Color::srgb(0.10, 0.19, 0.15)),
                     children![(
-                        Text::new(format!("{}  {}", i + 1, class.display_name())),
+                        Text::new(label),
+                        Pickable::IGNORE,
                         TextFont {
                             font_size: FontSize::Px(12.0),
                             ..default()
@@ -369,6 +381,8 @@ fn setup(
             }
             parent.spawn((
                 Button,
+                Hovered::default(),
+                AccessibleLabel::new("Esc  Pause"),
                 PauseButton,
                 Node {
                     padding: UiRect::axes(px(10), px(12)),
@@ -377,6 +391,7 @@ fn setup(
                 BackgroundColor(Color::srgb(0.17, 0.20, 0.16)),
                 children![(
                     Text::new("Esc  Pause"),
+                    Pickable::IGNORE,
                     TextFont {
                         font_size: FontSize::Px(12.0),
                         ..default()
@@ -385,6 +400,8 @@ fn setup(
             ));
             parent.spawn((
                 Button,
+                Hovered::default(),
+                AccessibleLabel::new("N  Restart"),
                 RestartButton,
                 Node {
                     padding: UiRect::axes(px(10), px(12)),
@@ -393,6 +410,7 @@ fn setup(
                 BackgroundColor(Color::srgb(0.23, 0.20, 0.11)),
                 children![(
                     Text::new("N  Restart"),
+                    Pickable::IGNORE,
                     TextFont {
                         font_size: FontSize::Px(12.0),
                         ..default()
@@ -408,38 +426,42 @@ fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     p.distance(a + ab * t)
 }
 
-fn buttons(
+fn activate_button(
+    event: On<PointerPress>,
     mut practice: ResMut<Practice>,
-    mut query: Query<
-        (
-            &Interaction,
-            Option<&ClassButton>,
-            Has<RestartButton>,
-            Has<PauseButton>,
-            &mut BackgroundColor,
-        ),
-        (With<Button>, Changed<Interaction>),
-    >,
+    buttons: Query<(Option<&ClassButton>, Has<RestartButton>, Has<PauseButton>), With<Button>>,
 ) {
-    for (interaction, class, restart, pause, mut color) in &mut query {
-        *color = match interaction {
-            Interaction::Hovered => Color::srgb(0.22, 0.34, 0.23),
-            Interaction::Pressed => GOLD,
-            Interaction::None => Color::srgb(0.10, 0.19, 0.15),
-        }
-        .into();
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        if let Some(class) = class {
-            practice.restart(class.0);
-        } else if restart {
-            let class = practice.class;
-            practice.restart(class);
-        } else if pause {
-            practice.paused = !practice.paused;
-        }
+    if event.button != PointerButton::Primary {
+        return;
     }
+    let Ok((class, restart, pause)) = buttons.get(event.entity) else {
+        return;
+    };
+    if let Some(class) = class {
+        practice.restart(class.0);
+    } else if restart {
+        let class = practice.class;
+        practice.restart(class);
+    } else if pause {
+        practice.paused = !practice.paused;
+    }
+}
+
+fn paint_buttons(mut buttons: Query<(&Hovered, Has<Pressed>, &mut BackgroundColor), With<Button>>) {
+    for (hovered, pressed, mut color) in &mut buttons {
+        color.set_if_neq(button_color(hovered.get(), pressed));
+    }
+}
+
+fn button_color(hovered: bool, pressed: bool) -> BackgroundColor {
+    if pressed {
+        GOLD
+    } else if hovered {
+        Color::srgb(0.22, 0.34, 0.23)
+    } else {
+        Color::srgb(0.10, 0.19, 0.15)
+    }
+    .into()
 }
 
 fn input(

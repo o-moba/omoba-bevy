@@ -15,7 +15,7 @@ Stormfist, Veilstalker and Emberveil. Both teams' bots use Regular difficulty.
 Requirements: the repository's Rust toolchain/lockfile, installed
 `wasm32-unknown-unknown` target and Trunk 0.21.x. Trunk supplies the matching
 wasm-bindgen CLI version from Cargo.lock. No new third-party production library
-is introduced: this package reuses Bevy 0.19.1, common and shared. Native shared
+is introduced: this package reuses Bevy 0.20, common and shared. Native shared
 has no Bevy dependency; only its wasm target uses the engine's monotonic clock.
 
 ```sh

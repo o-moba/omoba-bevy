@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Upgrade the workspace and pinned Ekza Bevy SDK to exactly Bevy 0.20.1
+  (`=0.20.1` in every manifest) with Rust 1.97.1. Migrate mesh AABB accessors, keep the existing Linux cpal
+  recovery patch, and preserve the client/server network protocol and gameplay
+  contracts. Desktop, Android, browser and server checks run through the normal
+  CI gates. Fix taps escaping one-axis scroll clips and restore accessible
+  button labels. Use Bevy picking for practice buttons in the browser and
+  reduce redundant HUD, transform, particle and minimap fog updates.
+
 - Externalize bulky Ranked evidence without deleting the local proof: a private
   draft asset in `o-moba/omoba-bevy-archive` preserves all 1,321 evidence files
   from `dad1e4f6` (59,321,682 bytes; SHA-256

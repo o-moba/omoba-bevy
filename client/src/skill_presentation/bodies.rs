@@ -702,8 +702,8 @@ fn frame(effect: &SkillEffectState, shape: &GeoShape) -> (Vec2, Vec2) {
     let directed = strip
         || category::heading_only(effect.kind)
         || matches!(shape, GeoShape::Sector { .. } | GeoShape::Segment { .. });
-    let heading = Some(toward - origin)
-        .filter(|_| directed)
+    let heading = directed
+        .then_some(toward - origin)
         .and_then(Vec2::try_normalize)
         .unwrap_or(REST_HEADING);
     (origin, heading)
@@ -1632,11 +1632,10 @@ fn marker(slot: &PartSlot, index: u8, seen: &Seen) -> Option<Transform> {
             } else {
                 0.0
             };
-            Some(flat_circle(
+            (left > 0.0).then_some(flat_circle(
                 seen.circle()? * MARKER_REACH * left,
                 MARKER_LIFT,
             ))
-            .filter(|_| left > 0.0)
         }
         Marker::FillToEdge if index > 0 => core_edge(index, seen),
         Marker::FillToEdge => {

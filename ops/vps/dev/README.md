@@ -117,7 +117,7 @@ docker run --rm --platform linux/amd64 -v "$PWD:/src" -v "$T:/cache" -w /src \
   -e CARGO_TARGET_DIR=/cache -e OMOBA_DEFAULT_GAME_SERVER_ADDR=lobby.dev.omoba.io:4100 \
   -e OMOBA_DEFAULT_REGISTRY_URL=https://registry.dev.ekza.io \
   -e OMOBA_DEFAULT_PASSPORT_URL=http://127.0.0.1:9/api/passport -e OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev \
-  rust:1.95.0-bookworm cargo build --locked --release -p server -p omoba-account-api
+  rust:1.97.1-bookworm cargo build --locked --release -p server -p omoba-account-api
 python3 ops/vps/dev/lobby_dev.py ship --binary "$T/release/server" --account-api "$T/release/omoba-account-api" \
   --version "$V" --check      # then --apply
 ```

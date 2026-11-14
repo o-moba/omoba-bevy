@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use crate::i18n::{tr, trf};
 use crate::net::TargetKind;
+use crate::ui::Button;
 use bevy::{
     input::touch::{TouchInput, TouchPhase},
     prelude::*,

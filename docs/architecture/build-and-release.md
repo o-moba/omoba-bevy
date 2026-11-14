@@ -26,7 +26,7 @@ Decisions recorded for this area: [ADR-002](decisions.md#adr-002-separate-produc
 
 ## Workspace
 
-[Cargo.toml](../../Cargo.toml) defines one workspace with resolver 2 and edition 2024. Every crate takes its version from `[workspace.package].version` (0.44.0 at the snapshot). [rust-toolchain.toml](../../rust-toolchain.toml) pins the toolchain to 1.95.0 with rustfmt and clippy. `Cargo.lock` is committed.
+[Cargo.toml](../../Cargo.toml) defines one workspace with resolver 2 and edition 2024. Every crate takes its version from `[workspace.package].version` (0.46.0 at the snapshot). [rust-toolchain.toml](../../rust-toolchain.toml) pins the toolchain to 1.97.1 with rustfmt and clippy. `Cargo.lock` is committed.
 
 These commands pass `--locked`:
 
@@ -331,7 +331,7 @@ More release.yml behaviour:
 
 **[bot-sim.yml](../../.github/workflows/bot-sim.yml).** Trigger: `workflow_dispatch` with inputs `rounds`, `pairings` and `tune`. It runs the full bot-difficulty matrix and uploads the report JSON as an artifact.
 
-Every job that runs cargo installs Rust 1.95.0 explicitly with `dtolnay/rust-toolchain` and uses `Swatinem/rust-cache`. The ci.yml `scripts` job and the release.yml `draft` job install no Rust.
+Every job that runs cargo installs Rust 1.97.1 explicitly with `dtolnay/rust-toolchain` and uses `Swatinem/rust-cache`. The ci.yml `scripts` job and the release.yml `draft` job install no Rust.
 
 ## Makefile release wrappers
 

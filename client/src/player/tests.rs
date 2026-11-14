@@ -4,6 +4,7 @@ use crate::combat::{CombatStats, PendingCast, WorldPointerState};
 use crate::minimap::MinimapNavigationState;
 use crate::net::{GameState, GameStateSnapshot, NetworkStructure, StructureKind};
 use crate::targeting::BasicAttackState;
+use crate::ui::Button;
 use bevy::input::mouse::MouseButton;
 
 #[test]

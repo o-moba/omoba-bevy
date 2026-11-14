@@ -1,5 +1,6 @@
 //! Server-authoritative base shop. Browsing is always safe; a receipt confirms payment.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     combat::{ActionFeedback, CombatStats},
     help_overlay::HelpOverlayVisible,

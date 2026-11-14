@@ -1,5 +1,6 @@
 //! Presentation and input helpers for resolved skills. No hit or resource authority.
 // i18n-strict
+use crate::ui::Button;
 use bevy::gizmos::config::GizmoConfigGroup;
 use bevy::prelude::*;
 
