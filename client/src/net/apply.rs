@@ -207,8 +207,8 @@ pub struct SnapshotApplied {
 /// Snapshot application as chained stages, each a member of
 /// `ClientNetPipeline::ApplySnapshot` (so every `.after(ApplySnapshot)`
 /// reader still sees the whole application), followed by the session-event
-/// flush. `configure_network_pipeline` chains the stage sets and adds them to
-/// the parent set. Used by the plugin and test apps that apply snapshots.
+/// flush. The stages are chained here for standalone test apps, while
+/// `configure_network_pipeline` attaches the stage sets to the parent set.
 pub(in crate::net) fn snapshot_apply_systems() -> ScheduleConfigs<ScheduleSystem> {
     (
         begin_snapshot_apply.in_set(SnapshotApply::Begin),
@@ -239,11 +239,9 @@ pub(in crate::net) fn snapshot_apply_systems() -> ScheduleConfigs<ScheduleSystem
         finish_snapshot_apply
             .run_if(snapshot_staged)
             .in_set(SnapshotApply::Finish),
-        flush_session_events
-            .after(SnapshotApply::Finish)
-            .in_set(ClientNetPipeline::ApplySnapshot),
+        flush_session_events.in_set(ClientNetPipeline::ApplySnapshot),
     )
-        .into_configs()
+        .chain()
 }
 
 fn snapshot_staged(staged: Res<StagedSnapshot>) -> bool {
