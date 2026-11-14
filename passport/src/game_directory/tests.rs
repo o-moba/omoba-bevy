@@ -20,6 +20,8 @@ fn fixture(reply: Vec<u8>) -> (DirectoryTransport, thread::JoinHandle<String>) {
                 Err(e) => panic!("fixture accept: {e}"),
             }
         };
+        // Accepted sockets can inherit non-blocking mode on BSD.
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
