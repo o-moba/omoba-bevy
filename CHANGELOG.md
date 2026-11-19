@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Recognize Ubuntu's standard `/etc/os-release` → `/usr/lib/os-release` symlink
+  during RU host preflight while continuing to refuse arbitrary configuration
+  symlinks. Two focused tests and all 76 RU host tooling tests pass; this changes
+  deployment detection only, not gameplay, server configuration or release gates.
+
 - Upgrade the workspace and pinned Ekza Bevy SDK to exactly Bevy 0.20.1
   (`=0.20.1` in every manifest) with Rust 1.97.1. Migrate mesh AABB accessors, keep the existing Linux cpal
   recovery patch, and preserve the client/server network protocol and gameplay

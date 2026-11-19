@@ -1366,8 +1366,18 @@ class Host:
         return found
 
     def os_release(self) -> dict:
+        path = "/etc/os-release"
+        local = self.p(path)
+        if os.path.islink(local):
+            # Ubuntu's standard link is safe to follow, but arbitrary host
+            # configuration links remain refused by read().
+            target = os.path.realpath(local)
+            standard = os.path.realpath(self.p("/usr/lib/os-release"))
+            text = Path(target).read_text() if target == standard and os.path.isfile(target) else ""
+        else:
+            text = self.read(path) or ""
         values = {}
-        for line in (self.read("/etc/os-release") or "").splitlines():
+        for line in text.splitlines():
             key, sep, value = line.partition("=")
             if sep:
                 values[key.strip()] = value.strip().strip('"')

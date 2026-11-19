@@ -1072,6 +1072,21 @@ class BootstrapTest(HostCase):
         self.assertEqual(self.fresh().status(self.payload())["facts"]["names"],
                          {key: NAMES[key] for key in ru_host.HOST_KEYS})
 
+    def test_standard_os_release_symlink(self):
+        os.unlink(self.fake.p("/etc/os-release"))
+        self.fake.write("/usr/lib/os-release", 'ID=ubuntu\nVERSION_ID="26.04"\n')
+        os.symlink("../usr/lib/os-release", self.fake.p("/etc/os-release"))
+        self.assertEqual(self.fresh().os_release(), {"ID": "ubuntu", "VERSION_ID": "26.04"})
+        self.assertEqual(self.fresh().platform_problems(), [])
+
+    def test_arbitrary_os_release_symlink_is_refused(self):
+        os.unlink(self.fake.p("/etc/os-release"))
+        self.fake.write("/tmp/os-release", 'ID=ubuntu\nVERSION_ID="26.04"\n')
+        os.symlink("../tmp/os-release", self.fake.p("/etc/os-release"))
+        self.assertEqual(self.fresh().os_release(), {})
+        self.assertTrue(any("Ubuntu 24.04 or newer" in problem
+                            for problem in self.fresh().platform_problems()))
+
     def test_bootstrap_refuses_other_contours_and_platforms(self):
         cases = {
             "/opt/omoba": lambda: os.makedirs(self.fake.p("/opt/omoba")),
