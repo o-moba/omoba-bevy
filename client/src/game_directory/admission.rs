@@ -353,6 +353,16 @@ impl Admission {
                 }
                 SocketAddr::new(owner.ip(), port)
             };
+            let contour = (authority.directory.contour != "production")
+                .then_some(authority.directory.contour.as_str());
+            if !crate::session_config::GameService::Worker.allows(
+                contour,
+                Some(authority.directory.region),
+                &worker.ip().to_string(),
+                worker.port(),
+            ) {
+                return ResumeDecision::Unavailable;
+            }
             return ResumeDecision::Ready(ResumeRoute {
                 lobby: Route {
                     region: authority.directory.region,

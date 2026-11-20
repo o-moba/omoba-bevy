@@ -1270,7 +1270,7 @@ def ensure_android_keystore() -> Path:
 def mobile_endpoints_check(flavor: Flavor, platform_name: str) -> None:
     """Dev phone builds (and every iOS archive) compile their contour's registry and
     passport (scripts/contours.py; production: the SDK defaults); only --server changes."""
-    defaults = (DEV_REGISTRY, DEV_PASSPORT) if flavor.dev else (None, None)
+    defaults = (DEV_REGISTRY, DEV_PASSPORT) if flavor.dev and flavor.market == "global" else (None, None)
     if (flavor.registry, flavor.passport) != defaults:
         raise SystemExit(f"--registry/--passport are not supported for {platform_name}: the "
                          f"{flavor.contour} app compiles its contour's own (scripts/contours.py)")

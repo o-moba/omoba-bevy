@@ -16,9 +16,8 @@
 //! **Contour builds.** A build with `OMOBA_DEFAULT_CONFIG_DIR_SUFFIX` (a dev-contour
 //! tester build from `scripts/release.py build … --contour dev`) never offers or
 //! accepts the production lobby. Its bound account region chooses the dev
-//! endpoints, and [`endpoint_allowed_for`] refuses the production VPS and every production `omoba.io` /
-//! `ekza.io` name in every address it validates (custom, `GAME_SERVER_ADDR`,
-//! match allocations).
+//! endpoints. [`GameService`] also checks the UDP destination after DNS resolution.
+//! On the shared RU host each dev service has a dedicated port.
 //!
 //! **Failure detection** (TASK-14): `net::update_session_lifecycle` tears down on stale snapshot
 //! (`is_stale` + [`T_STALE_SNAPSHOT`]), on `NetThreadSignal::TransportFailure` from the UDP thread
@@ -33,11 +32,13 @@ pub const FALLBACK_GAME_SERVER_ADDR: &str = "127.0.0.1:4000";
 /// Public beta lobby. Match workers are allocated by this endpoint.
 pub const BETA_GAME_SERVER_ADDR: &str = "77.246.105.57:4000";
 
-/// Hosts of the production lobby. A contour build never connects to them, on any port.
-const PRODUCTION_LOBBY_HOSTS: &[std::net::Ipv4Addr] = &[
-    std::net::Ipv4Addr::new(77, 246, 105, 57),
-    std::net::Ipv4Addr::new(212, 113, 117, 105),
-];
+const RU_HOST: std::net::Ipv4Addr = std::net::Ipv4Addr::new(212, 113, 117, 105);
+const RU_DEV_LOBBY_PORT: u16 = 4100;
+const RU_DEV_WORKER_PORT: u16 = 41100;
+
+/// Host-only checks (including HTTP) never authorize a shared production address.
+const PRODUCTION_LOBBY_HOSTS: &[std::net::Ipv4Addr] =
+    &[std::net::Ipv4Addr::new(77, 246, 105, 57), RU_HOST];
 
 /// Public production zones (global `omoba.io` and `ekza.io`, the RU market's `omoba.ru`);
 /// inside them only `<contour>.<zone>` names belong to a contour build.
@@ -119,6 +120,41 @@ pub(crate) fn endpoint_allowed_in_region(
         .any(|zone| in_zone(zone) && !in_zone(&format!("{contour}.{zone}")))
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum GameService {
+    Lobby,
+    Worker,
+}
+
+impl GameService {
+    pub(crate) fn allows(
+        self,
+        contour: Option<&str>,
+        region: Option<shared::region::RegionId>,
+        host: &str,
+        port: u16,
+    ) -> bool {
+        let host = host.trim_end_matches('.');
+        let shared_ip = host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.to_canonical() == std::net::IpAddr::V4(RU_HOST));
+        let dev_name = host.eq_ignore_ascii_case(r"lobby.dev.omoba.ru");
+        if dev_name || shared_ip && contour.is_some() {
+            let expected = match self {
+                Self::Lobby => RU_DEV_LOBBY_PORT,
+                Self::Worker => RU_DEV_WORKER_PORT,
+            };
+            return contour == Some("dev")
+                && region == Some(shared::region::RegionId::Ru)
+                && port == expected;
+        }
+        if shared_ip && matches!(port, RU_DEV_LOBBY_PORT | RU_DEV_WORKER_PORT) {
+            return false;
+        }
+        endpoint_allowed_in_region(contour, region, host)
+    }
+}
+
 /// Known regional authorities cannot be crossed by an old desktop override or
 /// worker redirect. Explicit loopback/self-host endpoints remain developer tools.
 fn region_endpoint_allowed(region: shared::region::RegionId, host: &str) -> bool {
@@ -135,9 +171,7 @@ fn region_endpoint_allowed(region: shared::region::RegionId, host: &str) -> bool
             std::net::IpAddr::V4(ip) => Some(ip),
             std::net::IpAddr::V6(ip) => ip.to_ipv4_mapped(),
         });
-    let ru = host == "omoba.ru"
-        || host.ends_with(".omoba.ru")
-        || ip == Some(std::net::Ipv4Addr::new(212, 113, 117, 105));
+    let ru = host == "omoba.ru" || host.ends_with(".omoba.ru") || ip == Some(RU_HOST);
     let global = host == "omoba.io"
         || host.ends_with(".omoba.io")
         || ip == Some(std::net::Ipv4Addr::new(77, 246, 105, 57));
@@ -208,6 +242,32 @@ mod tests {
             Some("dev"),
             "[::ffff:212.113.117.105]"
         ));
+    }
+
+    #[test]
+    fn shared_ru_udp_services_are_scoped_to_the_bound_region_and_contour() {
+        use shared::region::RegionId::{Global, Ru};
+        for host in [
+            "212.113.117.105",
+            "::ffff:212.113.117.105",
+            r"LOBBY.DEV.OMOBA.RU.",
+        ] {
+            for (service, permitted) in [(GameService::Lobby, 4100), (GameService::Worker, 41100)] {
+                for port in [4000, 4100, 41000, 41001, 41100, 41101] {
+                    assert_eq!(
+                        service.allows(Some("dev"), Some(Ru), host, port),
+                        port == permitted
+                    );
+                }
+                assert!(!service.allows(Some("dev"), Some(Global), host, permitted));
+                assert!(!service.allows(Some("dev"), None, host, permitted));
+                assert!(!service.allows(None, Some(Ru), host, permitted));
+                assert!(!service.allows(Some("qa"), Some(Ru), host, permitted));
+                assert!(!service.allows(Some("dev"), Some(Ru), "77.246.105.57", permitted));
+            }
+        }
+        assert!(GameService::Lobby.allows(None, Some(Ru), "212.113.117.105", 4000));
+        assert!(GameService::Worker.allows(None, Some(Ru), "212.113.117.105", 41000));
     }
 
     #[test]

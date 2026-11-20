@@ -30,9 +30,12 @@ impl Drop for Fixture {
     }
 }
 fn trust() -> DirectoryTrust {
+    trust_for("production")
+}
+fn trust_for(contour: &str) -> DirectoryTrust {
     DirectoryTrust::new(
         shared::region::RegionId::Ru,
-        "production",
+        contour,
         vec![PublicPin {
             key_id: "fixture".into(),
             public_key: SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes(),
@@ -52,6 +55,44 @@ fn lobby(id: &str, address: u8) -> Lobby {
         weight: 1,
     }
 }
+#[test]
+fn shared_ru_dev_handoff_and_resume_require_the_worker_port() {
+    let fixture = Fixture::new();
+    let trust = trust_for("dev");
+    let mut entry = lobby("shared", 105);
+    entry.host = r"lobby.dev.omoba.ru".into();
+    entry.port = 4100;
+    let fallback = PinnedFallback::new(&trust, entry).unwrap();
+    let mut admission =
+        Admission::new(fixture.0.join("cache.json"), trust, Some(fallback)).unwrap();
+    assert_eq!(
+        admission.refresh_at(Err("offline"), NOW),
+        Ok(Origin::PinnedFallback)
+    );
+    let owner = "212.113.117.105:4100";
+    for worker in [
+        "212.113.117.105:41100",
+        "[::ffff:212.113.117.105]:41100",
+        "lobby.dev.omoba.ru:41100",
+    ] {
+        assert!(matches!(
+            admission.resume_at(NOW, owner, worker),
+            ResumeDecision::Ready(_)
+        ));
+    }
+    for worker in [
+        "212.113.117.105:4000",
+        "212.113.117.105:41000",
+        "212.113.117.105:4100",
+        "lobby.dev.omoba.ru:41001",
+    ] {
+        assert!(matches!(
+            admission.resume_at(NOW, owner, worker),
+            ResumeDecision::Unavailable
+        ));
+    }
+}
+
 fn document(sequence: u64) -> Directory {
     Directory {
         version: 1,

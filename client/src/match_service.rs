@@ -273,7 +273,7 @@ impl MatchServiceClient {
     /// resumed.
     pub fn resume_in_match(&mut self, view: &CareerView) -> Option<String> {
         let allocation = self.in_match(view)?.0.clone();
-        crate::persistence::validate_game_server_addr(&allocation.endpoint)?;
+        crate::persistence::validate_worker_addr(&allocation.endpoint)?;
         self.pending_join.as_ref()?;
         let endpoint = allocation.endpoint.clone();
         self.last_left_allocation = None;
@@ -524,7 +524,7 @@ fn update_match_service(
         }) = &career.view.match_service
         && flow.last_left_allocation.as_deref() != Some(allocation.allocation_id.as_str())
     {
-        if crate::persistence::validate_game_server_addr(&allocation.endpoint).is_some() {
+        if crate::persistence::validate_worker_addr(&allocation.endpoint).is_some() {
             flow.allocation = Some(allocation.clone());
             session_ui.write(SessionUiCommand::ConnectAllocated(
                 allocation.endpoint.clone(),

@@ -186,13 +186,27 @@ pub fn validate_game_server_addr(raw: &str) -> Option<String> {
 
 /// [`validate_game_server_addr`] for a build of `contour`.
 pub(crate) fn validate_game_server_addr_in(contour: Option<&str>, raw: &str) -> Option<String> {
+    validate_service_addr(contour, crate::session_config::GameService::Lobby, raw)
+}
+
+pub(crate) fn validate_worker_addr(raw: &str) -> Option<String> {
+    validate_service_addr(
+        crate::session_config::BUILD_CONTOUR,
+        crate::session_config::GameService::Worker,
+        raw,
+    )
+}
+
+fn validate_service_addr(
+    contour: Option<&str>,
+    service: crate::session_config::GameService,
+    raw: &str,
+) -> Option<String> {
+    let region = shared::region::active().map(|r| r.id);
     let t = raw.trim();
-    if t.is_empty() {
-        return None;
-    }
     if let Ok(address) = t.parse::<SocketAddr>() {
         return (address.port() != 0
-            && crate::session_config::endpoint_allowed_for(contour, &address.ip().to_string()))
+            && service.allows(contour, region, &address.ip().to_string(), address.port()))
         .then(|| address.to_string());
     }
     let (host, port_str) = t.rsplit_once(':')?;
@@ -214,8 +228,7 @@ pub(crate) fn validate_game_server_addr_in(contour: Option<&str>, raw: &str) -> 
         return None;
     }
     let port: u16 = port_str.trim().parse().ok()?;
-    (port != 0 && crate::session_config::endpoint_allowed_for(contour, dns_name))
-        .then(|| format!("{host}:{port}"))
+    (port != 0 && service.allows(contour, region, dns_name, port)).then(|| format!("{host}:{port}"))
 }
 
 pub fn clamp_model_target_height(value: f32) -> f32 {

@@ -132,11 +132,12 @@ fn scope_time_and_known_foreign_labels_and_ips_are_checked_independently() {
     let mut doc = document(1);
     doc["contour"] = json!("dev");
     doc["lobbies"] = json!([{"id":"ru-one","location":"moscow","host":r"lobby.dev.omoba.ru","addresses":["212.113.117.105"],"port":4100,"contract":contract,"status":"open","weight":1}]);
-    assert!(
-        super::tests::trust(RegionId::Ru, "dev")
-            .verify_at(&signed(&doc, 7, "fixture"), NOW, 0)
-            .is_err()
-    );
+    let dev = super::tests::trust(RegionId::Ru, "dev");
+    dev.verify_at(&signed(&doc, 7, "fixture"), NOW, 0).unwrap();
+    for port in [4000, 41000, 41100] {
+        doc["lobbies"][0]["port"] = json!(port);
+        assert!(dev.verify_at(&signed(&doc, 7, "fixture"), NOW, 0).is_err());
+    }
 }
 #[test]
 fn expired_cache_survives_restart_as_a_rollback_and_equivocation_fence() {

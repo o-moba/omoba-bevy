@@ -142,10 +142,11 @@ impl DirectoryTrust {
             for host in std::iter::once(lobby.host.clone())
                 .chain(lobby.addresses.iter().map(ToString::to_string))
             {
-                if !crate::session_config::endpoint_allowed_in_region(
+                if !crate::session_config::GameService::Lobby.allows(
                     contour,
                     Some(self.region),
                     &host,
+                    lobby.port,
                 ) || (contour.is_none() && known_dev_destination(&host))
                 {
                     return Err(DirectoryError::Invalid(

@@ -5,6 +5,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Support the RU dev lobby and match worker on dedicated ports of the Russian game host. Android RU dev packages use their own regional service endpoints.
+
 - Recognize Ubuntu's standard `/etc/os-release` → `/usr/lib/os-release` symlink
   during RU host preflight while continuing to refuse arbitrary configuration
   symlinks. Two focused tests and all 76 RU host tooling tests pass; this changes

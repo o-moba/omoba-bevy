@@ -113,7 +113,7 @@ fn valid_resume(saved: &SavedResume, session: &str, lobby: &str) -> bool {
     saved.session_id == session
         && saved.server_epoch != 0
         && saved.match_id != 0
-        && crate::persistence::validate_game_server_addr(&saved.allocation.endpoint).is_some()
+        && crate::persistence::validate_worker_addr(&saved.allocation.endpoint).is_some()
         && same_lobby(&saved.lobby, lobby)
 }
 pub(crate) fn remember_resume(

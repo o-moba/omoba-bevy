@@ -19,7 +19,7 @@ use shared::wire::{ClientPacket, ServerPacket};
 
 use crate::persistence::ResolvedServerAddressForPrefs;
 use crate::session_config::{
-    T_RETRY, TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS,
+    GameService, T_RETRY, TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS,
 };
 
 use super::session::{ClientConnectionState, ClientSession, SessionEvent};
@@ -101,9 +101,15 @@ pub(in crate::net) fn spawn_network_transport(
         ));
     } else {
         commands.remove_resource::<offline::LocalPractice>();
+        let service = if client_session.ephemeral_endpoint {
+            GameService::Worker
+        } else {
+            GameService::Lobby
+        };
         thread::spawn(move || {
             run_udp_client(
                 addr_for_thread,
+                service,
                 outgoing_rx,
                 incoming_tx,
                 signal_tx,
@@ -135,11 +141,12 @@ pub(in crate::net) fn spawn_network_transport(
 /// socket bound to its own IP family: an IPv4 wildcard cannot connect to IPv6.
 /// UDP connect checks local routing, not server reachability; the normal snapshot
 /// timeout still decides whether the selected server is actually responding.
-fn connect_udp_server(server: impl ToSocketAddrs) -> io::Result<UdpSocket> {
-    connect_resolved_udp_server(server.to_socket_addrs()?)
+fn connect_udp_server(service: GameService, server: impl ToSocketAddrs) -> io::Result<UdpSocket> {
+    connect_resolved_udp_server(service, server.to_socket_addrs()?)
 }
 
 fn connect_resolved_udp_server(
+    service: GameService,
     candidates: impl IntoIterator<Item = SocketAddr>,
 ) -> io::Result<UdpSocket> {
     let mut last_error = None;
@@ -148,6 +155,18 @@ fn connect_resolved_udp_server(
             last_error = Some(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "game server UDP port must be nonzero",
+            ));
+            continue;
+        }
+        if !service.allows(
+            crate::session_config::BUILD_CONTOUR,
+            shared::region::active().map(|r| r.id),
+            &address.ip().to_string(),
+            address.port(),
+        ) {
+            last_error = Some(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "game endpoint outside the account region or contour",
             ));
             continue;
         }
@@ -214,13 +233,14 @@ fn verify_server_compatibility(
 
 pub(in crate::net) fn run_udp_client(
     server_addr: String,
+    service: GameService,
     outgoing: Receiver<ClientPacket>,
     incoming: Sender<ServerPacket>,
     signals: Sender<NetThreadSignal>,
     gameplay_signer: SharedGameplaySigner,
 ) {
     println!("Connecting to server at {server_addr}");
-    let socket = match connect_udp_server(server_addr.as_str()) {
+    let socket = match connect_udp_server(service, server_addr.as_str()) {
         Ok(socket) => socket,
         Err(error) => {
             eprintln!("Failed to resolve/bind/connect UDP server {server_addr}: {error}");
@@ -630,6 +650,7 @@ mod tests {
         let worker = thread::spawn(move || {
             run_udp_client(
                 address,
+                GameService::Lobby,
                 outgoing_rx,
                 incoming_tx,
                 signals_tx,
@@ -666,7 +687,7 @@ mod tests {
         server
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
-        let socket = connect_udp_server(server.local_addr().unwrap()).unwrap();
+        let socket = connect_udp_server(GameService::Lobby, server.local_addr().unwrap()).unwrap();
         socket.set_nonblocking(true).unwrap();
         let worker =
             thread::spawn(move || verify_server_compatibility(&socket, Duration::from_secs(2)));
@@ -700,7 +721,7 @@ mod tests {
     #[test]
     fn compatibility_timeout_is_unknown_never_compatible_or_protocol_mismatch() {
         let server = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let socket = connect_udp_server(server.local_addr().unwrap()).unwrap();
+        let socket = connect_udp_server(GameService::Lobby, server.local_addr().unwrap()).unwrap();
         socket.set_nonblocking(true).unwrap();
         assert_eq!(
             verify_server_compatibility(&socket, Duration::from_millis(60)),
@@ -723,7 +744,8 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
         let server_address = server.local_addr().unwrap();
-        let client = connect_udp_server(server_address).expect("connect matching IP family");
+        let client = connect_udp_server(GameService::Lobby, server_address)
+            .expect("connect matching IP family");
         client
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
@@ -785,7 +807,7 @@ mod tests {
             addresses: vec!["[::1]:0".parse().unwrap(), address],
             error: None,
         };
-        let client = connect_udp_server(resolver).unwrap();
+        let client = connect_udp_server(GameService::Lobby, resolver).unwrap();
         assert_eq!(calls.get(), 1);
         assert_eq!(client.peer_addr().unwrap(), address);
     }
@@ -799,7 +821,9 @@ mod tests {
             error: None,
         };
         assert_eq!(
-            connect_udp_server(empty).unwrap_err().kind(),
+            connect_udp_server(GameService::Lobby, empty)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::AddrNotAvailable
         );
         assert_eq!(calls.get(), 1);
@@ -808,7 +832,7 @@ mod tests {
             addresses: vec![],
             error: Some(io::ErrorKind::NotFound),
         };
-        let error = connect_udp_server(failed).unwrap_err();
+        let error = connect_udp_server(GameService::Lobby, failed).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert_eq!(error.to_string(), "resolution failed");
         assert_eq!(calls.get(), 2);
@@ -819,7 +843,7 @@ mod tests {
         let attempted = Cell::new(0);
         let candidates = std::iter::repeat("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .inspect(|_| attempted.set(attempted.get() + 1));
-        let error = connect_resolved_udp_server(candidates).unwrap_err();
+        let error = connect_resolved_udp_server(GameService::Lobby, candidates).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert_eq!(attempted.get(), MAX_RESOLVED_SERVER_ADDRESSES);
     }
