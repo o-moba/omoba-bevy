@@ -29,7 +29,8 @@ read-only DNS/VPS check still finds public RU login unavailable. No live changes
 - Device enrollment/recovery/completion and native social-link replies carry
   `account_region`. Native transport rejects a foreign region before using a reply.
   Legacy replies may omit it; the exact trusted regional origin still owns them.
-- Both production IPs are denied from dev. RU dev uses its own
+- The RU dev lobby and its worker may share the RU host on dedicated UDP ports
+  4100 and 41100 after the client change of 2026-11-20. RU dev uses its own
   `lobby.dev.omoba.ru:4100`, `account.dev.omoba.ru`, `dev.omoba.ru` endpoints;
   unavailable RU dev does not fall back to global dev. This replaces LR-68's earlier
   shared-dev exception to keep each backend's authenticated account region true.

@@ -391,10 +391,17 @@ class DevContour(unittest.TestCase):
                 mock.patch.object(release, "android_ndk", return_value=None), \
                 mock.patch.object(release, "run", run):
             Path(temporary, "key").write_bytes(b"k")
-            for flavor in (release.PROD, release.resolve_flavor("dev", server="203.0.113.10:4100")):
+            for flavor in (release.PROD, release.resolve_flavor("dev", server="203.0.113.10:4100"),
+                           release.resolve_flavor("dev", market="ru")):
                 with self.assertRaises(SystemExit):
                     release.build_android("0.24.0", Path(temporary), flavor)
-        (prod_args, _), (dev_args, dev_env) = seen
+        (prod_args, _), (dev_args, dev_env), (ru_args, ru_env) = seen
+        self.assertEqual(ru_args[ru_args.index("--market") + 1], "ru")
+        self.assertEqual(ru_args[ru_args.index("--server") + 1], release.DEV_RU_LOBBY)
+        self.assertEqual(ru_env[release.ACCOUNT_API_ENV], release.DEV_RU_ACCOUNT_API)
+        self.assertEqual(ru_env[release.PORTAL_ORIGIN_ENV], release.DEV_RU_PORTAL_ORIGIN)
+        self.assertNotIn(release.REGISTRY_DEFAULT_ENV, ru_env)
+        self.assertNotIn(release.PASSPORT_DEFAULT_ENV, ru_env)
         self.assertEqual(prod_args[prod_args.index("--contour") + 1], "prod")
         self.assertEqual(dev_args[dev_args.index("--contour") + 1], "dev")
         self.assertEqual(dev_args[dev_args.index("--server") + 1], "203.0.113.10:4100")

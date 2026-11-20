@@ -340,6 +340,16 @@ impl ClientSession {
         }
     }
 
+    fn legacy_retry_addr(&self) -> Option<String> {
+        if self.is_offline() {
+            return Some(offline::ADDRESS.to_owned());
+        }
+        if self.ephemeral_endpoint {
+            return crate::persistence::validate_worker_addr(&self.server_addr_display);
+        }
+        Some(validated_server_addr_or_default(&self.server_addr_display))
+    }
+
     pub(crate) fn is_offline(&self) -> bool {
         self.offline_return_addr.is_some()
     }
@@ -1012,7 +1022,7 @@ pub(in crate::net) fn update_session_lifecycle(
                     }
                     address
                 } else {
-                    let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
+                    let Some(address) = crate::persistence::validate_worker_addr(raw) else {
                         continue;
                     };
                     address
@@ -1138,9 +1148,10 @@ pub(in crate::net) fn update_session_lifecycle(
                     || client_session.join_error.is_some()
                     || client_session.join_exhausted
                 {
+                    let Some(retry_addr) = client_session.legacy_retry_addr() else {
+                        continue;
+                    };
                     commands.remove_resource::<NetworkChannels>();
-                    let retry_addr =
-                        validated_server_addr_or_default(&client_session.server_addr_display);
                     spawn_network_transport(&mut commands, &mut client_session, retry_addr);
                     incoming_dead.0 = false;
                     retried_this_frame = true;
@@ -1170,8 +1181,11 @@ pub(in crate::net) fn update_session_lifecycle(
                 return;
             };
             address
+        } else if let Some(address) = client_session.legacy_retry_addr() {
+            address
         } else {
-            validated_server_addr_or_default(&client_session.server_addr_display)
+            client_session.reconnect.last_attempt = Some(Instant::now());
+            return;
         };
         commands.remove_resource::<NetworkChannels>();
         spawn_network_transport(&mut commands, &mut client_session, retry_addr);
@@ -2206,6 +2220,7 @@ mod tests {
         let worker = std::thread::spawn(move || {
             run_udp_client(
                 server_addr,
+                crate::session_config::GameService::Lobby,
                 outgoing_rx,
                 incoming_tx,
                 signals_tx,

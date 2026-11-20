@@ -1,5 +1,7 @@
 # Feature Inventory
 
+The RU dev client supports UDP 4100 for the lobby and UDP 41100 for its worker on the shared Russian host. See [regional connection checks](progress/2026-11-20-ru-dev-client.md).
+
 ## Ranked matchmaking readiness (2026-11-05)
 
 A found match that falls apart before it starts no longer drops everyone: the
