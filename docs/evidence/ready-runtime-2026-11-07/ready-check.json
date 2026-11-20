@@ -1,0 +1,217 @@
+{
+  "scenario": "ready-check",
+  "clients": 1,
+  "preference": "bot_practice",
+  "capacity": 16,
+  "limits": {},
+  "max_wait_secs": null,
+  "protocol": 16,
+  "host": {
+    "platform": "darwin",
+    "cpus": 14,
+    "cpu_model": "Apple M4 Pro",
+    "memory_gib": 48
+  },
+  "input_hz_requested": 20,
+  "input_model": "signed_current_pose_transform",
+  "soak_seconds": 1,
+  "started_at": "2026-11-07T01:42:06.418Z",
+  "scenarios": [
+    "raw_ping_no_replication",
+    "allocated_draft_countdown_loading_running",
+    "distinct_workers_and_ten_player_rosters",
+    "unanimous_15s_ready_timeout_fifo_replacement"
+  ],
+  "status": "PASS",
+  "arenas": 1,
+  "total_bytes": 288864,
+  "total_datagrams": 319,
+  "elapsed_seconds": 13.7487565,
+  "snapshot_gap_ms": {
+    "p50": 54.51695800000016,
+    "p95": 64.37754200000018,
+    "p99": 64.37754200000018,
+    "max": 64.37754200000018
+  },
+  "per_arena_type": {
+    "bot_practice": {
+      "arenas": 1,
+      "players": 1,
+      "snapshot_gap_ms": {
+        "p50": 54.51695800000016,
+        "p95": 64.37754200000018,
+        "p99": 64.37754200000018,
+        "max": 64.37754200000018
+      },
+      "running_after_secs": {
+        "p50": 12.702901166,
+        "p95": 12.702901166,
+        "p99": 12.702901166,
+        "max": 12.702901166
+      },
+      "snapshot_bytes_per_second_per_player": {
+        "p50": 57372.87926436971,
+        "p95": 57372.87926436971,
+        "p99": 57372.87926436971,
+        "max": 57372.87926436971
+      }
+    }
+  },
+  "soak_resources": {
+    "samples": 2,
+    "processes": 2,
+    "cpu_percent_mean": 17.4,
+    "cpu_percent_peak": 27.9,
+    "rss_mib_mean": 38.3,
+    "rss_mib_peak": 38.3,
+    "per_arena": {
+      "cpu_percent": 17.41,
+      "rss_mib": 38.3
+    }
+  },
+  "running_after_secs": {
+    "p50": 12.702901166,
+    "p95": 12.702901166,
+    "p99": 12.702901166,
+    "max": 12.702901166
+  },
+  "qualification_fixtures": [
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    },
+    {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 1,
+      "real_games_played": 0,
+      "receipts_created": 10,
+      "target": 10
+    }
+  ],
+  "ready_check": {
+    "status": "PASS",
+    "qualification_setup_seconds": 20.089067959,
+    "fixture_setup_before_search": true,
+    "window_secs": 15,
+    "accepted_before_timeout": 9,
+    "worker_count_before_unanimity": 0,
+    "fifo_age_preserved": true,
+    "late_accept_rejected": true,
+    "replacement_allocation": "1b279c849a9ddd1dc1dd2cbc87050392"
+  },
+  "total_transforms_sent": 921,
+  "total_sent_datagrams": 2726,
+  "total_sent_bytes": 1361960,
+  "resources": [
+    {
+      "at": "2026-11-07T01:42:07.956Z",
+      "wall_ms": 1556.383792,
+      "processes": 1,
+      "cpu_percent": 86,
+      "rss_mib": 16.390625,
+      "cpu_seconds": 1.35
+    },
+    {
+      "at": "2026-11-07T01:42:12.963Z",
+      "wall_ms": 6564.13475,
+      "processes": 2,
+      "cpu_percent": 38.199999999999996,
+      "rss_mib": 27.734375,
+      "cpu_seconds": 1.52,
+      "cpu_percent_interval": 3.3947375064333203
+    },
+    {
+      "at": "2026-11-07T01:42:17.969Z",
+      "wall_ms": 11569.454167,
+      "processes": 2,
+      "cpu_percent": 2.8,
+      "rss_mib": 36.796875,
+      "cpu_seconds": 2.86,
+      "cpu_percent_interval": 26.771518226166386
+    },
+    {
+      "at": "2026-11-07T01:42:20.652Z",
+      "wall_ms": 14252.965709,
+      "processes": 2,
+      "cpu_percent": 92.7,
+      "rss_mib": 38.234375,
+      "cpu_seconds": 3.61,
+      "cpu_percent_interval": 27.94845441361623
+    },
+    {
+      "at": "2026-11-07T01:42:21.672Z",
+      "wall_ms": 15272.62025,
+      "processes": 2,
+      "cpu_percent": 9.200000000000001,
+      "rss_mib": 38.296875,
+      "cpu_seconds": 3.6799999999999997,
+      "cpu_percent_interval": 6.8650701963577925
+    }
+  ]
+}

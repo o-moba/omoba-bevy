@@ -1,0 +1,150 @@
+{
+  "classes": [
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "warrior",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "mage",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "ranger",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "cleric",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "warden",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "dawnweaver",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "wildspark",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "cinderforge",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "edgeweaver",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "stormfist",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "veilstalker",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "emberveil",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "orbitwright",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "riftshot",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "chainkeeper",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "frostguard",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    },
+    {
+      "baseRevision": null,
+      "baseSha256": null,
+      "classId": "adventurer",
+      "designContractRevision": null,
+      "heroDesignId": null,
+      "status": "unconfigured"
+    }
+  ],
+  "gameContractRevision": "sha256-bae71784fff170720fcaf18da3992c05a4800257f89954157b687406b1257402",
+  "gameId": "omoba",
+  "modeScope": "classic",
+  "revision": "sha256-ab21e6cae6a586124e48bfb8422156c29386956518179dc05e8ddff721d98b69",
+  "schema": "omoba.hero-designs.v1",
+  "source": {
+    "commit": "51f3b711d6316eb9b2913009c712e805ca57a773",
+    "exporter": "scripts/export_game_contract.py",
+    "inputsSha256": "a6b741d7868fcd521d90734c8881f919cffb61df15123821d3b8190b66d2f296"
+  }
+}

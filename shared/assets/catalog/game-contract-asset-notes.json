@@ -1,0 +1,419 @@
+{
+  "contract": "ekza.game-contract.v1",
+  "heroes": [
+    {
+      "assetRequirements": [
+        {
+          "id": "warrior.handheld.sword",
+          "role": "held_weapon",
+          "status": "supported"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "crescent"
+      },
+      "bodies": [],
+      "handhelds": [
+        {
+          "item": "forge-sword",
+          "mode": null,
+          "model": "weapons/forge-sword.glb",
+          "muzzle": null,
+          "socket": "rightHand"
+        }
+      ],
+      "id": "warrior",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "arcane"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "mage",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [
+        {
+          "id": "ranger.handheld.bow",
+          "role": "held_weapon",
+          "status": "supported"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "arrow"
+      },
+      "bodies": [],
+      "handhelds": [
+        {
+          "item": "verdant-bow",
+          "mode": null,
+          "model": "weapons/verdant-bow.glb",
+          "muzzle": null,
+          "socket": "rightHand"
+        }
+      ],
+      "id": "ranger",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "holy"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "cleric",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "claw"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "warden",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [
+        {
+          "id": "dawnweaver.handheld.scepter",
+          "role": "held_weapon",
+          "status": "supported"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "holy"
+      },
+      "bodies": [],
+      "handhelds": [
+        {
+          "item": "dawn-scepter",
+          "mode": null,
+          "model": "weapons/dawn-scepter.glb",
+          "muzzle": null,
+          "socket": "rightHand"
+        }
+      ],
+      "id": "dawnweaver",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [
+        {
+          "id": "wildspark.handheld.repeater",
+          "role": "held_weapon",
+          "status": "supported"
+        },
+        {
+          "id": "wildspark.handheld.launcher",
+          "role": "held_weapon",
+          "status": "supported"
+        },
+        {
+          "id": "wildspark.projectile.basic-rocket",
+          "role": "projectile",
+          "status": "engine_owned"
+        },
+        {
+          "id": "wildspark.projectile.ultimate",
+          "role": "projectile",
+          "status": "planned"
+        },
+        {
+          "id": "wildspark.prop.trap",
+          "role": "world_prop",
+          "status": "planned"
+        },
+        {
+          "id": "wildspark.effect.shockline",
+          "role": "engine_effect",
+          "status": "engine_owned"
+        },
+        {
+          "id": "wildspark.effect.explosion",
+          "role": "engine_effect",
+          "status": "engine_owned"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "projectile",
+        "styleByMode": {
+          "repeater": "bullet",
+          "rockets": "rocket"
+        }
+      },
+      "bodies": [
+        {
+          "archetype": "prop",
+          "model": "cosmetics/standard/trap.glb",
+          "part": "body",
+          "skill": "wild_traps"
+        },
+        {
+          "archetype": "traveller",
+          "model": "cosmetics/standard/rocket.glb",
+          "part": "body",
+          "skill": "wild_rocket"
+        }
+      ],
+      "handhelds": [
+        {
+          "item": "wild-repeater",
+          "mode": "repeater",
+          "model": "weapons/wildspark-repeater.glb",
+          "muzzle": [
+            0.0,
+            0.12,
+            0.735
+          ],
+          "socket": "rightHand"
+        },
+        {
+          "item": "wild-launcher",
+          "mode": "rockets",
+          "model": "weapons/wild-launcher.glb",
+          "muzzle": [
+            0.0,
+            0.13,
+            0.81
+          ],
+          "socket": "rightHand"
+        }
+      ],
+      "id": "wildspark",
+      "launcherShownDuring": [
+        "wild_zap",
+        "wild_rocket"
+      ],
+      "weaponModes": [
+        "repeater",
+        "rockets"
+      ]
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "contact",
+        "style": "crescent"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "cinderforge",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "contact",
+        "style": "crescent"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "edgeweaver",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "contact",
+        "style": "crescent"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "stormfist",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "contact",
+        "style": "crescent"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "veilstalker",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "arcane"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "emberveil",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [
+        {
+          "id": "orbitwright.prop.orb",
+          "role": "world_prop",
+          "status": "planned"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "holy"
+      },
+      "bodies": [
+        {
+          "archetype": "orbiter",
+          "model": "cosmetics/standard/orb.glb",
+          "part": "aux.orb",
+          "skill": "orbital_command"
+        },
+        {
+          "archetype": "orbiter",
+          "model": "cosmetics/standard/orb.glb",
+          "part": "aux.orb",
+          "skill": "orbital_guard"
+        }
+      ],
+      "handhelds": [],
+      "id": "orbitwright",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [
+        {
+          "id": "riftshot.handheld.repeater",
+          "role": "held_weapon",
+          "status": "supported"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "arrow"
+      },
+      "bodies": [],
+      "handhelds": [
+        {
+          "item": "wild-repeater",
+          "mode": null,
+          "model": "weapons/wild-repeater.glb",
+          "muzzle": null,
+          "socket": "rightHand"
+        }
+      ],
+      "id": "riftshot",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [
+        {
+          "id": "chainkeeper.projectile.hook",
+          "role": "projectile",
+          "status": "planned"
+        },
+        {
+          "id": "chainkeeper.prop.lantern",
+          "role": "world_prop",
+          "status": "planned"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "projectile",
+        "style": "holy"
+      },
+      "bodies": [
+        {
+          "archetype": "traveller",
+          "model": "cosmetics/standard/hook.glb",
+          "part": "body",
+          "skill": "iron_hook"
+        },
+        {
+          "archetype": "zone",
+          "model": "cosmetics/standard/lantern.glb",
+          "part": "body",
+          "skill": "guiding_lantern"
+        }
+      ],
+      "handhelds": [],
+      "id": "chainkeeper",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [],
+      "basicAttack": {
+        "delivery": "contact",
+        "style": "crescent"
+      },
+      "bodies": [],
+      "handhelds": [],
+      "id": "frostguard",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    },
+    {
+      "assetRequirements": [
+        {
+          "id": "adventurer.handheld.dagger",
+          "role": "held_weapon",
+          "status": "supported"
+        }
+      ],
+      "basicAttack": {
+        "delivery": "contact",
+        "style": "crescent"
+      },
+      "bodies": [],
+      "handhelds": [
+        {
+          "item": "dagger",
+          "mode": null,
+          "model": "weapons/dagger.glb",
+          "muzzle": null,
+          "socket": "rightHand"
+        }
+      ],
+      "id": "adventurer",
+      "launcherShownDuring": [],
+      "weaponModes": []
+    }
+  ],
+  "license": "CC0-1.0",
+  "schema": "omoba.game-contract-asset-notes.draft-1",
+  "sockets": {
+    "rightHand": {
+      "frame": "palm grip frame of the rest pose: +Y along the shaft toward the index side, +Z out toward the fingertips; uses the index, middle and little proximal bones when present",
+      "source": "client/src/humanoid/sockets.rs (grip_frame)"
+    }
+  },
+  "sources": {
+    "assetRequirements": "shared/assets/catalog/asset-requirements.json (ids of omoba.asset-catalog.v1)",
+    "basicAttack": "common/src/basic_attack.rs (melee contact, repeater bullet or rocket, else the catalogue projectile_style), shared/assets/catalog/heroes.json",
+    "bodies": "client/assets/config/skills.skillfx (body.model, aux.<kind>.model), client/src/skill_presentation/effects.rs (cosmetics/standard/<model>.glb)",
+    "handhelds": "shared/src/handheld.rs (HandheldSelection::resolve_mode), client/assets/weapons/manifest.json (grip), client/src/held_weapons.rs (shown_model, slot_mode, muzzle_point)",
+    "weaponModes": "shared/src/loadout.rs (AttackProfileId::Repeater, WeaponMode), client/src/held_weapons.rs (slot_mode)"
+  },
+  "status": "notes for GP5 (asset slots of omoba.character.v1); not part of the game contract"
+}

@@ -444,18 +444,24 @@ fn a_windup_is_a_loop_or_fitted_to_its_telegraph() {
         held += 1;
     }
     assert_eq!(held, 5);
-    // Dawn Ray: a half-second clip under a 0.8 s warning.
+    // Dawn Ray: a charge authored for its 0.8 s warning plays at its own speed and forms its
+    // raised two-hand pose (the contact) at least 0.1 s before the ray fires.
     let ray = target.profile(SkillId::DawnRay).unwrap();
-    assert_eq!(
-        MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate,
-        0.625
-    );
-    // A row that does not ask for the fit plays its windup as the clip is.
-    let unfitted = SkillPresentation::target_with(|config| {
-        config["skills"]["dawn_ray"]["motion"]["fit_windup"] = false.into();
-    });
-    let ray = unfitted.profile(SkillId::DawnRay).unwrap();
-    assert_eq!(MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate, 1.0);
+    let charge = MotionCue::windup(ray, SkillId::DawnRay).unwrap();
+    assert_eq!((charge.motion.as_str(), charge.rate), ("spell_charge", 1.0));
+    let telegraph = category::telegraph_secs(SkillId::DawnRay).unwrap();
+    let contact = library.contact(&charge.motion).unwrap() / charge.rate;
+    assert!(contact <= telegraph - 0.1, "contact at {contact} s");
+    // A row that does not ask for the fit plays its windup as the clip is: the half-second
+    // enter clip is slowed to 0.625 only when it is fitted.
+    for (fit, rate) in [(true, 0.625), (false, 1.0)] {
+        let edited = SkillPresentation::target_with(|config| {
+            config["skills"]["dawn_ray"]["windup"] = "spell_prepare".into();
+            config["skills"]["dawn_ray"]["motion"]["fit_windup"] = fit.into();
+        });
+        let ray = edited.profile(SkillId::DawnRay).unwrap();
+        assert_eq!(MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate, rate);
+    }
     // Any clip can be fitted, and the fit is clamped to the rates a row may author: a
     // 0.17 s pose is not stretched to a fifth of its speed, nor a 1.5 s swing rushed past
     // twice its speed.
@@ -1426,7 +1432,7 @@ fn budget_from_data() {
             recasts: 7,
             areas: 3,
             moves: 10,
-            links: 14,
+            links: 13,
             impacts: 51 + 18,
             expires: 12,
         }
@@ -1752,8 +1758,8 @@ fn target_bodies_fit_the_part_and_material_budgets() {
     assert_eq!(
         long_cooldown,
         [
-            ("dawn_ray", 16),
-            ("dawn_ray", 16),
+            ("dawn_ray", 18),
+            ("dawn_ray", 18),
             ("iron_boundary", 16),
             ("orbital_collapse", 13),
             ("winter_divide", 15)

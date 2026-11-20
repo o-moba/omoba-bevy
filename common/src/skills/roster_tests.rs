@@ -199,6 +199,54 @@ fn shield_intercepts_front_once_reduces_later_and_ignores_rear() {
     );
     assert!(w.players[&addr(1)].hero.hp < before);
 }
+/// Two shots blocked by one wall in the same tick: the older projectile takes
+/// the free block, whatever order the `HashMap` holds them in.
+#[test]
+fn simultaneous_blocks_follow_projectile_creation_order() {
+    let hp: Vec<f32> = (0..16)
+        .map(|_| {
+            let (mut w, now, _) = fixture(HeroClass::Frostguard);
+            cast(&mut w, addr(1), 2, [10.0, 0.0], 1, now);
+            let owner = w.players[&addr(1)].hero.identity.id;
+            for (id, damage) in [(8_u64, 50.0), (7, 40.0)] {
+                w.projectiles.insert(
+                    id,
+                    crate::entities::Projectile {
+                        state: shared::wire::ProjectileState {
+                            source_kind: CombatEntityKind::Minion,
+                            style: ProjectileStyle::CasterBolt,
+                            action_slot: None,
+                            direction: [-1.0, 0.0, 0.0],
+                            id,
+                            owner_id: 900 + id,
+                            owner_team: Team::Blue,
+                            x: 1.6,
+                            y: crate::balance::PLAYER_GROUND_Y + 1.0,
+                            z: 0.0,
+                        },
+                        target: target(owner),
+                        velocity: crate::entities::Vec3f::new(-30.0, 0.0, 0.0),
+                        homing: true,
+                        guaranteed_hit: true,
+                        damage,
+                        radius: crate::balance::PROJECTILE_RADIUS,
+                        expires_at: now + Duration::from_secs(3),
+                    },
+                );
+            }
+            let at = now + duration(0.05);
+            crate::sim::projectiles::simulate_projectiles_filtered(
+                &mut w,
+                TickCtx { now: at, dt: 0.05 },
+                |_| true,
+            );
+            assert!(w.projectiles.is_empty(), "both shots reached the wall");
+            w.players[&addr(1)].hero.hp
+        })
+        .collect();
+    assert!(hp[0] < 1000.0, "the second block lets some damage through");
+    assert!(hp.iter().all(|h| *h == hp[0]), "{hp:?}");
+}
 #[test]
 fn northwall_publishes_its_interception_count() {
     let (mut w, now, _) = fixture(HeroClass::Frostguard);

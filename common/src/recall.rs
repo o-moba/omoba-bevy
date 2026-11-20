@@ -1,5 +1,6 @@
 //! Server-owned return-to-base channel, shared by online and offline matches.
-use std::time::{Duration, Instant};
+use shared::clock::Instant;
+use std::time::Duration;
 
 use crate::{balance::PLAYER_GROUND_Y, entities::ConnectedPlayer, game_world::GameWorld};
 use shared::{utility::RECALL_CHANNEL_SECS, wire::GameState};
@@ -162,6 +163,8 @@ mod tests {
                 &mut w,
                 address(),
                 &ClientPacket::Transform {
+                    input_kind: Default::default(),
+                    input_active: false,
                     x: 0.0,
                     y: 99.0,
                     z: 0.0,
@@ -183,6 +186,8 @@ mod tests {
             &mut w,
             address(),
             &ClientPacket::Transform {
+                input_kind: Default::default(),
+                input_active: false,
                 x: 0.0,
                 y: 0.5,
                 z: 0.0,
@@ -201,6 +206,8 @@ mod tests {
             &mut w,
             address(),
             &ClientPacket::Transform {
+                input_kind: Default::default(),
+                input_active: false,
                 x: 1.0,
                 y: 0.5,
                 z: 0.0,

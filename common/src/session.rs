@@ -1,6 +1,7 @@
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::HeroClass;
 use shared::map::Team;
@@ -305,7 +306,10 @@ pub fn handle_transform_request_with_structures(
         return;
     }
 
-    if player.hero.hp <= 0.0 || player.hero.skills.control.movement(now) == 0.0 {
+    if player.hero.hp <= 0.0
+        || player.hero.skills.control.movement(now) == 0.0
+        || player.hero.skills.cast_locked(now)
+    {
         player.timers.last_movement_at = now;
         player.timers.movement_slack = 0.0;
         return;

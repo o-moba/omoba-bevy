@@ -6,7 +6,7 @@ use crate::net::{NetworkMinion, NetworkNeutral, StructureKind};
 use crate::player::Player;
 use crate::sprite::PlayerVisualMode;
 use crate::team::Team;
-use bevy::{camera::primitives::Aabb, math::primitives::Rectangle, prelude::*};
+use bevy::{camera::primitives::Aabb, prelude::*};
 
 use super::marker::{TARGET_MARKER_INNER_RADIUS, TargetMarker};
 use super::selection::TargetState;

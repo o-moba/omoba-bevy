@@ -25,6 +25,8 @@
   "career.result.my_progress": "Ваш рейтинг: {rating} · +{xp} очков опыта",
   "career.unrated.allocated_bots": "Матч не имеет рейтинга, так как на открытые места были добавлены боты.",
   "career.unrated.server_interrupted": "Сервер отключился до завершения матча, поэтому матч не имеет рейтинга.",
+  "career.unrated.casual_queue": "Матчи в обычном PvP не влияют на рейтинг.",
+  "career.unrated.not_completed": "Матч не был завершён штатно, поэтому не влияет на рейтинг.",
   "career.queue.waiting": "Поиск подходящего матча · {compatible}/{needed} подходящих игроков · {elapsed}\n{hint}",
   "career.queue.hint_newcomer": "Новые игроки играют с другими новичками.",
   "career.queue.hint_rating": "Ожидание игроков с похожим опытом и рейтингом.",
@@ -46,7 +48,7 @@
   "career.team.winners": "{team} · Победители",
   "career.team.defeated": "{team} · Потерпели поражение",
   "career.profile.title": "Ваш профиль",
-  "career.profile.progress": "Уровень карьеры {level} · {xp} очков опыта\nРейтинг {rating} · {rated} рейтинговых матчей\n{wins} побед · {losses} поражений · {played} сыграно матчей",
+  "career.profile.progress": "Уровень карьеры {level} · {xp} очков опыта\nРейтинг {rating} · {rated} рейтинговых матчей\n{wins} побед · {losses} поражений · {played} сыграно матчей\nВыходы / AFK: {abandons}",
   "career.profile.newcomer": "Поиск матча для новичков",
   "career.profile.connecting": "Подключение профиля…",
   "career.profile.unavailable": "Сохраненные данные недоступны. Подключитесь к серверу, поддерживающему профили.",
@@ -107,5 +109,10 @@
   "career.button.back_to_friends": "Назад к друзьям",
   "career.button.details": "Подробности",
   "career.button.previous": "Предыдущий",
-  "career.button.older": "Ранее"
+  "career.button.older": "Ранее",
+  "career.player.progress_abandoned": "{rating} · +{xp} очков опыта в карьере · Выход / AFK",
+  "career.unrated.abandoned_reaped": "Матч завершён: активных игроков не осталось. Подтверждённые выходы и AFK по-прежнему наказываются.",
+  "career.unrated.duration_capped": "Матч достиг предельной длительности. Штрафы за выход и AFK не назначаются.",
+  "career.result.remade": "Ремейк",
+  "career.unrated.remake": "Ранний ремейк команды: обычных наград нет."
 }

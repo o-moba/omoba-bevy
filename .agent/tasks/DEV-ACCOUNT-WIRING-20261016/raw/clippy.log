@@ -1,0 +1,11 @@
+warning: failed to auto-clean cache data
+
+failed to clean entries from the global cache
+
+Caused by:
+  failed to remove file `/Users/wotori/.cargo/git/checkouts/ekza-bevy-sdk-93c50f0335f3416b/6e4123a/Cargo.toml`
+
+Caused by:
+  Permission denied (os error 13)
+    Checking omoba-account-api v0.44.0 (/Users/wotori/git/ekza/_workspace/worktrees/playtest-game/account-api)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 1.83s

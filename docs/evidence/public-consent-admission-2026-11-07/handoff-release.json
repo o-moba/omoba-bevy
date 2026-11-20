@@ -1,0 +1,52 @@
+{
+  "scenario": "handoff-release",
+  "clients": 10,
+  "preference": "quick",
+  "capacity": 16,
+  "limits": {},
+  "max_wait_secs": null,
+  "protocol": 16,
+  "host": {
+    "platform": "darwin",
+    "cpus": 14,
+    "cpu_model": "Apple M4 Pro",
+    "memory_gib": 48
+  },
+  "input_hz_requested": 20,
+  "input_model": "signed_current_pose_transform",
+  "soak_seconds": 1,
+  "started_at": "2026-11-07T02:35:04.515Z",
+  "scenarios": [
+    "raw_ping_no_replication",
+    "casual_handoff_release_ack_bot_fill_same_worker_and_running_race"
+  ],
+  "status": "PASS",
+  "handoff_release": {
+    "allocation_id": "b73d0553ddf7a3bc03744e4c1f5b6721",
+    "checks": [
+      {
+        "name": "unjoined_cancel_is_worker_acknowledged_and_only_its_seat_is_bot_filled",
+        "status": "PASS",
+        "surviving_humans": 9,
+        "bots": 1,
+        "manifest_humans": 10
+      },
+      {
+        "name": "nine_original_humans_reach_running_without_new_search_or_worker",
+        "status": "PASS"
+      },
+      {
+        "name": "unjoined_canceller_receives_no_match_xp_or_rating",
+        "status": "PASS"
+      },
+      {
+        "name": "start_wins_late_cancel_keeps_admission_and_resume_without_aborting_other_players",
+        "status": "PASS"
+      }
+    ]
+  },
+  "total_transforms_sent": 1052,
+  "total_sent_datagrams": 1725,
+  "total_sent_bytes": 892456,
+  "resources": []
+}

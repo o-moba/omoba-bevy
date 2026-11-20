@@ -1,8 +1,8 @@
 {
   "error.join.match_full": "The match is full. Retry when a seat becomes available.",
   "error.join.session_active": "This session is active in another client. Close it, then retry.",
-  "error.join.protocol_mismatch": "Client and server network protocols differ. Update the game or choose a compatible server.",
-  "error.join.map_geometry_mismatch": "This server uses a different map geometry. Install the matching map release.",
+  "error.join.protocol_mismatch": "Client and server network protocols differ. Update the game.",
+  "error.join.map_geometry_mismatch": "This server uses a different map version. Update the game.",
   "error.join.avatar_not_authorized": "Avatar or weapon approval failed. Refresh Studio, select approved equipment and retry.",
   "error.purchase.unavailable": "The shop is unavailable until you join a match.",
   "error.purchase.dead": "Wait to respawn before buying.",

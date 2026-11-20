@@ -1,0 +1,298 @@
+{
+  "status": "restart_and_draft_labels_accepted_home_name_partial",
+  "ui_source_commit": "2e411fd917de01d7964ccb8f2bdef57dddcbe497",
+  "scope": "actual owned loopback lobby restarts and actual UI-created party/public admission; RU852x393 native production offscreen renderer, two disposable native clients; no OS window/focus/physical phone/WAN/RU-host/performance certification",
+  "build": {
+    "source_parent": "8a02d375a882584f01c6617dae86b400cd69162b",
+    "working_diff_sha256": "fb2f4fe59fe44d128d40ff8bc78b73fb0ff84978e23d50002568a11cbb514021",
+    "untracked": [],
+    "market": "ru",
+    "steps": [
+      {
+        "name": "clippy",
+        "exit": 0,
+        "seconds": 26.11,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-native-names-restart-v2-clippy.log"
+      },
+      {
+        "name": "build",
+        "exit": 0,
+        "seconds": 746.61,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-native-names-restart-v2-build.log"
+      }
+    ],
+    "minimum_root_gib": 22.006977081298828,
+    "binary": "/Users/wotori/git/ekza/omoba-bevy/target-b/debug/client",
+    "binary_sha256": "b26096140df25e64f0c931792151118748e9dfba2d94f6f7f614dbaec7b4326e",
+    "binary_bytes": 226222680
+  },
+  "restart_events": [
+    {
+      "kind": "home",
+      "seconds": 2.61,
+      "role": "leader",
+      "session": {
+        "connected": true,
+        "join_confirmed": false,
+        "match_mode": "lobby",
+        "your_id": 1
+      }
+    },
+    {
+      "kind": "home",
+      "seconds": 6.2,
+      "role": "member",
+      "session": {
+        "connected": true,
+        "join_confirmed": false,
+        "match_mode": "lobby",
+        "your_id": 2
+      }
+    },
+    {
+      "kind": "frame",
+      "seconds": 10.26,
+      "file": "leader/loop/01-party-formed.png",
+      "screen": "Lobby"
+    },
+    {
+      "kind": "frame",
+      "seconds": 11.77,
+      "file": "leader/loop/02-home-party.png",
+      "screen": "Home"
+    },
+    {
+      "kind": "owned_lobby_restarted",
+      "seconds": 21.74,
+      "label": "home"
+    },
+    {
+      "kind": "actual_toast",
+      "seconds": 22.63,
+      "role": "leader",
+      "texts": [
+        "Соединение с лобби восстановлено, группа распущена."
+      ]
+    },
+    {
+      "kind": "frame",
+      "seconds": 23.37,
+      "file": "leader/loop/03-home-restart-warning.png",
+      "screen": "Home"
+    },
+    {
+      "kind": "actual_toast",
+      "seconds": 23.59,
+      "role": "member",
+      "texts": [
+        "Соединение с лобби восстановлено, группа распущена."
+      ]
+    },
+    {
+      "kind": "frame",
+      "seconds": 24.32,
+      "file": "member/loop/03-home-restart-warning.png",
+      "screen": "Home"
+    },
+    {
+      "kind": "frame",
+      "seconds": 24.97,
+      "file": "leader/loop/04-search-before-restart.png",
+      "screen": "Searching"
+    },
+    {
+      "kind": "owned_lobby_restarted",
+      "seconds": 34.84,
+      "label": "search"
+    },
+    {
+      "kind": "actual_toast",
+      "seconds": 38.08,
+      "role": "leader",
+      "texts": [
+        "Соединение с лобби восстановлено. Поиск начат заново."
+      ]
+    },
+    {
+      "kind": "frame",
+      "seconds": 38.93,
+      "file": "leader/loop/05-search-restart-warning.png",
+      "screen": "Searching"
+    }
+  ],
+  "restart_seconds": 39.07,
+  "party": {
+    "transitions": {
+      "leader": [
+        {
+          "screen": "Home",
+          "seconds": 8.33,
+          "session": {
+            "connected": false,
+            "join_confirmed": false,
+            "match_mode": "",
+            "your_id": 0
+          }
+        },
+        {
+          "screen": "Lobby",
+          "seconds": 13.21,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 1
+          }
+        },
+        {
+          "screen": "Home",
+          "seconds": 17.2,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 1
+          }
+        },
+        {
+          "screen": "Searching",
+          "seconds": 18.31,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 1
+          }
+        },
+        {
+          "screen": "Draft",
+          "seconds": 27.16,
+          "session": {
+            "connected": true,
+            "join_confirmed": true,
+            "match_mode": "practice",
+            "your_id": 1
+          }
+        }
+      ],
+      "member": [
+        {
+          "screen": "Home",
+          "seconds": 11.47,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 2
+          }
+        },
+        {
+          "screen": "Lobby",
+          "seconds": 14.09,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 2
+          }
+        },
+        {
+          "screen": "Home",
+          "seconds": 17.1,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 2
+          }
+        },
+        {
+          "screen": "Searching",
+          "seconds": 18.75,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 2
+          }
+        },
+        {
+          "screen": "Draft",
+          "seconds": 29.79,
+          "session": {
+            "connected": true,
+            "join_confirmed": true,
+            "match_mode": "practice",
+            "your_id": 2
+          }
+        }
+      ]
+    },
+    "draft_entries": {
+      "leader": 1,
+      "member": 1
+    },
+    "allocation": {
+      "id": "9f42ee30335c11091b8913856ee80b24",
+      "preference": "quick",
+      "human_seats": 10,
+      "native_profiles_same_team": true
+    },
+    "seconds": 31.83
+  },
+  "acceptance": {
+    "45": "PASS: both real group clients show dissolved-party toast on Home after actual new-epoch party view; actual solo Searching shows the distinct search-restarted toast after another owned lobby restart. Recorder waits for actual observed text, never seeds these resources.",
+    "65": "PASS again on changed revision: real party Home→Searching→ready→one Draft for each native; ten actual worker joins, party same side.",
+    "UI-2": "PASS: nicknames/class/role/status lines fit their own five-team slots with ellipses at readable phone font sizes; begins of names are retained, no adjacent overlaps in both native perspectives.",
+    "UI-1": "PARTIAL: long nickname stays on one line and rating fits within identity chip; leader name end/ellipsis can still be clipped. Do not treat this as complete long-name visual acceptance."
+  },
+  "fixture_asset_scope": "AI public peers omit avatar selection; unrevealed human choices and absent AI avatar resources leave empty plinths. This flow/text check does not certify five rendered avatar assets.",
+  "screenshots": [
+    {
+      "file": "real-home-party-restart-leader.png",
+      "sha256": "b3123fd0d0c6027f4ad04c8234b8d3c6fe2cb338201e888afdbc183175511b00",
+      "bytes": 564185,
+      "manual_inspection": "45 actual group-loss toast; UI-1 name remains partial"
+    },
+    {
+      "file": "real-home-party-restart-member.png",
+      "sha256": "9026717108622399d6df92ca8b331504e3f7ea98041c1983bdb256346a2d0f53",
+      "bytes": 564524,
+      "manual_inspection": "45 actual group-loss toast"
+    },
+    {
+      "file": "real-search-restart.png",
+      "sha256": "5d992a6b9774093e754c912a187556c5e85f7a4c41347b0bc24cafe896dc608a",
+      "bytes": 531658,
+      "manual_inspection": "45 actual solo-search restarted toast"
+    },
+    {
+      "file": "names-home-rating-contained.png",
+      "sha256": "00e0d9aa7319c6de9f0a54b3fde3e3305e44bc6505d96e9793b73a6d7606d4d9",
+      "bytes": 582505,
+      "manual_inspection": "UI-1 partial: rating contained, name ending still clipped"
+    },
+    {
+      "file": "names-draft-leader.png",
+      "sha256": "cccbde8561dca7d6a0ce319b1011bab9d8772edc0f9d6c6feb5882212f6efdc9",
+      "bytes": 133410,
+      "manual_inspection": "UI-2 fitted text; not avatar-assets acceptance"
+    },
+    {
+      "file": "names-draft-member.png",
+      "sha256": "55882abca9321392dd7c7b456a66681443ce1ccfd3d3efa838ad4ebea46b78cc",
+      "bytes": 133752,
+      "manual_inspection": "UI-2 fitted text; not avatar-assets acceptance"
+    }
+  ],
+  "source_files": {
+    "client/src/frontend/home.rs": "7351042347e85b0934658443a497c9470325900854e22e11ea9ec6c1b25f097e",
+    "client/src/frontend/lobby.rs": "3040343c3bc51380c7349fae5a65a97859d20e664a4cd879ddf15004dca56e1e",
+    "client/src/frontend/draft/stage.rs": "8b9ea930bbdfa701ba1c6a1f1aefa867092e94ce89716989fc3f36219a3dffb1",
+    "client/src/qa/creator_loop_qa.rs": "f7f2669d83d5782300645c1fff28140fd5d4a7d7dfa7bd9b35d33f988adf9d34",
+    "client/src/ui/widgets/surfaces.rs": "7c800f9dc551adac8d2831fef22e20545e982bad6508f7af7e10999412c9cd2c",
+    "client/src/party.rs": "76e10c44c5c72827b0bd2bdc7b8cc27b7d86024d7159a962794732832b444696"
+  }
+}

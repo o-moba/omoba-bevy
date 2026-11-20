@@ -84,6 +84,22 @@
     "vital_break": {
       "path": "audio/sfx/vital_break.ogg",
       "gain": 0.65
+    },
+    "radiant_charge": {
+      "path": "audio/sfx/radiant_charge.ogg",
+      "gain": 0.55
+    },
+    "radiant_beam": {
+      "path": "audio/sfx/radiant_beam.ogg",
+      "gain": 0.7
+    },
+    "radiant_core": {
+      "path": "audio/sfx/radiant_core.ogg",
+      "gain": 0.5
+    },
+    "radiance_burst": {
+      "path": "audio/sfx/radiance_burst.ogg",
+      "gain": 0.65
     }
   }
 }

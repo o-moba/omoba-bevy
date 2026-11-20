@@ -19,7 +19,7 @@ use crate::{
     skill_presentation::{
         SkillPresentation, accents,
         cast::CastKey,
-        impacts::{Receipt, receipt_burst, rocket_blast},
+        impacts::{Receipt, crowd_reserve, radiance_pop, receipt_burst, rocket_blast},
         vocab::PaletteSlot,
     },
     sprite::PlayerVisualMode,
@@ -167,6 +167,9 @@ impl ReceiptLook {
             receipt: event.id,
             slot: event.action_slot,
             impact: themed.and_then(|_| {
+                if event.radiance_burst {
+                    return Some(crate::skill_presentation::impacts::RADIANCE_POP);
+                }
                 let look = skills?.look(source?.key(event)?)?;
                 Some(look.impact?.kind.id())
             }),
@@ -202,7 +205,8 @@ fn hit_direction(dealer: CombatEntityKind, source: Option<Vec3>, position: Vec3)
 
 /// The burst of an accepted receipt from the recipe of the row that dealt it. `None` keeps
 /// the built-in burst: the source is not seen or its row carries no recipe. `reserved`
-/// particles of the budget of the receipt are left to the engine's own add-on.
+/// particles of the budget of the receipt are left to the engine's own add-on and to the
+/// other receipts of a crowded strike.
 fn themed_impact(
     skills: Option<&SkillPresentation>,
     source: Option<&Source>,
@@ -222,9 +226,59 @@ fn themed_impact(
             source: event.source.id,
             source_position: source.position,
             reserved,
+            core_hit: event.core_hit,
         },
         effects,
     )
+}
+
+/// The burst of an accepted receipt that names no area. A detonated Radiance mark is the
+/// passive's own pop in the gold of the mark, whoever set it and whether the client sees
+/// them: it points nowhere, and the recipe of the hit that set it off is not drawn twice.
+/// Every other receipt is drawn from the recipe of its row (`themed_impact`).
+fn hit_burst(
+    skills: Option<&SkillPresentation>,
+    source: Option<&Source>,
+    event: &CombatEvent,
+    ground: f32,
+    effects: &[SkillEffectState],
+    reserved: usize,
+) -> Option<Vec<ParticleSpec>> {
+    if event.radiance_burst {
+        return Some(radiance_pop(Vec3::new(event.x, event.y, event.z), event.id));
+    }
+    themed_impact(skills, source, event, ground, effects, reserved)
+}
+
+/// The strike a receipt belongs to: the hero and the action that dealt it. The pop of a
+/// detonated mark is not part of the strike that set it off.
+fn strike(event: &CombatEvent) -> Option<(u64, u8, bool)> {
+    let slot = event
+        .action_slot
+        .filter(|_| event.source.kind == CombatEntityKind::Player)?;
+    Some((event.source.id, slot, event.radiance_burst))
+}
+
+/// Puts the receipts on heroes first, so that they are drawn first when the pool is
+/// short, and counts the receipts of each strike: a beam that runs through a wave lands
+/// many receipts at once, and each of them then leaves room for the others
+/// (`impacts::crowd_reserve`, which shares only a strike that runs through its targets).
+fn strike_crowds(events: &mut [CombatEvent]) -> std::collections::HashMap<(u64, u8, bool), usize> {
+    events.sort_by_key(|event| event.target.kind != CombatEntityKind::Player);
+    let mut crowds = std::collections::HashMap::new();
+    for key in events.iter().filter_map(strike) {
+        *crowds.entry(key).or_default() += 1;
+    }
+    crowds
+}
+
+/// The slot of the cast a receipt may be linked to: an action of a hero the client sees.
+/// The pop of a detonated Radiance mark leaves no hand; only the hit that set it off is
+/// linked.
+fn link_slot(source: Option<&Source>, event: &CombatEvent) -> Option<u8> {
+    source
+        .and(event.action_slot)
+        .filter(|_| !event.radiance_burst)
 }
 
 /// The camp hit: drops that rise from a neutral monster when a hero whose class deals
@@ -359,7 +413,7 @@ fn collect_hits(
         feedback.camps.insert(id.0, camp.0.is_boss());
     }
     let seen = feedback.cursor.high_water;
-    let (changed, events) = feedback.cursor.accept(
+    let (changed, mut events) = feedback.cursor.accept(
         (snapshot.meta.server_epoch, snapshot.meta.match_id),
         &snapshot.combat_events,
     );
@@ -436,6 +490,7 @@ fn collect_hits(
             }
         }
     }
+    let crowds = strike_crowds(&mut events);
     for event in events {
         let position = Vec3::new(event.x, event.y, event.z);
         if !on_screen(position) {
@@ -474,6 +529,12 @@ fn collect_hits(
         // The vital break is the engine's own burst; every other receipt is drawn from the
         // recipe of its row when it has one.
         let area = event.area_impact.filter(|area| area.valid());
+        let crowd = crowd_reserve(
+            source.and_then(|source| source.key(&event)),
+            strike(&event)
+                .and_then(|key| crowds.get(&key).copied())
+                .unwrap_or(1),
+        );
         let themed = if let Some(area) = area {
             // The server repeats the detonation on visible victim receipts. Draw one
             // blast even when receipts arrive in different snapshots or the caster is hidden.
@@ -490,13 +551,13 @@ fn collect_hits(
         } else {
             (!vital)
                 .then(|| {
-                    themed_impact(
+                    hit_burst(
                         skills.as_deref(),
                         source.as_ref(),
                         &event,
                         ground(position).y,
                         &snapshot.skill_effects,
-                        drops.len(),
+                        drops.len() + crowd,
                     )
                 })
                 .flatten()
@@ -551,7 +612,7 @@ fn collect_hits(
         if event.amount == 0.0 {
             continue; // A shield can confirm detonation without damage or a hit link.
         }
-        if let Some((_, slot)) = source.zip(event.action_slot) {
+        if let Some(slot) = link_slot(source.as_ref(), &event) {
             out.hits.write(ConfirmedHit {
                 receipt: event.id,
                 source: event.source.id,
@@ -900,6 +961,215 @@ mod tests {
                 .all(|spec| spec.source == ParticleSource::Impact && spec.event_id == 6)
         );
         assert!(themed_impact(Some(&empty), Some(&source), &basic, FLOOR, &[], 0).is_none());
+    }
+
+    /// The ray's receipts carry how they struck: a hit inside its full-damage core and one at
+    /// its edge are drawn from the same row, the core hit brighter and bigger.
+    #[test]
+    fn a_core_hit_and_an_edge_hit_of_the_ray_differ() {
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Dawnweaver;
+        let source = seen_hero(class);
+        let ray = slot_of(class, SkillId::DawnRay);
+        let burst = |core_hit| {
+            let hit = CombatEvent {
+                core_hit,
+                ..dealt(5, 80.0, 7, ray)
+            };
+            hit_burst(Some(&registry), Some(&source), &hit, FLOOR, &[], 0).unwrap()
+        };
+        let (core, edge) = (burst(true), burst(false));
+        assert!(core.len() > edge.len());
+        assert_ne!(core[0].color, edge[0].color);
+        assert!(core.len() <= crate::skill_presentation::impacts::IMPACT_MAX);
+    }
+
+    /// A detonated Radiance mark is its own receipt: it pops in the gold of the mark, not as
+    /// a second burst of the hit that set it off, whoever dealt it and whether the client
+    /// sees them, and it opens no link from the hand. The hit itself is drawn and linked
+    /// as before.
+    #[test]
+    fn a_radiance_burst_pops_and_is_not_linked() {
+        use crate::game_vfx::ParticleSource;
+        use crate::skill_presentation::impacts::radiance_pop;
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Dawnweaver;
+        let source = seen_hero(class);
+        let at = |event: &CombatEvent| Vec3::new(event.x, event.y, event.z);
+        for slot in [
+            shared::BASIC_ATTACK_ACTION_SLOT,
+            slot_of(class, SkillId::DawnRay),
+        ] {
+            let hit = dealt(5, 12.0, 7, slot);
+            let pop = CombatEvent {
+                id: 6,
+                radiance_burst: true,
+                ..hit.clone()
+            };
+            let recipe = hit_burst(Some(&registry), Some(&source), &hit, FLOOR, &[], 0).unwrap();
+            for seen in [Some(&source), None] {
+                let drawn = hit_burst(Some(&registry), seen, &pop, FLOOR, &[], 0).unwrap();
+                assert_eq!(drawn, radiance_pop(at(&pop), 6));
+                assert!(
+                    drawn
+                        .iter()
+                        .all(|spec| spec.source == ParticleSource::Impact && spec.event_id == 6)
+                );
+                assert_ne!(drawn, recipe, "slot {slot}");
+            }
+            // Without a registry the pop is still the engine's own.
+            assert!(hit_burst(None, None, &pop, FLOOR, &[], 0).is_some());
+            assert_eq!(link_slot(Some(&source), &hit), Some(slot));
+            assert_eq!(link_slot(Some(&source), &pop), None);
+            assert_eq!(link_slot(None, &hit), None);
+            #[cfg(feature = "qa")]
+            {
+                let look = ReceiptLook::of(Some(&registry), Some(&source), &pop, Some(&[]));
+                assert_eq!(
+                    look.impact,
+                    Some(crate::skill_presentation::impacts::RADIANCE_POP)
+                );
+            }
+        }
+    }
+
+    /// A ray through a wave lands many receipts in one snapshot. The receipts on heroes are
+    /// drawn first, and every receipt of so large a strike leaves room for the others: the
+    /// strike draws less than half of what its bursts would whole, and an edge hit in it
+    /// still keeps four particles of its recipe and its flash. A small strike is drawn
+    /// whole.
+    #[test]
+    fn a_crowded_strike_shares_the_pool_and_draws_heroes_first() {
+        use crate::skill_presentation::impacts::{IMPACT_MAX, crowd_reserve};
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Dawnweaver;
+        let source = seen_hero(class);
+        let ray = slot_of(class, SkillId::DawnRay);
+        let on = |id: u64, kind: CombatEntityKind| CombatEvent {
+            core_hit: true,
+            target: shared::combat::CombatEntity { kind, id: 100 + id },
+            ..dealt(id, 40.0, 7, ray)
+        };
+        let mut events: Vec<_> = (1..=8)
+            .map(|id| on(id, CombatEntityKind::Minion))
+            .chain([
+                on(9, CombatEntityKind::Player),
+                on(10, CombatEntityKind::Player),
+            ])
+            .chain([CombatEvent {
+                radiance_burst: true,
+                core_hit: false,
+                ..on(11, CombatEntityKind::Player)
+            }])
+            .collect();
+        let crowds = strike_crowds(&mut events);
+        // Heroes first, in the order they came; then the wave.
+        assert_eq!(
+            events.iter().map(|event| event.id).collect::<Vec<_>>(),
+            [9, 10, 11, 1, 2, 3, 4, 5, 6, 7, 8]
+        );
+        assert_eq!(crowds[&(7, ray, false)], 10);
+        assert_eq!(crowds[&(7, ray, true)], 1);
+        let drawn = |crowded: bool| -> usize {
+            events
+                .iter()
+                .filter(|event| !event.radiance_burst)
+                .map(|event| {
+                    let k = if crowded {
+                        crowds[&strike(event).unwrap()]
+                    } else {
+                        1
+                    };
+                    hit_burst(
+                        Some(&registry),
+                        Some(&source),
+                        event,
+                        FLOOR,
+                        &[],
+                        crowd_reserve(source.key(event), k),
+                    )
+                    .unwrap()
+                    .len()
+                })
+                .sum()
+        };
+        assert_eq!(drawn(false), 10 * IMPACT_MAX);
+        assert!(2 * drawn(true) < drawn(false), "{}", drawn(true));
+        // Up to three receipts of a strike are drawn whole; a crowded one keeps a mark and
+        // its flash.
+        let key = source.key(&events[0]);
+        assert_eq!((crowd_reserve(key, 1), crowd_reserve(key, 3)), (0, 0));
+        assert!(crowd_reserve(key, 4) > 0);
+        assert!((4..64).all(|k| crowd_reserve(key, k) <= IMPACT_MAX - 1 - 4));
+        let lone = hit_burst(Some(&registry), Some(&source), &events[0], FLOOR, &[], 0).unwrap();
+        assert_eq!(lone.len(), IMPACT_MAX);
+        // Most of a wave is struck at the edge of the ray: such a receipt in a crowd still
+        // draws four particles of its recipe and its flash, and no more than a core hit.
+        let edge = CombatEvent {
+            core_hit: false,
+            ..events[3].clone()
+        };
+        for k in 4..64 {
+            let burst = |event: &CombatEvent| {
+                let reserved = crowd_reserve(source.key(event), k);
+                hit_burst(Some(&registry), Some(&source), event, FLOOR, &[], reserved)
+                    .unwrap()
+                    .len()
+            };
+            assert!(burst(&edge) > 4, "{k}: {}", burst(&edge));
+            assert!(burst(&edge) <= burst(&events[3]), "{k}");
+        }
+        // Receipts of no hero's action belong to no strike.
+        let tower = CombatEvent {
+            source: shared::combat::CombatEntity {
+                kind: CombatEntityKind::Structure,
+                id: 3,
+            },
+            ..hit(12, 30.0)
+        };
+        assert_eq!(strike(&tower), None);
+    }
+
+    /// Only a strike that runs through its targets shares the pool. An area strike of
+    /// another hero landing on a whole wave in one snapshot still draws every receipt
+    /// whole, as does a basic attack.
+    #[test]
+    fn a_crowded_area_strike_is_drawn_whole() {
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        for (class, skill) in [
+            (shared::HeroClass::Chainkeeper, SkillId::ChainSweep),
+            (shared::HeroClass::Stormfist, SkillId::ThunderPulse),
+        ] {
+            let source = seen_hero(class);
+            let slot = slot_of(class, skill);
+            let mut events: Vec<_> = (1..=8)
+                .map(|id| CombatEvent {
+                    target: shared::combat::CombatEntity {
+                        kind: CombatEntityKind::Minion,
+                        id: 100 + id,
+                    },
+                    ..dealt(id, 30.0, 7, slot)
+                })
+                .collect();
+            let crowds = strike_crowds(&mut events);
+            assert_eq!(crowds[&(7, slot, false)], 8);
+            for event in &events {
+                let crowd = crowd_reserve(source.key(event), crowds[&strike(event).unwrap()]);
+                assert_eq!(crowd, 0, "{skill:?}");
+                let whole = hit_burst(Some(&registry), Some(&source), event, FLOOR, &[], 0);
+                assert!(whole.is_some(), "{skill:?}");
+                assert_eq!(
+                    hit_burst(Some(&registry), Some(&source), event, FLOOR, &[], crowd),
+                    whole
+                );
+            }
+            let basic = dealt(9, 30.0, 7, shared::BASIC_ATTACK_ACTION_SLOT);
+            assert_eq!(crowd_reserve(source.key(&basic), 8), 0);
+        }
     }
 
     /// A receipt on the neutral monster 50 from the hero 7.

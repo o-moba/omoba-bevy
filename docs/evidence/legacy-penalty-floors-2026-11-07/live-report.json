@@ -1,0 +1,145 @@
+{
+  "scenario": "legacy-penalty",
+  "clients": 1,
+  "preference": "bot_practice",
+  "capacity": 16,
+  "limits": {},
+  "max_wait_secs": null,
+  "protocol": 16,
+  "host": {
+    "platform": "darwin",
+    "cpus": 14,
+    "cpu_model": "Apple M4 Pro",
+    "memory_gib": 48
+  },
+  "input_hz_requested": 20,
+  "input_model": "signed_current_pose_transform",
+  "soak_seconds": 1,
+  "started_at": "2026-11-07T02:01:29.022Z",
+  "scenarios": [
+    "raw_ping_no_replication",
+    "allocated_draft_countdown_loading_running",
+    "distinct_workers_and_ten_player_rosters",
+    "legacy_floor_shared_without_duplicate_events_or_expired_time_revival"
+  ],
+  "status": "PASS",
+  "arenas": 1,
+  "total_bytes": 286664,
+  "total_datagrams": 317,
+  "elapsed_seconds": 13.77830775,
+  "snapshot_gap_ms": {
+    "p50": 55.18274999999994,
+    "p95": 62.623750000000655,
+    "p99": 62.623750000000655,
+    "max": 62.623750000000655
+  },
+  "per_arena_type": {
+    "bot_practice": {
+      "arenas": 1,
+      "players": 1,
+      "snapshot_gap_ms": {
+        "p50": 55.18274999999994,
+        "p95": 62.623750000000655,
+        "p99": 62.623750000000655,
+        "max": 62.623750000000655
+      },
+      "running_after_secs": {
+        "p50": 12.735320666,
+        "p95": 12.735320666,
+        "p99": 12.735320666,
+        "max": 12.735320666
+      },
+      "snapshot_bytes_per_second_per_player": {
+        "p50": 58079.280200648725,
+        "p95": 58079.280200648725,
+        "p99": 58079.280200648725,
+        "max": 58079.280200648725
+      }
+    }
+  },
+  "soak_resources": {
+    "samples": 2,
+    "processes": 2,
+    "cpu_percent_mean": 16.5,
+    "cpu_percent_peak": 27.1,
+    "rss_mib_mean": 38.1,
+    "rss_mib_peak": 38.1,
+    "per_arena": {
+      "cpu_percent": 16.52,
+      "rss_mib": 38.1
+    }
+  },
+  "running_after_secs": {
+    "p50": 12.735320666,
+    "p95": 12.735320666,
+    "p99": 12.735320666,
+    "max": 12.735320666
+  },
+  "legacy_penalty": {
+    "status": "PASS",
+    "lobby_ports": [
+      46500,
+      46501
+    ],
+    "versionless_snapshots": 2,
+    "active_floor_strikes": 3,
+    "expired_floor_strikes": 2,
+    "new_decline_strikes": 3,
+    "expired_cooldown_not_rearmed": true,
+    "shared_refusals": true,
+    "source_snapshot_unchanged": true,
+    "restart_preserves_shared_penalties": true,
+    "career_unchanged": true,
+    "new_workers": 0,
+    "transport": "real UDP; signed account requests; separate lobby epochs/outboxes"
+  },
+  "total_transforms_sent": 328,
+  "total_sent_datagrams": 592,
+  "total_sent_bytes": 300697,
+  "resources": [
+    {
+      "at": "2026-11-07T02:01:30.561Z",
+      "wall_ms": 1556.555584,
+      "processes": 1,
+      "cpu_percent": 53.7,
+      "rss_mib": 16.234375,
+      "cpu_seconds": 1.32
+    },
+    {
+      "at": "2026-11-07T02:01:35.551Z",
+      "wall_ms": 6547.104292,
+      "processes": 2,
+      "cpu_percent": 40.6,
+      "rss_mib": 27.640625,
+      "cpu_seconds": 1.5499999999999998,
+      "cpu_percent_interval": 4.608711655920777
+    },
+    {
+      "at": "2026-11-07T02:01:40.564Z",
+      "wall_ms": 11559.393375,
+      "processes": 2,
+      "cpu_percent": 2.3,
+      "rss_mib": 36.625,
+      "cpu_seconds": 2.86,
+      "cpu_percent_interval": 26.13576308762956
+    },
+    {
+      "at": "2026-11-07T02:01:43.294Z",
+      "wall_ms": 14289.600917,
+      "processes": 2,
+      "cpu_percent": 91.6,
+      "rss_mib": 38.046875,
+      "cpu_seconds": 3.6,
+      "cpu_percent_interval": 27.104166574014986
+    },
+    {
+      "at": "2026-11-07T02:01:44.306Z",
+      "wall_ms": 15302.0525,
+      "processes": 2,
+      "cpu_percent": 7.8999999999999995,
+      "rss_mib": 38.09375,
+      "cpu_seconds": 3.66,
+      "cpu_percent_interval": 5.926209312865487
+    }
+  ]
+}

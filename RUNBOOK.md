@@ -256,4 +256,125 @@ Use two terminals (or `make start` / `make stop`). Constants live in `client/src
 | 5 | Spam team join (double-click / rapid confirm) | At most one local `Player` after sync; `Join` idempotent while `join_flow_committed`. |
 | 6 | Block UDP (e.g. firewall) while **Connected** | Stale snapshot or transport rule → **Disconnected** same as server kill. |
 
-**Preferences file** (optional server address + graphics + stable client session id): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). **Env wins** over saved `game_server_addr` when `GAME_SERVER_ADDR` is set and non-empty.
+**Preferences file** (graphics + stable client session id): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). The lobby comes from the build's connection profile; on a desktop a non-empty `GAME_SERVER_ADDR` overrides it (a saved `game_server_addr` is no longer read). Production builds have no in-game server selection; dev builds (`--contour dev`) switch between their Dev, Local and Custom profiles in Home → Connection, applied at the next start. See [docs/connection-profiles.md](docs/connection-profiles.md).
+
+## RU host backups and restore (LR-03)
+
+Player data never lives on a development machine. On the RU host,
+[ops/vps/ru/ru_backup.py](ops/vps/ru/ru_backup.py) backs it up; the full procedure is in
+[ops/vps/ru/README.md › Backups, escrow and restore drill](ops/vps/ru/README.md#backups-escrow-and-restore-drill).
+
+- **Where the backups are.** Every night at 00:30 UTC and before every migration, one
+  encrypted, signed set `omoba-ru-<UTC>-<reason>.tar.gpg` holds the database (`pg_dump -Fc`
+  of `omoba_ru`, career and portal) and the match and outbox archive
+  (`/var/lib/omoba-ru/matches`, `/var/lib/omoba-ru/lobby-outbox`). It goes off-host to the
+  storage in Russia named by `OMOBA_BACKUP_TARGET` in `/opt/omoba-ru/backup.env` (S3-compatible
+  or SFTP, provided by the owner), which keeps 14 daily and 8 weekly sets. The host keeps
+  the newest two in `/var/backups/omoba-ru/sets/` and a plain rollback dump of each
+  migration in `/var/backups/omoba-ru/`. `ru_backup.py list` on the host shows them all.
+- **Escrow holder.** Not named yet (the owner names them). They keep the backup secret key
+  and the encrypted secrets escrow (`OMOBA_PORTAL_SECRET`, the never-rotated
+  `OMOBA_SOCIAL_SECRET`, the env files, the backup keys, later the Android release key)
+  offline. The ops README's escrow table records who, how to reach them, where the files
+  are and the date of the latest escrow.
+- **Restore.** Stop the lobby, the Account API and the portal; on the host
+  `ru_backup.py fetch --set latest --out /var/backups/omoba-ru/restore` (downloads,
+  verifies the signature and the checksums, unpacks), then `pg_restore` the
+  `database.dump` and unpack `state.tar.gz` as the ops README says; start the services and
+  check ratings, match history, a recovery code and VK sign-in. A lost VPS is rebuilt
+  with `ru_host.py bootstrap` after the escrowed env files and keys are put back. Never
+  test a restore over the running database: the monthly restore drill (2nd of the month)
+  does that in a scratch database, and `ru_host.py status` reports its result.
+
+## RU host alerts (LR-17)
+
+Alerts reach the owner's Telegram chat (the bot in `/opt/omoba-ru/alerts.env` on the host
+and in the external probe's settings) and always the journal. What each one means and
+what to look at first; the full list is in
+[ops/vps/ru/README.md › Monitoring and alerts](ops/vps/ru/README.md#monitoring-and-alerts).
+
+| Alert | First look |
+| --- | --- |
+| `<unit> failed (…)`, from `omoba-alert-ru@` | `journalctl -u <unit> -n 200`. A service is restarted by systemd every 5 s; repeated failures mean a crash loop: roll back (`ru_host.py rollback`) when a release caused it |
+| `<unit> is not running` | `systemctl status <unit>`; an enabled RU service must run |
+| `postgresql@<v>-main.service failed`/`is not running`, `PostgreSQL does not accept connections on port 5432` | `journalctl -u postgresql@<v>-main.service -n 200`, `pg_lsclusters`, `df -h /var/lib/postgresql`. It takes the lobby and the Account API with it (the probe's `/health/ready` fails too). Once the cause is fixed, `systemctl start postgresql@<v>-main`; `systemctl status postgresql` says nothing, it is only a wrapper |
+| `<timer> is disabled/inactive` | `systemctl enable --now <timer>`; without it no backup is made or none is reported |
+| `only N% free on the filesystem of <path>` | `df -h`, `du -xsh /var/backups/omoba-ru/* /var/lib/omoba-ru/matches/archive`; the journal keeps itself to 1 GiB |
+| `match worker <id> (…) has written no heartbeat` | `journalctl -u omoba-lobby-ru`; the lobby relaunches stale workers, so a lasting one is stuck: its directory under `/var/lib/omoba-ru/matches/` |
+| `OMOBA ru: down (external probe …)` | `python3 scripts/release.py preflight --market ru` from the Mac, then `ru_host.py status`. All three checks down at once usually means the host or its network; only the lobby means `omoba-lobby-ru` or the firewall (UDP 4000) |
+| Backup alerts (`OMOBA RU backups on …`) | [RU host backups and restore](#ru-host-backups-and-restore-lr-03) |
+
+`python3 /opt/omoba-ru/monitor/ru_monitor.py check` prints what the host check sees now,
+and `test-alert` sends one message to prove the bot works.
+
+## Moderation (LR-15)
+
+Sanctions and the chat switch are applied with the `omoba-account-api` operator
+commands (`account-api/src/moderation.rs`). They use `OMOBA_DATABASE_URL`; the portal
+role is enough, and they change nothing but the moderation tables and, for a name
+reset, the name. Game servers apply every change within about 10 seconds (their
+access refresh and chat-switch poll), without a restart. On the RU host, run them as
+the Account API's user with its environment, so the database password is never typed
+or printed:
+
+```sh
+# on the RU host, as root (ssh): one alias for the session
+alias omoba-mod='systemd-run --quiet --pipe --wait --uid=omoba-ru --gid=omoba-ru \
+  -p EnvironmentFile=/opt/omoba-ru/account-api.env /opt/omoba-ru/current/omoba-account-api'
+omoba-mod player 'Name#1234'
+```
+
+Every command that changes something needs `--reason` (for the record, never shown to
+the player) and `--by` (your name or login). Durations are `30m`, `12h`, `7d` or `2w`;
+`--permanent` lasts until lifted. One of the two is required.
+
+**Look up a player.** `omoba-mod player <Name#1234 | profile-id>` prints the profile ID,
+matches and rating, the device keys (first 16 hex digits, label, added, revoked), every
+sanction (active, ended or lifted, with its number) and the last 20 moderation log
+entries. A report names the player as the game shows it (`Name#1234`); names change,
+so write the profile ID into the incident note.
+
+**Apply a sanction.**
+`omoba-mod sanction add <player> <kind> (--for 7d | --permanent) --reason "…" --by <you>`
+
+| Kind | Effect |
+|---|---|
+| `chat_mute` | The player's chat messages are refused («muted until …») and reach no one, including what they sent in the last 30 seconds; reactions stay |
+| `matchmaking_ban` | Every match search is refused («You cannot search for matches until …»); a search in progress ends; the player is hidden from party presence and leaves their party |
+| `ranked_ban` | Ranked searches are refused; Casual PvP and vs Bots stay |
+| `account_ban` | Game sign-in is refused («Your account is suspended until …»), a signed-in session ends at the next refresh (a running match drops the player), website sessions and new website sign-ins get `account_banned`; hidden from party presence |
+| `name_reset` | Same as `rename` below |
+
+**Force a rename.** `omoba-mod rename <player> (--for 7d | --permanent) --reason "…" --by <you>`
+renames the profile to `Player#NNNN` (a free tag) and records a `name_reset` sanction:
+until it ends, the player cannot rename in the game or on the website. Party presence
+and new matches show the new name within seconds; saved match results keep the names
+they were played with.
+
+**Lift a sanction.** `omoba-mod sanction list <player> [--all]` shows the numbers;
+`omoba-mod sanction lift <number> --reason "…" --by <you>` ends one early. Access
+returns at the next refresh: a search, chat or rename works again at once, and a
+suspended game client signs in again within a minute. Nothing restarts.
+
+**Turn chat off or on.** The RU lobby unit sets `OMOBA_CHAT=off` (owner default O-9):
+there is no text chat on RU servers, whatever the database says, and match workers
+inherit it. Turning RU chat on needs the owner's legal check (ОРИ, 149-FZ) and a change
+of the unit and of `ru_host.py`'s unit rule, then `ship`. The runtime kill switch works
+on every server of the database: `omoba-mod chat off --reason "…" --by <you>` stops all
+chat delivery within about 5 seconds (held messages are dropped, reactions stay),
+`omoba-mod chat on …` allows it again where `OMOBA_CHAT` allows it, and
+`omoba-mod chat status` shows the switch.
+
+**The record.** Every add, lift, rename and chat switch writes one row to
+`career_moderation_events` (time, `--by`, action, profile, sanction number, kind,
+reason, end, old and new name) in the same transaction. Rows cannot be changed, and
+the database refuses to delete one younger than a year; nothing deletes them
+automatically. The portal's own audit events (pairings, sessions) are separate and
+kept 30 days.
+
+**Limits of M0.** A sanction holds a profile, not a person: a new device key makes a new
+profile, within the new-profile limits per network (LR-16). A sanctioned profile is never
+deleted as unplayed, so a ban on a throwaway key keeps holding that key. There are no
+IP or device bans. The player sees the refusal in their language with its end in UTC;
+the website shows only the `account_banned` / `name_locked` codes until the portal adds
+copy for them.

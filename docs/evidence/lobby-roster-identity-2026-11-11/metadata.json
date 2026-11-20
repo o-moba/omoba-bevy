@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "native_source": "f8f68c3d5ff0c74d3dc15489230c9a2abda59c3e",
+  "capture_helper_head": "95d38e07f5f91e465869402d331e0d0de6b35187",
+  "release_run_id": 43010114221,
+  "release_url": "https://github.com/o-moba/omoba-bevy/actions/runs/43010114221",
+  "viewport": [852, 393],
+  "visible_tags_in_png": ["#1000", "#1001", "#1002"],
+  "all_tags_in_qa_state": ["#1000", "#1001", "#1002", "#1003", "#1004"],
+  "visual_inspection": "PASS: #1001 and #1002 are readable beside Исключить; leader #1000 is readable; no overlap or clipping in the visible rows. #1003/#1004 are below the scroll viewport and are verified in QA state, not claimed as simultaneously visible in the PNG.",
+  "scope": "Synthetic production offscreen RU Mobile renderer; not a physical device, live account, WAN or release acceptance."
+}

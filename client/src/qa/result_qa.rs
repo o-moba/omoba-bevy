@@ -171,6 +171,60 @@ fn fixture_label(mut commands: Commands) {
 
 const YOUR_ID: u64 = 11;
 
+/// Reuse the result renderer's coherent own-player fixture for fair-play pixels.
+pub(super) fn fair_play_fixture(
+    remade: bool,
+    game: &mut GameStateSnapshot,
+    career: &mut CareerClient,
+    team: &mut Team,
+) {
+    apply_fixture(Fixture::Saved, game, career, team);
+    let result = career.view.last_result.as_mut().expect("saved fixture");
+    result.end_reason = Some(if remade { "remake" } else { "surrender" }.into());
+    if remade {
+        // A remake arrives as a terminal career receipt without a base victory.
+        // PostMatch deliberately refuses a winner-less receipt after latching
+        // Victory, so the saved-win fixture must not keep that world outcome.
+        game.state = GameState::Running;
+        result.outcome = MatchOutcome::Remade;
+        result.winner = None;
+        result.rated = false;
+        result.unrated_reason = Some("remake".into());
+        result.duration_ms = 95_000;
+        result.ended_at_ms = 95_000;
+        if let Some(scoreboard) = game.scoreboard.as_mut() {
+            scoreboard.elapsed_secs = 95;
+            for player in &mut scoreboard.players {
+                player.kills = 0;
+                player.deaths = 0;
+                player.assists = 0;
+                player.earned_gold = 1000;
+                player.level = 1;
+            }
+        }
+        for participant in &mut result.participants {
+            participant.rating = None;
+            participant.progression_xp_gained = 0;
+            participant.stats = Default::default();
+            participant.stats.earned_gold = Some(1000);
+            participant.stats.final_level = 1;
+            let absent = participant.player_id == YOUR_ID + 1;
+            participant.disconnected = absent;
+            participant.participation = Some(shared::career::Participation {
+                connected_ms: if absent { 0 } else { 95_000 },
+                disconnected_ms: if absent { 95_000 } else { 0 },
+                afk_ms: 0,
+                abandoned: absent,
+            });
+        }
+        if let Some(scoreboard) = game.scoreboard.as_mut() {
+            for player in &mut scoreboard.players {
+                player.connected = player.player_id != YOUR_ID + 1;
+            }
+        }
+    }
+}
+
 fn live_row(team: shared::map::Team) -> LiveScoreboard {
     LiveScoreboard {
         elapsed_secs: 720,
@@ -250,6 +304,7 @@ fn receipt(outcome: MatchOutcome, rated: bool) -> MatchResult {
             participant
         })
         .collect();
+    super::ranked_fixture::apply_result(&mut result);
     result
 }
 
@@ -273,6 +328,9 @@ fn apply_fixture(
         progression_xp: 2450,
         ..ProfileSummary::new("qa-profile".into(), "Guest".into()) // i18n-allow: fixture
     });
+    if let Some(profile) = career.view.profile.as_mut() {
+        super::ranked_fixture::apply_profile(profile);
+    }
     career.public_profile_id = Some("qa-profile".into());
     career.view.last_result = None;
     match fixture {
@@ -371,6 +429,11 @@ fn shoot(
     mut qa: ResMut<ResultQa>,
     screen: Res<State<AppScreen>>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    texts: Query<(&Text, &ComputedNode, &InheritedVisibility)>,
+    toasts: Query<
+        (&Node, &ComputedNode, &Visibility),
+        With<crate::ui::widgets::surfaces::ToastAge>,
+    >,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(&(file, fixture)) = STAGES.get(qa.stage) else {
@@ -417,7 +480,20 @@ fn shoot(
         return;
     }
     qa.settled += 1;
-    if qa.settled < SETTLE_FRAMES {
+    let expected = (fixture == Fixture::Saved)
+        .then(super::ranked_fixture::expected_notice)
+        .flatten();
+    if let Some(text) = expected {
+        let visible = texts.iter().any(|(label, node, visibility)| {
+            label.0 == text && node.size().x > 0.0 && visibility.get()
+        });
+        let settled = toasts.iter().any(|(node, computed, visibility)| {
+            node.top == Val::Px(0.0) && computed.size().x > 0.0 && *visibility != Visibility::Hidden
+        });
+        if qa.settled < 2 || !visible || !settled {
+            return;
+        }
+    } else if qa.settled < SETTLE_FRAMES {
         return;
     }
     if std::fs::create_dir_all(&qa.directory).is_err() {

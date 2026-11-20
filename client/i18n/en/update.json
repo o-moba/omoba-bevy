@@ -1,0 +1,15 @@
+{
+  "update.required.title": "Update required",
+  "update.required.detail": "Update required: version {version} can no longer play online.",
+  "update.required.body": "Version {version} can no longer play online. Download the new version to keep playing.",
+  "update.required.body_store": "Version {version} can no longer play online. Update the game in the App Store or TestFlight.",
+  "update.required.body_site": "Version {version} can no longer play online. Download the new version from the official site.",
+  "update.required.latest": "New version: {version}",
+  "update.servers_updating": "The servers are switching to your version {version}. You will connect automatically.",
+  "update.available": "Update available: version {version}",
+  "update.button.download": "Download update",
+  "update.button.get": "Download",
+  "update.button.later": "Later",
+  "update.pill.required": "Update required",
+  "update.pill.servers_updating": "Servers updating"
+}

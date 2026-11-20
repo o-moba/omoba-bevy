@@ -10,11 +10,14 @@ use crate::{AbilityDefinition, HeroClass, MAX_ABILITY_RANK, SkillSlot, Targeting
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-pub const CATALOG_REVISION: &str = "standard-kits-7";
+pub const CATALOG_REVISION: &str = "standard-kits-8";
 pub const RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_ACTIVE_EFFECTS: usize = 128;
 pub const MAX_EFFECTS_PER_OWNER: usize = 16;
 pub const MAX_AIM_COORDINATE: f32 = 4096.0;
+/// Seconds a fired beam stays replicated after it resolves; the client's telegraph
+/// progress and release classification read the same value.
+pub const BEAM_LINGER_SECS: f32 = 0.15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -623,9 +626,15 @@ pub enum SkillEffect {
         duration_secs: f32,
         slow_multiplier: f32,
     },
+    /// A warned line from the caster to `cast_range`. `width` is the half-width
+    /// (radius) of the capsule; each target adds its own radius. Damage is full
+    /// within `core_width` of the axis and eases to `edge_damage_multiplier` at the
+    /// graze point (see [`beam_damage_multiplier`]).
     Beam {
         width: f32,
         damage: f32,
+        core_width: f32,
+        edge_damage_multiplier: f32,
     },
     WeaponToggle {
         rocket_range: f32,
@@ -657,6 +666,22 @@ pub enum SkillEffect {
         max_distance: f32,
         missing_health_ratio: f32,
     },
+}
+
+/// Damage multiplier of a beam hit whose target centre lies `lateral` from the
+/// beam segment. Full damage inside `core_width`; a smoothstep down to
+/// `edge_multiplier` at `width + target_radius`, the last offset that still hits.
+/// Normalising by each target's own reach gives heroes and minions the same curve.
+pub fn beam_damage_multiplier(
+    lateral: f32,
+    width: f32,
+    target_radius: f32,
+    core_width: f32,
+    edge_multiplier: f32,
+) -> f32 {
+    let span = (width + target_radius - core_width).max(1e-3);
+    let u = ((lateral - core_width) / span).clamp(0.0, 1.0);
+    1.0 - (1.0 - edge_multiplier) * u * u * (3.0 - 2.0 * u)
 }
 
 impl SkillEffect {
@@ -722,7 +747,17 @@ impl SkillEffect {
                 [radius, damage, duration_secs].into_iter().all(positive)
                     && multiplier(slow_multiplier)
             }
-            Self::Beam { width, damage } => [width, damage].into_iter().all(positive),
+            Self::Beam {
+                width,
+                damage,
+                core_width,
+                edge_damage_multiplier,
+            } => {
+                [width, damage].into_iter().all(positive)
+                    && nonnegative(core_width)
+                    && core_width <= width
+                    && multiplier(edge_damage_multiplier)
+            }
             Self::WeaponToggle {
                 rocket_range,
                 rocket_damage_multiplier,
@@ -1081,6 +1116,38 @@ pub struct SkillEffectState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn beam_falloff_is_full_in_the_core_eases_to_the_edge_and_validates_its_band() {
+        let at = |lateral| beam_damage_multiplier(lateral, 0.8, 0.62, 0.35, 0.6);
+        assert_eq!(at(0.0), 1.0);
+        assert_eq!(at(0.35), 1.0);
+        assert!((at(1.42) - 0.6).abs() < 1e-6);
+        assert_eq!(at(9.0), 0.6, "clamped past the graze point");
+        let samples: Vec<f32> = (0..=20).map(|i| at(i as f32 * 0.071)).collect();
+        assert!(samples.windows(2).all(|w| w[1] <= w[0]));
+        assert_eq!(beam_damage_multiplier(1.0, 0.8, 0.62, 0.35, 1.0), 1.0);
+        let beam = |core_width, edge_damage_multiplier| SkillEffect::Beam {
+            width: 0.8,
+            damage: 80.0,
+            core_width,
+            edge_damage_multiplier,
+        };
+        assert!(beam(0.35, 0.6).validate());
+        assert!(beam(0.0, 1.0).validate());
+        assert!(!beam(0.81, 0.6).validate());
+        assert!(!beam(-0.1, 0.6).validate());
+        assert!(!beam(0.35, 1.01).validate());
+        assert!(!beam(0.35, f32::NAN).validate());
+        let SkillEffect::Beam {
+            core_width,
+            edge_damage_multiplier,
+            ..
+        } = skill(SkillId::DawnRay).effect
+        else {
+            panic!("Horizon Ray is a beam")
+        };
+        assert_eq!((core_width, edge_damage_multiplier), (0.35, 0.6));
+    }
     #[test]
     fn fixed_and_mixed_recipes_resolve_with_explicit_dependencies() {
         for core in [CoreId::Dawnweaver, CoreId::Wildspark] {

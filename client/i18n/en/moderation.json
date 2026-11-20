@@ -1,0 +1,13 @@
+{
+  "moderation.account_banned.until": "Your account is suspended until {until} UTC.",
+  "moderation.account_banned.plain": "Your account is suspended.",
+  "moderation.matchmaking_ban.until": "You cannot search for matches until {until} UTC.",
+  "moderation.matchmaking_ban.plain": "You cannot search for matches.",
+  "moderation.ranked_ban.until": "Ranked is closed to you until {until} UTC.\nCasual PvP and vs Bots are open.",
+  "moderation.ranked_ban.plain": "Ranked is closed to you.\nCasual PvP and vs Bots are open.",
+  "moderation.name_locked.until": "A moderator reset your name. You can change it after {until} UTC.",
+  "moderation.name_locked.plain": "A moderator reset your name. It cannot be changed for now.",
+  "moderation.chat_muted.until": "You are muted until {until} UTC. Reactions still work.",
+  "moderation.chat_muted.plain": "You are muted. Reactions still work.",
+  "moderation.chat_disabled": "Chat is turned off on this server. Reactions still work."
+}

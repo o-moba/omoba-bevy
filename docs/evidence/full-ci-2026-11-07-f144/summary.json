@@ -1,0 +1,347 @@
+{
+  "status": "ALL_SEVEN_JOBS_PASS",
+  "source_commit": "f144c8f7a3a0084f636cb3bd9a6dafdf41b6bb31",
+  "run_id": 42273662478,
+  "run_url": "https://github.com/o-moba/omoba-bevy/actions/runs/42273662478",
+  "artifact_id": 13535750914,
+  "artifact_bytes": 498521,
+  "artifact_sha256": "21f319defdf8480d108cf994e9a9a284c61908d548bde729703c00cda66007b9",
+  "jobs": {
+    "128084353337": "PASS",
+    "128084353588": "PASS",
+    "128084353735": "PASS",
+    "128084353744": "PASS",
+    "128084353808": "PASS",
+    "128084354047": "PASS",
+    "128084354193": "PASS"
+  },
+  "stages": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "log": "build.log",
+      "seconds": 109.76
+    },
+    {
+      "name": "build-ranked-fixture",
+      "status": "PASS",
+      "log": "build-ranked-fixture.log",
+      "seconds": 33.3
+    },
+    {
+      "name": "migrate",
+      "status": "PASS",
+      "log": "migrate.log",
+      "seconds": 0.03
+    },
+    {
+      "name": "admission-300",
+      "status": "PASS",
+      "log": "admission-300.log",
+      "seconds": 58.2
+    },
+    {
+      "name": "registration-api",
+      "status": "PASS",
+      "log": "registration-api.log",
+      "seconds": 12.5
+    },
+    {
+      "name": "registration-game",
+      "status": "PASS",
+      "log": "registration-game.log",
+      "seconds": 30.78
+    },
+    {
+      "name": "lifecycle",
+      "status": "PASS",
+      "log": "lifecycle.log",
+      "proof": "lifecycle/report.json",
+      "seconds": 109.91
+    },
+    {
+      "name": "mixed",
+      "status": "PASS",
+      "log": "mixed.log",
+      "proof": "mixed/report.json",
+      "seconds": 47.61
+    },
+    {
+      "name": "ready-check",
+      "status": "PASS",
+      "log": "ready-check.log",
+      "proof": "ready-check/report.json",
+      "seconds": 42.86
+    },
+    {
+      "name": "unique-draft",
+      "status": "PASS",
+      "log": "unique-draft.log",
+      "proof": "unique-draft/report.json",
+      "seconds": 32.69
+    },
+    {
+      "name": "party-leave",
+      "status": "PASS",
+      "log": "party-leave.log",
+      "proof": "party-leave/report.json",
+      "seconds": 38.11
+    },
+    {
+      "name": "party-disconnect",
+      "status": "PASS",
+      "log": "party-disconnect.log",
+      "proof": "party-disconnect/report.json",
+      "seconds": 88.18
+    },
+    {
+      "name": "ranked-early-crash",
+      "status": "PASS",
+      "log": "ranked-early-crash.log",
+      "proof": "ranked-early-crash/report.json",
+      "seconds": 140.59
+    },
+    {
+      "name": "termination",
+      "status": "PASS",
+      "log": "termination.log",
+      "proof": "termination/report.json",
+      "seconds": 18.36
+    },
+    {
+      "name": "remake",
+      "status": "PASS",
+      "log": "remake.log",
+      "proof": "remake/report.json",
+      "seconds": 116.76
+    },
+    {
+      "name": "surrender",
+      "status": "PASS",
+      "log": "surrender.log",
+      "proof": "surrender/report.json",
+      "seconds": 621.1
+    },
+    {
+      "name": "ranked-eligibility",
+      "status": "PASS",
+      "log": "ranked-eligibility.log",
+      "proof": "ranked-eligibility/report.json",
+      "seconds": 615.76
+    },
+    {
+      "name": "ranked-victory",
+      "status": "PASS",
+      "log": "ranked-victory.log",
+      "proof": "ranked-victory/report.json",
+      "seconds": 488.69
+    }
+  ],
+  "harness_seconds": 2605.18,
+  "ready_check": {
+    "status": "PASS",
+    "qualification_setup_seconds": 5.5622753340000015,
+    "fixture_setup_before_search": true,
+    "window_secs": 15,
+    "accepted_before_timeout": 9,
+    "worker_count_before_unanimity": 0,
+    "fifo_age_preserved": true,
+    "late_accept_rejected": true,
+    "replacement_allocation": "2b79abbc7be86952f8e4e4dce9ec5d79"
+  },
+  "party_leave": {
+    "checks": [
+      {
+        "name": "five_stack_signed_invite_accept",
+        "status": "PASS",
+        "party_id": 1,
+        "members": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "name": "ranked_party_team_and_held_draft",
+        "status": "PASS",
+        "allocation_id": "16e1f32101855fdbb2a162e1500dcd61",
+        "team": "green",
+        "humans": 10,
+        "bots": 0
+      },
+      {
+        "name": "draft_departure_requeues_nine_without_credit",
+        "status": "PASS",
+        "exit": "leave",
+        "original_queue_ages_secs": [
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          0
+        ],
+        "elapsed_secs": [
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          10
+        ],
+        "all_profiles_unchanged": true,
+        "all_histories_empty": true,
+        "all_survivors_received_return_code": true,
+        "dodger_code": "dodge_cooldown"
+      },
+      {
+        "name": "stale_ready_search_id_refresh",
+        "status": "PASS",
+        "clients": 10,
+        "explicit_current_search_consent": true
+      },
+      {
+        "name": "replacement_party_ranked_running",
+        "status": "PASS",
+        "allocation_id": "d3e0820649198eeebbf1a92f5ef47dac",
+        "humans": 10,
+        "bots": 0,
+        "party_team": "green"
+      }
+    ],
+    "stale_handoff_checks": 20,
+    "stale_endpoint_checks": 20
+  },
+  "casual_handoff": {
+    "allocation_id": "808fc8c5209321d91ea325740255abfd",
+    "checks": [
+      {
+        "name": "unjoined_cancel_is_worker_acknowledged_and_only_its_seat_is_bot_filled",
+        "status": "PASS",
+        "surviving_humans": 9,
+        "bots": 1,
+        "manifest_humans": 10
+      },
+      {
+        "name": "nine_original_humans_reach_running_without_new_search_or_worker",
+        "status": "PASS"
+      },
+      {
+        "name": "unjoined_canceller_receives_no_match_xp_or_rating",
+        "status": "PASS"
+      },
+      {
+        "name": "start_wins_late_cancel_keeps_admission_and_resume_without_aborting_other_players",
+        "status": "PASS"
+      }
+    ]
+  },
+  "ranked_victory": {
+    "result_id": "521b0420f200fbe11547201270e410bb",
+    "duration_ms": 466798,
+    "winner": "blue",
+    "rated": true,
+    "no_map_override": true,
+    "peers": "10 authenticated signed native AI peers in human seats; no physical people/device claim",
+    "qualification_fixture": {
+      "method": "synthetic_public_casual_store_receipts",
+      "profiles": 10,
+      "real_games_played": 0,
+      "receipts_created": 100,
+      "target": 10
+    },
+    "awards": [
+      {
+        "team": "green",
+        "rating_delta": -24,
+        "xp_gained": 100,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "green",
+        "rating_delta": -24,
+        "xp_gained": 100,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "green",
+        "rating_delta": -24,
+        "xp_gained": 100,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "green",
+        "rating_delta": -24,
+        "xp_gained": 100,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "blue",
+        "rating_delta": 24,
+        "xp_gained": 150,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "blue",
+        "rating_delta": 24,
+        "xp_gained": 150,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "green",
+        "rating_delta": -24,
+        "xp_gained": 100,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "blue",
+        "rating_delta": 24,
+        "xp_gained": 150,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "blue",
+        "rating_delta": 24,
+        "xp_gained": 150,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      },
+      {
+        "team": "blue",
+        "rating_delta": 24,
+        "xp_gained": 150,
+        "completed_public_delta": 1,
+        "season_completed_delta": 1
+      }
+    ]
+  },
+  "report_sha256": {
+    "report.json": "fe178dd4e7c4a86b14a9bca38f352ef1cfb519b994113a9acf18c0820a8e716b",
+    "ranked-victory/report.json": "5ad4bdee0cb36e29ab1f247d1f63765fc006b43cf64a0cee735676c3ac2c320f",
+    "party-leave/report.json": "3e454f036a4e79a1ab7eec6b13320dce97697b2599ee299b24b0752ca1a4e188",
+    "ready-check/report.json": "3ae8c088c838ffa34dd4660212759d807681b4d7b01a814b34726467a2ef86a4",
+    "unique-draft/report.json": "68e268c87d1684b9c501f6d1290d3128ad252f3df61508328ab766c92bc6e271"
+  },
+  "limits": [
+    "Only the exact f144 source gate. Later admission/configuration changes need their own current checks.",
+    "No current UI pixel, physical phone, RU/WAN/host capacity or deployment acceptance.",
+    "Synthetic prerequisites are not counted as played games."
+  ]
+}

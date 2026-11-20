@@ -1,0 +1,55 @@
+{
+  "status": "PASS",
+  "scope": "RU loopback real Account API/PostgreSQL and production Next, publicly known fixture key; no client routing, live signing key, host or deployment",
+  "api_checks": [
+    {
+      "name": "api-tests",
+      "exit": 0,
+      "seconds": 160.61,
+      "stop_reason": null
+    },
+    {
+      "name": "api-clippy",
+      "exit": 0,
+      "seconds": 24.08,
+      "stop_reason": null
+    }
+  ],
+  "api_test_cases": 4,
+  "api_database_case_explicitly_executed": true,
+  "api_minimum_root_gib": 36.270591735839844,
+  "stack": {
+    "status": "PASS",
+    "scope": "RU loopback real Account API/PostgreSQL and production Next, publicly known fixture key; no client routing, live signing key, host or deployment",
+    "checks": [
+      "real Rust publisher to production Next preserves exact signed bytes with no browser account headers or cookies",
+      "native offline verifier accepts the document delivered through the portal and preserves closed admission policy",
+      "anonymous HEAD",
+      "mutation method rejected",
+      "request cannot choose a foreign account region",
+      "corrupted publication unavailable, never reflected or treated as an empty directory",
+      "atomic new signed publication visible without restarting API or portal"
+    ],
+    "unexpected_requests": [],
+    "private_fixture_removed": true,
+    "api_binary_sha256": "2742a5def9afe6268fa43c4174c47862db4e5bdb9e390f0facbca441a826154d",
+    "signer_binary_sha256": "dea4d28fa44674a1140e4b716364ec399f17b7c2027d84ee21e8340682e6797d"
+  },
+  "portal": {
+    "unit_pass": 257,
+    "expected_skips": 3,
+    "failures": 0,
+    "typecheck": "PASS",
+    "ru_production_build": "PASS"
+  },
+  "sources_sha256": {
+    "game/account-api/src/game_directory.rs": "436a6de0b578f6c97701265833ea9d070efb95cc1437f71c5f47cb0b30f7569f",
+    "game/account-api/src/lib.rs": "2b4cf8a3d4004257c343944cb4cd7eff534c537b76bb400e0508a758fa9ed16b",
+    "game/account-api/src/main.rs": "f6700ca8ed039ba1719b3968ca3f92da5ed1decabb8ae4143d9e4bf6320a365d",
+    "web/src/lib/game-directory-server.mjs": "e11d8676ca86ce1cfe95775655100c87b5b41c9d9398e2a6b7e4ac9c9025d892",
+    "web/src/lib/game-directory-server.d.mts": "7e7f759ff9f6e967b99ce9ea7f02b135caaeb6972b3b0397d444dd80be609006",
+    "web/src/app/api/game/directory/route.ts": "0dbf4457779abcc8bf9ad960e331527684789d716e84e8ae651848119e1b5670",
+    "web/tests/game-directory.test.mjs": "670c682350e294953466de812c78e8040095cdf4e0bc9c8acf8b57288188239d",
+    "web/tests/game-directory.e2e.mjs": "93e49a5f9392cce187b15d67c035f4656ba5a9bee60ca680e1f2f428c8f95db3"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "owned_schemas_removed": [
+    "career_public_consent_de0fa5ab93ba673a7cf499a53f69e9ec",
+    "career_public_consent_d85bef7814baecb3cd8d8f6c8d1afc58"
+  ],
+  "scope": "exact logged red-test and rejected unseeded-claim stress fixtures; expected2 profiles/1 match/0 events/1 ready row verified; unrelated schemas retained"
+}

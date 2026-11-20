@@ -10,14 +10,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use shared::compatibility::{CompatibilityIssue, CompatibilityProbe, ReleaseContract};
+use shared::compatibility::{
+    CompatibilityIssue, CompatibilityProbe, ReleaseContract, ServerReport, UpdateNotice,
+};
 use shared::protocol::{PROTOCOL_VERSION, SnapshotOrder};
 use shared::transport::{SnapshotAssembler, TransportError};
 use shared::wire::{ClientPacket, ServerPacket};
 
 use crate::persistence::ResolvedServerAddressForPrefs;
 use crate::session_config::{
-    T_RETRY, TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS,
+    GameService, T_RETRY, TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS,
 };
 
 use super::session::{ClientConnectionState, ClientSession, SessionEvent};
@@ -46,9 +48,14 @@ pub enum NetThreadSignal {
     TransportFailure,
     /// A framed reply uses a different application protocol. No payload was applied.
     ProtocolMismatch,
+    /// The server answered this transport's probe "server full" (LR-09): it
+    /// holds as many endpoints as it can; the probes go on.
+    ServerFull,
     Compatibility {
         server: Option<ReleaseContract>,
         issue: Option<CompatibilityIssue>,
+        /// The server's update notice (LR-14), when it sent a valid one.
+        update: Option<UpdateNotice>,
     },
 }
 
@@ -70,7 +77,10 @@ pub(in crate::net) fn spawn_network_transport(
 ) {
     client_session.clear_join_attempt();
     client_session.server_contract = None;
+    client_session.server_update = None;
     client_session.compatibility_issue = None;
+    client_session.directory_notice = None;
+    client_session.directory_update_url = None;
     client_session.snapshot_order = SnapshotOrder::default();
     client_session.server_addr_display.clone_from(&server_addr);
     if !client_session.ephemeral_endpoint {
@@ -91,9 +101,15 @@ pub(in crate::net) fn spawn_network_transport(
         ));
     } else {
         commands.remove_resource::<offline::LocalPractice>();
+        let service = if client_session.ephemeral_endpoint {
+            GameService::Worker
+        } else {
+            GameService::Lobby
+        };
         thread::spawn(move || {
             run_udp_client(
                 addr_for_thread,
+                service,
                 outgoing_rx,
                 incoming_tx,
                 signal_tx,
@@ -125,11 +141,12 @@ pub(in crate::net) fn spawn_network_transport(
 /// socket bound to its own IP family: an IPv4 wildcard cannot connect to IPv6.
 /// UDP connect checks local routing, not server reachability; the normal snapshot
 /// timeout still decides whether the selected server is actually responding.
-fn connect_udp_server(server: impl ToSocketAddrs) -> io::Result<UdpSocket> {
-    connect_resolved_udp_server(server.to_socket_addrs()?)
+fn connect_udp_server(service: GameService, server: impl ToSocketAddrs) -> io::Result<UdpSocket> {
+    connect_resolved_udp_server(service, server.to_socket_addrs()?)
 }
 
 fn connect_resolved_udp_server(
+    service: GameService,
     candidates: impl IntoIterator<Item = SocketAddr>,
 ) -> io::Result<UdpSocket> {
     let mut last_error = None;
@@ -138,6 +155,18 @@ fn connect_resolved_udp_server(
             last_error = Some(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "game server UDP port must be nonzero",
+            ));
+            continue;
+        }
+        if !service.allows(
+            crate::session_config::BUILD_CONTOUR,
+            shared::region::active().map(|r| r.id),
+            &address.ip().to_string(),
+            address.port(),
+        ) {
+            last_error = Some(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "game endpoint outside the account region or contour",
             ));
             continue;
         }
@@ -167,7 +196,7 @@ fn connect_resolved_udp_server(
 fn verify_server_compatibility(
     socket: &UdpSocket,
     timeout: Duration,
-) -> Result<ReleaseContract, CompatibilityIssue> {
+) -> Result<ServerReport, CompatibilityIssue> {
     let mut nonce = [0_u8; 16];
     getrandom::fill(&mut nonce).map_err(|_| CompatibilityIssue::Unavailable)?;
     let probe = CompatibilityProbe::new(
@@ -189,8 +218,8 @@ fn verify_server_compatibility(
         for _ in 0..32 {
             match socket.recv(&mut buffer) {
                 Ok(len) => {
-                    if let Some(server) = probe.accept(&buffer[..len]) {
-                        return Ok(server);
+                    if let Some(report) = probe.accept_report(&buffer[..len]) {
+                        return Ok(report);
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
@@ -204,13 +233,14 @@ fn verify_server_compatibility(
 
 pub(in crate::net) fn run_udp_client(
     server_addr: String,
+    service: GameService,
     outgoing: Receiver<ClientPacket>,
     incoming: Sender<ServerPacket>,
     signals: Sender<NetThreadSignal>,
     gameplay_signer: SharedGameplaySigner,
 ) {
     println!("Connecting to server at {server_addr}");
-    let socket = match connect_udp_server(server_addr.as_str()) {
+    let socket = match connect_udp_server(service, server_addr.as_str()) {
         Ok(socket) => socket,
         Err(error) => {
             eprintln!("Failed to resolve/bind/connect UDP server {server_addr}: {error}");
@@ -225,19 +255,26 @@ pub(in crate::net) fn run_udp_client(
         return;
     }
     let result = verify_server_compatibility(&socket, Duration::from_secs(4));
-    let (server, issue) = match result {
-        Ok(server) => {
+    let (server, issue, update) = match result {
+        Ok(ServerReport {
+            contract: server,
+            update,
+        }) => {
             let issue = ReleaseContract::current().compare(&server).err();
             println!(
-                "Server compatibility at {server_addr}: client={:?}, server={server:?}, issue={issue:?}",
+                "Server compatibility at {server_addr}: client={:?}, server={server:?}, issue={issue:?}, update={update:?}",
                 ReleaseContract::current()
             );
-            (Some(server), issue)
+            (Some(server), issue, update)
         }
-        Err(issue) => (None, Some(issue)),
+        Err(issue) => (None, Some(issue), None),
     };
     if signals
-        .send(NetThreadSignal::Compatibility { server, issue })
+        .send(NetThreadSignal::Compatibility {
+            server,
+            issue,
+            update,
+        })
         .is_err()
         || issue.is_some()
     {
@@ -308,6 +345,12 @@ pub(in crate::net) fn run_udp_client(
             match socket.recv(&mut recv_buf) {
                 Ok(len) => {
                     consecutive_recv_errors = 0;
+                    if let Some(ours) = public_transport.server_full(&recv_buf[..len]) {
+                        if ours {
+                            let _ = signals.send(NetThreadSignal::ServerFull);
+                        }
+                        continue;
+                    }
                     if public_transport.handle_challenge(&socket, &recv_buf[..len]) {
                         continue;
                     }
@@ -607,6 +650,7 @@ mod tests {
         let worker = thread::spawn(move || {
             run_udp_client(
                 address,
+                GameService::Lobby,
                 outgoing_rx,
                 incoming_tx,
                 signals_tx,
@@ -643,7 +687,7 @@ mod tests {
         server
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
-        let socket = connect_udp_server(server.local_addr().unwrap()).unwrap();
+        let socket = connect_udp_server(GameService::Lobby, server.local_addr().unwrap()).unwrap();
         socket.set_nonblocking(true).unwrap();
         let worker =
             thread::spawn(move || verify_server_compatibility(&socket, Duration::from_secs(2)));
@@ -651,7 +695,13 @@ mod tests {
         let (len, peer) = server.recv_from(&mut bytes).unwrap();
         let mut contract = ReleaseContract::current();
         contract.release = "99.2.3".into();
-        let reply = shared::compatibility::response(&bytes[..len], &contract).unwrap();
+        let notice = UpdateNotice {
+            min_release: "99.2.3".into(),
+            url: Some("https://portal.example/download".into()),
+        };
+        let reply =
+            shared::compatibility::response_with_update(&bytes[..len], &contract, Some(&notice))
+                .unwrap();
         let mut stale: serde_json::Value = serde_json::from_slice(&reply).unwrap();
         stale["nonce"] = "00".repeat(16).into();
         server
@@ -659,13 +709,19 @@ mod tests {
             .unwrap();
         server.send_to(b"{}", peer).unwrap();
         server.send_to(&reply, peer).unwrap();
-        assert_eq!(worker.join().unwrap(), Ok(contract));
+        assert_eq!(
+            worker.join().unwrap(),
+            Ok(ServerReport {
+                contract,
+                update: Some(notice),
+            })
+        );
     }
 
     #[test]
     fn compatibility_timeout_is_unknown_never_compatible_or_protocol_mismatch() {
         let server = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let socket = connect_udp_server(server.local_addr().unwrap()).unwrap();
+        let socket = connect_udp_server(GameService::Lobby, server.local_addr().unwrap()).unwrap();
         socket.set_nonblocking(true).unwrap();
         assert_eq!(
             verify_server_compatibility(&socket, Duration::from_millis(60)),
@@ -688,7 +744,8 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
         let server_address = server.local_addr().unwrap();
-        let client = connect_udp_server(server_address).expect("connect matching IP family");
+        let client = connect_udp_server(GameService::Lobby, server_address)
+            .expect("connect matching IP family");
         client
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
@@ -750,7 +807,7 @@ mod tests {
             addresses: vec!["[::1]:0".parse().unwrap(), address],
             error: None,
         };
-        let client = connect_udp_server(resolver).unwrap();
+        let client = connect_udp_server(GameService::Lobby, resolver).unwrap();
         assert_eq!(calls.get(), 1);
         assert_eq!(client.peer_addr().unwrap(), address);
     }
@@ -764,7 +821,9 @@ mod tests {
             error: None,
         };
         assert_eq!(
-            connect_udp_server(empty).unwrap_err().kind(),
+            connect_udp_server(GameService::Lobby, empty)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::AddrNotAvailable
         );
         assert_eq!(calls.get(), 1);
@@ -773,7 +832,7 @@ mod tests {
             addresses: vec![],
             error: Some(io::ErrorKind::NotFound),
         };
-        let error = connect_udp_server(failed).unwrap_err();
+        let error = connect_udp_server(GameService::Lobby, failed).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert_eq!(error.to_string(), "resolution failed");
         assert_eq!(calls.get(), 2);
@@ -784,7 +843,7 @@ mod tests {
         let attempted = Cell::new(0);
         let candidates = std::iter::repeat("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .inspect(|_| attempted.set(attempted.get() + 1));
-        let error = connect_resolved_udp_server(candidates).unwrap_err();
+        let error = connect_resolved_udp_server(GameService::Lobby, candidates).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert_eq!(attempted.get(), MAX_RESOLVED_SERVER_ADDRESSES);
     }

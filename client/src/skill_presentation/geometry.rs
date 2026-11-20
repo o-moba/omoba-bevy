@@ -51,7 +51,7 @@ pub(crate) const ANCHOR_RADIUS: f32 = 0.5;
 pub(crate) const SOUL_RADIUS: f32 = 0.35;
 
 /// The `radius` an effect of this skill and kind is replicated with: the catalog value of
-/// the skill for the effect of the first cast (`common/src/skills/mod.rs:1456-1488`), a
+/// the skill for the effect of the first cast (`effects` in `common/src/skills/mod.rs`), a
 /// server literal for an auxiliary object. The parser sizes body parts against it; a
 /// drawn boundary always takes the received value.
 pub(crate) fn replicated_radius(id: SkillId, kind: EffectVisualKind) -> f32 {
@@ -76,6 +76,20 @@ fn catalog_radius(id: SkillId) -> f32 {
         | SkillEffect::ImpactRocket { radius, .. } => radius,
         SkillEffect::Beam { width, .. } => width,
         SkillEffect::WeaponToggle { .. } => 0.0,
+    }
+}
+
+/// The full-damage core of a beam as a share of its half-width: the catalog `core_width`
+/// over `width`. A target whose centre stands within it takes the whole damage and its
+/// receipt is flagged `core_hit` (`fire_beam` in `common/src/skills/mod.rs`); farther out
+/// the damage eases toward the edge (`shared::loadout::beam_damage_multiplier`). `None`
+/// for a skill whose damage does not depend on the distance from an axis.
+pub(crate) fn damage_core(id: SkillId) -> Option<f32> {
+    match skill(id).effect {
+        SkillEffect::Beam {
+            width, core_width, ..
+        } if width > 0.0 && core_width > 0.0 => Some((core_width / width).min(1.0)),
+        _ => None,
     }
 }
 
@@ -219,7 +233,8 @@ pub(crate) fn boundary_class(id: SkillId, kind: EffectVisualKind) -> GeoClass {
                 ..
             } => GeoClass::Ring,
             // Swept segment tests: every point within the radius of the segment
-            // (`common/src/skills/mod.rs:530-540`, `:1277`; `common/src/skills/advanced.rs:1206`).
+            // (`hits` and `fire_beam` in `common/src/skills/mod.rs`;
+            // `common/src/skills/advanced.rs:1206`).
             SkillEffect::Beam { .. }
             | SkillEffect::Technique {
                 action: Technique::GlacialFissure | Technique::PiercingWave,
@@ -372,7 +387,7 @@ pub(crate) fn body_fits(archetype: Archetype, id: SkillId) -> bool {
 }
 
 /// A unit the client sees, as the server's pick rules read it
-/// (`common/src/skills/mod.rs:438-506`).
+/// (`candidates` in `common/src/skills/mod.rs`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PickCandidate {
     pub kind: TargetKind,
@@ -385,7 +400,7 @@ pub(crate) struct PickCandidate {
 }
 
 /// The order in which the server breaks a tie between two candidates
-/// (`common/src/skills/mod.rs:38-48`).
+/// (`key` in `common/src/skills/mod.rs`).
 fn pick_order(candidate: &PickCandidate) -> (u8, u64) {
     let kind = match candidate.kind {
         TargetKind::Player => 0,
@@ -480,9 +495,10 @@ pub(crate) fn pick_rule(id: SkillId) -> Option<PickRule> {
 
 /// The shape of the aim preview of a skill: for its first cast, or for the press its slot
 /// offers while `recast` is replicated. A recast that ignores the aim previews nothing
-/// (`common/src/skills/mod.rs:886-900`; `common/src/skills/advanced.rs:599-611`, `:755-761`,
-/// `:803-808`); the spike recast strikes around the caster (`:617-624`) and the colossus is
-/// redirected from where it stands (`:695-707`).
+/// (the zone recast of `cast` in `common/src/skills/mod.rs`;
+/// `common/src/skills/advanced.rs:599-611`, `:755-761`, `:803-808`); the spike recast
+/// strikes around the caster (`:617-624`) and the colossus is redirected from where it
+/// stands (`:695-707`).
 pub(crate) fn preview_kind(id: SkillId, recast: bool) -> PreviewShape {
     use PreviewShape as P;
     let action = match skill(id).effect {
@@ -617,7 +633,7 @@ pub(crate) fn preview_shape(def: &SkillDefinition, ctx: &PreviewContext) -> Prev
         SkillEffect::Technique { action, .. } => Some(action),
         _ => None,
     };
-    // A directional cast without a direction is dropped (`common/src/skills/mod.rs:920-929`,
+    // A directional cast without a direction is dropped (`cast` in `common/src/skills/mod.rs`,
     // `common/src/skills/advanced.rs:437-439`); the other casts fall back to +Z.
     let dir = if def.ability.targeting == TargetingMode::Direction {
         let least = if action.is_some() { 0.001 } else { 0.0001 };
@@ -662,7 +678,7 @@ pub(crate) fn preview_shape(def: &SkillDefinition, ctx: &PreviewContext) -> Prev
         }
         PreviewShape::TrapRow => {
             if let SkillEffect::TrapLine { count, spacing, .. } = def.effect {
-                // `common/src/skills/mod.rs:930-934`, `:1022-1026`.
+                // The trap row of `cast` in `common/src/skills/mod.rs`.
                 let along = if origin.distance(aim) > 0.0001 {
                     (aim - origin).normalize()
                 } else {
@@ -1353,6 +1369,97 @@ mod tests {
         assert!(!hits(outward * beyond));
         // Nothing happens at the keeper.
         assert!(!hits(Vec2::new(0.5, 0.5)));
+    }
+
+    /// The flags of the receipts the in-process authority sends when a Dawnweaver's Horizon
+    /// Ray, aimed along +X, strikes a hero standing still at `lateral` from its axis, 12
+    /// units ahead: `core_hit` of each damage receipt that is not a Radiance burst.
+    fn ray_core_flags(lateral: f32) -> Vec<bool> {
+        use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
+        use shared::practice::PracticeCommand;
+        use shared::wire::{CharacterChoice, ClientPacket, ServerPacket};
+
+        let class = shared::HeroClass::Dawnweaver;
+        let slot = shared::loadout::preset_for_class(class)
+            .unwrap()
+            .skills()
+            .iter()
+            .position(|skill| *skill == SkillId::DawnRay)
+            .unwrap() as u8;
+        let mut session = PracticeSession::new(std::time::Instant::now());
+        session.command(ClientPacket::Join {
+            handheld: Default::default(),
+            prematch: false,
+            team: shared::map::Team::Green,
+            character: CharacterChoice::Ipfs,
+            hero_class: class,
+            avatar: None,
+            sprite_character: None,
+            session_id: None,
+            passport_ticket: None,
+        });
+        for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
+            session.command(ClientPacket::Practice { command });
+        }
+        session.bots = Default::default();
+        session.world.structures.clear();
+        session.world.minions.clear();
+        session.world.neutrals.clear();
+        let caster = session.world.players.get_mut(&LOCAL_ADDR).unwrap();
+        caster.modifiers.unlock_all = true;
+        caster.modifiers.infinite_resource = true;
+        let origin = Vec2::new(caster.hero.x, caster.hero.z);
+        let target = session
+            .world
+            .players
+            .values_mut()
+            .find(|player| player.hero.identity.is_bot)
+            .unwrap();
+        let target_id = target.hero.identity.id;
+        target.hero.x = origin.x + 12.0;
+        target.hero.z = origin.y + lateral;
+        session.command(ClientPacket::CastSkill {
+            slot,
+            aim: (origin + Vec2::X * 20.0).to_array(),
+            server_epoch: EPOCH,
+            match_id: 1,
+            request_id: 1,
+        });
+        let mut flags = std::collections::BTreeMap::new();
+        for _ in 0..30 {
+            session.advance(0.05);
+            let ServerPacket::Snapshot { combat_events, .. } = session.snapshot() else {
+                panic!("practice publishes a snapshot");
+            };
+            for event in combat_events {
+                if event.target.id == target_id && event.amount > 0.0 && !event.radiance_burst {
+                    flags.insert(event.id, event.core_hit);
+                }
+            }
+        }
+        flags.into_values().collect()
+    }
+
+    /// Parity with the in-process authority for the core the ray draws (bodies and
+    /// telegraph): a hero whose centre stands inside the drawn core takes one receipt
+    /// flagged `core_hit`, one just outside it, and one at the edge of the capsule, a
+    /// receipt without the flag.
+    #[test]
+    fn the_drawn_core_of_the_ray_is_where_the_authority_strikes_whole() {
+        let width = catalog_radius(SkillId::DawnRay);
+        let half = damage_core(SkillId::DawnRay).unwrap() * width;
+        for (lateral, core) in [
+            (0.0, true),
+            (half - 0.02, true),
+            (-(half - 0.02), true),
+            (half + 0.02, false),
+            (-(half + 0.02), false),
+            (width, false),
+        ] {
+            assert_eq!(ray_core_flags(lateral), [core], "{lateral}");
+        }
+        assert!(damage_core(SkillId::HorizonWave).is_none());
+        assert!(damage_core(SkillId::DawnBind).is_none());
     }
 
     /// A change of a mirrored literal must be deliberate. Parity against the in-process

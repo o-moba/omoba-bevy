@@ -1,7 +1,8 @@
 //! Server-side entity records: connected players, projectiles, structures,
 //! minions, neutrals, team buffs and the ECS mirror components.
 
-use std::time::{Duration, Instant};
+use shared::clock::Instant;
+use std::time::Duration;
 
 use shared::SkillSlot;
 use shared::map::{Lane, Team};

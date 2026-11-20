@@ -1,16 +1,129 @@
 //! Bounded, server-owned queue policy. Networking, authentication, match
 //! eligibility and durable settlement belong to the runtime/storage layer.
-use std::{collections::HashSet, fmt, time::Instant};
+use std::{
+    collections::HashSet,
+    fmt,
+    time::{Duration, Instant},
+};
 
 use shared::{
-    career::{MAX_PARTICIPANTS, ProfileSummary, QueueView, RatingChange, valid_profile_id},
+    career::{
+        MAX_PARTICIPANTS, NEWCOMER_MATCHES, ProfileSummary, QueueView, RatingChange,
+        valid_profile_id,
+    },
     map::Team,
 };
 
 pub const MAX_WAITING: usize = 128;
 pub const MAX_RATING_SPREAD: i32 = 300;
-pub const MAX_RATING: i32 = 5000;
+/// The widest rating spread a Ranked roster may ever have (LR-35): the base
+/// spread grows while players wait, never past this.
+pub const MAX_WIDENED_SPREAD: i32 = 600;
+pub use shared::ranked::MAX_RATING;
 pub const ELO_K: i32 = 32;
+pub const NEWCOMER_ELO_K: i32 = 48;
+
+/// How far a Ranked search may reach beyond the base cohort (LR-35, owner
+/// default O-1 amended 2026-11-05): the allowance a roster was formed with.
+/// [`CohortAllowance::BASE`] is the strict LR-08 cohort; [`CohortAllowance::MAX`]
+/// is the most the public lobby ever grants and the most the store accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CohortAllowance {
+    /// Largest rating distance between the roster's lowest and highest rating.
+    pub spread: i32,
+    /// Newcomers (fewer than 20 rated matches) and veterans may share the roster.
+    pub merge_newcomers: bool,
+}
+
+impl CohortAllowance {
+    pub const BASE: Self = Self {
+        spread: MAX_RATING_SPREAD,
+        merge_newcomers: false,
+    };
+    pub const MAX: Self = Self {
+        spread: MAX_WIDENED_SPREAD,
+        merge_newcomers: true,
+    };
+    /// Widening starts after this wait.
+    pub const WIDEN_AFTER: Duration = Duration::from_secs(120);
+    /// Every further period adds [`Self::WIDEN_STEP`] to the spread.
+    pub const WIDEN_EVERY: Duration = Duration::from_secs(60);
+    pub const WIDEN_STEP: i32 = 100;
+    /// The newcomer bracket merges with veterans after this wait.
+    pub const MERGE_NEWCOMERS_AFTER: Duration = Duration::from_secs(300);
+
+    /// The allowance for a unit that has searched Ranked for `waited`:
+    /// 300 up to 2 min, then +100 per minute (400 at 2 min, 500 at 3 min,
+    /// 600 at 4 min and beyond); newcomers merge at 5 min.
+    pub fn after_wait(waited: Duration) -> Self {
+        let spread = if waited < Self::WIDEN_AFTER {
+            MAX_RATING_SPREAD
+        } else {
+            let steps = 1 + (waited - Self::WIDEN_AFTER).as_secs() / Self::WIDEN_EVERY.as_secs();
+            let steps = i32::try_from(steps).unwrap_or(i32::MAX);
+            MAX_RATING_SPREAD.saturating_add(steps.saturating_mul(Self::WIDEN_STEP))
+        };
+        Self {
+            spread: spread.min(MAX_WIDENED_SPREAD),
+            merge_newcomers: waited >= Self::MERGE_NEWCOMERS_AFTER,
+        }
+        .clamped()
+    }
+
+    /// Never wider than [`Self::MAX`], never narrower than [`Self::BASE`].
+    pub fn clamped(self) -> Self {
+        Self {
+            spread: self.spread.clamp(MAX_RATING_SPREAD, MAX_WIDENED_SPREAD),
+            merge_newcomers: self.merge_newcomers,
+        }
+    }
+}
+
+impl Default for CohortAllowance {
+    fn default() -> Self {
+        Self::BASE
+    }
+}
+
+/// The one rated cohort policy (LR-08): `candidate` belongs to a cohort whose
+/// lowest rating is `low`'s, in the same newcomer bracket and at most
+/// [`MAX_RATING_SPREAD`] above it. The career queue, the public lobby's Ranked
+/// search and the store's rated-start check all use it.
+pub fn fits_cohort(low: &ProfileSummary, candidate: &ProfileSummary) -> bool {
+    fits_cohort_with(low, candidate, CohortAllowance::BASE)
+}
+
+/// [`fits_cohort`] under a widened `allowance` (LR-35): the same shape with the
+/// allowance's spread, and across newcomer brackets when it merges them.
+pub fn fits_cohort_with(
+    low: &ProfileSummary,
+    candidate: &ProfileSummary,
+    allowance: CohortAllowance,
+) -> bool {
+    let allowance = allowance.clamped();
+    (allowance.merge_newcomers || candidate.newcomer() == low.newcomer())
+        && candidate.rating >= low.rating
+        && rating_distance(low.rating, candidate.rating) <= i64::from(allowance.spread)
+}
+
+/// These profiles form one rated cohort: one newcomer bracket and at most
+/// [`MAX_RATING_SPREAD`] between the lowest and the highest rating. An empty
+/// set is no cohort.
+pub fn same_cohort<'a>(profiles: impl IntoIterator<Item = &'a ProfileSummary>) -> bool {
+    same_cohort_with(profiles, CohortAllowance::BASE)
+}
+
+/// [`same_cohort`] under a widened `allowance` (LR-35).
+pub fn same_cohort_with<'a>(
+    profiles: impl IntoIterator<Item = &'a ProfileSummary>,
+    allowance: CohortAllowance,
+) -> bool {
+    let profiles: Vec<_> = profiles.into_iter().collect();
+    let Some(low) = profiles.iter().copied().min_by_key(|p| p.rating) else {
+        return false;
+    };
+    profiles.iter().all(|p| fits_cohort_with(low, p, allowance))
+}
 
 #[derive(Clone, Debug)]
 pub struct WaitingPlayer {
@@ -230,21 +343,11 @@ impl Matchmaker {
         let compatible = self
             .waiting
             .iter()
-            .filter(|low| {
-                low.profile.newcomer() == entry.profile.newcomer()
-                    && low.profile.rating <= entry.profile.rating
-                    && rating_distance(low.profile.rating, entry.profile.rating)
-                        <= MAX_RATING_SPREAD as i64
-            })
+            .filter(|low| fits_cohort(&low.profile, &entry.profile))
             .map(|low| {
                 self.waiting
                     .iter()
-                    .filter(|candidate| {
-                        candidate.profile.newcomer() == entry.profile.newcomer()
-                            && candidate.profile.rating >= low.profile.rating
-                            && rating_distance(low.profile.rating, candidate.profile.rating)
-                                <= MAX_RATING_SPREAD as i64
-                    })
+                    .filter(|candidate| fits_cohort(&low.profile, &candidate.profile))
                     .count()
             })
             .max()
@@ -286,12 +389,7 @@ fn oldest_feasible_cohort(waiting: &[WaitingPlayer], needed: usize) -> Option<Ve
     for low in waiting {
         let mut candidates: Vec<_> = waiting
             .iter()
-            .filter(|entry| {
-                entry.profile.newcomer() == low.profile.newcomer()
-                    && entry.profile.rating >= low.profile.rating
-                    && rating_distance(low.profile.rating, entry.profile.rating)
-                        <= MAX_RATING_SPREAD as i64
-            })
+            .filter(|entry| fits_cohort(&low.profile, &entry.profile))
             .collect();
         if candidates.len() < needed {
             continue;
@@ -361,27 +459,34 @@ pub fn rating_changes(
     let players: Vec<_> = selection
         .participants
         .iter()
-        .map(|p| (p.waiting.player_id, p.team, p.waiting.profile.rating))
+        .map(|p| {
+            (
+                p.waiting.player_id,
+                p.team,
+                p.waiting.profile.rating,
+                p.waiting.profile.placement_matches(),
+            )
+        })
         .collect();
     rating_changes_for_players(&players, winner)
 }
 
 pub fn rating_changes_for_players(
-    players: &[(u64, Team, i32)],
+    players: &[(u64, Team, i32, u32)],
     winner: Team,
 ) -> Result<Vec<(u64, RatingChange)>, QueueError> {
     if players.is_empty() || players.len() > MAX_PARTICIPANTS || !players.len().is_multiple_of(2) {
         return Err(QueueError::InvalidSelection);
     }
     let mut identities = HashSet::new();
-    if players.iter().any(|&(id, _, rating)| {
+    if players.iter().any(|&(id, _, rating, _)| {
         id == 0 || !(0..=MAX_RATING).contains(&rating) || !identities.insert(id)
     }) {
         return Err(QueueError::InvalidSelection);
     }
     let green_count = players
         .iter()
-        .filter(|&&(_, team, _)| team == Team::Green)
+        .filter(|&&(_, team, _, _)| team == Team::Green)
         .count();
     if green_count != players.len() / 2 {
         return Err(QueueError::InvalidSelection);
@@ -389,8 +494,8 @@ pub fn rating_changes_for_players(
     let average = |team: Team| {
         players
             .iter()
-            .filter(|&&(_, t, _)| t == team)
-            .map(|&(_, _, rating)| f64::from(rating))
+            .filter(|&&(_, t, _, _)| t == team)
+            .map(|&(_, _, rating, _)| f64::from(rating))
             .sum::<f64>()
             / green_count as f64
     };
@@ -401,14 +506,21 @@ pub fn rating_changes_for_players(
     };
     let expected_win =
         1.0 / (1.0 + 10.0_f64.powf((average(losing_team) - average(winner)) / 400.0));
-    let transfer = (f64::from(ELO_K) * (1.0 - expected_win)).round() as i32;
-    // Fixed-K team outcome changes are symmetric away from the bounds. Clamp
+    // Equal-experience team outcome changes are symmetric away from bounds.
+    // Placement K is chosen per player from the locked pre-match profile; a
+    // mixed-experience roster may intentionally be non-zero-sum. Clamp
     // each player independently so a zero-rated loser cannot prevent winners
     // from progressing. Bounds intentionally make some matches non-zero-sum;
     // report the actual persisted difference, never the unclamped request.
     Ok(players
         .iter()
-        .map(|&(id, team, before)| {
+        .map(|&(id, team, before, rated_matches)| {
+            let k = if rated_matches < NEWCOMER_MATCHES {
+                NEWCOMER_ELO_K
+            } else {
+                ELO_K
+            };
+            let transfer = (f64::from(k) * (1.0 - expected_win)).round() as i32;
             let requested = if team == winner { transfer } else { -transfer };
             let after = (before + requested).clamp(0, MAX_RATING);
             (
@@ -426,7 +538,6 @@ pub fn rating_changes_for_players(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::career::NEWCOMER_MATCHES;
     use std::time::Duration;
 
     fn profile(id: u64, rating: i32, rated_matches: u32) -> ProfileSummary {
@@ -679,7 +790,10 @@ mod tests {
 
     #[test]
     fn rating_is_team_outcome_only_symmetric_and_rewards_upsets() {
-        let equal = [(1, Team::Green, 1000), (2, Team::Blue, 1000)];
+        let equal = [
+            (1, Team::Green, 1000, NEWCOMER_MATCHES),
+            (2, Team::Blue, 1000, NEWCOMER_MATCHES),
+        ];
         let win = rating_changes_for_players(&equal, Team::Green).unwrap();
         assert_eq!(
             win[0].1,
@@ -699,7 +813,10 @@ mod tests {
         );
         let reversed = rating_changes_for_players(&equal, Team::Blue).unwrap();
         assert_eq!(win[0].1.delta, -reversed[0].1.delta);
-        let unequal = [(1, Team::Green, 1000), (2, Team::Blue, 1300)];
+        let unequal = [
+            (1, Team::Green, 1000, NEWCOMER_MATCHES),
+            (2, Team::Blue, 1300, NEWCOMER_MATCHES),
+        ];
         let upset = rating_changes_for_players(&unequal, Team::Green).unwrap();
         let expected = rating_changes_for_players(&unequal, Team::Blue).unwrap();
         assert!(upset[0].1.delta > 16 && upset[0].1.delta > expected[1].1.delta);
@@ -707,12 +824,46 @@ mod tests {
     }
 
     #[test]
+    fn placement_k_uses_each_players_pre_match_count_at_the_exact_boundary() {
+        for rated_matches in [0, NEWCOMER_MATCHES - 1, NEWCOMER_MATCHES] {
+            let players = [
+                (1, Team::Green, 1000, rated_matches),
+                (2, Team::Blue, 1000, rated_matches),
+            ];
+            let changes = rating_changes_for_players(&players, Team::Green).unwrap();
+            let expected = if rated_matches < NEWCOMER_MATCHES {
+                24
+            } else {
+                16
+            };
+            assert_eq!(changes[0].1.delta, expected);
+            assert_eq!(changes[1].1.delta, -expected);
+        }
+        let mixed = [(1, Team::Green, 1000, 19), (2, Team::Blue, 1000, 20)];
+        for (winner, expected) in [(Team::Green, [24, -16]), (Team::Blue, [-24, 16])] {
+            let changes = rating_changes_for_players(&mixed, winner).unwrap();
+            assert_eq!([changes[0].1.delta, changes[1].1.delta], expected);
+        }
+        for rating in [0, MAX_RATING] {
+            let players = [(1, Team::Green, rating, 0), (2, Team::Blue, rating, 19)];
+            let changes = rating_changes_for_players(&players, Team::Green).unwrap();
+            for (_, change) in changes {
+                assert!((0..=MAX_RATING).contains(&change.after));
+                assert_eq!(change.delta, change.after - change.before);
+            }
+        }
+    }
+
+    #[test]
     fn rating_boundaries_clamp_independently_and_report_actual_non_zero_sum_deltas() {
         for players in [
-            [(1, Team::Green, 0), (2, Team::Blue, 1)],
             [
-                (1, Team::Green, MAX_RATING - 1),
-                (2, Team::Blue, MAX_RATING),
+                (1, Team::Green, 0, NEWCOMER_MATCHES),
+                (2, Team::Blue, 1, NEWCOMER_MATCHES),
+            ],
+            [
+                (1, Team::Green, MAX_RATING - 1, NEWCOMER_MATCHES),
+                (2, Team::Blue, MAX_RATING, NEWCOMER_MATCHES),
             ],
         ] {
             for winner in [Team::Green, Team::Blue] {
@@ -724,13 +875,19 @@ mod tests {
                 }
             }
         }
-        let zero_cohort = [(1, Team::Green, 0), (2, Team::Blue, 0)];
+        let zero_cohort = [
+            (1, Team::Green, 0, NEWCOMER_MATCHES),
+            (2, Team::Blue, 0, NEWCOMER_MATCHES),
+        ];
         let changes = rating_changes_for_players(&zero_cohort, Team::Green).unwrap();
         assert_eq!(changes[0].1.after, 16);
         assert_eq!(changes[0].1.delta, 16);
         assert_eq!(changes[1].1.after, 0);
         assert_eq!(changes[1].1.delta, 0);
-        let upper_cohort = [(1, Team::Green, MAX_RATING), (2, Team::Blue, MAX_RATING)];
+        let upper_cohort = [
+            (1, Team::Green, MAX_RATING, NEWCOMER_MATCHES),
+            (2, Team::Blue, MAX_RATING, NEWCOMER_MATCHES),
+        ];
         let changes = rating_changes_for_players(&upper_cohort, Team::Green).unwrap();
         assert_eq!(changes[0].1.after, MAX_RATING);
         assert_eq!(changes[0].1.delta, 0);
@@ -738,11 +895,23 @@ mod tests {
         assert_eq!(changes[1].1.delta, -16);
         for bad in [
             vec![],
-            vec![(1, Team::Green, 1000)],
-            vec![(1, Team::Green, 1000), (1, Team::Blue, 1000)],
-            vec![(1, Team::Green, -1), (2, Team::Blue, 1000)],
-            vec![(1, Team::Green, MAX_RATING + 1), (2, Team::Blue, 1000)],
-            vec![(1, Team::Green, 1000), (2, Team::Green, 1000)],
+            vec![(1, Team::Green, 1000, NEWCOMER_MATCHES)],
+            vec![
+                (1, Team::Green, 1000, NEWCOMER_MATCHES),
+                (1, Team::Blue, 1000, NEWCOMER_MATCHES),
+            ],
+            vec![
+                (1, Team::Green, -1, NEWCOMER_MATCHES),
+                (2, Team::Blue, 1000, NEWCOMER_MATCHES),
+            ],
+            vec![
+                (1, Team::Green, MAX_RATING + 1, NEWCOMER_MATCHES),
+                (2, Team::Blue, 1000, NEWCOMER_MATCHES),
+            ],
+            vec![
+                (1, Team::Green, 1000, NEWCOMER_MATCHES),
+                (2, Team::Green, 1000, NEWCOMER_MATCHES),
+            ],
         ] {
             assert_eq!(
                 rating_changes_for_players(&bad, Team::Green),
@@ -778,6 +947,81 @@ mod tests {
         assert!(matches!(
             queue.reserve_match(17),
             Err(QueueError::InvalidTeamSize)
+        ));
+    }
+
+    /// LR-08: one cohort policy for the queue, the lobby and the store.
+    #[test]
+    fn one_cohort_is_one_newcomer_bracket_within_the_spread() {
+        let newcomer = profile(1, 1000, 0);
+        let veteran = profile(2, 1000, NEWCOMER_MATCHES);
+        let edge = profile(3, 1000 + MAX_RATING_SPREAD, 0);
+        let beyond = profile(4, 1001 + MAX_RATING_SPREAD, 0);
+        assert!(same_cohort([&newcomer, &edge]));
+        assert!(same_cohort([&edge, &newcomer]), "order does not matter");
+        assert!(!same_cohort([&newcomer, &beyond]));
+        assert!(!same_cohort([&newcomer, &veteran]));
+        assert!(!same_cohort(std::iter::empty::<&ProfileSummary>()));
+        assert!(fits_cohort(&newcomer, &edge));
+        assert!(!fits_cohort(&edge, &newcomer), "below the cohort's low");
+        // The party of the LR-08 report: a 1000 newcomer and a 1400 veteran.
+        assert!(!same_cohort([
+            &newcomer,
+            &profile(5, 1400, NEWCOMER_MATCHES)
+        ]));
+    }
+
+    /// LR-35: the allowance grows with the wait and never past the maximum;
+    /// the widened policy admits what the base refuses and nothing beyond.
+    #[test]
+    fn the_ranked_window_widens_with_the_wait_up_to_the_maximum() {
+        let at = |secs| CohortAllowance::after_wait(Duration::from_secs(secs));
+        assert_eq!(at(0), CohortAllowance::BASE);
+        assert_eq!(at(119), CohortAllowance::BASE);
+        assert_eq!(at(120).spread, 400);
+        assert_eq!(at(179).spread, 400);
+        assert_eq!(at(180).spread, 500);
+        assert_eq!(at(240).spread, 600);
+        assert_eq!(at(3600).spread, MAX_WIDENED_SPREAD);
+        assert!(!at(299).merge_newcomers);
+        assert!(at(300).merge_newcomers);
+        assert_eq!(at(86_400), CohortAllowance::MAX);
+        assert_eq!(
+            CohortAllowance {
+                spread: 9000,
+                merge_newcomers: true
+            }
+            .clamped(),
+            CohortAllowance::MAX
+        );
+        assert_eq!(
+            CohortAllowance {
+                spread: 10,
+                merge_newcomers: false
+            }
+            .clamped(),
+            CohortAllowance::BASE
+        );
+
+        let newcomer = profile(1, 1000, 0);
+        let veteran = profile(2, 1000, NEWCOMER_MATCHES);
+        let far = profile(3, 1500, 0);
+        let too_far = profile(4, 1601, 0);
+        assert!(!fits_cohort_with(&newcomer, &far, at(0)));
+        assert!(!fits_cohort_with(&newcomer, &far, at(120)));
+        assert!(fits_cohort_with(&newcomer, &far, at(180)));
+        assert!(!fits_cohort_with(&newcomer, &too_far, CohortAllowance::MAX));
+        assert!(!fits_cohort_with(&newcomer, &veteran, at(299)));
+        assert!(fits_cohort_with(&newcomer, &veteran, at(300)));
+        assert!(same_cohort_with([&newcomer, &far], at(180)));
+        assert!(!same_cohort_with([&newcomer, &far], at(0)));
+        assert!(same_cohort_with(
+            [&newcomer, &veteran, &far],
+            CohortAllowance::MAX
+        ));
+        assert!(!same_cohort_with(
+            [&newcomer, &too_far],
+            CohortAllowance::MAX
         ));
     }
 }

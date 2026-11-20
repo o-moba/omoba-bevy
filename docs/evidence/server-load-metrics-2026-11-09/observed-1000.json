@@ -1,0 +1,121 @@
+{
+  "clients": 1000,
+  "status": "PASS",
+  "soak_seconds": 120.0,
+  "elapsed_seconds": 165.22113112499937,
+  "all_running_after_seconds": 44.11526095797308,
+  "input": {
+    "requested_hz": 20,
+    "successful_signed_transforms_per_second": {
+      "min": 19.834248050520216,
+      "p05": 19.910601572387147,
+      "p50": 19.967557275653032,
+      "p95": 19.99967794418318,
+      "max": 20.000273150009082
+    },
+    "cached_snapshot_transforms": {
+      "total": 809669,
+      "min_per_peer": 408
+    },
+    "all_peers_within_2_5_percent": true,
+    "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+  },
+  "wire": {
+    "bytes_per_second_per_player": {
+      "p50": 61423.83227405536,
+      "p95": 75215.3264657917,
+      "p99": 77769.83337317433,
+      "max": 78403.23606733885
+    },
+    "accepted_snapshots_per_second_per_player": {
+      "p50": 13.02459360685144,
+      "p05": 12.018041035667473
+    },
+    "observed_broadcast_tick_span_per_second_per_player": {
+      "p50": 14.013067228799985,
+      "p05": 13.004349231008458
+    },
+    "accepted_fraction_of_observed_tick_span": {
+      "p50": 0.9294680215182307,
+      "p05": 0.9243104554201411
+    },
+    "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+  },
+  "server_load": {
+    "totals": {
+      "transport_commands": 3166007,
+      "gameplay_transforms": 2712856,
+      "sequence_gaps": 0,
+      "sequence_restarts": 0,
+      "snapshots": 1858997
+    },
+    "all_endpoints_without_sequence_gaps": true,
+    "all_endpoints_without_sequence_restarts": true,
+    "broadcasts": 188205,
+    "broadcast_gaps": {
+      "count": 188105,
+      "total_us": 13843790467,
+      "buckets": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        43484,
+        126160,
+        4590,
+        3003,
+        4225,
+        6106,
+        537,
+        0
+      ],
+      "mean_us": 73596.07914196858,
+      "p95_exclusive_upper_us": 250000,
+      "p99_exclusive_upper_us": 500000
+    },
+    "latest_transform_age_at_snapshot": {
+      "count": 1854112,
+      "total_us": 64649624459,
+      "buckets": [
+        490353,
+        25585,
+        17089,
+        625549,
+        489318,
+        58498,
+        17278,
+        11587,
+        19410,
+        40313,
+        55737,
+        3395,
+        0
+      ],
+      "mean_us": 34868.2412168197,
+      "p95_exclusive_upper_us": 250000,
+      "p99_exclusive_upper_us": 500000
+    }
+  },
+  "aggregate_received_bytes_per_second": 62457526.87207613,
+  "aggregate_received_mbit_per_second": 499.66021497660904,
+  "server_sha256": "f8c6daad7fbd556f1b64769ce99240e127033c9c9b254345d6576ad2b747e2d8",
+  "bots_sha256": "5ee8d341de8c0d4e2b3f063d561f14408c33cf5623f66d73a2cb68a8dafc3234",
+  "source_sha256": {
+    "scripts/public_playing_capacity.py": "9e55c9132df7d4ee50de9915b3f6024a6f7423fff421f8d8905bb3186f4a6702",
+    "scripts/public_bots_rehearsal.py": "6aa99b8f6f4f40571e1857fa86c738dccb9ad000670980883e9fcc2d7b073cac",
+    "harness/src/bin/bots.rs": "e367bb20023abb170176dad664f9007916d5de14e7f574f745ebc46d98116f71",
+    "harness/src/bot.rs": "899a3e91bec6cffac76b277e4e981d45adf0131e6ba6f4a783824d91f61c0d97",
+    "harness/src/public_client.rs": "8cdd4848a51779f3ef57ec63b3ee6487fae653b2277e38f0e583a2ef4d1debf4",
+    "server/src/main.rs": "574fed414663eda587682a659b67ac7de8570f5936391a6b0041027466d739aa",
+    "server/src/load_metrics.rs": "2a0b2c214cfb93183bc342873dbdfa12d962a049a5e4995c40587a7b29d598b7",
+    "server/src/public_transport.rs": "e341b67159c160e444639e8f6f274cabb409b7c6f8ff330ff5df32d8b213fdaf",
+    "server/src/runtime/dispatch.rs": "e240458dedc5b2988865acfcfe9117a00c527ad03658b3ac4f627ffbe5e87077",
+    "server/src/runtime/mod.rs": "87a80bf51d4c25c166d774510088d272b582bf927a3d8f189081ff18cb257125",
+    "server/src/snapshot.rs": "c867c37bbf3fe9eddf2a6e49a548ba34124f7b22b844cd46dc2df634969f65b3",
+    "Cargo.lock": "7f9d507b2d24608ca9ee045a8e96fca981c3d7b163bd7ad705dc3aff34931b14",
+    "shared/src/lib.rs": "b428d4d87b6a6281fe526959e9d7162252108bb147d357659f074aaca0277ed4",
+    "shared/src/transport.rs": "4039272ce723e8ccc13b30abbc1f059fdaf721257e4187f2544d16b8d4f15cd7",
+    "shared/src/protocol.rs": "4fed0addc8cef8694d28b911af10f75983c475a6c788a41dff1c4479596df5a4"
+  }
+}

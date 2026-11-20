@@ -1,0 +1,81 @@
+{
+  "status": "rejected-not-acceptance",
+  "binary_sha256": "a54fdaa13b27540825ea342d2a04ced0b039d4870a3763168b047dcae9519d61",
+  "source_ui_revision": "e85875ba6e535bba1236cc597c8e640059f3d47f",
+  "attempts": [
+    {
+      "scene": "remade-result",
+      "exit": 1,
+      "screen_locked_at_launch": true,
+      "panic_observed": false,
+      "seconds": 124.99,
+      "summary": null
+    },
+    {
+      "scene": "remake-prompt",
+      "exit": 1,
+      "screen_locked_at_launch": true,
+      "panic_observed": false,
+      "seconds": 12.64,
+      "summary": {
+        "color_pixels": false,
+        "controls": [
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "MatchVotePromptYes",
+            "min": [
+              284.0,
+              147.0
+            ],
+            "size": [
+              284.0,
+              44.0
+            ]
+          },
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "MatchVotePromptNo",
+            "min": [
+              284.0,
+              197.0
+            ],
+            "size": [
+              284.0,
+              44.0
+            ]
+          }
+        ],
+        "expected_visible_text": "Против",
+        "locale": "ru",
+        "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+        "physical_device": false,
+        "real_admission_or_gameplay": false,
+        "scene": "RemakePrompt",
+        "screen": "InMatch",
+        "status": "failed",
+        "synthetic_state": true,
+        "viewport": [
+          852,
+          393
+        ]
+      }
+    }
+  ],
+  "findings": [
+    "Remake fixture still supplied a Green Victory snapshot with a winner-less Remade receipt. Production PostMatch correctly retained Victory and refused the conflicting receipt. The QA fixture is corrected to retain Running until the terminal career receipt; no live-result acceptance rule was weakened.",
+    "Locked-window prompt attempt had correct visible UI geometry but color_pixels=false and was rejected. No accepted new game image exists.",
+    "Separate no-window Bevy texture-render diagnostic succeeded in12.29s with a readable852x393 image; Mac reported locked after capture. This only establishes feasibility for a future opt-in application QA integration. It is not C5/game/physical acceptance."
+  ],
+  "fix_sources_sha256": {
+    "client/src/qa/result_qa.rs": "1ab50f42695ded4c3015ac118dab9b150ce97b5c290d4e97d4a168d4d0f5366e",
+    "client/src/frontend/postmatch.rs": "c463b4c08e20ff373518cdcb88a0fc46968ff56abc0de5d4ef33baa7e9a323b2"
+  },
+  "current_targeted_checks": {
+    "postmatch": 18,
+    "failures": 0,
+    "strict_client_lib_test_clippy": "PASS",
+    "pixel_acceptance": "pending new build and actual game render"
+  }
+}

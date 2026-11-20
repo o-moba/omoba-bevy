@@ -1,6 +1,6 @@
 use crate::game_world::GameWorld;
+use shared::clock::Instant;
 use shared::wire::PlayerState;
-use std::time::Instant;
 /// Replicated player list for the recipient with hero id `recipient`: their
 /// own entry is the `owner_view`, everyone else (teammates included) the
 /// redacted `public_view`; `None` redacts every entry. Only joined players

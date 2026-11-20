@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_repository": "o-moba/omoba-bevy",
+  "source_commit": "dad1e4f68f7301fdfd7001dc0705abfc75a87605",
+  "archive_repository": "o-moba/omoba-bevy-archive",
+  "release_tag": "evidence-ranked-dad1e4f6",
+  "release_url": "https://github.com/o-moba/omoba-bevy-archive/releases/tag/untagged-1cb018532e3fa86c9d6c",
+  "asset": "omoba-ranked-evidence-dad1e4f6.tar.gz",
+  "asset_url": "https://github.com/o-moba/omoba-bevy-archive/releases/download/evidence-ranked-dad1e4f6/omoba-ranked-evidence-dad1e4f6.tar.gz",
+  "archive_bytes": 59321682,
+  "archive_sha256": "5f163c6d8bb3acc97f13cbe028116a1881950017cba790896137b70d86c5cea8",
+  "archived_files": 1321,
+  "archive_root": "docs/evidence",
+  "storage": "Private draft release asset; this is an evidence archive, not a game release.",
+  "restore": "python3 docs/evidence/restore.py",
+  "notes": "The archive contains every evidence file tracked at source_commit before payload externalization. Restore it at the repository root to run the retained verifiers unchanged."
+}

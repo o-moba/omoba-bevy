@@ -1,0 +1,18 @@
+{
+  "legal.card.title": "Перед игрой",
+  "legal.card.body": "Чтобы играть в OMOBA, прочитайте и примите Пользовательское соглашение и Политику конфиденциальности.",
+  "legal.card.version": "Версия документов: {version}",
+  "legal.card.language": "Язык",
+  "legal.card.accept": "Я принимаю Пользовательское соглашение и Политику конфиденциальности",
+  "legal.card.continue": "Продолжить",
+  "legal.link.terms": "Пользовательское соглашение",
+  "legal.link.privacy": "Политика конфиденциальности",
+  "legal.link.source": "Исходный код",
+  "legal.link.community_vk": "Сообщество ВКонтакте",
+  "legal.link.community_telegram": "Канал в Telegram",
+  "legal.link.failed": "Браузер не открылся. Адрес: {url}",
+  "legal.about.title": "Об игре",
+  "legal.about.build": "Сборка: {build}",
+  "legal.about.age": "Возрастная категория",
+  "legal.about.support": "Поддержка: {email}"
+}

@@ -2,7 +2,7 @@
 //! catalog. Each match is exhaustive, so a new effect or technique does not compile until
 //! its answer is written here. Server anchors name the rule each answer mirrors.
 use super::vocab::{MotionPhase, StageRule};
-use shared::loadout::{EffectVisualKind, SkillEffect, SkillId, Technique, skill};
+use shared::loadout::{BEAM_LINGER_SECS, EffectVisualKind, SkillEffect, SkillId, Technique, skill};
 use shared::{HeroClass, SkillSlot, TargetingMode};
 
 /// A row of the registry: a modular skill or an ability of one of the five legacy classes.
@@ -85,7 +85,7 @@ pub(crate) fn category(key: SkillKey) -> Category {
 }
 
 /// Kinds the effect created by the first cast can replicate
-/// (`common/src/skills/mod.rs:1457-1490`; the `persistent` arms of
+/// (`effects` in `common/src/skills/mod.rs`; the `persistent` arms of
 /// `common/src/skills/advanced.rs:588-1039`). A row's `body` is bound to these.
 pub(crate) fn own_kinds(id: SkillId) -> &'static [EffectVisualKind] {
     use EffectVisualKind as K;
@@ -180,7 +180,7 @@ pub(crate) const fn unstable_id(kind: EffectVisualKind) -> bool {
 }
 
 /// Kinds replicated with `end` one unit ahead of `position`: a heading and nothing more
-/// (`common/src/skills/mod.rs:1498-1503`).
+/// (`effects` in `common/src/skills/mod.rs`).
 pub(crate) const fn heading_only(kind: EffectVisualKind) -> bool {
     matches!(
         kind,
@@ -235,10 +235,10 @@ pub(crate) fn stage_rule(id: SkillId, kind: EffectVisualKind) -> StageRule {
         return StageRule::Active;
     }
     match skill(id).effect {
-        // Armed after `arm_secs` (`common/src/skills/mod.rs:1028`).
+        // Armed after `arm_secs` (`cast` in `common/src/skills/mod.rs`).
         SkillEffect::TrapLine { .. } => StageRule::ArmedGate,
-        // A warning until it fires, then a beam on the same id
-        // (`common/src/skills/mod.rs:1479-1484`).
+        // A warning until it fires, then a beam on the same id (`effects` in
+        // `common/src/skills/mod.rs`).
         SkillEffect::Beam { .. } => StageRule::KindGate,
         SkillEffect::LinearProjectile { .. }
         | SkillEffect::ReturningShield { .. }
@@ -248,8 +248,8 @@ pub(crate) fn stage_rule(id: SkillId, kind: EffectVisualKind) -> StageRule {
         SkillEffect::Technique { action, .. } => match action {
             // The pillar arms 0.65 s after the cast (`common/src/skills/advanced.rs:660`).
             Technique::TerrainLine => StageRule::ArmedGate,
-            // A warning until armed, then a bolt on the same id
-            // (`common/src/skills/mod.rs:1466-1468`).
+            // A warning until armed, then a bolt on the same id (`effects` in
+            // `common/src/skills/mod.rs`).
             Technique::PiercingWave => StageRule::KindGate,
             // Replicated as a telegraph until the firing tick removes it
             // (`common/src/skills/advanced.rs:1157-1204`).
@@ -328,15 +328,15 @@ const CONE_ARM_SHARE: f32 = 0.8;
 /// Mirror Guard and Orbital Collapse are removed 0.2 s after they arm, in the firing tick
 /// (`common/src/skills/advanced.rs:739`, `:991-996`).
 const FUSE_TAIL_SECS: f32 = 0.2;
-/// A beam lives 0.15 s past its windup (`common/src/skills/mod.rs:1015`).
-const BEAM_TAIL_SECS: f32 = 0.15;
 
 /// `(telegraph, tail)`: how long the effect is a telegraph and what `remaining_secs` reads
 /// when the telegraph ends. Only skills with a timed telegraph have one.
 fn telegraph(id: SkillId) -> Option<(f32, f32)> {
     let def = skill(id);
     match def.effect {
-        SkillEffect::Beam { .. } => Some((def.windup_secs, BEAM_TAIL_SECS)),
+        // A beam lives `BEAM_LINGER_SECS` past its windup (`cast` and `tick` in
+        // `common/src/skills/mod.rs`).
+        SkillEffect::Beam { .. } => Some((def.windup_secs, BEAM_LINGER_SECS)),
         SkillEffect::Technique {
             action,
             duration_secs,
@@ -452,7 +452,8 @@ pub(crate) fn can_damage(key: SkillKey) -> bool {
 
 /// Whether one cast keeps travelling through a target it damaged: beams, projectiles with
 /// more than one hit, and the three bodies the server lets fly on
-/// (`common/src/skills/mod.rs:1194`, `:1277`; `common/src/skills/advanced.rs:1388-1393`).
+/// (`tick` and `fire_beam` in `common/src/skills/mod.rs`;
+/// `common/src/skills/advanced.rs:1388-1393`).
 pub(crate) fn pierces(key: SkillKey) -> bool {
     let Some(id) = key.modular() else {
         return false;
@@ -473,7 +474,7 @@ pub(crate) fn pierces(key: SkillKey) -> bool {
 }
 
 /// Whether the skill damages every hostile in a disc around one point at one moment
-/// (`common/src/skills/mod.rs:1076-1078`, `:1417-1419`;
+/// (`detonate` and the rocket of `tick` in `common/src/skills/mod.rs`;
 /// `common/src/skills/advanced.rs:346-349`, `:810-817`, `:1015-1019`, `:1158-1162`).
 pub(crate) fn area_damage(key: SkillKey) -> bool {
     let Some(id) = key.modular() else {
@@ -498,7 +499,8 @@ pub(crate) fn area_damage(key: SkillKey) -> bool {
 }
 
 /// Whether the replicated slot can report `can_recast` for this skill
-/// (`common/src/skills/mod.rs:886-901`; the `recast` calls of `common/src/skills/advanced.rs`).
+/// (the zone recast of `cast` in `common/src/skills/mod.rs`; the `recast` calls of
+/// `common/src/skills/advanced.rs`).
 pub(crate) fn has_recast(id: SkillId) -> bool {
     match skill(id).effect {
         SkillEffect::RecastZone { .. } => true,
@@ -522,7 +524,7 @@ pub(crate) fn has_recast(id: SkillId) -> bool {
 }
 
 /// Whether the zone bursts when it is recast or runs out
-/// (`common/src/skills/mod.rs:895-897`, `:1124-1126`).
+/// (`detonate`, from `cast` and `tick` in `common/src/skills/mod.rs`).
 pub(crate) fn detonates(id: SkillId) -> bool {
     matches!(skill(id).effect, SkillEffect::RecastZone { .. })
 }
@@ -609,10 +611,14 @@ pub(crate) enum StrikeOrigin {
 }
 
 /// Skills that move first and then pick from the new position are anchored at the arrival
-/// (`common/src/skills/advanced.rs:674-686`, `:726-727`, `:776`, `:901-923`).
+/// (`common/src/skills/advanced.rs:674-686`, `:726-727`, `:776`, `:901-923`). A zone that
+/// bursts does so where it stands, however far from its caster, when it is recast and when
+/// it runs out (`detonate` in `common/src/skills/mod.rs`).
 pub(crate) fn strike_origin(id: SkillId, recast: bool) -> StrikeOrigin {
-    let SkillEffect::Technique { action, .. } = skill(id).effect else {
-        return StrikeOrigin::Origin;
+    let action = match skill(id).effect {
+        SkillEffect::Technique { action, .. } => action,
+        SkillEffect::RecastZone { .. } => return StrikeOrigin::EffectPosition,
+        _ => return StrikeOrigin::Origin,
     };
     match action {
         Technique::CollisionCharge
@@ -933,6 +939,8 @@ mod tests {
             assert!(close(telegraph_secs(id), telegraph), "{}", id.id());
             assert!(close(tail_secs(id), tail), "{}", id.id());
         }
+        // The beam's tail is the server's linger, read from the shared constant.
+        assert_eq!(tail_secs(SkillId::DawnRay), Some(BEAM_LINGER_SECS));
         assert_eq!(
             modular_where(|id| telegraph_secs(id).is_some()),
             [
@@ -1106,17 +1114,20 @@ mod tests {
                 "sheltering_leap",
             ]
         );
-        assert_eq!(
-            modular_where(|id| strike_origin(id, false) == StrikeOrigin::EffectPosition),
-            ["mirror_guard"]
-        );
+        // The riposte and the burst of a field leave from the effect, not from the hand.
+        for recast in [false, true] {
+            assert_eq!(
+                modular_where(|id| strike_origin(id, recast) == StrikeOrigin::EffectPosition),
+                ["dawn_field", "mirror_guard"]
+            );
+        }
         for id in [
             SkillId::Nightfall,
             SkillId::ShadowLash,
             SkillId::ChainSweep,
             SkillId::ThunderPulse,
             SkillId::ThunderKick,
-            SkillId::DawnField,
+            SkillId::DawnRay,
         ] {
             assert_eq!(
                 strike_origin(id, false),

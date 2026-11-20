@@ -26,7 +26,7 @@ use crate::{
 };
 
 const SETTLE_FRAMES: u32 = 32;
-const VIEWS: [(&str, CareerModal, f32); 9] = [
+const VIEWS: [(&str, CareerModal, f32); 10] = [
     ("01-profile.png", CareerModal::Profile, 0.0),
     ("02-friends-code.png", CareerModal::Friends, 0.0),
     ("03-friends-list.png", CareerModal::Friends, 350.0),
@@ -36,6 +36,7 @@ const VIEWS: [(&str, CareerModal, f32); 9] = [
     ("07-website-account.png", CareerModal::WebLink, 0.0),
     ("08-devices.png", CareerModal::Devices, 0.0),
     ("09-result-bottom.png", CareerModal::Result, 100000.0),
+    ("10-protect.png", CareerModal::Protect, 0.0),
 ];
 
 pub(crate) struct CareerVisualQaPlugin;
@@ -62,6 +63,11 @@ impl Plugin for CareerVisualQaPlugin {
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
             stage: 0,
+            views: if super::ranked_fixture::enabled() {
+                vec![0, 2, 5]
+            } else {
+                (0..VIEWS.len()).collect()
+            },
             applied_stage: None,
             settled: 0,
             in_flight: false,
@@ -86,6 +92,7 @@ struct CareerQa {
     started: Instant,
     pixels: UVec2,
     stage: usize,
+    views: Vec<usize>,
     applied_stage: Option<usize>,
     settled: u32,
     in_flight: bool,
@@ -116,7 +123,9 @@ fn watermark(mut commands: Commands) {
 }
 
 fn profile(id: char, nickname: &str) -> ProfileSummary {
-    ProfileSummary {
+    let mut profile = ProfileSummary {
+        ranked: None,
+        completed_public_matches: 10,
         profile_id: id.to_string().repeat(64),
         nickname: format!("{nickname}#{:04}", id as u32),
         rating: 1210,
@@ -124,8 +133,11 @@ fn profile(id: char, nickname: &str) -> ProfileSummary {
         matches_played: 12,
         wins: 7,
         losses: 5,
+        abandons: 0,
         progression_xp: 2450,
-    }
+    };
+    super::ranked_fixture::apply_profile(&mut profile);
+    profile
 }
 
 fn fixture() -> CareerView {
@@ -140,6 +152,8 @@ fn fixture() -> CareerView {
     let classes = [HeroClass::Warrior, HeroClass::Mage, HeroClass::Ranger];
     let participants: Vec<_> = (0..10)
         .map(|index| ParticipantResult {
+            input_kind: Default::default(),
+            participation: None,
             is_bot: false,
             player_id: index + 1,
             profile_id: Some(if index == 0 {
@@ -177,6 +191,9 @@ fn fixture() -> CareerView {
         })
         .collect();
     let result = MatchResult {
+        ranked_season_id: None,
+        gameplay_started: true,
+        end_reason: None,
         result_id: "QA-FIXTURE-NOT-A-SAVED-MATCH".into(),
         server_epoch: 999,
         match_id: 1,
@@ -251,7 +268,7 @@ fn prepare(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut scrolls: Query<(crate::qa::QaName, &mut ScrollPosition)>,
 ) {
-    if qa.finished || qa.stage >= VIEWS.len() {
+    if qa.finished || qa.stage >= qa.views.len() {
         return;
     }
     if let Ok(mut window) = windows.single_mut() {
@@ -265,13 +282,13 @@ fn prepare(
         }
     }
     if qa.applied_stage != Some(qa.stage) {
-        career.present_visual_fixture(fixture(), VIEWS[qa.stage].1);
+        career.present_visual_fixture(fixture(), VIEWS[qa.views[qa.stage]].1);
         qa.applied_stage = Some(qa.stage);
         qa.settled = 0;
     }
     for (name, mut scroll) in &mut scrolls {
         if name.as_str() == "CareerBody" {
-            scroll.y = VIEWS[qa.stage].2;
+            scroll.y = VIEWS[qa.views[qa.stage]].2;
         }
     }
 }
@@ -321,7 +338,7 @@ fn observe(
         if !qa.readbacks.contains(&qa.stage)
             || !qa
                 .directory
-                .join(VIEWS[qa.stage].0)
+                .join(VIEWS[qa.views[qa.stage]].0)
                 .metadata()
                 .is_ok_and(|file| file.len() > 32)
         {
@@ -329,7 +346,7 @@ fn observe(
         }
         qa.stage += 1;
         qa.in_flight = false;
-        if qa.stage == VIEWS.len() {
+        if qa.stage == qa.views.len() {
             let summary = serde_json::json!({"status":"passed", "scenario":"career-ui-fixture", "version":env!("CARGO_PKG_VERSION"), "method":"real Bevy primary_window ScreenshotCaptured + save_to_disk", "fixture":true, "live_account_or_database_evidence":false, "manual_input_verified":false, "physical_phone_verified":false, "settle_frames":SETTLE_FRAMES, "captures":qa.captures});
             let saved = std::fs::write(
                 qa.directory.join("qa-summary.json"),
@@ -431,7 +448,7 @@ fn observe(
                 })
         });
     let node_json: Vec<_> = measured.iter().map(|(name, min, size, visible)| serde_json::json!({"name":name,"min":min.to_array(),"size":size.to_array(),"visible":visible})).collect();
-    let record = serde_json::json!({"file":VIEWS[qa.stage].0,"frame":qa.settled,"modal":format!("{:?}",VIEWS[qa.stage].1),"mobile":mobile,"ui_profile":if mobile {"Mobile"}else{"Desktop"},"pixels":viewport.to_array(),"logical_dimensions":[window.width(),window.height()],"scroll_y":VIEWS[qa.stage].2,"fixture":true,"primary_roots_fit":primary_fit,"header_buttons_fit":header_fit,"header_buttons_do_not_overlap":header_no_overlap,"nodes":node_json});
+    let record = serde_json::json!({"file":VIEWS[qa.views[qa.stage]].0,"frame":qa.settled,"modal":format!("{:?}",VIEWS[qa.views[qa.stage]].1),"mobile":mobile,"ui_profile":if mobile {"Mobile"}else{"Desktop"},"pixels":viewport.to_array(),"logical_dimensions":[window.width(),window.height()],"scroll_y":VIEWS[qa.views[qa.stage]].2,"fixture":true,"primary_roots_fit":primary_fit,"header_buttons_fit":header_fit,"header_buttons_do_not_overlap":header_no_overlap,"nodes":node_json});
     qa.captures.push(record);
     if !primary_fit || !header_fit || !header_no_overlap {
         fail(
@@ -446,9 +463,10 @@ fn observe(
         return;
     }
     let stage = qa.stage;
+    let view = qa.views[stage];
     commands
         .spawn((Screenshot::primary_window(), Shot(stage)))
-        .observe(save_to_disk(qa.directory.join(VIEWS[stage].0)))
+        .observe(save_to_disk(qa.directory.join(VIEWS[view].0)))
         .observe(readback);
     qa.in_flight = true;
 }

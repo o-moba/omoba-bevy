@@ -234,6 +234,8 @@ fn send_transform(
 ) {
     clock.advance(step);
     let packet = shared::wire::ClientPacket::Transform {
+        input_kind: Default::default(),
+        input_active: false,
         dash_sequence: 0,
         x,
         y: PLAYER_GROUND_Y,

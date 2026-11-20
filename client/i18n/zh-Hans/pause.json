@@ -50,5 +50,17 @@
   "pause.render.show_fps": "显示 FPS",
   "pause.tips.enabled": "新手提示",
   "pause.tips.hint": "显示加载提示和首场对局指南。关闭后仍可手动打开帮助。",
-  "pause.button.practice": "调试"
+  "pause.button.practice": "调试",
+  "pause.vote.remake": "重新比赛",
+  "pause.vote.surrender": "投降",
+  "pause.vote.active": "{kind} · {name} · 同意 {yes}/{required} · 反对 {no} · {seconds}秒",
+  "pause.vote.voted_yes": "你已同意",
+  "pause.vote.voted_no": "你已反对",
+  "pause.vote.yes": "同意",
+  "pause.vote.no": "反对",
+  "pause.vote.cooldown": "{seconds}秒后可再次发起投票",
+  "pause.vote.too_early": "{seconds}秒后开放",
+  "pause.vote.window_closed": "已超过开局3分钟",
+  "pause.vote.no_absent_teammate": "需要一名队友连续离开90秒",
+  "pause.vote.unavailable": "{kind} · {reason}"
 }

@@ -419,13 +419,13 @@ flowchart LR
 | Throw / pull / command object | Warden, Chainkeeper, Orbitwright | Общая кинематика руки, якоря для предмета и эффекта |
 | Dash / leap / blink arrival | Stormfist, Edgeweaver, Emberveil, Veilstalker, Riftshot | Pose/follow-through поверх серверного перемещения |
 | Punch / kick / stagger / knock-up | Stormfist и реакции целей | Адаптировать готовые исходные удары руками/реакции; отдельно сделать kick и реакции контролируемой цели |
-| Channel / ground slam / recast redirect | Cinderforge, Dawnweaver, Riftshot, Frostguard | Только реальные длительности; без придуманного cast lock |
+| Channel / ground slam / recast redirect | Cinderforge, Dawnweaver, Riftshot, Frostguard | Только реальные длительности; без придуманного cast lock. Dawn Ray (2026-10-11, proposed for owner review): the server now holds the caster in place for the real 0.8 s windup (`HeroSkills::cast_lock_until`, replicated as `movement_multiplier` 0), and the client stops local movement for it, so the held charge pose is honest rather than an invented lock. No other row gains a lock |
 
 В `assets-src/animations/AnimationLibrary_Godot_Standard.gltf` проверены 46 исходных клипов Quaternius UAL. Общая runtime-библиотека экспортирует шесть: `Idle_Loop`, `Walk_Loop`, `Sprint_Loop`, `Sword_Attack`, `Spell_Simple_Shoot`, `Death01`. Поэтому наличие следующего клипа в исходнике ещё не означает, что игра уже выбирает его для навыка.
 
 | Назначение | Что уже есть в локальном UAL | Предлагаемая следующая работа |
 | --- | --- | --- |
-| Магический выпуск и удержание | `Spell_Simple_Enter`, `Spell_Simple_Idle_Loop`, `Spell_Simple_Shoot`, `Spell_Simple_Exit` | Подключить реальные стадии; сильный двухручный выпуск доработать отдельно |
+| Магический выпуск и удержание | `Spell_Simple_Enter`, `Spell_Simple_Idle_Loop`, `Spell_Simple_Shoot`, `Spell_Simple_Exit` | Подключить реальные стадии; сильный двухручный выпуск доработать отдельно. Dawn Ray (2026-10-11): derived `spell_charge` (Enter, Idle_Loop, then both hands raised) spans the 0.8 s warning and `ray_release` is a two-hand push with a recoil lean |
 | Прицельная стрельба | `Pistol_Aim_Down`, `Pistol_Aim_Neutral`, `Pistol_Aim_Up`, `Pistol_Idle_Loop`, `Pistol_Shoot`, `Pistol_Reload` | Адаптировать хват; тяжёлую ракетницу и смену режима Wildspark сделать отдельно. Reload не создаёт новый игровой cooldown |
 | Меч | `Sword_Idle`, `Sword_Attack` | Создать точный выпад, парирование и тяжёлый ground slam: готовых соответствующих клипов в этом наборе нет |
 | Рукопашный бой и попадания | `Punch_Enter`, `Punch_Jab`, `Punch_Cross`, `Hit_Chest`, `Hit_Head` | Добавить выбор по действию; kick и knock-up/recovery потребуют отдельных движений |

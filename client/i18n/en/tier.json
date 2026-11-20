@@ -1,0 +1,9 @@
+{
+  "tier.status.step_down": "Hero tier {tier} until {until} UTC, then {next}.",
+  "tier.status.until": "Hero tier {tier} until {until} UTC.",
+  "tier.status.none": "Each donation counts for 30 days, and donations within those 30 days add up to a higher tier.",
+  "tier.style.locked": "{aura} · locked",
+  "tier.purchase.website": "Support on the website",
+  "tier.website.unavailable": "The website is not configured in this build.",
+  "tier.website.opened": "The Supporter page opened in your browser. Press Refresh after paying."
+}

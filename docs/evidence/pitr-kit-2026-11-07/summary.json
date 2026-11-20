@@ -1,0 +1,109 @@
+{
+  "status": "REVIEW_DRAFT_NOT_APPLIED",
+  "source_parent": "715a81173ac919cb48fd65d7df510c3f6daf4d72",
+  "patch": "docs/plans/reviews/C4-PITR-2026-11-07.patch",
+  "patch_sha256": "000e4fba32e13475df1724db51eb7ca7ab3fbdf1da24b7309202505ada4efdea",
+  "files": [
+    {
+      "path": "ops/vps/ru/README.md",
+      "old_sha256": "e51fe2dcde247fdf35b6a500550f71a6e827f9ac1091914f67ac61bd20918520",
+      "new_sha256": "8802c36dbb7f44411446c556460ddc01bdeb628d11cb21c86d9f76609676b30c"
+    },
+    {
+      "path": "ops/vps/ru/backup.env.example",
+      "old_sha256": "2ae4cbf9cfa1dffd2c438f555351567af5d8cb3cc60449857fea2fdc2847b7c5",
+      "new_sha256": "e5cddab15367a6fcfa617606ed39cc3a49db0bd54240b3fef030df3776c9d3f2"
+    },
+    {
+      "path": "ops/vps/ru/omoba-backup-check-ru.service",
+      "old_sha256": "6e48449bf778773916d71879ea27b563bfa1df12a67fb7f33fb7be3178c52370",
+      "new_sha256": "a66c769f00ba36d69d024e88efb27c32e0ed3a21923a5af95d3e6117884b338c"
+    },
+    {
+      "path": "ops/vps/ru/omoba-backup-ru.service",
+      "old_sha256": "4d68383930c91205c1d476d38fd0e87545a4ddd0c1135f0a9747c85a4d594569",
+      "new_sha256": "8820c9abb20ba354a581edcb3d9734b84f15114886b231076eafc268175cab71"
+    },
+    {
+      "path": "ops/vps/ru/omoba-pitr-check-ru.service",
+      "old_sha256": null,
+      "new_sha256": "8aacbd8b387ee38c812bfd7b27b83354bb58711d588cbadbed97a72988e6914d"
+    },
+    {
+      "path": "ops/vps/ru/omoba-pitr-check-ru.timer",
+      "old_sha256": null,
+      "new_sha256": "d4a4d967630fedd62c8b4823d8792ed97d12234336366ba62e41d45f89e7d6db"
+    },
+    {
+      "path": "ops/vps/ru/omoba-restore-drill-ru.service",
+      "old_sha256": "a5c1b2252dfb58a868ee2c10a0ede0b8e96cf0f356e6d5b01bb63e78f43796c6",
+      "new_sha256": "94bcdfb55337911fab1bc8ea5ef1d26faecb8620b1d354a7137425318229dcfe"
+    },
+    {
+      "path": "ops/vps/ru/pgbackrest.conf.example",
+      "old_sha256": null,
+      "new_sha256": "f48cbf882fb4ed947b60de4317832fb7c678819c7aa4f2d65ebc0ec928762833"
+    },
+    {
+      "path": "ops/vps/ru/ru_backup.py",
+      "old_sha256": "d5ed6fa2eb8a9aef00d7ad962ec3c4da36f674bf76290c5f055b3f83f90610ae",
+      "new_sha256": "cce1de26c770266aa700c2ab3b3a9a4a030b3c2723e89b364f1c4a729d4b8801"
+    },
+    {
+      "path": "ops/vps/ru/ru_host.py",
+      "old_sha256": "040c12e526554ab956bf1f2ab0caeae9b04b36a84c3d47016d0250b93fe91cbc",
+      "new_sha256": "ff4525deaeafddb4258abd34c80bf63335fa022a80aaeedd73efb26c4f6ca632"
+    },
+    {
+      "path": "ops/vps/ru/ru_monitor.py",
+      "old_sha256": "bb3e318fec9bf803e5b5435a8d2601c7305f92a690634ed1750f11653bbb6d85",
+      "new_sha256": "57aeb0a6b9cd7f48a06d43760bc64cb840458aa2b7de7842bc26bbb5f3ff1025"
+    },
+    {
+      "path": "ops/vps/ru/ru_pitr.py",
+      "old_sha256": null,
+      "new_sha256": "0f0816936486df14dc650f46096b918671a0640c9c95cbb00c0adbb98a55ff38"
+    },
+    {
+      "path": "scripts/test_ru_backup.py",
+      "old_sha256": "26bc5192b95d12eafc08cae20b0971447cb48ec793f598aa77eddd5187446616",
+      "new_sha256": "5be1cff88dcd5c9f47201c4461bd0265a881a2fad07a571302d0e9e3cc68f210"
+    },
+    {
+      "path": "scripts/test_ru_host.py",
+      "old_sha256": "66fe9ea579fcc2cf9cdc10f2217ec7ac36a613a6172065aa2b7d27cd6971c297",
+      "new_sha256": "e4b8fc65bb0d0a65e96d4899e015ef00c8928a17acc6ff6d58601bbc03078409"
+    },
+    {
+      "path": "scripts/test_ru_pitr.py",
+      "old_sha256": null,
+      "new_sha256": "2929006654efcae7e4fa8178f30ddc9075f24a9aca678c765b17f8bf5e7f8e24"
+    }
+  ],
+  "unit_tests": {
+    "run": 156,
+    "passed": 155,
+    "skipped": 1,
+    "failed": 0,
+    "reason_for_skip": "Existing optional logical PostgreSQL E2E fixture is not configured; actual PG16/18 combined Docker proofs are separate."
+  },
+  "integration": {
+    "pg16": {
+      "checks": 18,
+      "status": "PASS"
+    },
+    "pg18": {
+      "checks": 18,
+      "status": "PASS"
+    }
+  },
+  "scope": "Local two-container SFTP/GnuPG/pgBackRest rehearsal with real schemas and explicit direct-SQL synthetic ratings; no RU deployment, independent storage, RPO/SLA, physical UI or real-player certification.",
+  "report_label_erratum": "The exact executed script and reports retain the literal PG18 scope label even in the PG16 image run; the authoritative postgres version fields/logs identify PG16.15 and PG18.6. No reported test result was rewritten.",
+  "proof_sources_sha256": {
+    "rehearse_full_kit.py": "fb244dcecf0f0db7e7b699c4890f0afd0735f45b8120ac56aee5d14544d6b940",
+    "Dockerfile.rehearsal": "5c9e471d61f555e111a9548bbf053708a6463deedd5efd006b5bfcd25ffa4073",
+    "Dockerfile.kit": "b81a37b7b5563abb0f399bf44521a77dc13b3c63e285e66ea78e51441b5e22f9",
+    "Dockerfile.kit16": "0a07992e122adda013527499d69e61ed1ca7c7cc6d182763283baccd1d70b75f"
+  },
+  "git_apply_check": "PASS"
+}

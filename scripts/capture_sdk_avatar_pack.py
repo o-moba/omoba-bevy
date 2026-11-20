@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import json
+from snapshot_payload import decode_snapshot_payload
 import os
 from pathlib import Path
 import socket
@@ -42,7 +43,7 @@ class Peer:
             data = b''.join(parts[i] for i in range(count))
             del self.pending[(epoch, tick)]
             assert len(data) == total
-        return json.loads(data)
+        return json.loads(decode_snapshot_payload(data))
 
     def join(self, slug, index, accepted=True):
         deadline, last_send = time.monotonic() + 15, 0

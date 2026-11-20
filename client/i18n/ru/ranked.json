@@ -1,0 +1,17 @@
+{
+  "ranked.tier.bronze": "Бронза",
+  "ranked.tier.silver": "Серебро",
+  "ranked.tier.gold": "Золото",
+  "ranked.tier.platinum": "Платина",
+  "ranked.tier.diamond": "Алмаз",
+  "ranked.tier.master": "Мастер",
+  "ranked.tier.unknown": "Неизвестный ранг",
+  "ranked.current_tier": "Ранг: {tier}",
+  "ranked.placements": "Калибровка {played}/{total}",
+  "ranked.season.until": "Сезон {season} · до {until}",
+  "ranked.badge.participant": "Участник сезона",
+  "ranked.badge.earned": "Значок сезона {season} · {tier} · рейтинг {rating}",
+  "ranked.placement_complete": "Калибровка завершена: {tier}",
+  "ranked.promoted": "Новый ранг: {tier}",
+  "ranked.demoted": "Ранг понижен: {tier}"
+}

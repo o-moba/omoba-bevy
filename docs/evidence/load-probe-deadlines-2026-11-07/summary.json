@@ -1,0 +1,178 @@
+{
+  "status": "Two probe correctness fixes PASS; 1000-client acceptance remains FAIL",
+  "source_parent": "865e27be2709ddebc5dd9c62ff2d73501bf3375a",
+  "production_server_sha256": "7a73699731633f1a4d0831ec41715e789d91479649fadd0cb343c5dce2dea1a9",
+  "production_source_reference": "../terminal-spool-replay-2026-11-07/summary.json",
+  "unchanged_production_files_checked": 263,
+  "build_profile": "Existing server and freshly linked native harness use unoptimized root crates, not Cargo dev opt1 or release performance qualification",
+  "files": {
+    "load-deadline--instrumented-10--report.json.gz": {
+      "source_path": "load-deadline/instrumented-10/report.json",
+      "raw_bytes": 52636,
+      "raw_sha256": "dbd2ed0a4da4b92e0d26c2b3c1246bd5113c5dc2c4e32ff29c70c60ce8f94e24",
+      "gzip_sha256": "732b93cdea10d19b42d663ac813e98a944b8e863f025dfd00137ee0d580a98ba"
+    },
+    "load-deadline--instrumented-1000--report.json.gz": {
+      "source_path": "load-deadline/instrumented-1000/report.json",
+      "raw_bytes": 2250217,
+      "raw_sha256": "98d61d9ff144b9aa53252b761be7494fa552919f63845a7161b18eaf2e2a255b",
+      "gzip_sha256": "3287e7b3de730c4a82b46286f704134b36f3a629c61ec2f7076f0063c75cd3e6"
+    },
+    "load-deadline--controller-cleanup-audit.json.gz": {
+      "source_path": "load-deadline/controller-cleanup-audit.json",
+      "raw_bytes": 368,
+      "raw_sha256": "57f38265f49342f907ec3e4cfd35f29a834544274838d909d42d7802935efc24",
+      "gzip_sha256": "23ed8a1e2c8de2c5b1ab332d1a7524f3224d62ff71f616c8852134697a7565f7"
+    },
+    "load-career-order--instrumented-10--report.json.gz": {
+      "source_path": "load-career-order/instrumented-10/report.json",
+      "raw_bytes": 54365,
+      "raw_sha256": "9ab43c6880811bc1eb104763235b018d51b41ca88a815e33e0810d28909a190a",
+      "gzip_sha256": "868a2ef7192cb3488922dd7f97b60dc0381e5a115352186c0962059322192021"
+    },
+    "load-career-order--instrumented-1000--report.json.gz": {
+      "source_path": "load-career-order/instrumented-1000/report.json",
+      "raw_bytes": 1941792,
+      "raw_sha256": "6b00b989f025c8b38eaa2ee5ba6e54548697d4c93dbf75a4ff83ad304a97b46f",
+      "gzip_sha256": "a67bf0b28ea5c060af8325230dc1a6b548e337c341e26f76b6b32fda33490c89"
+    },
+    "load-career-order--controller-cleanup-audit.json.gz": {
+      "source_path": "load-career-order/controller-cleanup-audit.json",
+      "raw_bytes": 639,
+      "raw_sha256": "af1ced240f18571fc4ade453c625a9c1db09ea4f6b927e22416863e723f085aa",
+      "gzip_sha256": "39a2214114bca22bc2a14461e159f4ec60d64906f0052926b29bbf60eacf3aad"
+    },
+    "load-cadence--deadline-before.log.gz": {
+      "source_path": "load-cadence/deadline-before.log",
+      "raw_bytes": 966,
+      "raw_sha256": "d9725bf50394eb0174fce1e0e4500bac9ec4885eece5d9475bbb7c91af5288dd",
+      "gzip_sha256": "f004c1890acdeb2e1dfad9c528fedf6300221dc51fe223ddae65560102b86783"
+    },
+    "load-cadence--career-order-before.log.gz": {
+      "source_path": "load-cadence/career-order-before.log",
+      "raw_bytes": 804,
+      "raw_sha256": "7aada2fe9024ce83f6af3ba24cc27b4454d13127ffeb708705618ef7cbfe08b0",
+      "gzip_sha256": "dd223be5b2299e01bf1505398d02c4c4a2f974547726456d1b9363c094af652d"
+    },
+    "load-cadence--harness-unit-tests.log.gz": {
+      "source_path": "load-cadence/harness-unit-tests.log",
+      "raw_bytes": 3193,
+      "raw_sha256": "c9648ea4b1d6e6cd5eb415a52885b4ee6c41ef5f7419dbd31f96e898fba13986",
+      "gzip_sha256": "5a0ef7f82c1cb96ba4276d03e6bb631ec1b23b06cfac24ba23132a4826112f65"
+    },
+    "load-cadence--build.json.gz": {
+      "source_path": "load-cadence/build.json",
+      "raw_bytes": 33688,
+      "raw_sha256": "05b06776e49d4ecd5e46570c751b45db25c4c526e86ec15a052b927b5717d2cb",
+      "gzip_sha256": "5e9fa4456376119c9df246fd9526bed2de8ee450050a1fdbaffa361d46aee82a"
+    },
+    "load-cadence--ordered-clippy-0.log.gz": {
+      "source_path": "load-cadence/ordered-clippy-0.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    },
+    "load-cadence--ordered-clippy-1.log.gz": {
+      "source_path": "load-cadence/ordered-clippy-1.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    },
+    "load-cadence--ordered-clippy-2.log.gz": {
+      "source_path": "load-cadence/ordered-clippy-2.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    },
+    "load-cadence--ordered-clippy-3.log.gz": {
+      "source_path": "load-cadence/ordered-clippy-3.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    },
+    "load-cadence--ordered-transport-tests.log.gz": {
+      "source_path": "load-cadence/ordered-transport-tests.log",
+      "raw_bytes": 293,
+      "raw_sha256": "aed62e11151551ab9e5e865d5c24a083919672d739d7e81bb90f0bb9231dc6b2",
+      "gzip_sha256": "42bde2a654263a46dc4c0ec3fe3eff7ffb77f84117136c0260cc7ac7a5e1dbd8"
+    },
+    "load-cadence--ordered-capacity-tests.log.gz": {
+      "source_path": "load-cadence/ordered-capacity-tests.log",
+      "raw_bytes": 106,
+      "raw_sha256": "713972b30bbbb93930114261a846150033bb4ae557443bb0167e5db8710ff990",
+      "gzip_sha256": "1558d02b43c338573951193b6f149aebefa10ab8f33e2fa98cbde1d153a4c38d"
+    },
+    "load-cadence--ordered-rehearsal-tests.log.gz": {
+      "source_path": "load-cadence/ordered-rehearsal-tests.log",
+      "raw_bytes": 113,
+      "raw_sha256": "c0c1944b5e25857db25bbbf2e3ba4f42ff63e629f143cfe071fe5602025b40af",
+      "gzip_sha256": "3d6d105b0ebc46666690c3a81b2d5ff4ad4267cabce893ba6161ed43a306a7e5"
+    }
+  },
+  "checks": {
+    "harness_library_cases": 35,
+    "udp_transport_cases": 3,
+    "python_capacity_cases": 8,
+    "python_rehearsal_cases": 14,
+    "strict_clippy_targets": 4,
+    "format": "PASS",
+    "diff": "PASS"
+  },
+  "latest_large_failure": {
+    "elapsed_seconds": 108.34543583297636,
+    "exited_before_cleanup": [
+      {
+        "pid": 19229,
+        "returncode": 101,
+        "role": "generator",
+        "generator_index": 83
+      },
+      {
+        "pid": 19235,
+        "returncode": 101,
+        "role": "generator",
+        "generator_index": 89
+      },
+      {
+        "pid": 19239,
+        "returncode": 101,
+        "role": "generator",
+        "generator_index": 93
+      },
+      {
+        "pid": 19241,
+        "returncode": 101,
+        "role": "generator",
+        "generator_index": 95
+      }
+    ],
+    "worker_phases_at_observation": {
+      "running": 44,
+      "forming": 20,
+      "ready": 10,
+      "failed": 2
+    },
+    "last_observed_stale_career_packets": 0,
+    "last_observed_authority_resets": 209,
+    "counter_scope": "Sum of each peer latest retained observation; not a simultaneous final population or complete loss-event count"
+  },
+  "current_source_sha256": {
+    "harness/src/bin/bots.rs": "921ec57b1724997129c3e65eddd135aec4161dccb16abe779445af906aa0ff56",
+    "harness/src/bot.rs": "27d71f65cd6976dcca95bd037b7ced23c96c6e469dd02cf3611984cd808753c3",
+    "harness/src/bot_ai.rs": "82fa6a2e2b7cd52f8ff199a2cdd0e96632b54a79e8c82f12a5095d9da009113b",
+    "harness/src/database.rs": "5d09b886d22c02ec422e47f76713ef665bcfefffeb04fb82f654714d856e4ade",
+    "harness/src/lib.rs": "c28702862b36dc3070acd6468a557b86525e4de0544de8135ca49a1627305239",
+    "harness/src/navigation.rs": "b9134aa7435f87d64a72c7f973fd0b7e48345623e09bee63551ad47b22dcb23a",
+    "harness/src/protocol.rs": "2a075efb34041d70d53b467bfd5b3dfac92fdd6d1b044346a1d7105ecc58999e",
+    "harness/src/public_client.rs": "19287077ccfc63f5c7aa269f00d54842a1b0f4379822a64741c57d46c03be253",
+    "harness/src/server.rs": "6a87e10aaafebb6c9449109685c6912f5c11ee2ac1b4551a9c8855efdb01753c",
+    "harness/tests/transport_stats.rs": "36f4efe249ec89df7610fc79a8b4021ce9f1bc76ad167a7ce32d577e9505cf23",
+    "scripts/public_playing_capacity.py": "cb79ae4b1f35c39b14106db4f3138986f279066895ae813e8a989e1102992578",
+    "scripts/test_public_playing_capacity.py": "f18a453e5e2516b5b59b3c40627e22c5452256e5ac8931dcb8c8de92877057c0"
+  },
+  "next": [
+    "Use an explicitly optimized, current-source, coherent server and generator build before performance qualification.",
+    "Investigate genuine authorization expiry/refresh/transport transitions under load; the final local run observed0 stale career replies and209 authority resets, so career reordering is not its established cause.",
+    "Then require current full1000-client sustained cadence/latency, actual RU or identical-host resources/uplink, WAN/physical/trust and existing release gates."
+  ]
+}

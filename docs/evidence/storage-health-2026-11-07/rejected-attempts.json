@@ -1,0 +1,28 @@
+{
+  "status": "not acceptance",
+  "attempts": [
+    {
+      "scope": "startup fault/recovery regression v1/v2",
+      "result": "FAIL after schema restoration; last report has no SQL probe and remains unavailable",
+      "cause": "startup connection retry shared the result-delivery retry clock",
+      "resolution": "independent last_connect schedule; identical fault/recovery expectations pass",
+      "owned_fixture_cleanup": "rejected-fixture-cleanup.json"
+    },
+    {
+      "scope": "existing Python symlink test after adding a second bounded reader",
+      "result": "fixture mock rejected an unrelated legitimate health-file read",
+      "resolution": "assert the original journal scanner directly; symlink-read refusal preserved; all42 pass"
+    },
+    {
+      "scope": "first strengthened live health audit",
+      "result": "FAIL at epoch equality despite healthy actual reports and ten-human Running",
+      "cause": "plain JSON Number lost u64 epoch precision",
+      "resolution": "reuse the existing lossless native parser; accepted rerun verifies all10 Running and exact epoch, with no relaxed condition"
+    },
+    {
+      "scope": "older ready-check report claims",
+      "result": "replacement reached Assigned only; baseline bot Running was a separate path",
+      "resolution": "historical README corrected; current harness explicitly continues the replacement ten-human roster to Running"
+    }
+  ]
+}

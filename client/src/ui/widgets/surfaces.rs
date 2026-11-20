@@ -637,6 +637,7 @@ fn toast_content(toast: &mut ChildSpawnerCommands, kind: ToastKind, text: impl U
     toast.spawn(icon_node(kind.icon(), size::ICON_MD, kind.accent()));
     toast.spawn((
         text.into_text(),
+        Name::new("UiToastText"),
         theme::styled_text(TextStyle::keep_case(TextRole::Body)),
         TextColor(color::TEXT_PRIMARY),
         Node {

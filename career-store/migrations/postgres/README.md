@@ -2,7 +2,7 @@
 
 `career_store.rs` uses these PostgreSQL migrations with SQLx dynamic queries. It
 does not use the older SQLite prototype. `connect` applies career schema versions
-1–3 transactionally under a migration advisory lock, upgrades supported earlier
+1–13 transactionally under a migration advisory lock, upgrades supported earlier
 versions, and rejects unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
 explicitly as the migration owner. The game worker uses `connect_runtime` and
 requires no DDL permissions; startup rejects missing/unknown versions. See
@@ -14,6 +14,43 @@ CareerStore runtime SQLx pools are bounded to one connection when
 They configure statement and lock timeouts plus `synchronous_commit = on`.
 The optional Account API pool and administrative connections need their own budget. Infrastructure backups,
 replication, credentials, TLS policy and disaster recovery remain deployment work.
+
+## Current ready-receipt maintenance (schema13)
+
+Apply013_ready_retention.sql and the paired runtime grants before the new binary.
+Runtime requires all13 versions; a schema12 binary is not a compatible rollback.
+The migration adds partial deadline/closed-time indexes and a narrow owner-pinned
+`career_prune_closed_ready(1..128)` function. PUBLIC/portal cannot execute it; the
+game may execute the fixed policy but receives no DELETE grant on consent tables.
+It removes only cancelled/expired/consumed receipts older than7 days, with neither
+ready claims nor an unfinished SQL match. Members cascade; queue-dodge event
+identity/history, profile totals and immutable allocations/results remain intact.
+
+`maintain_ready` first reconciles at most128 expired active checks using the normal
+sorted profile/check locks. A healthy missed-answer deadline charges only absent
+answers, exactly once. Failed ownership/unpublished/handoff faults cancel without
+a dodge. Busy profile locks defer after50ms; per-statement maintenance work is
+limited to500ms. Fresh closure starts a new7-day retention window.
+
+Lobby/standalone runtime schedules32 checks per minute in one async background
+task after a300-second reconnect warmup, with a5-second overall deadline and
+skipped missed intervals. Match-worker processes do not schedule it. Existing
+immutable SQL admission remains the authority for Resume even after consent
+cleanup; absent consent cannot admit an unknown public allocation. Do not reuse
+random check identities for a later roster. Terminal ready-update retries after
+cleanup return closed, never approval. This policy does not delete local recovery
+spools or discipline deduplication receipts. Monitor pre-persistence and SQL-ready
+availability separately. No RU migration or grant application is implied by these
+repository changes; current-schema recovery and the reviewed rollout stay gates.
+
+`matchmaking_available` is a read-only authenticated preflight of the current
+schema, writable primary and runtime privileges on the ready/discipline/admission
+tables and prune function. It returns an anonymous boolean, not database error
+details. Actual game-role/portal-role, read-only connection and lost-version cases
+are tested. This does not replace transaction ACKs, validate every business rule,
+or certify performance under load. The career worker samples it asynchronously
+and publishes operational health alongside pre-persistence backlog counts; see
+the RU kit's monitoring contract. No schema or permission addition beyond13.
 
 ## Accounts, profiles and friends
 
@@ -45,6 +82,51 @@ assignment both exist; an expired presence is Offline. A restart does not fabric
 Online status from stored friendships. The worker uses `touch_presences` for
 up to 512 refreshes in one atomic SQL statement. Duplicate account refreshes are
 coalesced; a missing profile or foreign allocation rejects the whole batch.
+
+## Admission limits and retention (schema 4, LR-16)
+
+`authenticate_from(public_key, nickname, source, limits)` is the game's sign-in: a
+known key signs in as with `authenticate`; an unknown key gets a profile only while
+`source` (the server passes one IP: an IPv4 address or an IPv6 /64) created fewer than
+`limits.per_source` profiles in the last 24 hours and everyone fewer than
+`limits.total`. The check and its counter row (`career_profile_admissions`) are written
+in the sign-in transaction under `pg_advisory_xact_lock(721946004)`, so concurrent new
+keys never both take the last place. A refusal returns `NEW_PROFILE_LIMIT_ERROR` or
+`NEW_PROFILES_PAUSED_ERROR` and creates nothing. Rows hold
+`sha256(salt || source)` with the random salt of `career_admission_salt`, never the
+address. `authenticate` (Account API, tests, fixtures) has no limit.
+
+`prune_unplayed_profiles(min_age_days, max_profiles)` deletes admission rows older
+than 48 hours and calls `career_prune_unplayed_profiles`. That SECURITY DEFINER
+function (owner rights, `search_path` pinned to the migration's schemas plus
+`pg_temp`, no PUBLIC execute) deletes at most `max_profiles` (1–500) profiles whose
+only key is unrevoked and older than `min_age_days` (≥ 7), with no match, XP, friend
+or live presence, under the key's sign-in lock. A profile that any other row still
+references (portal sessions, settings, sign-in links, Supporter grants) fails its
+foreign key and is kept. The key row goes with the profile, so the device signs in to
+a fresh profile. The game role may execute it but still cannot delete a key itself.
+
+## Moderation (schema 5, LR-15)
+
+`career_sanctions` holds one row per sanction: `profile_id`, `kind` (`chat_mute`,
+`matchmaking_ban`, `ranked_ban`, `account_ban`, `name_reset`), `reason`, `created_at`,
+`created_by`, `expires_at` (NULL: until lifted) and, once lifted early, `lifted_at`,
+`lifted_by` and `lift_reason`. A sanction is active while it is neither lifted nor
+expired. `CareerStore::add_sanction` and `lift_sanction` write one
+`career_moderation_events` row in the same transaction (actor, action, profile,
+sanction, JSON detail with kind, reason, end and, for a name reset, the old and the
+new name). That audit table has no foreign key (the record outlives the profile); its
+trigger refuses every UPDATE and deleting a row younger than a year. A `name_reset`
+renames the profile to `Player#NNNN` with a free tag in the same transaction, and
+`rename` refuses with `NAME_LOCKED_ERROR` while it is active. `career_chat_switch` is
+one row, the database-wide chat switch (`set_chat`, audited as `chat_switched`).
+
+Game servers read with `access(public_key, profile_id)` (key active, current name and
+active sanctions in one query, at every 10-second access refresh),
+`active_sanctions` (sign-in) and `chat_enabled` (polled every 5 s). A sanction's
+foreign key keeps its profile from `career_prune_unplayed_profiles`. Operators use the
+`omoba-account-api sanction|rename|player|chat` commands (`RUNBOOK.md` › Moderation),
+which also run with the portal role.
 
 ## Allocation and result lifecycle
 
@@ -134,3 +216,63 @@ Each career-store test creates its own schema
 and removes that schema after success. No SQLite or mock adapter substitutes for
 these checks; database availability, actual run results and deployment durability
 must be reported separately.
+
+## Rating ladder (schema 6, LR-47)
+
+`006_rating_ladder.sql` adds the partial index `career_profiles_ladder`
+(`rating DESC, rated_matches DESC, profile_id` where `rated_matches >= 20`) that
+the Account API's `GET /v1/leaderboard` reads. No table or grant changes: the
+portal role already has `SELECT` on `career_profiles`.
+
+## Ranked seasons (schema10)
+
+The initial window is90 days, with unchanged rating, lifetime career and public
+eligibility and zero seasonal placements. Profile window snapshots are FK-checked;
+registration is stamped by a narrow owner trigger pinned to its owning schema
+before `pg_temp`, with PUBLIC execution revoked. Runtime roles need metadata
+reads and the game needs INSERT/SELECT on immutable allocation mappings. Only the
+operator can close, archive/reset or consume the season sequence. Apply the
+reviewed schema10 grants together with the paired runtime; the repository role patch
+was owner-approved; production application remains a separate action.
+
+`ranked-season show` is read-only. The explicit close command requires expected
+identity, `--apply`, a separate authorized operator connection, an expired window
+and no unsettled original Ranked intent. Drain all hosts/reservations first and
+refresh lobby caches afterward. The database operation archives/badges/resets and
+opens a new window atomically; retry returns its original receipt. See the
+[season plan](../../../docs/plans/ranked-seasons-2026-11-06.md). Source/runtime
+requires schema10; old workers must drain before migration, and an old schema9
+binary is not a compatible rollback afterward. No production change is implied
+by the local test fixtures.
+
+
+## Queue discipline foundation (schema11)
+
+011_queue_discipline.sql adds immutable-by-API event receipts and separate
+per-profile queue penalties. They do not alter played-match abandon penalties,
+rating, XP, public counts, season state or history. The trusted server API records
+a stable32-hex event/profile/original observation exactly once under the same
+profile-row locks used by match admission. Duplicate deliveries cannot increment
+or extend a penalty; conflicting identities/times fail. Preserve60/300/900/3600s
+escalation and reset after24h without a new dodge. Old deliveries do not restart
+expired cooldowns; small future clock drift is bounded/clamped to database time.
+
+New runtime source requires schema11. Existing schema10 binaries are not a
+compatible rollback after that migration. Apply only through the separately
+approved operator rollout after the complete feature is integrated. The local
+proof runs actual source and69 store tests on the task-owned PG18.6 fixture.
+
+Runtime role grants and lobby access/event/outbox/start wiring are not added in
+this foundation. The cross-host loophole therefore remains open. Shared ready
+ownership/deadline fences, legacy local-floor reconciliation, signed two-lobby
+fault scenarios, standard full CI/PG16 and schema11 backup/recovery remain
+release requirements. [Proof and limits](../../../docs/evidence/queue-discipline-store-2026-11-07/README.md).
+
+Legacy matchmaking penalty rollout: schema12's existing queue-penalty tables also
+accept trusted aggregate lower bounds; no new schema or grant is needed. New
+lobbies retain their persisted `dodge-penalties.json` sources and wait for known
+event delivery plus exact aggregate SQL ACKs before new admission. Import every
+old host's authoritative snapshot before opening global queue traffic. Do not
+translate old counters into invented event IDs or add overlapping counters;
+maximum floors preserve the known minimum while typed event IDs remain exact.
+See [the verified runtime/import scope](../../../docs/evidence/legacy-penalty-floors-2026-11-07/README.md).

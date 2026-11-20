@@ -1,0 +1,72 @@
+{
+  "observed_date": "2026-11-07",
+  "scope": "All open PRs in both OMOBA repositories before this checkpoint push",
+  "pull_requests": [
+    {
+      "repository": "o-moba/omoba-bevy",
+      "number": 148,
+      "title": "feat(matchmaking): add confirmed Ranked and bounded lobby scaling",
+      "draft": false,
+      "url": "https://github.com/o-moba/omoba-bevy/pull/148",
+      "base": "dev",
+      "head": "feat/ranked-matchmaking-readiness",
+      "head_sha": "f0e4b7d4685a3a05f9c9fd2f65e415a8d5658bb6",
+      "state": "open"
+    },
+    {
+      "repository": "o-moba/omoba-bevy",
+      "number": 146,
+      "title": "docs: LR-67c portal page built; RU offer published as edition 1",
+      "draft": false,
+      "url": "https://github.com/o-moba/omoba-bevy/pull/146",
+      "base": "dev",
+      "head": "docs/lr-67c-built",
+      "head_sha": "dc98525f42bfb4b73d6ed93ecbf849281165aef4",
+      "state": "open"
+    },
+    {
+      "repository": "o-moba/omoba-bevy",
+      "number": 101,
+      "title": "chore(release): promote dev to main",
+      "draft": true,
+      "url": "https://github.com/o-moba/omoba-bevy/pull/101",
+      "base": "main",
+      "head": "dev",
+      "head_sha": "2a90c28caa95282b31450ea2a21bca8ae5803c5e",
+      "state": "open"
+    },
+    {
+      "repository": "o-moba/omoba-web",
+      "number": 33,
+      "title": "feat(portal): show seasonal ranked progress and match outcomes",
+      "draft": false,
+      "url": "https://github.com/o-moba/omoba-web/pull/33",
+      "base": "dev",
+      "head": "feat/ranked-matchmaking-readiness",
+      "head_sha": "f868fa4641d74899d5c5844def5fd078281fd9a7",
+      "state": "open"
+    },
+    {
+      "repository": "o-moba/omoba-web",
+      "number": 30,
+      "title": "docs(progress): RU website update 1bd2924 and YooKassa shop submission",
+      "draft": false,
+      "url": "https://github.com/o-moba/omoba-web/pull/30",
+      "base": "dev",
+      "head": "docs/ru-web-deploy-20261105",
+      "head_sha": "ee1c8083098eba2a79900df93848160180f0e52a",
+      "state": "open"
+    },
+    {
+      "repository": "o-moba/omoba-web",
+      "number": 10,
+      "title": "chore(release): promote dev to main",
+      "draft": true,
+      "url": "https://github.com/o-moba/omoba-web/pull/10",
+      "base": "main",
+      "head": "dev",
+      "head_sha": "c7b170f872831f59c75f1202d74a040c3a01c811",
+      "state": "open"
+    }
+  ]
+}

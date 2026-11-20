@@ -1,0 +1,13 @@
+{
+  "run": 42211135390,
+  "job": 127869761950,
+  "commit": "e85875ba6e535bba1236cc597c8e640059f3d47f",
+  "lines": [
+    "2026-11-06T11:44:17.9378761Z test pause_menu::match_votes::tests::active_vote_reaches_closed_menu_and_real_press_keeps_original_round_and_generation ... ok",
+    "2026-11-06T11:44:17.9571169Z test pause_menu::match_votes::tests::opening_pause_replaces_prompt_and_unavailable_surrender_has_no_start_button ... ok",
+    "2026-11-06T11:44:17.9586029Z test pause_menu::match_votes::tests::modal_replacement_removes_vote_controls_before_kit_decoration ... ok",
+    "2026-11-06T11:44:27.4066703Z test result: ok. 1579 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 12.38s",
+    "2026-11-06T11:44:27.4408123Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "2026-11-06T11:44:29.7295090Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  ]
+}

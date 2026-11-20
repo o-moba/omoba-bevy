@@ -1,0 +1,84 @@
+{
+  "status": "visually inspected PASS for stated scene-specific scope",
+  "ui_source_commit": "710063a75052805250acb3e0977eaa654d021bdd",
+  "binary_sha256": "d8d0bf61d3492371542f532566b8ef96601706d58b8fc2bed64dce3e710e56b3",
+  "source_hashes": {
+    "client/src/qa/fair_play_qa.rs": "80a5cc379ce424d3a9f8194a0adcc169b103784c67676283f2404a0d991c8f70",
+    "client/src/qa/result_qa.rs": "1ab50f42695ded4c3015ac118dab9b150ce97b5c290d4e97d4a168d4d0f5366e",
+    "client/src/qa/mod.rs": "c630fd60edd77f2ba97cdadc90f0c81657b38c1681a114b261291effd0e5ebf2",
+    "client/src/net/session.rs": "a3937e7fa17dec8b9f2385499a3c1db7a767685ab5e95bc80c226dee2d90685d",
+    "client/src/pause_menu/match_votes.rs": "104a12aeccd5b481872b2aaa489d8911b26f2c58899411b07e5e2608712cc13e",
+    "client/src/pause_menu/match_votes/tests.rs": "b63eaeebd95cbbe3190f542443c53a12a8673851ab77427786b95bfc7d45ea44",
+    "client/src/qa/offscreen.rs": "a3d2067f99c5e7136816626bfee872a6ae86f90783c08896d7b02af267197504",
+    "client/src/qa/creator_loop_qa.rs": "18de95f632bdf9605d3fd23a4e449c0aba7c9dc4aa8f02a3587ddd1a43289083",
+    "client/src/lib.rs": "24d7ec59fe68ee1153cbf44630bf0cb886f822b7354ecd9e32d48b819f6b1a5f",
+    "client/src/world.rs": "24613bd3c250fef5d67d4aa8971bf59f9289a74815a3579594227c98dabf4bcb",
+    "client/src/platform.rs": "2934dd6113615624ffe8a3259a643998d471e3e5625b94a0cc687ab36a4fdd37"
+  },
+  "build_source_parent": "1ab44e5aa00912c2f8d37f3b383a81277383b539",
+  "build_working_diff_sha256": "cfa6d8ce891b5b9277cc1ab0dbb9260b97cce760699cbe4de3234afca9f9303d",
+  "build_seconds": 981.32,
+  "strict_ru_clippy_seconds": 74.24,
+  "minimum_root_gib": 32.70808029174805,
+  "targeted_offscreen_cases": 2,
+  "screen_map_cases": 5,
+  "locale": "ru",
+  "viewport": [
+    852,
+    393
+  ],
+  "method": "native production rendering into an image with virtual primary-window metrics, no OS window/desktop capture or lock/power changes",
+  "synthetic_fixture": true,
+  "real_admission_gameplay_accounts": false,
+  "physical_phone_or_performance": false,
+  "images": [
+    {
+      "file": "native-offscreen-remade-result.png",
+      "sha256": "eb85c37ece6b87d03d8051e1200c03264156567520fa2f5848360d9c6422c2e6",
+      "bytes": 545660,
+      "scope": "Remade typed result with no winner/rating/ordinary rewards and zero XP; coherent fixture, not live settlement",
+      "screen_locked_at_launch": true,
+      "manual_review": "accepted"
+    },
+    {
+      "file": "native-offscreen-surrender-result.png",
+      "sha256": "52ebe444922cd99edca57a126af57591fd4b6c72f7a48305719b6ed429055175",
+      "bytes": 541295,
+      "scope": "Completed surrender fixture:12min, preserved supplied +16 rating/+150 XP and saved status; not rating-math/gameplay proof",
+      "screen_locked_at_launch": true,
+      "manual_review": "accepted"
+    },
+    {
+      "file": "native-offscreen-remake-guide.png",
+      "sha256": "b27df55bcec0ccd98b905b8f826ee26dd9920e56895167da1ab40491c661a15c",
+      "bytes": 155453,
+      "scope": "Real first-match guide before real UI-kit dismiss; visible scroll body and dismiss target",
+      "screen_locked_at_launch": true,
+      "manual_review": "accepted"
+    },
+    {
+      "file": "native-offscreen-remake-vote.png",
+      "sha256": "9483f5acd30908589354fb186c67a9334dbc3de7f6da343f73e2dce0377eb0bd",
+      "bytes": 373944,
+      "scope": "Remake1/3, no0,27s;44px Yes/No, restored after the guide without despawn panic; not a network vote action",
+      "screen_locked_at_launch": true,
+      "manual_review": "accepted"
+    },
+    {
+      "file": "native-offscreen-surrender-vote.png",
+      "sha256": "9c940d5a986391aa7172f0db2af7f2455fdd3fb74fc8ec002d52dea74b5ca436",
+      "bytes": 373290,
+      "scope": "Surrender1/4, no0,27s; readable44px Yes/No; not a network vote action",
+      "screen_locked_at_launch": true,
+      "manual_review": "accepted"
+    },
+    {
+      "file": "native-offscreen-remake-menu.png",
+      "sha256": "5c4187831488b1c6d94602db331461dfe1eef9c00d8eaeda48d1c6f56796e5d4",
+      "bytes": 160166,
+      "scope": "Required remake entry and510s surrender availability;44px entry. Lower scroll-body actions were not exercised",
+      "screen_locked_at_launch": true,
+      "manual_review": "accepted"
+    }
+  ]
+}

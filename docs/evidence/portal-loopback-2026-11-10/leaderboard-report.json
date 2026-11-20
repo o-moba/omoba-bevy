@@ -1,0 +1,37 @@
+{
+  "status": "PASS",
+  "portal_commit": "ff8f50165bdce761425e27369d6fff7d8fd250ea",
+  "game_code_commit": "5cd10d83f4b1016060830b58f5b763e19e3f96ea",
+  "entries": 1,
+  "me": {
+    "listed": true,
+    "rank": 1,
+    "ranked": {
+      "completed_matches": 20,
+      "ends_at_ms": 1801712089160,
+      "losses": 0,
+      "rated_matches": 20,
+      "season_id": 1,
+      "started_at_ms": 1793936089160,
+      "wins": 20
+    },
+    "rated_matches": 20,
+    "rating": 1351
+  },
+  "checks": [
+    "ladder ordered, ranked, own row",
+    "no MMR/raw codes",
+    "390px no horizontal scroll",
+    "settings opt-out hides and explains",
+    "current-season placement progress line on the overview"
+  ],
+  "fixture": "Public synthetic seeds 7/8, one real settled match per final setup, synthetic career/season counters raised to 20 only for the first profile's leaderboard eligibility threshold; the second profile remained in seasonal placement",
+  "api_binary_sha256": "b44e44ade776d698724be72753aa2a7abe1c3afe8ee82f0ef8ead31fcaa3c323",
+  "seed_binary_sha256": "330ea72580c00356dd84989d17d2c08040d4c1510231124300232404faf0a9ed",
+  "limitations": [
+    "Loopback RU Account API/PostgreSQL and production Next only; not the RU production API",
+    "Synthetic fixture and threshold counters; not organic matchmaking or settlement-at-scale proof",
+    "Browser emulation at 390px; not physical iPhone/Android or native key storage",
+    "No WAN, production host, deployment or live account data"
+  ]
+}

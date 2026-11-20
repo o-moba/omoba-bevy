@@ -286,7 +286,7 @@ pub(crate) fn transitions(
         );
     }
     // A wall publishes how many projectiles its holder has stopped with it
-    // (`common/src/skills/mod.rs:1509-1520`). A rise is one block, however many it counts.
+    // (`effects` in `common/src/skills/mod.rs`). A rise is one block, however many it counts.
     // A fall is the count of a newer wall of the same hero and says nothing.
     if before.kind == K::ShieldWall
         && now.kind == K::ShieldWall
@@ -418,6 +418,18 @@ pub(crate) struct StageEvent {
     pub owner: Option<OwnerSeen>,
 }
 
+/// The first sight of a timed telegraph that was cast a moment ago: at most `FRESH_SECS` into
+/// its time. Whoever cast it, and whether or not the client sees that hero: the telegraph
+/// itself is in the snapshot, so nothing hidden is told. Only an effect with a replicated id
+/// of its own has one, and only in a stream that already runs.
+#[derive(Message, Clone, Debug, PartialEq)]
+pub(crate) struct TelegraphSeen {
+    /// The effect as the snapshot that showed it first holds it.
+    pub effect: SkillEffectState,
+    /// The owner as this frame shows it; `None` when the client holds no such hero.
+    pub owner: Option<OwnerSeen>,
+}
+
 /// A hero as the client holds it in the frame that takes a snapshot in.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HeroSeen<'a> {
@@ -471,6 +483,8 @@ pub(crate) struct Taken {
     pub events: Vec<StageEvent>,
     /// Casts known only from their own fresh telegraph (rule E-16).
     pub casts: Vec<SkillCastObserved>,
+    /// Timed telegraphs seen for the first time just after they were cast.
+    pub telegraphs: Vec<TelegraphSeen>,
 }
 
 /// The memory of every effect of the newest snapshot. A new round starts it empty.
@@ -492,8 +506,9 @@ impl EffectMemory {
     }
 
     /// Takes one snapshot in: remembers every effect it holds, reports the transitions of
-    /// those the previous snapshot held as well, and classifies the end of those it no
-    /// longer holds. Effects of another round are forgotten without a word.
+    /// those the previous snapshot held as well and the first sight of a telegraph cast just
+    /// now, and classifies the end of those it no longer holds. Effects of another round are
+    /// forgotten without a word.
     pub(crate) fn take(&mut self, frame: &Frame) -> Taken {
         let now = frame.now;
         if self.round != frame.round {
@@ -573,11 +588,16 @@ impl EffectMemory {
 
         for (key, effect) in current {
             let Some(memory) = self.seen.get_mut(&key) else {
-                if consecutive
-                    && frame.running
-                    && let Some(cast) = self.warned_cast(key, effect, frame)
-                {
-                    taken.casts.push(cast);
+                if consecutive && frame.running {
+                    if let Some(cast) = self.warned_cast(key, effect, frame) {
+                        taken.casts.push(cast);
+                    }
+                    if matches!(key, EffectKey::Runtime(_)) && fresh_telegraph(effect) {
+                        taken.telegraphs.push(TelegraphSeen {
+                            effect: effect.clone(),
+                            owner: owner_of(effect),
+                        });
+                    }
                 }
                 self.seen.insert(key, Memory::first(effect, now));
                 continue;
@@ -630,10 +650,7 @@ impl EffectMemory {
         let charged = frame.registry?.profile(skill).is_some_and(|profile| {
             profile.windup.is_some() && profile.phase(row) == MotionPhase::WarnFire
         });
-        let stage = view(effect);
-        let fresh = stage.stage == Stage::Telegraph
-            && category::telegraph_secs(skill)
-                .is_some_and(|telegraph| stage.progress * telegraph <= FRESH_SECS);
+        let fresh = fresh_telegraph(effect);
         let edge_seen = self
             .edges
             .iter()
@@ -666,7 +683,16 @@ impl EffectMemory {
     }
 }
 
+/// The effect is a timed telegraph at most `FRESH_SECS` into its time: it was cast just now.
+fn fresh_telegraph(effect: &SkillEffectState) -> bool {
+    let stage = view(effect);
+    stage.stage == Stage::Telegraph
+        && category::telegraph_secs(effect.skill)
+            .is_some_and(|telegraph| stage.progress * telegraph <= FRESH_SECS)
+}
+
 /// Takes in every snapshot the session applied, after the cast observer has read the frame.
+/// The first sights of telegraphs go to whoever registered `TelegraphSeen` (the audio).
 pub(crate) fn track_effects(
     game: Option<Res<GameStateSnapshot>>,
     clock: Res<crate::vfx_clock::VfxClock>,
@@ -684,6 +710,7 @@ pub(crate) fn track_effects(
     mut cursor: Local<MessageCursor<SkillCastObserved>>,
     mut casts: ResMut<Messages<SkillCastObserved>>,
     mut events: MessageWriter<StageEvent>,
+    telegraphs: Option<ResMut<Messages<TelegraphSeen>>>,
 ) {
     let observed: Vec<SkillCastObserved> = cursor.read(&casts).cloned().collect();
     // The resource changes when a snapshot is applied and at no other time.
@@ -716,6 +743,9 @@ pub(crate) fn track_effects(
     });
     events.write_batch(taken.events);
     casts.write_batch(taken.casts);
+    if let Some(mut telegraphs) = telegraphs {
+        telegraphs.write_batch(taken.telegraphs);
+    }
     // Its own casts are no edges to compare the next warning with.
     cursor.clear(&casts);
 }

@@ -8,7 +8,7 @@ CC0 terms: https://creativecommons.org/publicdomain/zero/1.0/
 | --- | --- | --- |
 | `music/arena.ogg` | Exploration Theme — Cleyton Kauffman | Author's CC0 notice in `licenses/exploration-theme.txt`; exact source and adaptation in `music-provenance.json` |
 | `sfx/melee.ogg`, `sfx/hit.ogg` | Kenney Vleugels, RPG Audio 1.0 | Original CC0 notice in `licenses/kenney-rpg-audio.txt`; source members in `sfx-provenance.json` |
-| Other fourteen `sfx/*.ogg` | Open MOBA contributors | Original deterministic synthesis in `scripts/build_audio_palette.py`; no imported samples or melodies |
+| Other twenty-two `sfx/*.ogg` | Open MOBA contributors | Original deterministic synthesis in `scripts/build_audio_palette.py`; no imported samples or melodies |
 
 To the extent the project holds copyright or related rights in the original
 synthesized clips and its adaptations, Open MOBA contributors dedicate those

@@ -9,9 +9,12 @@ The beta result is a labeled synthetic snapshot, never complete-match evidence.
 No source working directory, user configuration, CUA, or additional dependency is required.
 This is a bounded automated renderer scenario, not an interactive gameplay certification.
 """
+from qa_account_fixture import prepare_capture_account
+
 import argparse
 import hashlib
 import json
+from snapshot_payload import decode_snapshot_payload
 import catalog
 import math
 import os
@@ -208,7 +211,7 @@ class ScenarioPeer:
                 del self.pending[key]
                 if len(data) != total:
                     raise RuntimeError("incomplete native frame reconstruction")
-            snapshot = json.loads(data)
+            snapshot = json.loads(decode_snapshot_payload(data))
             tick = snapshot.get("snapshot_tick", 0)
             if tick <= self.snapshot_tick:
                 continue
@@ -272,7 +275,7 @@ class SnapshotObserver:
                 del self.pending[key]
                 if len(data) != total:
                     raise RuntimeError("incomplete observer snapshot reconstruction")
-            packet = json.loads(data)
+            packet = json.loads(decode_snapshot_payload(data))
             if packet.get("type") != "snapshot":
                 continue
             self.joined = any(player["id"] == packet.get("your_id") for player in packet.get("players", []))
@@ -426,6 +429,7 @@ def main():
                   scripted_peers=args.bots, server_mode="dev; production commands; no cheats")
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-verdant-capture-") as isolated:
+        prepare_capture_account(isolated)
         result["isolated_cwd"] = isolated
         env = dict(os.environ, SERVER_ADDR=f"{address[0]}:{address[1]}",
                    GAME_SERVER_ADDR=f"{address[0]}:{address[1]}",

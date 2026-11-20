@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay verify-public-mvp iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres test-postgres-harness release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish release-ru-verify-downloads showcase demo-video trailer-clips sdk-pin-check
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -25,6 +25,7 @@ LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
 IPHONE_OUTPUT ?= builds/iphone
 ANDROID_OUTPUT ?= target/mobile/android
 ANDROID_SERVER ?=
+SDK_BRANCH ?=
 SHOWCASE_OUTPUT ?= builds/showcase
 DEMO_OUTPUT ?= builds/demo
 UI_AUDIT_OUTPUT ?= ../omoba-ui/captures/$(shell date +%F)
@@ -65,6 +66,20 @@ test-scripts: ## Python launcher, packaging, asset-gate and iOS tooling tests
 # CI runs the same script in the `postgres` job.
 test-postgres: ## PostgreSQL-backed tests (set OMOBA_TEST_DATABASE_URL to a disposable database)
 	python3 scripts/postgres_tests.py
+
+# Complete opt-in loopback gate. Uses the existing assigned cargo cache, builds
+# the server/tools, prepares fresh API-enrolled private keys, exercises real
+# admission/registration and public gameplay, then removes those private keys.
+POSTGRES_HARNESS_OUT ?= .agent/postgres-harness-$(shell date +%Y%m%d-%H%M%S)
+test-postgres-harness: ## Opt-in PostgreSQL admission, registration and full Ranked/public journeys
+	python3 scripts/postgres_harness.py --output "$(POSTGRES_HARNESS_OUT)"
+
+# Not part of `check`: reads the SDK's GitHub repository. Cargo fetches the pinned
+# ekza-bevy-sdk commit from there, so a commit only in a local checkout or in
+# ~/.cargo/git builds here and fails CI and fresh clones. Run before opening a PR
+# that moves the pin; SDK_BRANCH=dev (or main) before merging into that branch.
+sdk-pin-check: ## Check the pinned ekza-bevy-sdk commit is on an SDK branch (SDK_BRANCH=dev: merged there)
+	python3 scripts/check_sdk_pin.py $(if $(SDK_BRANCH),--branch "$(SDK_BRANCH)")
 
 # Physical iOS package; install the Rust iOS target and select Xcode first.
 # Optional signing with existing credentials is documented in mobile/ios/README.md.
@@ -156,8 +171,10 @@ play-bots: play ## Alias for play
 # Usage: make bots [BOTS=4] [BOTS_SERVER=127.0.0.1:4000]
 BOTS ?= 9
 BOTS_SERVER ?= 127.0.0.1:4000
+BOTS_PUBLIC ?= 0
+BOTS_PREFERENCE ?= humans_only
 bots: ## Join external harness bots to an existing server
-	cargo run -p harness --bin bots -- --count $(BOTS) --server $(BOTS_SERVER)
+	cargo run -p harness --bin bots -- --count $(BOTS) --server $(BOTS_SERVER) $(if $(filter 1,$(BOTS_PUBLIC)),--public --preference $(BOTS_PREFERENCE))
 
 # Terminate any running server, client, and bot processes started above.
 stop: ## Stop matching local dev processes (broad legacy cleanup)
@@ -186,6 +203,20 @@ verify-gameplay: ## Build server and run headless gameplay/matchmaking checks
 	cargo build -p server
 	cargo test -p harness -- --test-threads=1
 
+# Not part of `check`: needs a disposable PostgreSQL database in OMOBA_TEST_DATABASE_URL
+# (as test-postgres), which it migrates first. Runs the public-protocol probe
+# (scripts/test_public_mvp.mjs, docs/public-mvp.md) twice against a loopback lobby built
+# from this checkout: the lifecycle scenario, then a short mixed Ranked/Casual/vs Bots
+# load. Reports land in PUBLIC_MVP_OUT. CI's `postgres` job runs the same target.
+PUBLIC_MVP_OUT ?= $(or $(CARGO_TARGET_DIR),target)/public-mvp
+PUBLIC_MVP_PROBE = HARNESS_SERVER_BIN="$(or $(CARGO_TARGET_DIR),target)/debug/server" node scripts/test_public_mvp.mjs
+verify-public-mvp: ## Public-protocol probe: lifecycle + mixed load (set OMOBA_TEST_DATABASE_URL to a disposable database)
+	@test -n "$(OMOBA_TEST_DATABASE_URL)" || { echo "verify-public-mvp: set OMOBA_TEST_DATABASE_URL to a disposable PostgreSQL database" >&2; exit 2; }
+	cargo build --locked -p server
+	OMOBA_DATABASE_URL="$(OMOBA_TEST_DATABASE_URL)" cargo run --locked -q -p omoba-account-api -- migrate
+	$(PUBLIC_MVP_PROBE) --scenario=lifecycle --output="$(PUBLIC_MVP_OUT)/lifecycle"
+	$(PUBLIC_MVP_PROBE) --mix=humans_only:10,quick:5,bot_practice:2 --max-wait-secs=60 --seconds=5 --output="$(PUBLIC_MVP_OUT)/mixed"
+
 # ---------------------------------------------------------------------------
 # Releases (docs/RELEASING.md). Artifacts go to dist/v<version>/.
 # RELEASE_SERVER=host:port compiles the initial server address into clients.
@@ -207,6 +238,28 @@ release-all: ## All five platforms on this Mac for PROD_SERVER into dist/v<versi
 
 release-publish: ## Pin dist/v<version>/ packages to IPFS (needs PINATA_JWT) and verify the downloads
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish
+
+# Market builds (docs/markets.md): one market per package set, own servers,
+# settings folder and package names. RU = free game, no Ekza, VK ID sign-in.
+release-markets: ## Print every market's features, servers and platforms
+	python3 scripts/release.py markets
+
+release-ru-preflight: ## Check that the RU lobby, Account API and portal answer
+	python3 scripts/release.py preflight --market ru
+
+release-ru: ## RU market packages (macOS, Windows, Linux, Android) and the RU server bundle into dist/v<version>-ru/
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py check
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py build all --market ru $(RELEASE_FLAGS)
+
+# LR-23: the RU packages live on the RU host (Caddy serves ops/vps/ru/README.md#downloads);
+# IPFS is the mirror. The rsync target is the RU VPS alias and its downloads folder.
+RU_DOWNLOADS_TARGET ?= $(or $(RU_HOST),vds-ru):/opt/omoba-ru/downloads
+release-ru-publish: ## Upload dist/v<version>-ru/ packages to the RU download host, pin the IPFS mirror (needs PINATA_JWT), write releases.json
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish --market ru --rsync-target "$(RU_DOWNLOADS_TARGET)"
+	python3 scripts/release.py catalog --market ru
+
+release-ru-verify-downloads: ## Download every package the RU portal lists (and its mirror) and check host, status and SHA-256
+	python3 scripts/release.py verify-downloads --market ru
 
 release-local: ## Build every package this computer can (macOS, iPhone archive, Linux via Docker, Android if SDK)
 	python3 scripts/release.py build all $(RELEASE_FLAGS)
@@ -234,6 +287,13 @@ release-draft: ## Upload local dist/ packages to a DRAFT GitHub release
 
 release-notes: ## Print release notes for the current version
 	python3 scripts/release.py notes
+
+# DEV-contour tester packages (desktop only) into dist/v<version>-dev/: dev lobby
+# lobby.dev.omoba.io:4100 (DEV_SERVER=<dev VPS IPv4>:4100 without DNS), dev registry,
+# own settings folder. See ops/vps/dev/README.md.
+DEV_SERVER ?=
+release-dev: ## DEV tester packages (macOS/Windows/Linux this Mac can build) for the dev contour
+	python3 scripts/release.py build all --contour dev $(if $(DEV_SERVER),--server $(DEV_SERVER),)
 
 # Staged native screenshots for the website, stores and README: desktop and
 # phone-preview scenes (hero select, lane fight, shop) from a local dev build.

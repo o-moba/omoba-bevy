@@ -5,7 +5,7 @@ use harness::{Bot, Character, HeroClass, ServerPacket, ServerProcess, SnapshotVi
 use serde_json::Value;
 use shared::protocol::{PROTOCOL_VERSION, SnapshotMeta, SnapshotOrder};
 use shared::transport::{MAX_DATAGRAM_BYTES, SnapshotAssembler};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 const OLD_CLIENT_BOUNDARY: usize = 8 * 1024;
@@ -142,6 +142,25 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         "filtered populated snapshot is {} bytes",
         payload.len()
     );
+    let chunks: BTreeMap<_, _> = actual_frames
+        .iter()
+        .map(|frame| {
+            (
+                u16::from_le_bytes(frame[22..24].try_into().unwrap()),
+                &frame[30..],
+            )
+        })
+        .collect();
+    let encoded: Vec<_> = chunks
+        .values()
+        .flat_map(|chunk| chunk.iter().copied())
+        .collect();
+    assert!(
+        encoded.starts_with(b"OMZ1"),
+        "populated world uses compression"
+    );
+    assert!(encoded.len() + 64 <= payload.len());
+    assert!(encoded.len() * 10 <= payload.len() * 9);
     assert_eq!(array(&snapshot["scoreboard"], "players").len(), 10);
     let vision: shared::vision::TeamVision =
         serde_json::from_value(snapshot["vision"].clone()).expect("authoritative team sight");

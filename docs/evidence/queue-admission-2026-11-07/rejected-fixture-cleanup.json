@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "scope": "Only exact failed-run disposable schema and two NOLOGIN roles from test process44921",
+  "removed_schemas": [
+    "career_test_44921_50"
+  ],
+  "removed_roles": [
+    "season_game_44921_51",
+    "season_portal_44921_52"
+  ],
+  "before": {
+    "career_schema": 11,
+    "profiles": 4,
+    "seasons": 2
+  },
+  "remaining": {
+    "schemas": 0,
+    "roles": 0
+  }
+}

@@ -1,0 +1,425 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ekza.io/schemas/gp/ekza.game-contract.v1.json",
+  "title": "ekza.game-contract.v1",
+  "description": "Ekza Game Protocol 1.0: what one game accepts from creators. Core keys are strict; profile data lives only under `ext`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "minReaderVersion", "game", "revision", "previousRevision", "license",
+               "source", "profiles", "rigs", "sockets", "packaging", "rules", "slots", "families", "targets",
+               "retired", "ext"],
+  "properties": {
+    "schema": { "const": "ekza.game-contract.v1" },
+    "schemaVersion": { "$ref": "#/$defs/version" },
+    "minReaderVersion": { "$ref": "#/$defs/version" },
+    "game": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/gameId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "revision": { "$ref": "#/$defs/revision" },
+    "previousRevision": { "oneOf": [{ "$ref": "#/$defs/revision" }, { "type": "null" }] },
+    "license": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["commit", "exporter", "inputsSha256"],
+      "properties": {
+        "commit": { "oneOf": [{ "type": "string", "pattern": "^[0-9a-f]{7,64}$" }, { "type": "null" }] },
+        "exporter": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "inputsSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "profiles": {
+      "type": "object", "additionalProperties": false, "required": ["used", "required"],
+      "properties": {
+        "used": { "type": "array", "uniqueItems": true, "maxItems": 16, "items": { "$ref": "#/$defs/profileId" } },
+        "required": { "type": "array", "uniqueItems": true, "maxItems": 16, "items": { "$ref": "#/$defs/profileId" } }
+      }
+    },
+    "rigs": {
+      "type": "object", "maxProperties": 8,
+      "propertyNames": { "$ref": "#/$defs/shortId" },
+      "additionalProperties": { "$ref": "#/$defs/rig" }
+    },
+    "sockets": {
+      "type": "object", "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/socketId" },
+      "additionalProperties": { "$ref": "#/$defs/socket" }
+    },
+    "packaging": {
+      "type": "object", "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/packageKind" },
+      "additionalProperties": { "$ref": "#/$defs/packaging" }
+    },
+    "rules": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/rule" } },
+    "slots": {
+      "type": "object", "minProperties": 1, "maxProperties": 4096,
+      "propertyNames": { "$ref": "#/$defs/slotId" },
+      "additionalProperties": { "$ref": "#/$defs/slot" }
+    },
+    "families": {
+      "type": "object", "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/shortId" },
+      "additionalProperties": { "$ref": "#/$defs/family" }
+    },
+    "targets": { "type": "array", "minItems": 1, "maxItems": 1024, "items": { "$ref": "#/$defs/target" } },
+    "retired": {
+      "type": "object", "additionalProperties": false, "required": ["slots", "targets", "families"],
+      "properties": {
+        "slots": { "type": "object", "propertyNames": { "$ref": "#/$defs/slotId" }, "additionalProperties": { "$ref": "#/$defs/revision" } },
+        "targets": { "type": "object", "propertyNames": { "$ref": "#/$defs/targetId" }, "additionalProperties": { "$ref": "#/$defs/revision" } },
+        "families": { "type": "object", "propertyNames": { "$ref": "#/$defs/shortId" }, "additionalProperties": { "$ref": "#/$defs/revision" } }
+      }
+    },
+    "ext": { "$ref": "#/$defs/ext" }
+  },
+  "$defs": {
+    "version": { "type": "string", "pattern": "^1\\.(0|[1-9][0-9]{0,3})$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "revision": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" },
+    "gameId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+    "targetId": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,47}$" },
+    "shortId": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+    "slotId": { "type": "string", "maxLength": 96, "pattern": "^[a-z][a-z0-9_-]{0,47}(\\.[a-z0-9][a-z0-9_-]{0,47}){0,7}$" },
+    "socketId": { "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_-]{0,31}(\\.[a-z0-9][a-z0-9_-]{0,31}){0,3}$" },
+    "profileId": { "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*\\.v[0-9]+$" },
+    "ruleId": {
+      "type": "string", "maxLength": 80,
+      "pattern": "^([a-z][a-z0-9-]{1,31}\\.)?(pack|clip|rig|asset|socket|rights)\\.[a-z][a-z0-9-]{1,40}$"
+    },
+    "requirementId": { "type": "string", "maxLength": 128, "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$" },
+    "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$" },
+    "markerName": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+    "secs": { "type": "number", "minimum": 0, "maximum": 600 },
+    "nullableSecs": { "oneOf": [{ "$ref": "#/$defs/secs" }, { "type": "null" }] },
+    "vec3": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -100, "maximum": 100 } },
+    "packageKind": { "enum": ["character", "animation-pack", "asset-pack", "accessory"] },
+    "slotKind": { "enum": ["animation", "asset", "socket"] },
+    "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "description": { "oneOf": [{ "type": "string", "maxLength": 2000 }, { "type": "null" }] },
+    "ext": {
+      "type": "object", "maxProperties": 16,
+      "propertyNames": { "$ref": "#/$defs/profileId" },
+      "additionalProperties": { "type": "object" }
+    },
+    "rig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "sourceFormats", "restPose", "facing", "requiredBones", "requiredBonesVrm0", "drivenBones",
+                   "maxHumanoidBones", "maxNodes", "uniformScale", "fingers", "thumbsRecommended", "lengthUnit", "ext"],
+      "properties": {
+        "kind": { "const": "vrm-humanoid" },
+        "sourceFormats": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["vrm1", "vrm0"] } },
+        "restPose": { "enum": ["t-pose", "a-pose", "any"] },
+        "facing": { "const": "as-vrm-spec" },
+        "requiredBones": { "$ref": "#/$defs/boneList" },
+        "requiredBonesVrm0": { "$ref": "#/$defs/boneList" },
+        "drivenBones": { "$ref": "#/$defs/boneList" },
+        "maxHumanoidBones": { "type": "integer", "minimum": 15, "maximum": 64 },
+        "maxNodes": { "type": "integer", "minimum": 1, "maximum": 65536 },
+        "uniformScale": { "enum": ["humanoid-bones-and-ancestors", "none"] },
+        "fingers": { "enum": ["optional", "required"] },
+        "thumbsRecommended": { "type": "boolean" },
+        "lengthUnit": {
+          "type": "object", "additionalProperties": false, "required": ["name", "from", "referenceM"],
+          "properties": {
+            "name": { "const": "legLength" },
+            "from": { "const": "hips-to-feet" },
+            "referenceM": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 }
+          }
+        },
+        "ext": { "$ref": "#/$defs/ext" }
+      }
+    },
+    "boneList": { "type": "array", "uniqueItems": true, "maxItems": 64, "items": { "type": "string", "pattern": "^[a-z][A-Za-z]{1,31}$" } },
+    "socket": {
+      "type": "object", "additionalProperties": false, "required": ["label", "rig", "bone", "frame", "fillable", "ext"],
+      "properties": {
+        "label": { "$ref": "#/$defs/label" },
+        "rig": { "$ref": "#/$defs/shortId" },
+        "bone": { "type": "string", "pattern": "^[a-z][A-Za-z]{1,31}$" },
+        "frame": { "enum": ["bone", "palm", "authored"] },
+        "fillable": { "type": "boolean" },
+        "ext": { "$ref": "#/$defs/ext" }
+      }
+    },
+    "packaging": {
+      "type": "object", "additionalProperties": false,
+      "required": ["containers", "manifestKey", "slotKinds", "maxBytes", "maxJsonBytes", "maxFills", "binding", "rendition", "ext"],
+      "properties": {
+        "containers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["vrm1", "vrm0", "glb", "vrma"] } },
+        "manifestKey": { "const": "ekza_package_v1" },
+        "slotKinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/slotKind" } },
+        "maxBytes": { "type": "integer", "minimum": 20, "maximum": 268435456 },
+        "maxJsonBytes": { "type": "integer", "minimum": 1024, "maximum": 16777216 },
+        "maxFills": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "binding": { "enum": ["manifest", "manifest-or-names"] },
+        "rendition": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["platform", "profile", "version"],
+              "properties": {
+                "platform": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+                "profile": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+                "version": { "type": "integer", "minimum": 1 }
+              }
+            }
+          ]
+        },
+        "ext": { "$ref": "#/$defs/ext" }
+      }
+    },
+    "rule": {
+      "type": "object", "additionalProperties": false, "required": ["id", "severity", "scope", "params", "checkedBy"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ruleId" },
+        "severity": { "enum": ["error", "warning"] },
+        "scope": { "enum": ["package", "animation", "asset", "socket", "rig", "rights"] },
+        "params": { "type": "object" },
+        "checkedBy": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "enum": ["tool", "hub", "builder", "game"] }
+        }
+      }
+    },
+    "default": {
+      "type": "object", "additionalProperties": false, "required": ["name", "playSecs", "loop", "markers", "preview"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "playSecs": { "$ref": "#/$defs/nullableSecs" },
+        "loop": { "type": ["boolean", "null"] },
+        "markers": {
+          "type": "object", "maxProperties": 8,
+          "propertyNames": { "$ref": "#/$defs/markerName" },
+          "additionalProperties": { "$ref": "#/$defs/secs" }
+        },
+        "preview": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["sha256", "bytes", "format", "license"],
+              "properties": {
+                "sha256": { "$ref": "#/$defs/sha256" },
+                "bytes": { "type": "integer", "minimum": 1, "maximum": 268435456 },
+                "format": { "enum": ["vrma", "glb", "png"] },
+                "license": { "type": "string", "minLength": 1, "maxLength": 64 }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "animationSpec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rig", "playback", "loop", "inPlace", "window", "markers", "minIntervalSecs", "leadInSecs"],
+      "properties": {
+        "rig": { "$ref": "#/$defs/shortId" },
+        "playback": { "enum": ["loop", "action", "hold"] },
+        "loop": { "type": "boolean" },
+        "inPlace": { "type": "boolean" },
+        "window": {
+          "type": "object", "additionalProperties": false, "required": ["minSecs", "targetSecs", "maxSecs"],
+          "properties": {
+            "minSecs": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
+            "targetSecs": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
+            "maxSecs": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 }
+          }
+        },
+        "markers": {
+          "type": "object", "maxProperties": 8,
+          "propertyNames": { "$ref": "#/$defs/markerName" },
+          "additionalProperties": {
+            "type": "object", "additionalProperties": false, "required": ["required", "maxSecs", "targetSecs"],
+            "properties": {
+              "required": { "type": "boolean" },
+              "maxSecs": { "$ref": "#/$defs/nullableSecs" },
+              "targetSecs": { "$ref": "#/$defs/nullableSecs" }
+            }
+          }
+        },
+        "minIntervalSecs": { "$ref": "#/$defs/nullableSecs" },
+        "leadInSecs": { "$ref": "#/$defs/nullableSecs" }
+      }
+    },
+    "assetSpec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "socket", "rootName", "nodes", "anchors", "axes", "sizeM", "budget", "materials", "motion"],
+      "properties": {
+        "role": { "enum": ["handheld", "projectile", "throwable", "deployable", "attachment", "effect"] },
+        "socket": { "oneOf": [{ "$ref": "#/$defs/socketId" }, { "type": "null" }] },
+        "rootName": { "oneOf": [{ "$ref": "#/$defs/name" }, { "type": "null" }] },
+        "nodes": {
+          "type": "object", "additionalProperties": false, "required": ["required", "optional"],
+          "properties": {
+            "required": { "type": "array", "uniqueItems": true, "maxItems": 32, "items": { "$ref": "#/$defs/name" } },
+            "optional": { "type": "array", "uniqueItems": true, "maxItems": 32, "items": { "$ref": "#/$defs/name" } }
+          }
+        },
+        "anchors": {
+          "type": "object", "maxProperties": 8,
+          "propertyNames": { "$ref": "#/$defs/markerName" },
+          "additionalProperties": {
+            "type": "object", "additionalProperties": false, "required": ["required", "default", "boxM"],
+            "properties": {
+              "required": { "type": "boolean" },
+              "default": { "oneOf": [{ "$ref": "#/$defs/vec3" }, { "type": "null" }] },
+              "boxM": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "object", "additionalProperties": false, "required": ["min", "max"],
+                    "properties": { "min": { "$ref": "#/$defs/vec3" }, "max": { "$ref": "#/$defs/vec3" } } }
+                ]
+              }
+            }
+          }
+        },
+        "axes": {
+          "type": "object", "additionalProperties": false, "required": ["origin", "up", "forward"],
+          "properties": {
+            "origin": { "enum": ["grip", "center", "base", "socket"] },
+            "up": { "enum": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"] },
+            "forward": { "enum": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"] }
+          }
+        },
+        "sizeM": {
+          "type": "object", "additionalProperties": false, "required": ["boxMin", "boxMax"],
+          "properties": {
+            "boxMin": { "oneOf": [{ "$ref": "#/$defs/vec3" }, { "type": "null" }] },
+            "boxMax": { "oneOf": [{ "$ref": "#/$defs/vec3" }, { "type": "null" }] }
+          }
+        },
+        "budget": {
+          "type": "object", "additionalProperties": false,
+          "required": ["maxTriangles", "maxNodes", "maxMeshes", "maxMaterials", "maxImages", "maxTextureSize", "maxTexturePixels"],
+          "properties": {
+            "maxTriangles": { "type": ["integer", "null"], "minimum": 1 },
+            "maxNodes": { "type": "integer", "minimum": 1, "maximum": 4096 },
+            "maxMeshes": { "type": "integer", "minimum": 1, "maximum": 1024 },
+            "maxMaterials": { "type": ["integer", "null"], "minimum": 1, "maximum": 256 },
+            "maxImages": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "maxTextureSize": { "type": "integer", "minimum": 0, "maximum": 16384 },
+            "maxTexturePixels": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "materials": {
+          "type": "object", "additionalProperties": false, "required": ["extensionsAllowed", "imageFormats", "maxEmissiveStrength"],
+          "properties": {
+            "extensionsAllowed": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z0-9]+_[A-Za-z0-9_]+$" } },
+            "imageFormats": { "type": "array", "uniqueItems": true, "items": { "enum": ["png", "jpeg", "webp", "ktx2"] } },
+            "maxEmissiveStrength": { "type": ["number", "null"], "minimum": 0 }
+          }
+        },
+        "motion": { "enum": ["static", "named-parts", "node-animation", "skinned"] }
+      }
+    },
+    "socketSpec": {
+      "type": "object", "additionalProperties": false, "required": ["socket", "maxOffsetM", "maxRotationDeg"],
+      "properties": {
+        "socket": { "$ref": "#/$defs/socketId" },
+        "maxOffsetM": { "type": "number", "minimum": 0, "maximum": 10 },
+        "maxRotationDeg": { "type": "number", "minimum": 0, "maximum": 360 }
+      }
+    },
+    "slotBody": {
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "#/$defs/slotKind" },
+        "label": { "$ref": "#/$defs/label" },
+        "description": { "$ref": "#/$defs/description" },
+        "customizable": { "type": "boolean" },
+        "customizableFrom": { "oneOf": [{ "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }, { "type": "null" }] },
+        "reserved": { "type": "boolean" },
+        "required": { "type": "boolean" },
+        "default": { "oneOf": [{ "$ref": "#/$defs/default" }, { "type": "null" }] },
+        "animation": { "oneOf": [{ "$ref": "#/$defs/animationSpec" }, { "type": "null" }] },
+        "asset": { "oneOf": [{ "$ref": "#/$defs/assetSpec" }, { "type": "null" }] },
+        "socket": { "oneOf": [{ "$ref": "#/$defs/socketSpec" }, { "type": "null" }] },
+        "ext": { "$ref": "#/$defs/ext" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "animation" } } },
+          "then": { "properties": { "animation": { "$ref": "#/$defs/animationSpec" }, "asset": { "type": "null" }, "socket": { "type": "null" } } } },
+        { "if": { "properties": { "kind": { "const": "asset" } } },
+          "then": { "properties": { "asset": { "$ref": "#/$defs/assetSpec" }, "animation": { "type": "null" }, "socket": { "type": "null" } } } },
+        { "if": { "properties": { "kind": { "const": "socket" } } },
+          "then": { "properties": { "socket": { "$ref": "#/$defs/socketSpec" }, "animation": { "type": "null" }, "asset": { "type": "null" } } } },
+        { "if": { "properties": { "customizable": { "const": true } } },
+          "then": { "properties": { "customizableFrom": { "type": "string" } } } },
+        { "if": { "properties": { "required": { "const": true } } },
+          "then": { "properties": { "default": { "type": "null" } } } }
+      ]
+    },
+    "slot": {
+      "allOf": [{ "$ref": "#/$defs/slotBody" }],
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["kind", "label", "description", "customizable", "customizableFrom", "reserved", "required", "default",
+                   "animation", "asset", "socket", "sharesDefaultWith", "alternatesWith", "usedBy", "ext"],
+      "properties": {
+        "sharesDefaultWith": { "type": "array", "uniqueItems": true, "maxItems": 64, "items": { "$ref": "#/$defs/slotId" } },
+        "alternatesWith": { "type": "array", "uniqueItems": true, "maxItems": 1, "items": { "$ref": "#/$defs/slotId" } },
+        "usedBy": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "oneOf": [{ "const": "*" }, { "$ref": "#/$defs/targetId" }] }
+        }
+      }
+    },
+    "family": {
+      "allOf": [{ "$ref": "#/$defs/slotBody" }],
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["kind", "label", "description", "customizable", "customizableFrom", "reserved", "required", "default",
+                   "animation", "asset", "socket", "idPrefix", "minFills", "maxFills", "usedBy", "ext"],
+      "properties": {
+        "idPrefix": { "$ref": "#/$defs/slotId" },
+        "minFills": { "type": "integer", "minimum": 0, "maximum": 64 },
+        "maxFills": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "usedBy": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "oneOf": [{ "const": "*" }, { "$ref": "#/$defs/targetId" }] }
+        }
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "name", "subtitle", "sections", "slots", "families", "accepts", "ext"],
+      "properties": {
+        "id": { "$ref": "#/$defs/targetId" },
+        "kind": { "enum": ["character", "any", "item", "vehicle", "prop"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "subtitle": { "oneOf": [{ "type": "string", "maxLength": 64 }, { "type": "null" }] },
+        "sections": {
+          "type": "array", "minItems": 1, "maxItems": 32,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "label", "key", "slots"],
+            "properties": {
+              "id": { "$ref": "#/$defs/shortId" },
+              "label": { "$ref": "#/$defs/label" },
+              "key": { "oneOf": [{ "type": "string", "maxLength": 8 }, { "type": "null" }] },
+              "slots": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/slotId" } }
+            }
+          }
+        },
+        "slots": { "type": "array", "minItems": 1, "uniqueItems": true, "maxItems": 512, "items": { "$ref": "#/$defs/slotId" } },
+        "families": { "type": "array", "uniqueItems": true, "maxItems": 16, "items": { "$ref": "#/$defs/shortId" } },
+        "accepts": {
+          "type": "array", "minItems": 1, "maxItems": 16,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["package", "requirementId", "label", "slots", "families", "listing", "mustFill"],
+            "properties": {
+              "package": { "$ref": "#/$defs/packageKind" },
+              "requirementId": { "$ref": "#/$defs/requirementId" },
+              "label": { "$ref": "#/$defs/label" },
+              "slots": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/slotId" } },
+              "families": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/shortId" } },
+              "listing": { "enum": ["every-customizable-slot", "filled-slots-only"] },
+              "mustFill": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/slotId" } }
+            }
+          }
+        },
+        "ext": { "$ref": "#/$defs/ext" }
+      }
+    }
+  }
+}

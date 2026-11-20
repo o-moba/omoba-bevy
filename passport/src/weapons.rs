@@ -222,9 +222,46 @@ pub fn validate_model(bytes: &[u8]) -> Result<Grip, String> {
     grip.validate()?;
     Ok(grip)
 }
+/// Optional `asset.extras.omoba_wildspark_set_v1` of a repeater + launcher set
+/// GLB. The client identifies the set by its node names alone; this hint only
+/// moves the muzzle flash. A missing or malformed tip uses the baseline tip.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WildsparkSetHint {
+    /// Canonical grip-frame metres, like the grip offset.
+    pub repeater_muzzle: Option<[f32; 3]>,
+    pub launcher_muzzle: Option<[f32; 3]>,
+}
+/// Read after `validate_model` has accepted the same bytes; never rejects a model.
+pub fn wildspark_set_hint(bytes: &[u8]) -> Option<WildsparkSetHint> {
+    let len = u32::from_le_bytes(bytes.get(12..16)?.try_into().ok()?) as usize;
+    if bytes.get(16..20) != Some(b"JSON") {
+        return None;
+    }
+    let d: serde_json::Value =
+        serde_json::from_slice(bytes.get(20..20usize.checked_add(len)?)?).ok()?;
+    let hint = d["asset"]["extras"]
+        .get("omoba_wildspark_set_v1")
+        .filter(|v| v.is_object())?;
+    let tip = |variant: &str| -> Option<[f32; 3]> {
+        let values = hint["muzzle"][variant]
+            .as_array()
+            .filter(|a| a.len() == 3)?;
+        let mut tip = [0.0; 3];
+        for (out, value) in tip.iter_mut().zip(values) {
+            *out = value.as_f64()? as f32;
+        }
+        tip.iter()
+            .all(|v| v.is_finite() && v.abs() <= 2.0)
+            .then_some(tip)
+    };
+    Some(WildsparkSetHint {
+        repeater_muzzle: tip("repeater"),
+        launcher_muzzle: tip("launcher"),
+    })
+}
 /// The profile caps the graph at 64 nodes before this check. Validate the
 /// entire forest, including unused nodes, before Bevy traverses any scene.
-fn validate_scene_graph(document: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn validate_scene_graph(document: &serde_json::Value) -> Result<(), String> {
     let nodes = document["nodes"].as_array().unwrap();
     let meshes = document["meshes"].as_array().unwrap();
     let index = |value: &serde_json::Value, bound: usize| -> Result<usize, String> {
@@ -477,6 +514,62 @@ mod tests {
             validate_model(&valid).is_ok(),
             "nested mesh and unused valid nodes are allowed"
         );
+    }
+    #[test]
+    fn wildspark_set_shape_passes_and_its_muzzle_hint_is_optional() {
+        use serde_json::json;
+        let set = |hint: Option<serde_json::Value>| {
+            with_document(|d| {
+                d["scenes"][0]["nodes"] = json!([0]);
+                d["nodes"] = json!([
+                    {"name":"wildspark-set","children":[1,3]},
+                    {"name":"WildsparkSetRepeater","mesh":0,"children":[2]},
+                    {"name":"WildsparkRotor","mesh":0,"translation":[0,0.12,0.25]},
+                    {"name":"WildsparkSetLauncher","scale":[0,0,0],"children":[4]},
+                    {"name":"WildsparkSlide","mesh":0,"translation":[0,0.13,0.2]}
+                ]);
+                if let Some(hint) = hint {
+                    d["asset"]["extras"]["omoba_wildspark_set_v1"] = hint;
+                }
+            })
+        };
+        let plain = set(None);
+        assert!(validate_model(&plain).is_ok(), "hidden launcher at scale 0");
+        assert_eq!(wildspark_set_hint(&plain), None);
+        let hinted = set(Some(json!({
+            "repeater": "WildsparkSetRepeater",
+            "launcher": "WildsparkSetLauncher",
+            "muzzle": {"repeater": [0, 0.12, 0.735], "launcher": [0, 0.13, 0.81]}
+        })));
+        assert!(validate_model(&hinted).is_ok());
+        assert_eq!(
+            wildspark_set_hint(&hinted),
+            Some(WildsparkSetHint {
+                repeater_muzzle: Some([0.0, 0.12, 0.735]),
+                launcher_muzzle: Some([0.0, 0.13, 0.81]),
+            })
+        );
+        // A malformed tip falls back on its own and never rejects the model.
+        for bad in [
+            json!([0, 0.1]),
+            json!([0, "up", 1]),
+            json!([0, 0, 9.0]),
+            json!(null),
+        ] {
+            let bytes = set(Some(
+                json!({"muzzle": {"repeater": bad, "launcher": [0, 0.2, 0.9]}}),
+            ));
+            assert!(validate_model(&bytes).is_ok());
+            assert_eq!(
+                wildspark_set_hint(&bytes),
+                Some(WildsparkSetHint {
+                    repeater_muzzle: None,
+                    launcher_muzzle: Some([0.0, 0.2, 0.9]),
+                })
+            );
+        }
+        assert_eq!(wildspark_set_hint(&set(Some(json!("set")))), None);
+        assert_eq!(wildspark_set_hint(b"not a glb"), None);
     }
     #[test]
     fn sdk_catalog_download_import_and_hash_rejection_use_real_http() {

@@ -612,7 +612,7 @@ fn a_contact_must_name_a_clip_and_lie_inside_it() {
 
 #[test]
 fn embedded_alias_preserves_curves_with_safe_runtime_ids_and_rejects_partial_remaps() {
-    use bevy::{animation::animated_field, math::curve::UnevenSampleAutoCurve};
+    use bevy::{animation::animated_field, curve::UnevenSampleAutoCurve};
     let rig = rig("agnes");
     let motion = motion();
     let (_, animated_nodes) = retarget::retarget_all(&rig, &motion).unwrap();
@@ -675,4 +675,31 @@ fn semantic_hand_sockets_cover_shipped_rigs_without_bone_names() {
             assert!(sockets::grip_frame(&missing, hand).is_none());
         }
     }
+}
+
+/// A real VRM 1.0 export (Ekza Studio fixture, VRM Public License 1.0) is read in
+/// place when present: its accessory nodes carry exporter scale roundoff, which the
+/// runtime rig must accept, and every shared motion must retarget onto it.
+#[test]
+fn optional_real_vrm1_export_retargets_at_runtime() {
+    let path = std::env::var_os("OMOBA_VRM1_SAMPLE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                std::path::PathBuf::from(home)
+                    .join("git/ekza/ekza-studio/fixtures/models/seed-san.vrm")
+            })
+        });
+    let Some(bytes) = path.and_then(|path| std::fs::read(path).ok()) else {
+        eprintln!("skipped: optional VRM 1.0 sample not present");
+        return;
+    };
+    let rig = HumanoidRig::from_glb(&bytes).expect("VRM 1.0 sample is a runtime humanoid");
+    assert_eq!(rig.version, VrmVersion::Vrm1);
+    assert!(rig.bones.contains_key("leftThumbMetacarpal"));
+    let (clips, animated) = retarget::retarget_all(&rig, &motion()).unwrap();
+    for state in ["idle", "run", "walk", "attack", "cast", "death"] {
+        assert!(clips.contains_key(state), "{state}");
+    }
+    assert!(animated.contains(&rig.bones["leftThumbMetacarpal"]));
 }

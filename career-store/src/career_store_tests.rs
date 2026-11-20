@@ -12,6 +12,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::with_initial_season(None).await
+    }
+    async fn with_initial_season(initial_ms: Option<i64>) -> Self {
         let url = std::env::var("OMOBA_TEST_DATABASE_URL")
             .expect("Set an isolated PostgreSQL test database URL");
         let admin = PgPoolOptions::new()
@@ -46,6 +49,43 @@ impl Fixture {
             .connect(&url)
             .await
             .unwrap();
+        if let Some(initial_ms) = initial_ms {
+            // Owned fixture only: apply the real SQL with an explicit initial
+            // timestamp. Production has no clock flag or reset-on-read path.
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::raw_sql("CREATE TABLE career_schema_version(version INTEGER PRIMARY KEY)")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::raw_sql(include_str!("../migrations/postgres/001_career.sql"))
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO career_schema_version VALUES(1)")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            for migration in [
+                include_str!("../migrations/postgres/002_player_handles.sql"),
+                include_str!("../migrations/postgres/003_device_keys.sql"),
+                include_str!("../migrations/postgres/004_admission_limits.sql"),
+                include_str!("../migrations/postgres/005_sanctions.sql"),
+                include_str!("../migrations/postgres/006_rating_ladder.sql"),
+                include_str!("../migrations/postgres/007_fair_play.sql"),
+                include_str!("../migrations/postgres/008_match_votes.sql"),
+                include_str!("../migrations/postgres/009_ranked_eligibility.sql"),
+            ] {
+                sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+            }
+            let migration = include_str!("../migrations/postgres/010_ranked_seasons.sql");
+            let expired = migration.replace(
+                "SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint AS ms",
+                &format!("SELECT {initial_ms}::bigint AS ms"),
+            );
+            assert_ne!(migration, expired);
+            sqlx::raw_sql(&expired).execute(&mut *tx).await.unwrap();
+            tx.commit().await.unwrap();
+        }
         let store = CareerStore::from_pool(pool).await.unwrap();
         Self {
             store,
@@ -58,11 +98,23 @@ impl Fixture {
             .await
             .unwrap()
     }
-    async fn profile(&self, n: u64) -> ProfileSummary {
+    async fn fresh_profile(&self, n: u64) -> ProfileSummary {
         self.store
             .authenticate(&format!("{n:064x}"), &format!("Player-{n}"))
             .await
             .unwrap()
+    }
+    async fn profile(&self, n: u64) -> ProfileSummary {
+        let profile = self.fresh_profile(n).await;
+        // Explicit qualifying snapshot for unrelated legacy store cases. These
+        // tests isolate rating/history baselines; eligibility tests below use
+        // fresh_profile and actual public settlement instead of this snapshot.
+        sqlx::query("UPDATE career_profiles SET completed_public_matches=10 WHERE profile_id=$1")
+            .bind(&profile.profile_id)
+            .execute(&self.store.pool)
+            .await
+            .unwrap();
+        self.store.profile(&profile.profile_id).await.unwrap()
     }
     async fn expire(&self, id: &str) {
         sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()-interval '1 second' WHERE result_id=$1")
@@ -77,8 +129,20 @@ impl Fixture {
         self.admin.close().await;
     }
 }
+// Remove every schema10/11 object before explicitly simulating a pre-season
+// schema. Leaving future tables while deleting version rows is not an upgrade
+// fixture. This runs only in the test's own disposable schema.
+async fn remove_season_schema_for_upgrade(f: &Fixture) {
+    sqlx::raw_sql("DROP FUNCTION career_prune_closed_ready(integer); DROP TABLE career_ready_claims,career_ready_members,career_ready_checks; DELETE FROM career_schema_version WHERE version>=12; DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
+        .execute(&f.store.pool).await.unwrap();
+    sqlx::raw_sql("DROP TRIGGER career_ranked_registration ON career_profiles; DROP FUNCTION career_stamp_ranked_profile(); ALTER TABLE career_profiles DROP COLUMN ranked_season_id,DROP COLUMN ranked_started_at_ms,DROP COLUMN ranked_ends_at_ms,DROP COLUMN season_rated_matches,DROP COLUMN season_wins,DROP COLUMN season_losses,DROP COLUMN season_completed_matches,DROP COLUMN latest_ranked_badge; DROP TABLE career_ranked_closures,career_ranked_archives,career_ranked_allocations,career_ranked_seasons; DROP FUNCTION career_guard_ranked_archive(),career_guard_ranked_season(),career_require_open_ranked_season(); DELETE FROM career_schema_version WHERE version=10;")
+        .execute(&f.store.pool).await.unwrap();
+}
+
 fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> ParticipantResult {
     ParticipantResult {
+        input_kind: Default::default(),
+        participation: None,
         is_bot: false,
         player_id,
         profile_id: Some(profile.profile_id.clone()),
@@ -99,6 +163,9 @@ fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> Particip
 }
 fn result(a: &ProfileSummary, b: &ProfileSummary, n: u64) -> MatchResult {
     MatchResult {
+        ranked_season_id: None,
+        gameplay_started: true,
+        end_reason: None,
         result_id: format!("fixture-result-{n}"),
         server_epoch: u64::MAX,
         match_id: n,
@@ -125,6 +192,136 @@ fn starting(result: &MatchResult) -> MatchResult {
     start.ended_at_ms = 0;
     start.duration_ms = 0;
     start
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn remake_preserves_innocent_totals_and_charges_one_ranked_abandon_exactly_once() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let completed = result(&a, &b, 1);
+    f.store.start(starting(&completed)).await.unwrap();
+    let mut remade = completed;
+    remade.outcome = MatchOutcome::Remade;
+    remade.rated = false;
+    remade.winner = None;
+    remade.duration_ms = 90_000;
+    remade.ended_at_ms = remade.started_at_ms + remade.duration_ms;
+    remade.unrated_reason = Some("remake".into());
+    remade.end_reason = Some("remake".into());
+    remade.participants[0].participation = Some(shared::career::Participation {
+        disconnected_ms: 90_000,
+        abandoned: true,
+        ..Default::default()
+    });
+    remade.participants[1].participation = Some(shared::career::Participation {
+        connected_ms: 90_000,
+        ..Default::default()
+    });
+    let other = f.another_owner().await;
+    // A foreign live owner is correctly fenced before terminal intent exists.
+    // Race valid retries from the actual owner, then replay from another host.
+    assert!(other.settle(remade.clone()).await.is_err());
+    let (left, right) = tokio::join!(
+        f.store.settle(remade.clone()),
+        f.store.settle(remade.clone())
+    );
+    let saved = left.unwrap();
+    assert_eq!(saved, right.unwrap());
+    assert_eq!(saved, other.settle(remade).await.unwrap());
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, -32);
+    assert_eq!(saved.participant_won(&saved.participants[0]), Some(false));
+    assert_eq!(saved.participant_won(&saved.participants[1]), None);
+    assert!(
+        saved
+            .participants
+            .iter()
+            .all(|p| p.progression_xp_gained == 0)
+    );
+    let leaver = f.store.profile(&a.profile_id).await.unwrap();
+    assert_eq!(
+        (
+            leaver.rating,
+            leaver.rated_matches,
+            leaver.matches_played,
+            leaver.wins,
+            leaver.losses,
+            leaver.abandons
+        ),
+        (968, 1, 1, 0, 1, 1)
+    );
+    assert_eq!(f.store.profile(&b.profile_id).await.unwrap(), b);
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_some()
+    );
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 2), &b.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    assert_eq!(
+        f.store.history(&b.profile_id, None).await.unwrap().0.len(),
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn premature_surrender_or_remake_outside_window_cannot_write_awards_or_penalties() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut terminal = result(&a, &b, 1);
+    f.store.start(starting(&terminal)).await.unwrap();
+    terminal.end_reason = Some("surrender".into());
+    terminal.duration_ms = 599_999;
+    terminal.ended_at_ms = terminal.started_at_ms + terminal.duration_ms;
+    assert!(f.store.settle(terminal.clone()).await.is_err());
+    terminal.outcome = MatchOutcome::Remade;
+    terminal.rated = false;
+    terminal.winner = None;
+    terminal.unrated_reason = Some("remake".into());
+    terminal.end_reason = Some("remake".into());
+    terminal.participants[0].participation = Some(shared::career::Participation {
+        disconnected_ms: 90_000,
+        abandoned: true,
+        ..Default::default()
+    });
+    for duration in [89_999, 180_000] {
+        terminal.duration_ms = duration;
+        terminal.ended_at_ms = terminal.started_at_ms + duration;
+        assert!(f.store.settle(terminal.clone()).await.is_err());
+    }
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    assert_eq!(f.store.profile(&b.profile_id).await.unwrap(), b);
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    let mut surrender = result(&a, &b, 1);
+    surrender.duration_ms = 600_000;
+    surrender.ended_at_ms = surrender.started_at_ms + surrender.duration_ms;
+    surrender.end_reason = Some("surrender".into());
+    let saved = f.store.settle(surrender).await.unwrap();
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 24);
+    assert_eq!(saved.participants[0].progression_xp_gained, 150);
+    assert_eq!(saved.participants[1].rating.as_ref().unwrap().delta, -24);
+    assert_eq!(saved.participants[1].progression_xp_gained, 100);
+    f.close().await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -173,7 +370,7 @@ async fn career_store_identity_reopen_and_explicit_rename() {
             .fetch_all(&f.store.pool)
             .await
             .unwrap();
-    assert_eq!(versions, [1, 2, 3]);
+    assert_eq!(versions, SCHEMA_VERSIONS);
     f.close().await;
 }
 
@@ -214,12 +411,31 @@ async fn career_store_distinct_owners_can_share_legacy_epoch_and_round_metadata(
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_accepts_the_lobbys_widened_rating_and_experience_window() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    sqlx::query("UPDATE career_profiles SET rating=1500,rated_matches=20,season_rated_matches=20,matches_played=20 WHERE profile_id=$1")
+        .bind(&b.profile_id).execute(&f.store.pool).await.unwrap();
+    let b = f.store.profile(&b.profile_id).await.unwrap();
+    assert!(a.newcomer() && !b.newcomer());
+    assert!(!crate::matchmaking::same_cohort([&a, &b]));
+    assert!(crate::matchmaking::same_cohort_with(
+        [&a, &b],
+        crate::matchmaking::CohortAllowance::MAX
+    ));
+    f.store.start(starting(&result(&a, &b, 1))).await.unwrap();
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_allocation_rechecks_current_experience_and_rating_after_remote_match() {
     let f = Fixture::new().await;
     let a = f.profile(1).await;
     let b = f.profile(2).await;
     let opponent = f.profile(3).await;
-    sqlx::query("UPDATE career_profiles SET rated_matches=19,matches_played=19,wins=9,losses=10")
+    sqlx::query("UPDATE career_profiles SET rated_matches=19,season_rated_matches=19,matches_played=19,wins=9,losses=10")
         .execute(&f.store.pool)
         .await
         .unwrap();
@@ -234,6 +450,14 @@ async fn career_store_allocation_rechecks_current_experience_and_rating_after_re
     assert_eq!(current_a.rated_matches, 20);
     assert!(!current_a.newcomer());
 
+    // A newcomer and a veteran within the widened window are one cohort for
+    // the store (LR-35: the lobby merges the brackets after five minutes);
+    // ratings that drifted beyond the widest window the lobby can form are not.
+    sqlx::query("UPDATE career_profiles SET rating = rating + 650 WHERE profile_id = $1")
+        .bind(&a.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
     let stale = result(&cached_a, &cached_b, 2);
     let error = "Queued ratings changed. Clear the queue and try again.";
     assert_eq!(server_b.start(starting(&stale)).await.unwrap_err(), error);
@@ -260,12 +484,13 @@ async fn career_store_allocation_rechecks_current_experience_and_rating_after_re
         .unwrap();
     assert_eq!(seats, 0, "failed validation cannot reserve either account");
 
-    sqlx::query("UPDATE career_profiles SET rated_matches=20,matches_played=20,losses=11,rating=$2 WHERE profile_id=$1")
-        .bind(&b.profile_id).bind(current_a.rating + 301).execute(&f.store.pool).await.unwrap();
+    // A is 650 above current_a: 601 points must fail, exactly 600 must pass.
+    sqlx::query("UPDATE career_profiles SET rated_matches=20,season_rated_matches=20,matches_played=20,losses=11,rating=$2 WHERE profile_id=$1")
+        .bind(&b.profile_id).bind(current_a.rating + 49).execute(&f.store.pool).await.unwrap();
     assert_eq!(server_b.start(starting(&stale)).await.unwrap_err(), error);
     sqlx::query("UPDATE career_profiles SET rating=$2 WHERE profile_id=$1")
         .bind(&b.profile_id)
-        .bind(current_a.rating + 300)
+        .bind(current_a.rating + 50)
         .execute(&f.store.pool)
         .await
         .unwrap();
@@ -399,6 +624,46 @@ async fn career_store_bulk_presence_is_atomic_validates_foreign_owner_and_dedupl
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn placement_k_changes_only_after_the_twentieth_committed_rated_match() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    sqlx::query("UPDATE career_profiles SET rated_matches=19,season_rated_matches=19,matches_played=19,wins=9,losses=10")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    for (n, expected_delta) in [(1, 24), (2, 16)] {
+        // Isolate the K boundary from the expected-score change after a win.
+        sqlx::query("UPDATE career_profiles SET rating=1000")
+            .execute(&f.store.pool)
+            .await
+            .unwrap();
+        let completed = result(&a, &b, n);
+        f.store.start(starting(&completed)).await.unwrap();
+        let saved = f.store.settle(completed.clone()).await.unwrap();
+        assert_eq!(
+            saved.participants[0].rating.as_ref().unwrap().delta,
+            expected_delta
+        );
+        assert_eq!(
+            saved.participants[1].rating.as_ref().unwrap().delta,
+            -expected_delta
+        );
+        assert_eq!(f.store.settle(completed).await.unwrap(), saved);
+        assert_eq!(
+            f.store.profile(&a.profile_id).await.unwrap().rated_matches,
+            19 + n as u32
+        );
+        assert_eq!(
+            f.store.profile(&b.profile_id).await.unwrap().rated_matches,
+            19 + n as u32
+        );
+    }
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
     let f = Fixture::new().await;
     let a = f.profile(1).await;
@@ -423,7 +688,7 @@ async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
     let saved = one.unwrap();
     assert_eq!(saved, two.unwrap());
     assert!(saved.saved);
-    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 16);
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 24);
     assert_eq!(saved.participants[0].progression_xp_gained, 150);
     assert_eq!(saved.participants[1].progression_xp_gained, 100);
     let profiles = (
@@ -437,7 +702,7 @@ async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
             profiles.0.wins,
             profiles.0.progression_xp
         ),
-        (1016, 1, 1, 150)
+        (1024, 1, 1, 150)
     );
     assert_eq!(
         (
@@ -445,7 +710,7 @@ async fn career_store_atomic_duplicate_settlement_and_conflicting_intent() {
             profiles.1.matches_played,
             profiles.1.losses
         ),
-        (984, 1, 1)
+        (976, 1, 1)
     );
     let reopened = f.another_owner().await;
     assert_eq!(reopened.settle(final_result.clone()).await.unwrap(), saved);
@@ -935,6 +1200,104 @@ fn career_store_public_casual_policy_requires_frozen_authenticated_default_roste
     assert_eq!(pool_connections(None), 4);
 }
 
+/// A Casual PvP result (LR-08): ten authenticated humans, no bots, unrated.
+fn casual_pvp(profiles: &[ProfileSummary], n: u64) -> MatchResult {
+    let mut game = result(&profiles[0], &profiles[1], n);
+    game.map_profile = shared::map::ResolvedMap::default().map_profile;
+    game.ruleset = PUBLIC_CASUAL_RULESET.into();
+    game.rated = false;
+    game.unrated_reason = Some("casual_queue".into());
+    game.participants = profiles
+        .iter()
+        .zip(1..)
+        .map(|(profile, id)| {
+            participant(
+                profile,
+                id,
+                if id % 2 == 1 { Team::Green } else { Team::Blue },
+            )
+        })
+        .collect();
+    game
+}
+
+/// LR-08: Casual PvP may seat ten humans (`casual_queue`); vs Bots
+/// (`allocated_bots`) still needs at least one bot, and neither is rated.
+#[test]
+fn career_store_casual_pvp_admits_ten_humans_and_vs_bots_still_needs_bots() {
+    let profiles: Vec<_> = (0..10_u8)
+        .map(|n| ProfileSummary::new(format!("{n:064x}"), format!("Player-{n}")))
+        .collect();
+    let game = casual_pvp(&profiles, 1);
+    assert!(normalize(starting(&game)).is_ok());
+    assert!(normalize_terminal(game.clone()).is_ok());
+    assert!(!roster_can_grow(&game));
+    let mut rated = game.clone();
+    rated.rated = true;
+    assert!(normalize_terminal(rated).is_err());
+    let mut vs_bots = game.clone();
+    vs_bots.unrated_reason = Some("allocated_bots".into());
+    assert!(normalize_terminal(vs_bots).is_err(), "vs Bots without bots");
+    // A Casual PvP roster that bots filled is valid too.
+    let a = &profiles[0];
+    let b = &profiles[1];
+    let mut filled = public_casual(a, b, 2);
+    filled.unrated_reason = Some("casual_queue".into());
+    assert!(normalize_terminal(filled).is_ok());
+    let mut all_bots = public_casual(a, b, 3);
+    all_bots.unrated_reason = Some("casual_queue".into());
+    for p in &mut all_bots.participants[..2] {
+        p.is_bot = true;
+        p.profile_id = None;
+    }
+    assert!(normalize_terminal(all_bots).is_err(), "nobody to credit");
+    // The server can still interrupt a ten-human Casual PvP match.
+    let mut recovered = game;
+    recovered.outcome = MatchOutcome::Interrupted;
+    recovered.winner = None;
+    recovered.unrated_reason = Some("server_interrupted".into());
+    assert!(normalize_terminal(recovered).is_ok());
+}
+
+/// LR-08: ten humans in Casual PvP settle the casual XP and never touch
+/// rating, whatever their cohorts (a newcomer and a 1400 veteran here).
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_ten_human_casual_pvp_awards_casual_xp_without_rating() {
+    let f = Fixture::new().await;
+    let mut profiles = Vec::new();
+    for n in 1..=10 {
+        profiles.push(f.profile(n).await);
+    }
+    sqlx::query("UPDATE career_profiles SET rating=1400,rated_matches=40,season_rated_matches=40,matches_played=40,wins=20,losses=20 WHERE profile_id=$1")
+        .bind(&profiles[1].profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let game = casual_pvp(&profiles, 1);
+    f.store.start(starting(&game)).await.unwrap();
+    let saved = f.store.settle(game).await.unwrap();
+    assert!(saved.saved && !saved.rated);
+    for (p, profile) in saved.participants.iter().zip(&profiles) {
+        assert!(p.rating.is_none());
+        let won = p.team == Team::Green;
+        assert_eq!(p.progression_xp_gained, if won { 50 } else { 25 });
+        let after = f.store.profile(&profile.profile_id).await.unwrap();
+        let before = if profile.profile_id == profiles[1].profile_id {
+            40
+        } else {
+            0
+        };
+        assert_eq!(after.matches_played, before + 1);
+        assert_eq!(after.progression_xp, if won { 50 } else { 25 });
+    }
+    let veteran = f.store.profile(&profiles[1].profile_id).await.unwrap();
+    assert_eq!((veteran.rating, veteran.rated_matches), (1400, 40));
+    let newcomer = f.store.profile(&profiles[0].profile_id).await.unwrap();
+    assert_eq!((newcomer.rating, newcomer.rated_matches), (1000, 0));
+    f.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_public_casual_progression_is_idempotent_and_survives_reopen() {
@@ -1083,6 +1446,58 @@ async fn career_store_interrupted_custom_and_development_never_grant_casual_xp()
     f.close().await;
 }
 
+/// LR-11: a match the server ends (an abandoned worker or the duration cap)
+/// settles as Interrupted with its allocation's own reason: once, unrated,
+/// without a winner or XP, for a public-casual bot game and a rated allocation.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_server_ended_matches_settle_interrupted_once_and_unrated() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for game in [public_casual(&a, &b, 1), result(&a, &b, 2)] {
+        f.store.start(starting(&game)).await.unwrap();
+        let mut ended = game.clone();
+        ended.outcome = MatchOutcome::Interrupted;
+        ended.winner = None;
+        ended.rated = false;
+        if game.ruleset == RULESET {
+            // What `finish_career_round` writes for a non-practice round.
+            ended.unrated_reason = Some("The match did not finish normally.".into());
+        }
+        let (first, duplicate) =
+            tokio::join!(f.store.settle(ended.clone()), f.store.settle(ended.clone()));
+        let saved = first.unwrap();
+        assert_eq!(saved, duplicate.unwrap());
+        assert_eq!(saved.outcome, MatchOutcome::Interrupted);
+        assert!(saved.saved && !saved.rated && saved.winner.is_none());
+        assert!(
+            saved
+                .participants
+                .iter()
+                .all(|p| p.progression_xp_gained == 0 && p.rating.is_none())
+        );
+        assert_eq!(f.store.settle(ended).await.unwrap(), saved);
+    }
+    for profile in [&a, &b] {
+        let current = f.store.profile(&profile.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                current.rating,
+                current.rated_matches,
+                current.wins,
+                current.losses,
+                current.progression_xp,
+                current.matches_played
+            ),
+            (profile.rating, 0, 0, 0, 0, 2)
+        );
+        let (history, _) = f.store.history(&profile.profile_id, None).await.unwrap();
+        assert_eq!(history.len(), 2);
+    }
+    f.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_public_worker_recovery_does_not_settle_another_epoch() {
@@ -1135,5 +1550,1998 @@ async fn career_store_public_worker_recovery_does_not_settle_another_epoch() {
             .unwrap()
             .is_empty()
     );
+    f.close().await;
+}
+
+/// LR-16: new device keys create profiles only within the per-source and the
+/// total 24-hour limits; existing keys always sign in; no raw address is kept.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_limits_new_profiles_per_source_and_in_total() {
+    let f = Fixture::new().await;
+    let limits = NewProfileLimits {
+        per_source: 2,
+        total: 3,
+    };
+    let key = |n: u64| format!("{n:064x}");
+    let home = "203.0.113.7";
+    let first = f
+        .store
+        .authenticate_from(&key(1), "One", home, limits)
+        .await
+        .unwrap();
+    f.store
+        .authenticate_from(&key(2), "Two", home, limits)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(3), "Three", home, limits)
+            .await
+            .unwrap_err(),
+        NEW_PROFILE_LIMIT_ERROR
+    );
+    // A refused key created nothing, and an existing key keeps working.
+    let profiles: i64 = sqlx::query_scalar("SELECT count(*) FROM career_profiles")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(profiles, 2);
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(1), "Ignored", home, limits)
+            .await
+            .unwrap(),
+        first
+    );
+    // Another network still gets the last place of the day, then nobody does.
+    f.store
+        .authenticate_from(&key(4), "Four", "198.51.100.9", limits)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(5), "Five", "192.0.2.1", limits)
+            .await
+            .unwrap_err(),
+        NEW_PROFILES_PAUSED_ERROR
+    );
+    // Rows hold a salted hash, never the address.
+    let raw: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM career_profile_admissions WHERE source IN ($1, $2)",
+    )
+    .bind(home)
+    .bind("198.51.100.9")
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    assert_eq!(raw, 0);
+    // The window is 24 hours: yesterday's profiles no longer count.
+    sqlx::query(
+        "UPDATE career_profile_admissions SET created_at = clock_timestamp() - interval '25 hours'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    // Two new keys race for the last place of one source: exactly one wins.
+    let tight = NewProfileLimits {
+        per_source: 1,
+        total: 100,
+    };
+    let (six, seven) = (key(6), key(7));
+    let (a, b) = tokio::join!(
+        f.store.authenticate_from(&six, "Six", home, tight),
+        f.store.authenticate_from(&seven, "Seven", home, tight)
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    // Retention drops admission rows after 48 hours.
+    sqlx::query(
+        "UPDATE career_profile_admissions SET created_at = clock_timestamp() - interval '49 hours' WHERE created_at < clock_timestamp() - interval '24 hours'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    f.store.prune_unplayed_profiles(30, 100).await.unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM career_profile_admissions")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 1);
+    f.close().await;
+}
+
+/// LR-16: the retention job deletes only profiles whose one key is older than
+/// the retention age, that never played, and that nothing else holds.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_prunes_only_old_unplayed_unlinked_profiles() {
+    let f = Fixture::new().await;
+    let unplayed = f.profile(1).await;
+    let recent = f.profile(2).await;
+    let (played, opponent) = (f.profile(3).await, f.profile(4).await);
+    let (friend, other_friend) = (f.profile(5).await, f.profile(6).await);
+    let two_keys = f.profile(7).await;
+    let online = f.profile(8).await;
+    let revoked = f.profile(9).await;
+    let held = f.profile(10).await;
+    let finished = result(&played, &opponent, 1);
+    f.store.start(starting(&finished)).await.unwrap();
+    f.store.settle(finished).await.unwrap();
+    f.store
+        .friend_action(
+            &friend.profile_id,
+            &other_friend.profile_id,
+            FriendAction::Request,
+        )
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO career_keys(public_key, profile_id) VALUES ($1, $2)")
+        .bind(format!("{:064x}", 70))
+        .bind(&two_keys.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    f.store
+        .touch_presences(&[(online.profile_id.clone(), None)])
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_keys SET revoked_at = clock_timestamp() WHERE profile_id = $1")
+        .bind(&revoked.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    // A row elsewhere (as a portal link or Supporter grant would be) holds a profile.
+    sqlx::raw_sql(
+        "CREATE TABLE portal_link (profile_id text REFERENCES career_profiles(profile_id))",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO portal_link VALUES ($1)")
+        .bind(&held.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE career_keys SET created_at = clock_timestamp() - interval '31 days' WHERE profile_id <> $1",
+    )
+    .bind(&recent.profile_id)
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    assert!(f.store.prune_unplayed_profiles(3, 100).await.is_err());
+    assert!(f.store.prune_unplayed_profiles(30, 0).await.is_err());
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 1);
+    assert!(f.store.profile(&unplayed.profile_id).await.is_err());
+    for kept in [
+        &recent,
+        &played,
+        &opponent,
+        &friend,
+        &other_friend,
+        &two_keys,
+        &online,
+        &revoked,
+        &held,
+    ] {
+        assert!(
+            f.store.profile(&kept.profile_id).await.is_ok(),
+            "{}",
+            kept.nickname
+        );
+    }
+    // The pruned key is free again: signing in makes a fresh profile.
+    let again = f.profile(1).await;
+    assert_ne!(again.profile_id, unplayed.profile_id);
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_sanctions_apply_expire_lift_and_audit() {
+    use moderation::{NAME_LOCKED_ERROR, NewSanction};
+    use shared::moderation::{Sanction, SanctionKind};
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let key = format!("{:064x}", 1);
+    let new = |kind, duration_secs| NewSanction {
+        profile_id: &a.profile_id,
+        kind,
+        reason: "Spam in team chat",
+        duration_secs,
+        actor: "ops.anna",
+    };
+    let clean = f.store.access(&key, &a.profile_id).await.unwrap();
+    assert!(clean.key_active && clean.sanctions.is_empty());
+    assert_eq!(clean.profile.as_ref(), Some(&a));
+    let absent = f.store.access(&key, &"f".repeat(64)).await.unwrap();
+    assert!(!absent.key_active && absent.profile.is_none());
+    assert_eq!(absent.completed_public_matches, 0);
+
+    assert_eq!(clean.nickname.as_deref(), Some(a.nickname.as_str()));
+
+    // Applied: visible to the game at once, with its end.
+    let mute = f
+        .store
+        .add_sanction(new(SanctionKind::ChatMute, Some(3600)))
+        .await
+        .unwrap();
+    assert!(mute.renamed.is_none() && mute.sanction.active);
+    let until = mute.sanction.expires_at.unwrap();
+    assert!((until - mute.sanction.created_at - 3600).abs() <= 1);
+    let ban = f
+        .store
+        .add_sanction(new(SanctionKind::AccountBan, None))
+        .await
+        .unwrap();
+    assert_eq!(ban.sanction.expires_at, None);
+    let access = f.store.access(&key, &a.profile_id).await.unwrap();
+    assert_eq!(
+        access.sanctions,
+        vec![
+            Sanction {
+                kind: SanctionKind::ChatMute,
+                until: Some(until)
+            },
+            Sanction {
+                kind: SanctionKind::AccountBan,
+                until: None
+            }
+        ]
+    );
+    assert_eq!(
+        f.store.active_sanctions(&a.profile_id).await.unwrap(),
+        access.sanctions
+    );
+
+    // An expired sanction no longer applies; a lifted one neither.
+    let ranked = f
+        .store
+        .add_sanction(new(SanctionKind::RankedBan, Some(60)))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_sanctions SET created_at=clock_timestamp()-interval '2 hours', expires_at=clock_timestamp()-interval '1 second' WHERE sanction_id=$1")
+        .bind(ranked.sanction.sanction_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let lifted = f
+        .store
+        .lift_sanction(ban.sanction.sanction_id, "Appeal accepted", "ops.boris")
+        .await
+        .unwrap();
+    assert!(!lifted.active);
+    assert_eq!(lifted.lifted_by.as_deref(), Some("ops.boris"));
+    assert_eq!(lifted.lift_reason.as_deref(), Some("Appeal accepted"));
+    assert!(
+        f.store
+            .lift_sanction(ban.sanction.sanction_id, "Again", "ops.boris")
+            .await
+            .is_err(),
+        "a lifted sanction cannot be lifted twice"
+    );
+    assert!(
+        f.store
+            .lift_sanction(ranked.sanction.sanction_id, "Expired", "ops.boris")
+            .await
+            .is_err(),
+        "an expired sanction cannot be lifted"
+    );
+    assert_eq!(
+        f.store.active_sanctions(&a.profile_id).await.unwrap(),
+        vec![Sanction {
+            kind: SanctionKind::ChatMute,
+            until: Some(until)
+        }]
+    );
+    let active = f.store.sanctions(&a.profile_id, false).await.unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(
+        f.store.sanctions(&a.profile_id, true).await.unwrap().len(),
+        3
+    );
+
+    // A name reset renames to Player#NNNN, locks renames, and is audited.
+    let reset = f
+        .store
+        .add_sanction(new(SanctionKind::NameReset, Some(7 * 86_400)))
+        .await
+        .unwrap();
+    let (old_name, new_name) = reset.renamed.clone().unwrap();
+    assert_eq!(old_name, a.nickname);
+    let tag = new_name.strip_prefix("Player#").unwrap();
+    assert!(tag.len() == 4 && tag.bytes().all(|b| b.is_ascii_digit()));
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().nickname,
+        new_name
+    );
+    assert_eq!(
+        f.store.access(&key, &a.profile_id).await.unwrap().nickname,
+        Some(new_name.clone())
+    );
+    assert_eq!(
+        f.store
+            .rename(&a.profile_id, "Offensive")
+            .await
+            .unwrap_err(),
+        NAME_LOCKED_ERROR
+    );
+    f.store
+        .lift_sanction(reset.sanction.sanction_id, "Name is fine now", "ops.anna")
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .rename(&a.profile_id, "Fine")
+            .await
+            .unwrap()
+            .nickname
+            .starts_with("Fine#")
+    );
+
+    // Refusals: bad input never writes a row.
+    for bad in [
+        NewSanction {
+            reason: " ",
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+        NewSanction {
+            actor: "ops anna",
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+        new(SanctionKind::ChatMute, Some(0)),
+        new(
+            SanctionKind::ChatMute,
+            Some(moderation::MAX_SANCTION_SECS + 1),
+        ),
+        new(SanctionKind::Unknown, Some(60)),
+        NewSanction {
+            profile_id: &"f".repeat(64),
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+    ] {
+        assert!(f.store.add_sanction(bad).await.is_err(), "{bad:?}");
+    }
+
+    // The audit trail: every write, newest first; append-only for a year.
+    let events = f
+        .store
+        .moderation_events(Some(&a.profile_id), 50)
+        .await
+        .unwrap();
+    let actions: Vec<_> = events.iter().map(|e| e.action.as_str()).collect();
+    assert_eq!(
+        actions,
+        [
+            "sanction_lifted",
+            "sanction_added",
+            "sanction_lifted",
+            "sanction_added",
+            "sanction_added",
+            "sanction_added"
+        ]
+    );
+    assert_eq!(events[1].detail["kind"], "name_reset");
+    assert_eq!(events[1].detail["new_name"], new_name.as_str());
+    assert_eq!(events[1].detail["old_name"], a.nickname.as_str());
+    assert_eq!(events[1].actor, "ops.anna");
+    for statement in [
+        "UPDATE career_moderation_events SET actor='someone-else'",
+        "DELETE FROM career_moderation_events",
+    ] {
+        let error = sqlx::query(statement)
+            .execute(&f.store.pool)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("23514"),
+            "{statement}"
+        );
+    }
+
+    // The chat switch, audited without a profile.
+    assert!(f.store.chat_enabled().await.unwrap());
+    let off = f
+        .store
+        .set_chat(false, "Raid in chat", "ops.anna")
+        .await
+        .unwrap();
+    assert!(!off.enabled && off.changed_by == "ops.anna");
+    assert!(!f.store.chat_enabled().await.unwrap());
+    let chat_events = f.store.moderation_events(None, 10).await.unwrap();
+    assert_eq!(chat_events.len(), 1);
+    assert_eq!(chat_events[0].detail["enabled"], false);
+    f.store.set_chat(true, "Over", "ops.anna").await.unwrap();
+    assert!(f.store.chat_enabled().await.unwrap());
+
+    // Lookup by handle or ID, with keys.
+    assert!(f.store.find_profile("Nobody#0000").await.is_err());
+    let found = f
+        .store
+        .find_profile(&f.store.profile(&a.profile_id).await.unwrap().nickname)
+        .await
+        .unwrap();
+    assert_eq!(found.profile_id, a.profile_id);
+    assert_eq!(
+        f.store
+            .find_profile(&a.profile_id)
+            .await
+            .unwrap()
+            .profile_id,
+        a.profile_id
+    );
+    let keys = f.store.profile_keys(&a.profile_id).await.unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].key_prefix, &key[..16]);
+
+    // A sanctioned profile that never played is not pruned: the ban holds.
+    let throwaway = f.profile(2).await;
+    f.store
+        .add_sanction(NewSanction {
+            profile_id: &throwaway.profile_id,
+            ..new(SanctionKind::MatchmakingBan, None)
+        })
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_keys SET created_at=clock_timestamp()-interval '40 days' WHERE profile_id=$1")
+        .bind(&throwaway.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
+    assert!(f.store.profile(&throwaway.profile_id).await.is_ok());
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn unplayed_allocations_settle_idempotently_without_career_or_history() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut r = result(&a, &b, 1);
+    r.gameplay_started = false;
+    f.store.start(starting(&r)).await.unwrap();
+    r.outcome = MatchOutcome::Abandoned;
+    r.winner = None;
+    r.rated = false;
+    r.unrated_reason = Some("prematch_abandoned".into());
+    let saved = f.store.settle(r.clone()).await.unwrap();
+    assert!(saved.saved && !saved.gameplay_started);
+    assert_eq!(f.store.settle(r).await.unwrap(), saved);
+    for p in [&a, &b] {
+        assert_eq!(f.store.profile(&p.profile_id).await.unwrap(), *p);
+        assert!(
+            f.store
+                .history(&p.profile_id, None)
+                .await
+                .unwrap()
+                .0
+                .is_empty()
+        );
+    }
+    let mut crashed = result(&a, &b, 2);
+    crashed.gameplay_started = false;
+    f.store.start(starting(&crashed)).await.unwrap();
+    f.expire(&crashed.result_id).await;
+    let recovered = f.store.recover_expired().await.unwrap();
+    assert_eq!(recovered.len(), 1);
+    assert!(!recovered[0].gameplay_started);
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().matches_played,
+        0
+    );
+    assert!(
+        f.store
+            .history(&a.profile_id, None)
+            .await
+            .unwrap()
+            .0
+            .is_empty()
+    );
+    let mut played = result(&a, &b, 3);
+    played.gameplay_started = false;
+    f.store.start(starting(&played)).await.unwrap();
+    played.gameplay_started = true;
+    let receipt = f.store.settle(played).await.unwrap();
+    assert!(receipt.rated && receipt.participants.iter().all(|p| p.rating.is_some()));
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().matches_played,
+        1
+    );
+    assert_eq!(
+        f.store.history(&a.profile_id, None).await.unwrap().0.len(),
+        1
+    );
+    f.close().await;
+}
+
+/// Activation is committed before Running, but a cancellation already accepted
+/// by the simulation while its ACK is in flight still retires an unplayed roster.
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_TEST_DATABASE_URL"]
+async fn committed_gameplay_recovers_immediately_but_prematch_cancel_can_win_the_ack_race() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for (match_id, cancelled) in [(1, false), (2, true)] {
+        let mut r = result(&a, &b, match_id);
+        r.gameplay_started = false;
+        f.store.start(starting(&r)).await.unwrap();
+        let mut marker = starting(&r);
+        marker.gameplay_started = true;
+        f.store.checkpoint(marker).await.unwrap();
+        if cancelled {
+            assert!(
+                f.store.checkpoint(starting(&r)).await.is_err(),
+                "ordinary checkpoints cannot undo gameplay activation"
+            );
+            let mut invalid_recovery = r.clone();
+            invalid_recovery.outcome = MatchOutcome::Interrupted;
+            invalid_recovery.winner = None;
+            invalid_recovery.rated = false;
+            invalid_recovery.unrated_reason = Some("server_interrupted".into());
+            assert!(
+                f.store.settle(invalid_recovery).await.is_err(),
+                "recovery cannot erase committed gameplay"
+            );
+            r.outcome = MatchOutcome::Abandoned;
+            r.winner = None;
+            r.rated = false;
+            r.unrated_reason = Some("prematch_abandoned".into());
+            let saved = f.store.settle(r).await.unwrap();
+            assert!(!saved.gameplay_started);
+        } else {
+            f.expire(&r.result_id).await;
+            let recovered = f.store.recover_expired().await.unwrap();
+            assert_eq!(recovered.len(), 1);
+            assert!(recovered[0].gameplay_started);
+            assert_eq!(recovered[0].outcome, MatchOutcome::Interrupted);
+            assert!(!recovered[0].rated);
+        }
+        let profile = f.store.profile(&a.profile_id).await.unwrap();
+        assert_eq!(profile.matches_played, 1);
+        assert_eq!(profile.rating, a.rating);
+        assert_eq!(profile.rated_matches, 0);
+        assert_eq!(profile.progression_xp, 0);
+        assert_eq!(
+            f.store.history(&a.profile_id, None).await.unwrap().0.len(),
+            1
+        );
+    }
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_settlement_is_atomic_idempotent_and_survives_reopen() {
+    use shared::career::Participation;
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let c = f.profile(3).await;
+    let d = f.profile(4).await;
+    for n in 1..=3 {
+        // Expire the preceding cooldown while retaining its 24-hour event.
+        sqlx::query(
+            "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+        )
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE career_profiles SET rating=1000")
+            .execute(&f.store.pool)
+            .await
+            .unwrap();
+        let mut final_result = result(&a, &b, n);
+        final_result.duration_ms = 120_000;
+        final_result.ended_at_ms = 121_000;
+        final_result.participants.extend([
+            participant(&c, 3, Team::Green),
+            participant(&d, 4, Team::Blue),
+        ]);
+        // A winning leaver still loses; its losing-team opponent has a short
+        // reconnect and must receive the normal loss, without a strike.
+        final_result.participants[0].participation = Some(Participation {
+            connected_ms: 30_000,
+            disconnected_ms: 90_000,
+            afk_ms: 0,
+            abandoned: true,
+        });
+        final_result.participants[1].participation = Some(Participation {
+            connected_ms: 119_000,
+            disconnected_ms: 1_000,
+            afk_ms: 0,
+            abandoned: false,
+        });
+        let mut start = starting(&final_result);
+        for p in &mut start.participants {
+            p.participation = None;
+        }
+        f.store.start(start).await.unwrap();
+        let (one, two) = tokio::join!(
+            f.store.settle(final_result.clone()),
+            f.store.settle(final_result.clone())
+        );
+        let saved = one.unwrap();
+        assert_eq!(saved, two.unwrap());
+        assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, -32);
+        assert_eq!(saved.participants[0].progression_xp_gained, 0);
+        assert_eq!(saved.participants[1].rating.as_ref().unwrap().delta, -24);
+        assert_eq!(saved.participants[2].rating.as_ref().unwrap().delta, 24);
+        let reopened = f.another_owner().await;
+        assert_eq!(reopened.settle(final_result).await.unwrap(), saved);
+        let profile = reopened.profile(&a.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                profile.abandons,
+                profile.wins,
+                profile.losses,
+                profile.progression_xp
+            ),
+            (n as u32, 0, n as u32, 0)
+        );
+        assert_eq!(reopened.profile(&b.profile_id).await.unwrap().abandons, 0);
+        let (count, seconds): (i64, f64) = sqlx::query_as("SELECT strikes::bigint,extract(epoch FROM cooldown_until-clock_timestamp())::double precision FROM career_play_penalties WHERE profile_id=$1")
+            .bind(&a.profile_id).fetch_one(&f.store.pool).await.unwrap();
+        let expected = match n {
+            1 => 300.,
+            2 => 1800.,
+            _ => 86400.,
+        };
+        assert_eq!(count, n as i64);
+        assert!(seconds > expected - 10. && seconds <= expected, "{seconds}");
+    }
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_teammate_reduction_and_invalid_time_cannot_settle() {
+    use shared::career::Participation;
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let c = f.profile(3).await;
+    let d = f.profile(4).await;
+    // Both teams mix newcomer K48 and established K32. Apply each coefficient
+    // before the leaver override / teammate reduction, using locked profiles.
+    sqlx::query(
+        "UPDATE career_profiles SET rated_matches=20,season_rated_matches=20,matches_played=20 WHERE profile_id=ANY($1)",
+    )
+    .bind(vec![b.profile_id.clone(), c.profile_id.clone()])
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    let mut completed = result(&a, &b, 1);
+    completed.duration_ms = 120_000;
+    completed.ended_at_ms = 121_000;
+    completed.participants.extend([
+        participant(&c, 3, Team::Green),
+        participant(&d, 4, Team::Blue),
+    ]);
+    completed.participants[1].participation = Some(Participation {
+        connected_ms: 120_000,
+        disconnected_ms: 0,
+        afk_ms: 90_000,
+        abandoned: true,
+    });
+    let mut start = starting(&completed);
+    for p in &mut start.participants {
+        p.participation = None;
+    }
+    f.store.start(start).await.unwrap();
+    let mut invalid = completed.clone();
+    invalid.participants[1]
+        .participation
+        .as_mut()
+        .unwrap()
+        .afk_ms = 120_001;
+    assert!(f.store.settle(invalid).await.is_err());
+    assert_eq!(f.store.profile(&b.profile_id).await.unwrap().abandons, 0);
+    let saved = f.store.settle(completed).await.unwrap();
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 24);
+    assert_eq!(saved.participants[2].rating.as_ref().unwrap().delta, 16);
+    assert_eq!(saved.participants[1].rating.as_ref().unwrap().delta, -32);
+    assert_eq!(saved.participants[3].rating.as_ref().unwrap().delta, -12);
+    assert_eq!(saved.participants[3].progression_xp_gained, 100);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_failed_terminal_transaction_rolls_back_incident_and_awards() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut completed = result(&a, &b, 1);
+    completed.duration_ms = 100_000;
+    completed.ended_at_ms = 101_000;
+    completed.participants[0].participation = Some(shared::career::Participation {
+        connected_ms: 10_000,
+        disconnected_ms: 90_000,
+        afk_ms: 0,
+        abandoned: true,
+    });
+    let mut start = starting(&completed);
+    start.participants[0].participation = None;
+    f.store.start(start).await.unwrap();
+    sqlx::raw_sql("CREATE FUNCTION fixture_reject_terminal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status='settled' THEN RAISE EXCEPTION 'fixture terminal failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fixture_terminal BEFORE UPDATE ON career_matches FOR EACH ROW EXECUTE FUNCTION fixture_reject_terminal();")
+        .execute(&f.store.pool).await.unwrap();
+    assert!(f.store.settle(completed.clone()).await.is_err());
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    for table in ["career_abandon_events", "career_play_penalties"] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+    sqlx::raw_sql(
+        "DROP TRIGGER fixture_terminal ON career_matches; DROP FUNCTION fixture_reject_terminal();",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    f.store.settle(completed).await.unwrap();
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap().abandons, 1);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_schema_upgrade_preserves_saved_profile_and_cooldown_is_cross_owner() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    remove_season_schema_for_upgrade(&f).await;
+    sqlx::raw_sql("UPDATE career_profiles SET rating=1234,rated_matches=25,matches_played=25,wins=15,losses=10,progression_xp=1000; DROP TABLE career_abandon_events,career_play_penalties; ALTER TABLE career_profiles DROP COLUMN abandons, DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version>=7;")
+        .execute(&f.store.pool).await.unwrap();
+    let upgraded = f.another_owner().await;
+    let profile = upgraded.profile(&a.profile_id).await.unwrap();
+    assert_eq!(
+        (
+            profile.rating,
+            profile.rated_matches,
+            profile.progression_xp,
+            profile.abandons
+        ),
+        (1234, 25, 1000, 0)
+    );
+    assert_eq!(
+        profile.completed_public_matches, 0,
+        "aggregate counters are not fabricated public receipts"
+    );
+    // This test targets cooldown fencing, not the separate new-admission gate.
+    sqlx::query("UPDATE career_profiles SET completed_public_matches=10")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let mut completed = result(&a, &b, 1);
+    completed.duration_ms = 100_000;
+    completed.ended_at_ms = 101_000;
+    completed.participants[0].participation = Some(shared::career::Participation {
+        connected_ms: 100_000,
+        disconnected_ms: 0,
+        afk_ms: 10_000,
+        abandoned: true,
+    });
+    let mut start = starting(&completed);
+    start.participants[0].participation = None;
+    upgraded.start(start).await.unwrap();
+    upgraded.settle(completed).await.unwrap();
+    let access = f
+        .store
+        .access(&format!("{:064x}", 1), &a.profile_id)
+        .await
+        .unwrap();
+    let cooldown = access.play_cooldown.unwrap();
+    assert_eq!(cooldown.strikes, 1);
+    assert!(cooldown.until > 0);
+    let another_match = result(&a, &b, 2);
+    assert_eq!(
+        f.store.start(starting(&another_match)).await.unwrap_err(),
+        shared::career::error_code::PLAY_COOLDOWN
+    );
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_matches WHERE result_id=$1)")
+            .bind(&another_match.result_id)
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    assert!(!exists, "refusal rolls back roster and match reservation");
+
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 2), &b.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    sqlx::query(
+        "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    assert!(
+        upgraded
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_legacy_disconnect_has_no_new_win_rewards_or_inferred_incident() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let mut completed = result(&a, &b, 1);
+    completed.participants[0].disconnected = true;
+    assert!(completed.participants[0].participation.is_none());
+    f.store.start(starting(&completed)).await.unwrap();
+    let saved = f.store.settle(completed).await.unwrap();
+    assert_eq!(saved.participants[0].rating.as_ref().unwrap().delta, 0);
+    assert_eq!(saved.participants[0].progression_xp_gained, 0);
+    let profile = f.store.profile(&a.profile_id).await.unwrap();
+    assert_eq!((profile.wins, profile.losses, profile.abandons), (1, 0, 0));
+    assert_eq!(
+        f.store.history(&a.profile_id, None).await.unwrap().0[0].won,
+        Some(true)
+    );
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none()
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn fair_play_only_player_caused_unattended_shutdown_adds_discipline() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for (n, reason, penalized) in [
+        (1, "server_interrupted", false),
+        (2, "duration_capped", false),
+        (3, "abandoned_reaped", true),
+    ] {
+        let mut terminal = result(&a, &b, n);
+        let mut start = starting(&terminal);
+        start.duration_ms = 0;
+        f.store.start(start).await.unwrap();
+        terminal.outcome = MatchOutcome::Interrupted;
+        terminal.rated = false;
+        terminal.winner = None;
+        terminal.unrated_reason = Some(reason.into());
+        terminal.duration_ms = 600_000;
+        terminal.ended_at_ms = 601_000;
+        terminal.participants[0].participation = Some(shared::career::Participation {
+            connected_ms: 90_000,
+            disconnected_ms: 510_000,
+            afk_ms: 0,
+            abandoned: true,
+        });
+        let saved = f.store.settle(terminal.clone()).await.unwrap();
+        assert_eq!(f.store.settle(terminal).await.unwrap(), saved);
+        let profile = f.store.profile(&a.profile_id).await.unwrap();
+        assert_eq!(profile.abandons, u32::from(penalized));
+        assert_eq!(profile.losses, u32::from(penalized));
+        assert_eq!(profile.rated_matches, u32::from(penalized));
+        assert_eq!(profile.rating, if penalized { 968 } else { 1000 });
+        assert_eq!(profile.progression_xp, 0);
+        let other = f.store.profile(&b.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                other.rating,
+                other.abandons,
+                other.losses,
+                other.rated_matches
+            ),
+            (1000, 0, 0, 0)
+        );
+    }
+    f.close().await;
+}
+
+fn public_eligibility_fixture(a: &ProfileSummary, n: u64) -> MatchResult {
+    let mut game = result(a, a, n);
+    game.ruleset = PUBLIC_CASUAL_RULESET.into();
+    game.map_profile = shared::map::ResolvedMap::default().map_profile;
+    game.rated = false;
+    game.unrated_reason = Some("allocated_bots".into());
+    game.participants = (0..10)
+        .map(|i| {
+            let mut p = participant(a, i + 1, if i < 5 { Team::Green } else { Team::Blue });
+            if i != 0 {
+                p.is_bot = true;
+                p.profile_id = None;
+            }
+            p
+        })
+        .collect();
+    game
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn ranked_eligibility_counts_ten_completed_public_games_and_locked_admission() {
+    let f = Fixture::new().await;
+    let a = f.fresh_profile(1).await;
+    let b = f.profile(2).await;
+    let other = f.another_owner().await;
+    for count in 0..=10 {
+        let current = f.store.profile(&a.profile_id).await.unwrap();
+        assert_eq!(current.completed_public_matches, count);
+        assert_eq!(current.ranked_unlocked(), count >= 10);
+        let access = f
+            .store
+            .access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap();
+        assert_eq!(access.completed_public_matches, count);
+        let ranked = starting(&result(&a, &b, 100));
+        if count < 10 {
+            assert_eq!(
+                other.start(ranked).await.unwrap_err(),
+                shared::career::error_code::RANKED_LOCKED
+            );
+            let pending: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM career_matches WHERE status!='settled'")
+                    .fetch_one(&f.store.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(pending, 0, "denied allocation must roll back every row");
+            let game = public_eligibility_fixture(&a, u64::from(count) + 1);
+            f.store.start(starting(&game)).await.unwrap();
+            let (left, right) =
+                tokio::join!(f.store.settle(game.clone()), f.store.settle(game.clone()));
+            left.unwrap();
+            right.unwrap();
+            // Cross-owner settlement replay cannot duplicate progress.
+            other.settle(game).await.unwrap();
+        } else {
+            other.start(ranked).await.unwrap();
+        }
+    }
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().matches_played,
+        10
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn ranked_eligibility_excludes_abandon_interruption_remake_and_custom_results() {
+    let f = Fixture::new().await;
+    let a = f.fresh_profile(1).await;
+    for n in 1..=5 {
+        let mut game = public_eligibility_fixture(&a, n);
+        match n {
+            1 => {
+                game.participants[0].participation = Some(shared::career::Participation {
+                    disconnected_ms: 90_000,
+                    abandoned: true,
+                    ..Default::default()
+                });
+                game.duration_ms = 90_000;
+            }
+            2 => {
+                game.outcome = MatchOutcome::Interrupted;
+                game.winner = None;
+            }
+            3 => {
+                game.outcome = MatchOutcome::Remade;
+                game.winner = None;
+                game.unrated_reason = Some("remake".into());
+                game.end_reason = Some("remake".into());
+                game.duration_ms = 90_000;
+                game.participants[0].participation = Some(shared::career::Participation {
+                    disconnected_ms: 90_000,
+                    abandoned: true,
+                    ..Default::default()
+                });
+            }
+            4 => {
+                game.ruleset = "custom-unrated-v1".into();
+            }
+            5 => {
+                game.gameplay_started = false;
+                game.outcome = MatchOutcome::Abandoned;
+                game.winner = None;
+                game.unrated_reason = Some("prematch_abandoned".into());
+            }
+            _ => unreachable!(),
+        }
+        game.ended_at_ms = game.started_at_ms + game.duration_ms;
+        // Cooldown is orthogonal; expire only this disposable fixture's penalty.
+        sqlx::query(
+            "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+        )
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+        let mut start = starting(&game);
+        start.participants[0].participation = None;
+        if n == 3 {
+            start.unrated_reason = Some("allocated_bots".into());
+            start.end_reason = None;
+        }
+        f.store
+            .start(start)
+            .await
+            .unwrap_or_else(|e| panic!("case {n}: {e}"));
+        f.store.settle(game).await.unwrap();
+        assert_eq!(
+            f.store
+                .profile(&a.profile_id)
+                .await
+                .unwrap()
+                .completed_public_matches,
+            0
+        );
+    }
+    // Backfill must apply the same exclusions as live settlement.
+    remove_season_schema_for_upgrade(&f).await;
+    sqlx::raw_sql("ALTER TABLE career_profiles DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version=9;")
+        .execute(&f.store.pool).await.unwrap();
+    let upgraded = f.another_owner().await;
+    assert_eq!(
+        upgraded
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        0
+    );
+    // A legacy terminal disconnect without participation does not fabricate an
+    // abandon. A completed trusted public receipt still counts once.
+    sqlx::query(
+        "UPDATE career_play_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    let mut legacy = public_eligibility_fixture(&a, 6);
+    legacy.participants[0].disconnected = true;
+    f.store.start(starting(&legacy)).await.unwrap();
+    f.store.settle(legacy).await.unwrap();
+    assert_eq!(
+        f.store
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn ranked_eligibility_backfill_and_existing_allocation_recovery_preserve_progress() {
+    let f = Fixture::new().await;
+    let a = f.fresh_profile(1).await;
+    let b = f.fresh_profile(2).await;
+    let game = public_eligibility_fixture(&a, 1);
+    f.store.start(starting(&game)).await.unwrap();
+    f.store.settle(game).await.unwrap();
+    // Reconstruct a pre-schema9 database from trusted receipts.
+    remove_season_schema_for_upgrade(&f).await;
+    sqlx::raw_sql("ALTER TABLE career_profiles DROP COLUMN completed_public_matches; DELETE FROM career_schema_version WHERE version=9;")
+        .execute(&f.store.pool).await.unwrap();
+    let upgraded = f.another_owner().await;
+    assert_eq!(
+        upgraded
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        1
+    );
+    assert_eq!(
+        upgraded
+            .profile(&b.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        0
+    );
+    assert!(upgraded.start(starting(&result(&a, &b, 2))).await.is_err());
+    // Durable outbox replay of an already allocated pre-upgrade round remains
+    // recoverable. This trusted API is not an unauthenticated queue bypass.
+    let old = starting(&result(&a, &b, 2));
+    upgraded.ensure_allocation(old.clone()).await.unwrap();
+    upgraded.start(old).await.unwrap();
+    assert_eq!(
+        upgraded
+            .profile(&a.profile_id)
+            .await
+            .unwrap()
+            .completed_public_matches,
+        1
+    );
+    upgraded.pool.close().await;
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn declared_input_statistics_are_bounded_and_settlement_retry_is_exact() {
+    use shared::ranked::InputKind;
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for n in 1..=3 {
+        let mut completed = if n == 3 {
+            public_eligibility_fixture(&a, n)
+        } else {
+            result(&a, &b, n)
+        };
+        completed.participants[0].input_kind = if n == 1 {
+            InputKind::Touch
+        } else {
+            InputKind::Mixed
+        };
+        completed.participants[1].input_kind = if n == 1 {
+            InputKind::Mouse
+        } else {
+            InputKind::Unknown
+        };
+        let mut initial = starting(&completed);
+        if n == 2 {
+            initial.participants[0].input_kind = InputKind::Touch;
+        }
+        f.store.start(initial.clone()).await.unwrap();
+        if n == 2 {
+            let mut checkpoint = initial;
+            checkpoint.participants[0].input_kind = InputKind::Mouse;
+            checkpoint.duration_ms = 500;
+            checkpoint.ended_at_ms = 1500;
+            f.store.checkpoint(checkpoint).await.unwrap();
+            // A recovered older worker lacks the previous controls. The
+            // durable checkpoint must preserve both observations.
+            completed.participants[0].input_kind = InputKind::Unknown;
+        }
+        let saved = f.store.settle(completed.clone()).await.unwrap();
+        assert_eq!(saved, f.store.settle(completed).await.unwrap());
+        assert_eq!(
+            f.store
+                .detail(&a.profile_id, &saved.result_id)
+                .await
+                .unwrap(),
+            saved
+        );
+    }
+    let report = f.store.input_statistics(3).await.unwrap();
+    assert_eq!(
+        (report.scanned_receipts, report.completed_ranked_matches),
+        (3, 2)
+    );
+    assert_eq!(
+        report
+            .rows
+            .iter()
+            .map(|r| (r.kind, r.matches, r.wins))
+            .collect::<Vec<_>>(),
+        vec![
+            (InputKind::Touch, 1, 1),
+            (InputKind::Mouse, 1, 0),
+            (InputKind::Mixed, 1, 1),
+            (InputKind::Unknown, 1, 0),
+        ]
+    );
+    let recent = f.store.input_statistics(1).await.unwrap();
+    assert_eq!(recent.scanned_receipts, 1);
+    assert_eq!(recent.completed_ranked_matches, 0);
+    assert!(recent.rows.iter().all(|r| r.matches == 0 && r.wins == 0));
+    assert!(f.store.input_statistics(0).await.is_err());
+    assert!(f.store.input_statistics(10_001).await.is_err());
+    f.close().await;
+}
+
+#[path = "career_store/seasons_tests.rs"]
+mod seasons;
+
+async fn queue_discipline_now(f: &Fixture) -> u64 {
+    u64::try_from(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint",
+        )
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_receipt_is_shared_exactly_once_and_preserves_career() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let event = format!("{:032x}", 1);
+    let first = f
+        .store
+        .record_queue_dodge(&event, &profile.profile_id, at)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.strikes, 1);
+    assert!(first.until >= i64::try_from(at / 1000).unwrap() + 60);
+    assert_eq!(
+        other
+            .queue_dodge_cooldown(&profile.profile_id)
+            .await
+            .unwrap(),
+        Some(first)
+    );
+    assert_eq!(
+        other
+            .record_queue_dodge(&event, &profile.profile_id, at)
+            .await
+            .unwrap(),
+        Some(first)
+    );
+    assert_eq!(f.store.profile(&profile.profile_id).await.unwrap(), profile);
+    assert_eq!(
+        f.store
+            .history(&profile.profile_id, None)
+            .await
+            .unwrap()
+            .0
+            .len(),
+        0
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    assert!(
+        f.store
+            .access(&format!("{:064x}", 1), &profile.profile_id)
+            .await
+            .unwrap()
+            .play_cooldown
+            .is_none(),
+        "queue discipline must not create a played-match abandon"
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_concurrent_owners_do_not_lose_or_double_strikes() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let first = format!("{:032x}", 1);
+    let second = format!("{:032x}", 2);
+    let (a, b) = tokio::join!(
+        f.store.record_queue_dodge(&first, &profile.profile_id, at),
+        other.record_queue_dodge(&second, &profile.profile_id, at)
+    );
+    let mut strikes = vec![a.unwrap().unwrap().strikes, b.unwrap().unwrap().strikes];
+    strikes.sort_unstable();
+    assert_eq!(strikes, [1, 2]);
+    let second = other
+        .queue_dodge_cooldown(&profile.profile_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.strikes, 2);
+    assert!(second.until >= i64::try_from(at / 1000).unwrap() + 300);
+    for (n, seconds) in [(3, 900), (4, 3600)] {
+        let value = f
+            .store
+            .record_queue_dodge(&format!("{n:032x}"), &profile.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.strikes, n);
+        assert!(value.until >= i64::try_from(at / 1000).unwrap() + seconds);
+    }
+    let event = format!("{:032x}", 5);
+    let (a, b) = tokio::join!(
+        f.store.record_queue_dodge(&event, &profile.profile_id, at),
+        other.record_queue_dodge(&event, &profile.profile_id, at)
+    );
+    assert_eq!(a.unwrap().unwrap().strikes, 5);
+    assert_eq!(b.unwrap().unwrap().strikes, 5);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_conflicting_receipt_and_invalid_clock_fail_without_side_effects() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let at = queue_discipline_now(&f).await;
+    let event = format!("{:032x}", 1);
+    f.store
+        .record_queue_dodge(&event, &a.profile_id, at)
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &b.profile_id, at)
+            .await
+            .is_err()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &a.profile_id, at - 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&format!("{:032x}", 2), &a.profile_id, at + 60_000)
+            .await
+            .is_err()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&format!("{:032x}", 3), &a.profile_id, u64::MAX)
+            .await
+            .is_err()
+    );
+    for event in ["", "../bad", &"a".repeat(33), &"A".repeat(32)] {
+        assert!(
+            f.store
+                .record_queue_dodge(event, &a.profile_id, at)
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        f.store
+            .queue_dodge_cooldown(&b.profile_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_old_delivery_does_not_restart_a_penalty_and_quiet_day_resets() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let stale = at - 86_401_000;
+    let event = format!("{:032x}", 1);
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &profile.profile_id, stale)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        f.store
+            .record_queue_dodge(&event, &profile.profile_id, stale)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let first = f
+        .store
+        .record_queue_dodge(&format!("{:032x}", 2), &profile.profile_id, at - 30_000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        first.until < i64::try_from(at / 1000).unwrap() + 32,
+        "delivery delay cannot restart the full minute"
+    );
+    sqlx::query("UPDATE career_queue_penalties SET last_observed_ms=$2,cooldown_until=clock_timestamp()-interval '1 day',strikes=9 WHERE profile_id=$1")
+        .bind(&profile.profile_id).bind(i64::try_from(stale).unwrap()).execute(&f.store.pool).await.unwrap();
+    let reset = f
+        .store
+        .record_queue_dodge(&format!("{:032x}", 3), &profile.profile_id, at)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reset.strikes, 1);
+    assert!(reset.until <= i64::try_from(at / 1000).unwrap() + 61);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_out_of_order_events_preserve_latest_time_and_schema_upgrade() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    // An actual schema10 fixture has none of the new objects or version row.
+    sqlx::raw_sql("DROP FUNCTION career_prune_closed_ready(integer); DROP TABLE career_ready_claims,career_ready_members,career_ready_checks; DELETE FROM career_schema_version WHERE version>=12; DROP TABLE career_queue_dodge_events,career_queue_penalties; DELETE FROM career_schema_version WHERE version=11;")
+        .execute(&f.store.pool).await.unwrap();
+    assert!(
+        f.store
+            .queue_dodge_cooldown(&profile.profile_id)
+            .await
+            .is_err(),
+        "missing schema is not a no-ban success"
+    );
+    let other = f.another_owner().await;
+    assert_eq!(other.profile(&profile.profile_id).await.unwrap(), profile);
+    let at = queue_discipline_now(&f).await;
+    other
+        .record_queue_dodge(&format!("{:032x}", 1), &profile.profile_id, at)
+        .await
+        .unwrap();
+    let later = f
+        .store
+        .record_queue_dodge(&format!("{:032x}", 2), &profile.profile_id, at - 1000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(later.strikes, 2);
+    assert!(later.until >= i64::try_from(at / 1000).unwrap() + 300);
+    let last: i64 = sqlx::query_scalar(
+        "SELECT last_observed_ms FROM career_queue_penalties WHERE profile_id=$1",
+    )
+    .bind(&profile.profile_id)
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    assert_eq!(last, i64::try_from(at).unwrap());
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_small_host_clock_skew_cannot_extend_the_cooldown() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let event = format!("{:032x}", 1);
+    let first = f
+        .store
+        .record_queue_dodge(&event, &profile.profile_id, at + 2_000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        first.until <= i64::try_from(at / 1000).unwrap() + 61,
+        "tolerated future observation must clamp to the authoritative database clock"
+    );
+    assert_eq!(
+        f.store
+            .record_queue_dodge(&event, &profile.profile_id, at + 2_000)
+            .await
+            .unwrap(),
+        Some(first)
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_fresh_search_is_global_but_access_and_revocation_remain_usable() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let key = format!("{:064x}", 1);
+    assert!(
+        other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    f.store
+        .record_queue_dodge(
+            &format!("{:032x}", 1),
+            &profile.profile_id,
+            queue_discipline_now(&f).await,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap_err(),
+        shared::career::error_code::DODGE_COOLDOWN
+    );
+    assert!(
+        other
+            .access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active,
+        "login/access/Resume authorization is separate from starting a search"
+    );
+    let untouched = f.profile(2).await;
+    assert!(
+        other
+            .queue_access(&format!("{:064x}", 2), &untouched.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    sqlx::query("UPDATE career_queue_penalties SET cooldown_until=clock_timestamp()-interval '1 second' WHERE profile_id=$1")
+        .bind(&profile.profile_id).execute(&f.store.pool).await.unwrap();
+    assert!(
+        other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    sqlx::query("UPDATE career_keys SET revoked_at=clock_timestamp() WHERE public_key=$1")
+        .bind(&key)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert!(
+        !other
+            .queue_access(&key, &profile.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    sqlx::query("DROP TABLE career_queue_penalties")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert!(
+        other
+            .queue_access(&format!("{:064x}", 2), &untouched.profile_id)
+            .await
+            .is_err(),
+        "unknown shared penalty state cannot authorize a new search"
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_start_rechecks_rolls_back_and_preserves_existing_allocation_recovery() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let other = f.another_owner().await;
+    // The earlier queue read succeeds; a different host then commits a dodge.
+    assert!(
+        other
+            .queue_access(&format!("{:064x}", 1), &a.profile_id)
+            .await
+            .unwrap()
+            .key_active
+    );
+    f.store
+        .record_queue_dodge(
+            &format!("{:032x}", 1),
+            &a.profile_id,
+            queue_discipline_now(&f).await,
+        )
+        .await
+        .unwrap();
+    for (n, rated) in [(901, true), (902, false)] {
+        let mut initial = starting(&result(&a, &b, n));
+        initial.rated = rated;
+        if !rated {
+            initial.unrated_reason = Some("casual fixture".into());
+        }
+        assert_eq!(
+            other.start(initial).await.unwrap_err(),
+            shared::career::error_code::DODGE_COOLDOWN
+        );
+    }
+    for table in [
+        "career_matches",
+        "career_participants",
+        "career_active_profiles",
+        "career_ranked_allocations",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "rejected admission must roll back {table}");
+    }
+    assert_eq!(f.store.profile(&a.profile_id).await.unwrap(), a);
+    sqlx::query(
+        "UPDATE career_queue_penalties SET cooldown_until=clock_timestamp()-interval '1 second'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    let initial = starting(&result(&a, &b, 903));
+    other.start(initial.clone()).await.unwrap();
+    f.store
+        .record_queue_dodge(
+            &format!("{:032x}", 2),
+            &a.profile_id,
+            queue_discipline_now(&f).await,
+        )
+        .await
+        .unwrap();
+    // This same immutable already admitted match must remain resumable.
+    other.start(initial.clone()).await.unwrap();
+    other.ensure_allocation(initial.clone()).await.unwrap();
+    f.expire(&initial.result_id).await;
+    f.store.ensure_allocation(initial.clone()).await.unwrap();
+    f.store.checkpoint(initial).await.unwrap();
+    f.close().await;
+}
+
+async fn queue_discipline_single_connection_owner(f: &Fixture) -> (CareerStore, i32) {
+    let schema = f.schema.clone();
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO {schema}"))
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("SET lock_timeout='5s'")
+                    .execute(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&std::env::var("OMOBA_TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let store = CareerStore::from_pool(pool).await.unwrap();
+    let pid = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    (store, pid)
+}
+async fn queue_discipline_wait_for_lock(f: &Fixture, pid: i32, statement: &str) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock' AND position($2 in query)>0)")
+                .bind(pid).bind(statement).fetch_one(&f.admin).await.unwrap();
+            if waiting { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("must observe this exact owner's blocked production statement");
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn queue_discipline_start_waits_for_an_inflight_other_owner_dodge_commit() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let (recorder, recording_pid) = queue_discipline_single_connection_owner(&f).await;
+    let (starter, starting_pid) = queue_discipline_single_connection_owner(&f).await;
+    let initial = starting(&result(&a, &b, 904));
+    let at = queue_discipline_now(&f).await;
+    // Only this disposable schema: pause the real record method AFTER it has
+    // locked its profile, before committing. No production time/race test hook.
+    sqlx::raw_sql("CREATE FUNCTION pause_queue_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtextextended(TG_TABLE_SCHEMA,35)); RETURN NEW; END $$; CREATE TRIGGER pause_queue_receipt BEFORE INSERT ON career_queue_dodge_events FOR EACH ROW EXECUTE FUNCTION pause_queue_receipt();")
+        .execute(&f.store.pool).await.unwrap();
+    let mut pause = f.store.pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,35))")
+        .bind(&f.schema)
+        .execute(&mut *pause)
+        .await
+        .unwrap();
+    let profile = a.profile_id.clone();
+    let recording = tokio::spawn(async move {
+        recorder
+            .record_queue_dodge(&format!("{:032x}", 1), &profile, at)
+            .await
+    });
+    queue_discipline_wait_for_lock(&f, recording_pid, "INSERT INTO career_queue_dodge_events")
+        .await;
+    let starting = tokio::spawn(async move { starter.start(initial).await });
+    queue_discipline_wait_for_lock(&f, starting_pid, "SELECT * FROM career_profiles").await;
+    pause.commit().await.unwrap();
+    assert!(recording.await.unwrap().unwrap().is_some());
+    assert_eq!(
+        starting.await.unwrap().unwrap_err(),
+        shared::career::error_code::DODGE_COOLDOWN
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    f.close().await;
+}
+
+#[path = "career_store/ready_tests.rs"]
+mod ready_ownership;
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_is_idempotent_shared_and_not_an_invented_event() {
+    let f = Fixture::new().await;
+    let profile = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let floor = QueuePenaltyFloor {
+        profile_id: profile.profile_id.clone(),
+        strikes: 3,
+        last_ms: at - 30_000,
+        until_ms: at + 870_000,
+    };
+    for _ in 0..3 {
+        let active = f
+            .store
+            .import_queue_penalty_floor(&floor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(active.strikes, 3);
+        assert_eq!(active.until, (floor.until_ms as i64 + 999) / 1000);
+    }
+    assert_eq!(
+        other
+            .queue_access(&format!("{:064x}", 1), &profile.profile_id)
+            .await
+            .unwrap_err(),
+        shared::career::error_code::DODGE_COOLDOWN
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "an aggregate is not a fabricated list of events");
+    let next = other
+        .record_queue_dodge(&"a".repeat(32), &profile.profile_id, at)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.strikes, 4);
+    let preserved = f
+        .store
+        .import_queue_penalty_floor(&floor)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        preserved, next,
+        "a restart's older floor cannot weaken the shared counter or time"
+    );
+    let after = f.store.profile(&profile.profile_id).await.unwrap();
+    assert_eq!(after.matches_played, profile.matches_played);
+    assert_eq!(after.rating, profile.rating);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_does_not_rearm_expired_time_or_revive_old_strikes() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let at = queue_discipline_now(&f).await;
+    let recent = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 2,
+        last_ms: at - 400_000,
+        until_ms: at - 100_000,
+    };
+    let stale = QueuePenaltyFloor {
+        profile_id: b.profile_id.clone(),
+        strikes: 3,
+        last_ms: at - 86_500_000,
+        until_ms: at - 85_600_000,
+    };
+    for floor in [&recent, &stale] {
+        for _ in 0..2 {
+            assert!(
+                f.store
+                    .import_queue_penalty_floor(floor)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM career_queue_penalties WHERE profile_id=$1")
+            .bind(&b.profile_id)
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(
+        f.store
+            .record_queue_dodge(&"a".repeat(32), &a.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        3
+    );
+    assert_eq!(
+        f.store
+            .record_queue_dodge(&"b".repeat(32), &b.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_refuses_invalid_future_and_missing_profile_without_effects() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let good = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 1,
+        last_ms: at,
+        until_ms: at + 60_000,
+    };
+    let mut cases = Vec::new();
+    let mut bad = good.clone();
+    bad.strikes = 0;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.strikes = u32::MAX;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.until_ms = at - 1;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.until_ms = at + 3_606_000;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.last_ms = at + 60_000;
+    bad.until_ms = at + 120_000;
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.profile_id = "f".repeat(64);
+    cases.push(bad);
+    for floor in cases {
+        assert!(f.store.import_queue_penalty_floor(&floor).await.is_err());
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_penalties")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_merges_overlapping_owners_by_max_after_known_receipt_replay() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let other = f.another_owner().await;
+    let at = queue_discipline_now(&f).await;
+    let event = "a".repeat(32);
+    for _ in 0..2 {
+        f.store
+            .record_queue_dodge(&event, &a.profile_id, at - 60_000)
+            .await
+            .unwrap();
+    }
+    let high = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 5,
+        last_ms: at - 60_000,
+        until_ms: at + 3_540_000,
+    };
+    let low = QueuePenaltyFloor {
+        strikes: 3,
+        until_ms: at + 840_000,
+        ..high.clone()
+    };
+    let (one, two) = tokio::join!(
+        f.store.import_queue_penalty_floor(&high),
+        other.import_queue_penalty_floor(&low)
+    );
+    one.unwrap();
+    two.unwrap();
+    assert_eq!(
+        f.store
+            .queue_dodge_cooldown(&a.profile_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        5
+    );
+    f.store
+        .record_queue_dodge(&event, &a.profile_id, at - 60_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        other
+            .record_queue_dodge(&"b".repeat(32), &a.profile_id, at)
+            .await
+            .unwrap()
+            .unwrap()
+            .strikes,
+        6
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires real isolated PostgreSQL"]
+async fn legacy_queue_floor_cache_roundtrip_preserves_clock_skew_and_second_rounding() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let at = queue_discipline_now(&f).await;
+    let source = QueuePenaltyFloor {
+        profile_id: a.profile_id.clone(),
+        strikes: 4,
+        last_ms: at + 4000,
+        until_ms: at + 3_604_000,
+    };
+    let active = f
+        .store
+        .import_queue_penalty_floor(&source)
+        .await
+        .unwrap()
+        .unwrap();
+    let stored_last: i64 = sqlx::query_scalar(
+        "SELECT last_observed_ms FROM career_queue_penalties WHERE profile_id=$1",
+    )
+    .bind(&a.profile_id)
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    let cached = QueuePenaltyFloor {
+        last_ms: stored_last as u64,
+        until_ms: active.until as u64 * 1000,
+        ..source
+    };
+    cached.validate().unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            f.store
+                .import_queue_penalty_floor(&cached)
+                .await
+                .unwrap()
+                .unwrap(),
+            active,
+            "cache retries must not keep adding clock or rounding grace"
+        );
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_queue_dodge_events")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
     f.close().await;
 }

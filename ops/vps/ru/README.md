@@ -1,0 +1,898 @@
+# RU market servers
+
+One Russian VPS runs everything Russian players reach: PostgreSQL, the lobby and
+match workers (UDP 4000, 41000–41001), the Account API (behind Caddy at
+`account.omoba.ru`), the player portal (`omoba.ru`) and the game downloads
+(`omoba.ru/downloads/`, [Downloads](#downloads)). Keep it apart
+from the global production host: each market has its own database, accounts and
+device keys. Background and the release steps: [docs/markets.md](../../../docs/markets.md).
+
+Only binaries from the RU server bundle may run here ([Server bundle](#server-bundle)):
+they are built with `OMOBA_MARKET=ru` (no Ekza, Hero Supporter through YooKassa only, VK
+ID sign-in; the shop settings and the webhook are in [YooKassa](#yookassa)).
+
+> **Status (LR-01, LR-03, LR-23, LR-17 ops).** Everything up to the host is ready: [ru_host.py](ru_host.py)
+> sets up a fresh Ubuntu host, ships the server package and the portal, checks the
+> whole host and runs the reboot test; [ru_backup.py](ru_backup.py) backs it up every
+> night, encrypted and off-host, before every migration, and drills a restore every
+> month ([Backups](#backups-escrow-and-restore-drill)); the host serves the game
+> packages and counts their downloads ([Downloads](#downloads)); every unit failure,
+> low disk, a stopped backup timer and a stuck match worker alert the owner, the journal
+> is bounded, and an external probe watches the public names every minute
+> ([Monitoring and alerts](#monitoring-and-alerts)). Players waiting too long for a free
+> arena alert too, and the capacity probe is ready to run here ([Arena capacity](#arena-capacity-lr-09)).
+> Still open before a public launch: the lobby's other metrics and their alerts (LR-17,
+> server part) and the capacity measurement on this host (LR-09). The owner buys the
+> VPS, sets DNS, creates the VK ID app, provides the backup storage in Russia, makes the backup key, names the escrow holder, creates
+> the Telegram bot and picks the probe host.
+> See [the launch-readiness plan](../../../docs/plans/launch-readiness.md) and the
+> [RU release checklist](release-checklist.md).
+
+## Topology
+
+Everything below runs on this one host; only Caddy listens publicly for HTTP.
+
+| Caller | Reaches | How | Client address the Account API sees |
+| --- | --- | --- | --- |
+| Game (native signed routes) | `https://account.omoba.ru` → Caddy → `127.0.0.1:40550` | `@native` allowlist and health only; every other route answers 403 | `X-Real-IP`, overwritten by Caddy with the game's address |
+| YooKassa (HTTP notifications) | `https://account.omoba.ru/v1/supporter/yookassa/notifications` → Caddy → `127.0.0.1:40550` | its own `@yookassa` handle: that one POST path ([YooKassa](#yookassa)) | `X-Real-IP`, overwritten by Caddy with YooKassa's address |
+| Browser | `https://omoba.ru` → Caddy → portal `127.0.0.1:3010` | the whole portal | — (Caddy overwrites `X-Real-IP` with the browser's address) |
+| Browser, game update button | `https://omoba.ru/downloads/<tag>/<package>` → Caddy `file_server` on `/opt/omoba-ru/downloads` | the packages only, no listing ([Downloads](#downloads)) | — (static files; Caddy logs the request, shortened) |
+| Portal (BFF, VK callback, server reads) | `http://127.0.0.1:40550` directly | loopback HTTP, no portal ingress key | `X-Real-IP`, the browser's address forwarded by the portal |
+
+- `OMOBA_TRUST_LOOPBACK_PROXY=1` is set on the Account API and the portal. The
+  API trusts `X-Real-IP` only from loopback and refuses a loopback request without
+  it; the portal trusts it only because Caddy overwrites it and its own listener is
+  loopback-only. Per-IP limits (social sign-in 30/min, pairing creation 5/min) are
+  therefore per player, never per host.
+- There is no portal ingress key on RU: the portal never goes through
+  `account.omoba.ru`, and that name never passes a portal route.
+- The portal refuses to serve (journal: `OMOBA portal misconfigured, refusing to
+  serve`) with an Account API that is not on loopback and no valid
+  `OMOBA_ACCOUNT_INGRESS_KEY`, or with the loopback API and no
+  `OMOBA_TRUST_LOOPBACK_PROXY=1`.
+- Never put another proxy in front of Caddy without changing `{remote_host}`
+  (for example to `{client_ip}` with `trusted_proxies`): the limits would key on
+  that proxy.
+
+## What runs where
+
+| Piece | Where | Started by |
+| --- | --- | --- |
+| PostgreSQL 16+ (Ubuntu package, ICU `und-x-icu`), database `omoba_ru`, `127.0.0.1:5432` only | cluster `/var/lib/postgresql` | `postgresql@<version>-main.service` (`postgresql.service` is postgresql-common's wrapper, a oneshot that stays active) |
+| Lobby + match workers, user `omoba-ru` | `/opt/omoba-ru/current/omoba-server`, state in `/var/lib/omoba-ru` | [omoba-lobby-ru.service](omoba-lobby-ru.service) |
+| Account API, user `omoba-ru`, `127.0.0.1:40550` | `/opt/omoba-ru/current/omoba-account-api` | [omoba-account-api-ru.service](omoba-account-api-ru.service) |
+| Portal, user `omoba-portal-ru`, `127.0.0.1:3010` | `/opt/omoba-ru/portal/current/server.js` on `/opt/omoba-ru/node/current/bin/node` | [omoba-portal-ru.service](omoba-portal-ru.service) |
+| Caddy, TCP 443 | `/etc/caddy/Caddyfile` = [Caddyfile.ru](Caddyfile.ru) | `caddy.service` |
+| Per-source UDP limits (nftables table `inet omoba_limits`) | `/opt/omoba-ru/nftables-omoba.conf` = [nftables-omoba.conf](nftables-omoba.conf) | [omoba-limits-ru.service](omoba-limits-ru.service) (oneshot) |
+| Downloads (LR-23): packages, root 0755/0644, and Caddy's log of them | `/opt/omoba-ru/downloads/<tag>/`; `/var/log/caddy/omoba-ru-downloads.log` (caddy, 0640) | `release.py publish --market ru` (rsync); read by `caddy.service` |
+| Env files (root, 0600) | `/opt/omoba-ru/{lobby,account-api,portal}.env` from the `*.env.example` files here | read by systemd |
+| Backups (LR-03), root | [ru_backup.py](ru_backup.py) as `/opt/omoba-ru/backup/ru_backup.py`; settings `/opt/omoba-ru/backup.env` (root 0600, from [backup.env.example](backup.env.example)), keys in `/opt/omoba-ru/backup-keys/` (0700); host copies in `/var/backups/omoba-ru/` (0700) | [omoba-backup-ru.timer](omoba-backup-ru.timer) nightly, [omoba-restore-drill-ru.timer](omoba-restore-drill-ru.timer) monthly, [omoba-backup-check-ru.timer](omoba-backup-check-ru.timer) hourly |
+| Monitoring and alerts (LR-17), root | [ru_monitor.py](ru_monitor.py) as `/opt/omoba-ru/monitor/ru_monitor.py`; settings `/opt/omoba-ru/alerts.env` (root 0600, from [alerts.env.example](alerts.env.example)); state in `/var/lib/omoba-ru-monitor/`; journal limits `/etc/systemd/journald.conf.d/50-omoba-ru.conf` ([journald-omoba-ru.conf](journald-omoba-ru.conf)); the PostgreSQL alert drop-in `/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf` ([postgresql-alert-ru.conf](postgresql-alert-ru.conf)) | [omoba-alert-ru@.service](omoba-alert-ru@.service) on any unit's failure (`OnFailure=`), [omoba-monitor-ru.timer](omoba-monitor-ru.timer) every 5 minutes |
+
+All three OMOBA units restart on any exit every 5 s without a start limit
+(`Restart=always`, `StartLimitIntervalSec=0`), and each failure alerts the owner
+([Monitoring and alerts](#monitoring-and-alerts)); the lobby and the Account API start
+after `postgresql.service` and pull it in. A reboot brings everything back with no
+manual step; `ru_host.py reboot-check --apply` proves it.
+
+## Install and update: ru_host.py
+
+[ru_host.py](ru_host.py) does every step below. It runs on the Mac and pipes itself to
+`ssh <alias> python3 -`, so the host needs nothing but Ubuntu 24.04+ (x86-64) and
+root login with a key. Without `--check` or `--apply` it contacts nothing; `--check`
+is a read-only preflight on the host; `--apply` changes it. It refuses the
+production and dev VPS (aliases, addresses, units, users, folders) on both sides, a
+host whose `ssh -G` HostName is not `$RU_IP`, a login user other than root, and —
+for bootstrap — an address that `whois` does not place in Russia
+(`--country-confirmed` when the provider says it is). No secret is printed or put
+in argv; a generated secret is never replaced.
+
+```sh
+# ~/.ssh/config:  Host vds-ru / HostName <RU IPv4> / User root / IdentityFile …
+export RU_HOST=vds-ru RU_IP=<RU VPS IPv4>
+python3 ops/vps/ru/ru_host.py names   # the RU names and the DNS A records to set; local only
+```
+
+The public names (lobby, Account API, portal) and the RU DNS zone come from the RU
+profile in [scripts/markets.py](../../../scripts/markets.py) and are written nowhere
+else: the tool reads them on the Mac and sends them to the host, where `status` and
+`bootstrap` check DNS against them. It refuses a kit whose `Caddyfile.ru` sites or
+`OMOBA_PORTAL_ORIGIN` lines do not match them, so a rename edits `markets.py` and then
+the kit files it names.
+
+1. **Bootstrap a fresh host** (idempotent; run it again after changing the kit):
+   ```sh
+   python3 ops/vps/ru/ru_host.py bootstrap --vkid-client-id <VK ID app id> \
+       --node-tarball ~/Downloads/node-v22.<x>.<y>-linux-x64.tar.xz \
+       --node-sha256 <its line in nodejs.org/dist/v22.<x>.<y>/SHASUMS256.txt>
+   python3 ops/vps/ru/ru_host.py bootstrap … --check   # then --apply
+   ```
+   - Packages from Ubuntu's own mirrors only (`postgresql caddy ufw nftables openssh-server gnupg`);
+     no third-party apt repository. PostgreSQL must be 16+ with the `und-x-icu`
+     collation and listen on loopback only, or bootstrap stops before writing secrets.
+   - Node.js ≥ 20.9 for the portal (Next.js 16): the uploaded official tarball
+     (sha256 checked) in `/opt/omoba-ru/node/v<x.y.z>`, or Ubuntu's `nodejs` when it is
+     new enough (24.04 ships 18.x, so pass the tarball there).
+   - Users `omoba-ru` and `omoba-portal-ru` (system, nologin); folders
+     `/opt/omoba-ru/{releases,portal/releases,node,incoming,backup,backup-keys}`,
+     `/var/lib/omoba-ru/{matches,lobby-outbox}` and `/var/backups/omoba-ru` (0700 but `backup`).
+   - Env files from the examples: database passwords, `OMOBA_PORTAL_SECRET` and
+     `OMOBA_SOCIAL_SECRET` are generated on the host; `OMOBA_MATCH_PUBLIC_HOST` is
+     `$RU_IP`; `--vkid-client-id` fills both VK ID lines (without it they stay
+     placeholders and `ship` refuses). Rerunning only fills placeholders and appends
+     the settings an example gained since the file was written (the per-source
+     limits of `lobby.env.example`), with the kit's values; it never replaces a value.
+   - Roles `omoba_owner` (NOLOGIN), `omoba_game`, `omoba_portal` and database
+     `omoba_ru` (UTF8, collation C.UTF-8; handles use `und-x-icu` explicitly).
+   - [Caddyfile.ru](Caddyfile.ru) after `caddy validate`; the old file is kept as
+     `Caddyfile.orig`. Before it, the download folder `/opt/omoba-ru/downloads` and
+     Caddy's download log `/var/log/caddy/omoba-ru-downloads.log`, owned by `caddy`
+     (created before `caddy validate`, which runs as root, could create it root-owned).
+   - Key-only SSH: `/etc/ssh/sshd_config.d/00-omoba-ru.conf` (sorts before
+     cloud-init's file), checked with `sshd -t` and `sshd -T`. Refused while
+     `/root/.ssh/authorized_keys` is empty.
+   - Firewall (ufw): incoming denied except SSH, TCP 443, UDP 4000 and the arena
+     range read from the lobby unit (`OMOBA_MATCH_FIRST_PORT` + `OMOBA_MATCH_CAPACITY`).
+     Port 80 stays closed: Caddy falls back to the TLS-ALPN challenge on 443 for its
+     certificates. If the provider has its own firewall, open the same ports there.
+   - Per-source UDP limits ([Admission limits](#admission-limits-lr-16)):
+     [nftables-omoba.conf](nftables-omoba.conf) as `/opt/omoba-ru/nftables-omoba.conf`
+     after `nft -c` accepts it, and [omoba-limits-ru.service](omoba-limits-ru.service),
+     enabled and started. A refused file leaves the loaded limits as they were.
+   - The three unit files; `postgresql` and `caddy` enabled; an OMOBA unit is
+     enabled once its release exists, so a boot never starts a missing binary.
+   - The backup kit: `ru_backup.py`, its three services and timers (the timers enabled
+     and started), and `/opt/omoba-ru/backup.env` from `backup.env.example`, written
+     once with placeholders and never replaced. Until the owner fills it, the nightly
+     backup fails and alerts, and `status` lists what is missing.
+   - The monitoring kit (LR-17), installed before the units that name it: `ru_monitor.py`,
+     the alert template `omoba-alert-ru@.service`, the host check and its timer (enabled
+     and started), the drop-in that gives every PostgreSQL cluster unit the alert,
+     `/opt/omoba-ru/alerts.env` from `alerts.env.example` (written once, never replaced)
+     and the journal limits, after which `systemd-journald` restarts.
+2. **Lobby and Account API** from the RU server bundle ([Server bundle](#server-bundle)):
+   ```sh
+   python3 scripts/release.py build server --market ru
+   python3 ops/vps/ru/ru_host.py ship --package dist/v<v>-ru/server/omoba-<v>-ru-server-linux-x64.tar.gz --apply
+   ```
+   Refused while a match runs. It stages `/opt/omoba-ru/releases/<v>-ru-<sha7>/`
+   (immutable, sha256-checked); when a schema exists it runs the pre-migration backup
+   (`ru_backup.py backup --reason pre-migration`: an encrypted set off-host and a plain
+   rollback dump in `/var/backups/omoba-ru/`) and refuses to migrate while backups are
+   not configured or the backup fails (before launch, without storage,
+   `--local-backup-only` takes only the rollback dump); then it runs
+   `omoba-account-api migrate` under a temporary, expiring
+   owner login, applies `account-api/ops/grants.sql`, switches `current`, installs
+   changed units, enables and restarts both services and checks UDP 4000, the
+   lobby's executable and `/health/ready`. Any failure rolls back to the previous
+   release. Shipping the running release again is a no-op.
+3. **Portal** (see [Portal bundle](#portal-bundle)):
+   ```sh
+   python3 ops/vps/ru/ru_host.py portal-bundle --web ../omoba-web
+   python3 ops/vps/ru/ru_host.py ship-portal --bundle dist/portal-ru/omoba-portal-ru-<rev7>.tar.gz --apply
+   ```
+4. **Backups and escrow**: [set them up once](#set-up-once-owner).
+5. **Check** with `python3 ops/vps/ru/ru_host.py status` (read-only, exit 0 only
+   when nothing is missing) and once per new host `reboot-check --apply`.
+
+Each change is appended to `/opt/omoba-ru/deployments.jsonl`.
+
+### Upgrades and live matches
+
+The lobby unit has `KillMode=process` (and `SendSIGHUP=no`): a stop, a restart
+(`systemctl restart omoba-lobby-ru`, a crash, the 5 s `Restart=always`) signals the
+lobby process only. Match workers it spawned keep running in the unit's cgroup, under
+the same memory, CPU and task limits, and their players keep playing. The next lobby
+adopts them at start from `/var/lib/omoba-ru/matches/<allocation>/manifest.json`
+(`server/src/match_pool.rs`): a slot without a child handle whose `status.json` still
+heartbeats keeps its port and its seats; a slot whose last heartbeat is older than 100 s
+is relaunched for recovery only when its UDP port can be bound (so a live worker is
+never duplicated); a finished or failed slot more than 35 s old is archived. A reboot
+still ends everything (`systemd` kills the cgroup at shutdown), and interrupted matches
+are recovered from their durable directories as before.
+
+- `ship` is still refused while a match runs (`match workers are running`): wait or
+  retry, so a release switch never leaves a mixed pair running by accident. If a
+  release is ever switched under live workers (a crash restart right after `ship`),
+  the old release's workers keep running until their match ends while the new lobby
+  adopts them: the lobby and its workers talk through the manifest, the status file and
+  the wire protocol, and must stay compatible across one upgrade (they already must,
+  for recovery). The adopted worker runs the old binary; it is not restarted.
+- `systemctl stop omoba-lobby-ru` therefore does not end matches. To stop everything,
+  stop the unit and then `systemctl kill omoba-lobby-ru` (or `pkill -u omoba-ru
+  omoba-server`); never kill a worker to free a port by hand.
+
+## Server bundle
+
+The RU lobby and Account API ship as their own bundle, never inside a player package
+(LR-22): the RU Linux player package (`omoba-<v>-ru-linux-x64.tar.gz`) holds the game,
+its practice server and the Russian README, and no `omoba-account-api`.
+
+```sh
+python3 scripts/release.py build server --market ru   # also part of `build all --market ru` / make release-ru
+# -> dist/v<v>-ru/server/omoba-<v>-ru-server-linux-x64.tar.gz (+ SHA256SUMS.txt there)
+```
+
+| Inside `omoba-<v>-ru-server/` | |
+| --- | --- |
+| `omoba-server` | the lobby and its match workers ([omoba-lobby-ru.service](omoba-lobby-ru.service)) |
+| `omoba-account-api` | the Account API and `omoba-account-api migrate` ([omoba-account-api-ru.service](omoba-account-api-ru.service)) |
+| `legal/`, `ATTRIBUTION.md`, `README.txt` | licence notices and an operator note |
+
+Both are built in one cargo invocation with the RU market's environment (the same
+values as the RU clients), on Linux or in the pinned `rust:<toolchain>-bookworm`
+container. The bundle sits in `server/` beside the player packages: `release.py draft`
+attaches and `publish` offers only the player packages. `ru_host.py ship` accepts only
+this file name (`RU_PACKAGE`, x86-64 ELF binaries); a player package or another
+market's file is refused before anything is contacted.
+
+## Portal bundle
+
+The portal is omoba-web's `output: standalone` build, made with the RU environment
+on the Mac (or in a `linux/amd64` container when a native addon matters):
+
+```sh
+cd ../omoba-web && git status --short   # clean checkout of the release commit
+npm ci
+OMOBA_MARKET=ru OMOBA_VKID_CLIENT_ID=<VK ID app id> npm run build
+cd - && python3 ops/vps/ru/ru_host.py portal-bundle --web ../omoba-web
+```
+
+`portal-bundle` packs `.next/standalone` with `.next/static` and `public/`, without
+`.next/cache` or any `.env*` file (Next.js copies them into the standalone folder),
+owned by root and world-readable, as `dist/portal-ru/omoba-portal-ru-<rev7>.tar.gz`.
+Both it and `ship-portal` refuse a build whose `server.js` does not say
+`OMOBA_BUILT_MARKET` ru (with Ekza off) and `OMOBA_BUILT_CONTOUR` production.
+Native addons built for macOS are reported (sharp falls back to its wasm build).
+On the host the release's `.next/cache` links to `/var/cache/omoba-portal-ru`, the
+unit's only writable folder.
+
+## Check
+
+- `python3 ops/vps/ru/ru_host.py status`: marker, Ubuntu, packages, PostgreSQL
+  (version, ICU, loopback, roles, schema), Caddy and its Caddyfile, firewall, the
+  per-source limits (file, unit, table `inet omoba_limits` loaded), sshd,
+  users and folder modes, env files, Node.js, releases, units enabled and running,
+  UDP 4000, `127.0.0.1:40550/health/ready`, the portal on `127.0.0.1:3010`, the
+  download folder and Caddy's download log (owned by `caddy`; `facts.downloads` lists
+  the published versions), DNS (A
+  records for the three names of `ru_host.py names` point here; no AAAA for the
+  lobby), memory and disk, and the backups: the installed kit and timers and
+  `ru_backup.py check --remote` (a set off-host from the last 26 h, no failed run or
+  drill, a successful drill in the last 35 days, a current escrow, complete settings),
+  and the monitoring: the installed kit, its timer, `alerts.env`, the journal limits and
+  `ru_monitor.py check` (free disk, match workers).
+- `python3 scripts/release.py preflight --market ru` from any computer: lobby DNS, the
+  lobby's UDP compatibility check (with `--contract dist/v<v>-ru/compatibility.json`,
+  compatible with that release), `https://account.omoba.ru/health/ready`, the portal,
+  and the topology: through
+  the portal `GET /api/me` must be the Account API's 401 and `GET /api/releases` 200
+  (a 403 there means a portal route was refused, LR-02), and
+  `https://account.omoba.ru/v1/me` must be 403 (portal routes stay off the public
+  name).
+- `journalctl -u omoba-lobby-ru -u omoba-account-api-ru -u omoba-portal-ru -u caddy`.
+- Releases: the [RU release checklist](release-checklist.md), with its result in
+  `docs/progress/` for every release.
+
+Downloads on the portal: see [Downloads](#downloads).
+
+## Downloads
+
+The RU packages (Windows, Linux, macOS, Android) are served from this host
+(LR-23, O-10); the Pinata IPFS copies are the mirror. The download path, the portal
+origin and the release status come from the RU profile in
+[scripts/markets.py](../../../scripts/markets.py) (`downloads_path`, `portal`,
+`release_label` «Открытая бета»): no fourth DNS name, the portal's Caddy site serves
+`/downloads/`.
+
+| Piece | Where |
+| --- | --- |
+| Packages | `/opt/omoba-ru/downloads/v<version>/<package>`, root, folders 0755, files 0644; served at `https://omoba.ru/downloads/v<version>/<package>` without a listing; rsync's in-progress dot files are hidden |
+| Catalog | `dist/v<version>-ru/releases.json` → `/opt/omoba-ru/releases.json`, `OMOBA_RELEASE_CATALOG` in `account-api.env`; the portal's download page, the game's **Update available** banner and its **Update required** button read it (`GET /v1/releases`, LR-14) |
+| Download log | `/var/log/caddy/omoba-ru-downloads.log` (caddy 0640): JSON, only `/downloads/` requests, address shortened to /24 (IPv4) or /48 (IPv6), no request headers (no cookies, no user agent); rolled at 50 MiB, kept 90 days |
+
+Publish a release (on the Mac, after `make release-ru`):
+
+```sh
+make release-ru-publish   # RU_DOWNLOADS_TARGET defaults to ${RU_HOST:-vds-ru}:/opt/omoba-ru/downloads
+# = release.py publish --market ru --rsync-target …  then  release.py catalog --market ru
+scp dist/v<version>-ru/releases.json $RU_HOST:/opt/omoba-ru/releases.json
+# once: OMOBA_RELEASE_CATALOG=/opt/omoba-ru/releases.json in /opt/omoba-ru/account-api.env,
+# then systemctl restart omoba-account-api-ru
+make release-ru-verify-downloads   # release.py verify-downloads --market ru
+```
+
+- `publish --market ru` refuses a target on the production or dev VPS (also through
+  the ssh alias's HostName) and needs `PINATA_JWT`. It copies the new packages with
+  `rsync --ignore-existing` into `<target>/v<version>/` (a published file is never
+  replaced), then downloads each one from `https://omoba.ru/downloads/…` and compares
+  SHA-256 and size; `dist/v<version>-ru/downloads.json` records the verified links.
+  Then it pins the IPFS mirror as before (`ipfs.json`). `--dry-run` prints the rsync
+  command and the URLs and contacts nothing.
+- `catalog --market ru` refuses until the public GitHub tag `v<version>-ru` exists (the
+  game's About page and the package README link its source, LR-06). It writes
+  `releases.json` from `downloads.json`: `url` on the RU
+  host, `mirror_url` the IPFS copy with the same SHA-256, `test_status` «Открытая бета»,
+  `region` `ru`, `channel` `direct`, `update_url` the portal's download page for the
+  platform (account-api/README.md#downloads). `--min-release X` adds `min_release`:
+  games older than X must update even without a server switch (a forced update: post
+  the player notice first).
+- `verify-downloads --market ru` reads the catalog the portal serves
+  (`https://omoba.ru/api/releases`, or `--catalog <file>` before installing it),
+  downloads every package and its mirror, and checks the host, region, channel,
+  status, SHA-256 and size. It exits 0 only when every RU platform is listed and correct.
+- A package rebuilt under a published name fails the read-back: publish a new version,
+  or remove the stale file on the host by hand first.
+
+For a release that changes the compatibility contract, install the new catalog and
+post the player notice **before** shipping the server
+([RELEASING.md](../../../docs/RELEASING.md#updates-and-contract-changes-lr-14)).
+
+**Counting downloads.** `python3 ops/vps/ru/ru_host.py downloads [--since YYYY-MM-DD]
+[--until YYYY-MM-DD]` pipes [ru_downloads.py](ru_downloads.py) to the host (the same
+target guards as `status`) and prints totals per platform, per version and per UTC day;
+no address leaves the host. A download is a GET of a package answered 200 or 206,
+counted once per shortened address, file and day (a resumed download counts once;
+players sharing a carrier NAT or a /24 on the same day count once, so the numbers are
+a floor); `completed` counts answers that sent the whole file at once, `requests` every
+GET. The log keeps 90 days: record the totals of a period in `docs/progress/` before
+they roll off. The shortened addresses in the log stay on this host in Russia; the
+privacy policy (LR-04, owner) must name this log and its 90 days.
+
+**A test download from a Russian network** (once per new host, and in the release
+checklist): from a Russian connection (a phone on a Russian carrier without VPN, or a
+computer in Russia), download one package from the portal's download page, compare its
+SHA-256 with the page, then run `ru_host.py downloads --since <today>` and record the
+count for that platform with the date, network and platform in `docs/progress/`.
+
+## Monitoring and alerts
+
+LR-17. The owner learns of an outage within minutes without logging in. On the host,
+[ru_monitor.py](ru_monitor.py) reports what the host itself can see; outside it, the
+[external probe](../../probe/README.md) reports what players would see, including the
+whole host being gone. Both send to the RU host's one Telegram bot; without the bot,
+alerts stay in the journal.
+
+| Alert | Source | When | Repeats while it lasts |
+| --- | --- | --- | --- |
+| A unit failed: lobby, Account API, portal, backup, restore drill, backup check, host check, per-source limits (LR-16), a PostgreSQL cluster | `OnFailure=omoba-alert-ru@%n.service` in every RU unit and, by [postgresql-alert-ru.conf](postgresql-alert-ru.conf), in every `postgresql@<version>-<name>.service` → `ru_monitor.py unit-failed` | at once, also on each crash before `Restart=` brings a service back (systemd 254+; Ubuntu 24.04 has 255) | hourly for a service; daily for a timer job, whose tool sends the details itself |
+| An enabled RU service or Caddy is not running | `ru_monitor.py check --alert` ([omoba-monitor-ru.timer](omoba-monitor-ru.timer), every 5 minutes) | at the next check | hourly |
+| A PostgreSQL cluster that starts at boot (`/etc/postgresql/<version>/<name>/`, as `pg_lsclusters` lists it) is not running, or port 5432 accepts no connection (`pg_isready`, no login). `postgresql.service` is only postgresql-common's wrapper, active whatever its clusters do, so the check watches `postgresql@<version>-<name>.service` | the same check; a crash also alerts at once through the drop-in, under the same alert | at the next check | hourly |
+| A backup, drill or backup-check timer is disabled or stopped: no backup is made, or a missing one is no longer reported | the same check | at the next check | hourly |
+| Free disk below 15% on a filesystem the host writes to (`/`, PostgreSQL, `/var/lib/omoba-ru`, `/var/backups/omoba-ru`, `/var/log`, `/opt/omoba-ru`) | the same check | at the next check | hourly |
+| A live match worker has written no heartbeat (`<match root>/<allocation>/status.json`) for 5 minutes while the lobby has run that long (the lobby relaunches a stale worker after 100 s) | the same check | at the next check | hourly |
+| Players have waited for a free arena for 2 minutes: every arena busy while a ready roster waits, from the lobby's `<match root>/capacity.json` (LR-09, [Arena capacity](#arena-capacity-lr-09)) | the same check | at the next check | hourly |
+| Career storage blocked for2 minutes, missing/stale/corrupt live-process health, or an incomplete scan; includes failures before the first durable receipt | `<outbox>/health/status.json` from the actual career worker, plus the same check | at the next check, after startup grace | hourly |
+| No backup for 26 h, a failed backup or drill, no drill for 35 days, a stale escrow | `ru_backup.py check --alert`, hourly (LR-03) | at once | every 6 h |
+| The lobby's UDP compatibility check, `/health/ready` or the portal fails from outside | the external probe, every minute | after 2 failed rounds in a row | hourly |
+
+Each alert says once when its problem is gone: "resolved" after 15 minutes without it,
+or "answers again" from the probe. Messages carry unit names, paths, numbers and
+allocation ids, never a log line, an address or a secret. Aggregate allocation-failure
+rates and sustained SQL/game-loop latency still need their controlled-load gates.
+
+Career workers publish anonymous v2 operational state every5s under each outbox's
+`health/status.json`: authenticated SQL preflight/time, journal availability and
+counts of staged dodges, legacy floors, failed result writes and retained critical
+replies, plus known reply-recipient disconnection. The worker retains at most256
+Ready/Flush completions and pauses input before its next bounded batch could
+overflow that budget; SQL/lease/probe/health work continues while output is full.
+Actual completion payload, request sequence and flush generation/success survive
+the pause. Dropped recipients abandon delivery; durable SQL/outboxes remain the
+authority. Shutdown keeps polling before accepting a flush barrier. The preflight
+checks required schema13, a writable primary and actual runtime permissions before
+player requests; a listening port is not sufficient. Its10s background probe has
+a2s deadline. Missing/stale reports also reveal failure to write operational state
+or a stalled worker. The report is atomic, disposable and does not add an fsync
+to the gameplay durability path. It is never a match/consent/recovery authority.
+
+After120s lobby startup grace, the monitor requires the lobby report and reports
+from live workers, bound to the exact worker epoch. A worker with no report gets
+its join deadline plus120s startup grace. Finished/failed workers are skipped.
+Reports older than60s, probes older than30s, corrupt/oversized/linked files and
+incomplete bounded scans are actionable. Persistent blockers alert after120s;
+brief initial reconnect/import work is not paged. Reports and this alert expose
+counts/booleans, no profile/event IDs, credentials or raw database errors.
+
+Ship the producer and monitor together through the reviewed drained rollout:
+old live workers without this contract must finish before the required-report
+monitor is enabled. No new systemd unit, timer, alert recipient or credential is
+needed. This repository change does not apply any live RU setting or deployment.
+
+**Set up once (owner).**
+
+1. Create a bot with @BotFather and a chat (or channel) for the alerts, and add the bot
+   to it. Read the chat id, for example from
+   `https://api.telegram.org/bot<token>/getUpdates` after a message in the chat.
+2. On the host, uncomment and fill `OMOBA_TELEGRAM_BOT_TOKEN` and `OMOBA_TELEGRAM_CHAT_ID`
+   in `/opt/omoba-ru/alerts.env`. Then `python3 /opt/omoba-ru/monitor/ru_monitor.py
+   test-alert` must print `sent`, and the message must arrive. The backup alerts use
+   the same bot unless `backup.env` names its own. The token is not in the escrow: a
+   lost one is replaced in @BotFather.
+3. Install the [external probe](../../probe/README.md) on a machine outside this host,
+   with the same bot.
+
+**Knobs** in `alerts.env`: `OMOBA_ALERT_DISK_MIN_FREE_PERCENT` (15),
+`OMOBA_ALERT_WORKER_STALE_SECONDS` (300), `OMOBA_ALERT_CAPACITY_WAIT_SECONDS` (120), `OMOBA_ALERT_REPEAT_MINUTES` (60),
+`OMOBA_ALERT_JOB_REPEAT_HOURS` (24) and `OMOBA_ALERT_RECOVERY_MINUTES` (15).
+`ru_monitor.py check` prints the host's state now, and
+`journalctl -u 'omoba-alert-ru@*' -u omoba-monitor-ru` shows what was alerted.
+
+**Journal limits.** [journald-omoba-ru.conf](journald-omoba-ru.conf) keeps the journal on
+disk (`Storage=persistent`), at most 1 GiB (`SystemMaxUse=1G`) and 30 days
+(`MaxRetentionSec=30day`, one file a day so whole days age out). Some lobby and Account
+API lines carry a player's IP address, so the privacy policy (LR-04) states these 30
+days, next to the 90 days of the download log. The match archive and `worker.log` are
+bounded by the lobby itself (LR-17, server part).
+
+## Backups, escrow and restore drill
+
+[ru_backup.py](ru_backup.py) runs on the host as root; `ru_host.py bootstrap` installs
+it with its units. It reads only `/opt/omoba-ru/backup.env`
+([backup.env.example](backup.env.example)) and never prints a secret.
+
+| What | Where | When | Kept |
+| --- | --- | --- | --- |
+| Backup set `omoba-ru-<UTC>-<reason>.tar.gpg`: `database.dump` (`pg_dump -Fc` of `omoba_ru`, career and portal), `state.tar.gz` (`/var/lib/omoba-ru/matches` with `archive/` and every allocation `outbox/`, and `/var/lib/omoba-ru/lobby-outbox`), `manifest.json` (rows and a digest per table, both schema version lists, sha256s); encrypted with GnuPG to the backup public key and signed with its secret key | **off-host:** the storage in Russia named by `OMOBA_BACKUP_TARGET` (`s3://` S3-compatible object storage or `sftp://` an SFTP account; the owner provides it); on the host: `/var/backups/omoba-ru/sets/` | nightly 00:30 UTC (03:30 Moscow), at the next boot after a missed night; before every migration (`ship`) | off-host: the newest set of each of the last 14 days with a set and of each of the last 8 weeks; host: the newest 2 |
+| Rollback dump (plain `pg_dump -Fc`) | `/var/backups/omoba-ru/omoba_ru-before-<release>-<UTC>.dump` (root 0600) | before every migration | the newest 3 |
+| Restore drill: the newest off-host set restored into `omoba_ru_restore_drill`, compared with its manifest (tables, row counts, the rows' digests, schema versions, the state archive), then dropped | the same PostgreSQL | the 2nd of every month, 02:30 UTC | result in `/var/backups/omoba-ru/state.json` |
+| Secrets escrow: `account-api.env` (`OMOBA_PORTAL_SECRET`, `OMOBA_SOCIAL_SECRET`), `lobby.env`, `portal.env`, `backup.env`, `host.json`, `backup-keys/`, encrypted to the escrow holder's public key | **offline with the escrow holder**; never on the backup storage | after bootstrap and after any change to those files | the holder keeps every version |
+
+`fetch` and the drill refuse a set the backup key did not sign: a set planted on the
+storage (by anyone with its login or the public key) never reaches `pg_restore`, which
+runs as the database superuser. A set that cannot be uploaded stays on the host and goes
+up with the next run. A failed
+backup or drill alerts at once; the hourly check alerts when no backup succeeded for
+26 h, when no drill succeeded for 35 days, and when the escrow is missing or stale.
+Alerts go to the journal (`journalctl -u omoba-backup-ru -u omoba-restore-drill-ru -u
+omoba-backup-check-ru`) and to Telegram through the host's bot in `alerts.env` (or a bot
+of its own in `backup.env`): one message per problem at most every 6 h, and one when
+everything passes again. A failed backup unit also alerts like any RU unit, at most
+daily ([Monitoring and alerts](#monitoring-and-alerts)).
+
+**Escrow holder:** not named yet (owner checklist, LR-03). Record here who holds the
+backup secret key and the secrets escrow, how to reach them and where the files are
+kept; date the latest escrow below.
+
+| Escrow holder | Reach | Kept where | Backup key fingerprint | Latest escrow |
+| --- | --- | --- | --- | --- |
+| — | — | — | — | — |
+
+### Set up once (owner)
+
+1. **Storage in Russia** (152-FZ): an S3-compatible bucket (a key limited to that
+   bucket) or an SFTP account on another server in Russia. Not the RU VPS itself. The
+   host prunes old sets, so its key may delete; where the provider offers bucket
+   versioning or object lock, keep deleted objects for 30 days, so a compromised host
+   cannot erase the history.
+2. **Backup key** on the Mac: `python3 ops/vps/ru/ru_backup.py keygen --out <folder>`
+   writes `backup-public.asc` and `backup-secret.asc`. The escrow holder keeps
+   `backup-secret.asc` offline: without it no backup can be read.
+3. **Keys on the host** (the host signs every set with the secret key, and the drill
+   decrypts with it):
+   ```sh
+   scp <folder>/backup-public.asc <folder>/backup-secret.asc $RU_HOST:/opt/omoba-ru/backup-keys/
+   ssh $RU_HOST chmod 600 /opt/omoba-ru/backup-keys/backup-secret.asc
+   ```
+   SFTP only: the login key as `backup-keys/ssh_key` (0600) and the server's host key
+   as `backup-keys/known_hosts` (`ssh-keyscan -p <port> <host>`, fingerprint compared
+   with the provider's).
+4. **Settings:** `ssh $RU_HOST` and edit `/opt/omoba-ru/backup.env` (the storage, its
+   key or login, optionally the Telegram bot); then
+   `python3 /opt/omoba-ru/backup/ru_backup.py config` must print `ok`.
+5. **First backup and drill** on the host: `systemctl start omoba-backup-ru` and
+   `systemctl start omoba-restore-drill-ru` (each waits for the other's lock), then
+   `python3 /opt/omoba-ru/backup/ru_backup.py list` and `… check --remote`.
+6. **Escrow** from the Mac, with the holder's public key; plaintext never leaves the host:
+   ```sh
+   python3 ops/vps/ru/ru_host.py escrow --recipient-file holder-public.asc \
+       --out omoba-ru-secrets-$(date +%F).asc
+   ```
+   The holder checks it (`gpg --decrypt <file> | tar -tzv`) and stores it offline;
+   delete the local copy. Repeat after any change to those files (`status` says when).
+   The Android release keystore (LR-24) goes the same way, on the Mac:
+   `python3 ops/vps/ru/ru_backup.py escrow --recipient-file holder-public.asc --file
+   <keystore> > android-release-key.asc`.
+7. Fill in the escrow table above and run `python3 ops/vps/ru/ru_host.py status`.
+
+### Restore
+
+Stop writers first: `systemctl stop omoba-lobby-ru omoba-account-api-ru omoba-portal-ru`.
+Never restore over the running database as a test; the monthly drill does that safely.
+
+- **Undo a migration on this host:** restore the rollback dump of that ship (next section).
+- **From an off-host set on this host** (database damaged or lost):
+  ```sh
+  python3 /opt/omoba-ru/backup/ru_backup.py fetch --set latest --out /var/backups/omoba-ru/restore
+  runuser -u postgres -- pg_restore --clean --if-exists --exit-on-error -d omoba_ru \
+      < /var/backups/omoba-ru/restore/database.dump
+  ```
+  `fetch` keeps nothing unless the set's signature and checksums are right; `--set
+  <name>` picks an older set (`ru_backup.py list`). To bring back the match and
+  outbox state as well: `tar -xzf /var/backups/omoba-ru/restore/state.tar.gz -C /` and
+  `chown -R omoba-ru:omoba-ru /var/lib/omoba-ru`. Matches settled after the set was
+  taken are lost (their outbox files were already acknowledged). Start the services,
+  then delete the `restore` folder.
+- **Onto a new host** (the VPS is lost): a new VPS and DNS as in LR-01. From the escrow,
+  put `account-api.env`, `portal.env`, `lobby.env` (with `OMOBA_MATCH_PUBLIC_HOST` set to
+  the new address), `backup.env` and `backup-keys/` into `/opt/omoba-ru/` (root, 0600;
+  folders 0700) before `ru_host.py bootstrap`, which then keeps those secrets and
+  passwords; leave out `host.json`. Run `bootstrap --apply`, then on the host
+  `ru_backup.py fetch --set latest --out /var/backups/omoba-ru/restore` and
+  `runuser -u postgres -- pg_restore --exit-on-error -d omoba_ru < …/database.dump` into
+  the empty database, restore the state as above, then `ship` (it re-applies the grants)
+  and `ship-portal`. Check before announcing it: ratings and match history on the
+  portal, sign-in with an existing recovery code, and VK sign-in of an existing linked
+  account (it works only with the escrowed `OMOBA_SOCIAL_SECRET`).
+
+## Admission limits (LR-16)
+
+Two layers keep one source (an address, or a household or carrier NAT behind
+one address) from crowding everyone else out. Both count **per source
+address**: many players behind one address share one budget. The game's
+defaults leave room for about eight players on one address; the RU host sets
+larger values ([lobby.env.example](lobby.env.example), table below) because
+Russian mobile operators put hundreds of subscribers behind one IPv4
+(carrier-grade NAT): a tournament bar, a dormitory or one operator's city
+pool must not look like one flooding source. One address may then hold 256
+players and 8 arenas; the kernel rates are sized so that share never trips
+them, while a real flood still does.
+
+**In the kernel** ([nftables-omoba.conf](nftables-omoba.conf), its own table
+`inet omoba_limits`, loaded by [omoba-limits-ru.service](omoba-limits-ru.service);
+it never flushes ufw's rules). Over-rate datagrams are dropped before the game
+reads them:
+
+| Port | Rate per source address | Burst | Why this much |
+| --- | --- | --- | --- |
+| UDP 4000 (lobby) | 4000 datagrams/s | 8000 | a lobby client sends a few datagrams per second; 256 NAT players ≈ 1500/s |
+| UDP arena range (41000–41015) | 6000 datagrams/s | 12000 | an arena player sends at most 120 datagrams/s (the game's per-endpoint limit); ~50 NAT players in matches at once |
+
+- If one operator address ever holds more than ~50 players in matches at once (the
+  arena rule's drop counter grows while players report lag), key the arena sets by
+  `ip saddr . udp dport` (per source and arena, 1200/s each) instead of raising the
+  rate again.
+
+- To change a rate, edit the rule in `nftables-omoba.conf` and run `ru_host.py
+  bootstrap --apply` (it runs `nft -c` first, then restarts the unit).
+- The file's `OMOBA_LOBBY_PORT` and `OMOBA_ARENA_PORTS` must match the lobby unit
+  (`OMOBA_MATCH_FIRST_PORT` … `+ OMOBA_MATCH_CAPACITY - 1`): `ru_host.py` refuses a
+  kit where they differ, so a capacity change edits both files.
+- On the host: `nft list table inet omoba_limits` shows the rules with their drop
+  counters; `systemctl stop omoba-limits-ru` removes the table (emergency only;
+  `status` then reports it).
+
+**In the game** (lobby and match workers). The defaults are the game's; the RU values
+are the fixed lines of [lobby.env.example](lobby.env.example), which `bootstrap` writes
+to `/opt/omoba-ru/lobby.env` (and appends to an older file) and `status` checks. To
+change one, edit the example (the kit is the contract), run `bootstrap --apply`, edit
+the host file to the same value and restart the lobby; the workers inherit it. A
+malformed value stops the lobby with a message naming it. The lobby logs the values it
+runs with (`Admission limits: …`).
+
+| Setting | Default | RU `lobby.env` | What it limits |
+| --- | --- | --- | --- |
+| `OMOBA_LIMIT_PROBES_PER_IP` | 8 | 64 | Transport probes per second from one IP, and, counted separately, compatibility replies. 256 NAT players reconnecting after a network blip probe once a second each, admitted over a few seconds |
+| `OMOBA_LIMIT_PROBES_PER_NETWORK` | 32 | 256 | The same per IPv4 /24 (IPv6 /48): one operator's pool is many addresses of one /24 |
+| `OMOBA_LIMIT_PROBES_GLOBAL` | 64 | 512 | The same for everyone together: a full lobby of 2048 players reconnecting is admitted within 4 s |
+| `OMOBA_LIMIT_PROBES_NEW_RESERVE` | 16 | 128 | Part of the global budget only a source's first datagram of the second may use (0 = none); must stay below the global budget |
+| `OMOBA_LIMIT_ENDPOINTS_PER_IP` | 8 | 256 | Return-path endpoints, and career clients, one IP holds at once (the game allows up to 2048, its endpoint ceiling). A new source of an IP at its share is answered `server_full` (the game shows «Сервер заполнен» and keeps trying). An unproven endpoint expires after 5 s and a proven one after 30 s without traffic; an idle career client gives way to a newcomer of its IP after 30 s |
+| `OMOBA_LIMIT_NEW_PROFILES_PER_IP` | 10 | 40 | Profiles new device keys may create from one IP in 24 hours; existing keys always sign in. Raised moderately: a NAT shares the counter, a farm of fresh keys still stops at 40 a day |
+| `OMOBA_LIMIT_NEW_PROFILES_TOTAL` | 5000 | — | The same for everyone together (then «new profiles are paused») |
+| `OMOBA_LIMIT_ARENAS_PER_IP` | 1 | 8 | Running or forming arenas one IP holds alone (every human of the match came from it): eight solo vs Bots players behind one operator address |
+| `OMOBA_LIMIT_PRACTICE_ABANDONS` | 3 | — | vs Bots allocations from one IP left unplayed within 10 minutes before a cooldown |
+| `OMOBA_LOBBY_MAX_WAITING` | 1024 | — | Queue entries the lobby holds (1–4096); a player beyond it is told `queue_full` and keeps retrying. The lobby also remembers at most 4096 recent requesters (`lobby_busy` beyond) |
+| `OMOBA_LIMIT_PRACTICE_COOLDOWN_SECS` | 120 | — | That cooldown |
+| `OMOBA_PROFILE_RETENTION_DAYS` | 30 | — | The lobby deletes, hourly and 200 at a time, profiles whose only key is older than this, that never played and that nothing else holds (a friend, a portal link, a sign-in, a Supporter grant); 0 = off, otherwise 7–3650 |
+
+- One IP is an IPv4 address or an IPv6 /64. The new-profile counter is durable
+  (PostgreSQL, career schema 4): it stores a salted hash of the address, never the
+  address, and deletes rows after 48 hours.
+- Refusals reach the player in their language: the new-profile limit at sign-in,
+  `arena_limit` and `practice_cooldown` on the searching screen.
+- The journal shows `PROFILE_RETENTION pruned=N …` when the retention job deleted
+  profiles.
+
+## Arena capacity (LR-09)
+
+Every vs Bots player, and every bot-filled Casual match, takes a whole arena (a match
+worker with nine or more server bots), so the arena count, not the player count, is what
+runs out. The lobby and all its workers share the lobby unit's cgroup limits.
+
+**Configured setting: 16 arenas, not yet accepted on this host (LR-09).** The
+current cgroup values come from the old developer-Mac formula below; native Linux
+measurements now show that its 16 MiB/arena constant is not transferable. Do not
+assume that 16 arenas fit under 500 MiB. Re-derive capacity, memory, CPU, tasks,
+firewall and uplink only from the release's measurements on this host or an
+identical isolated one.
+
+| Setting | Value | Where |
+| --- | --- | --- |
+| Arenas (`OMOBA_MATCH_CAPACITY`) | 16, configured but unvalidated | [omoba-lobby-ru.service](omoba-lobby-ru.service); `ru_host.py` allows 1–64 |
+| UDP arena range | 41000–41015 (`OMOBA_MATCH_FIRST_PORT` … `+ capacity - 1`) | the same unit; `OMOBA_ARENA_PORTS` in [nftables-omoba.conf](nftables-omoba.conf) must match (`ru_host.py` refuses a kit where they differ), and `bootstrap` opens it in ufw |
+| `MemoryHigh` / `MemoryMax` | 450M / 500M, historical formula values | the lobby unit (lobby and every worker together). Old formula: `MemoryMax = 16 MiB × arenas + 200 MiB`, `MemoryHigh = MemoryMax − 50 MiB`; replace the 16 MiB assumption with measured Linux data before launch |
+| `CPUQuota` / `TasksMax` | 190% / 96 | the lobby unit: `CPUQuota` = 190 % of the 2-vCPU host (PostgreSQL, the Account API and the portal share the rest); `TasksMax ≥ 3 × arenas + 16` is also an estimate until checked with `systemctl status omoba-lobby-ru` → `Tasks:` under measured load |
+| PostgreSQL `max_connections` | ≥ capacity + 32 (48 for 16 arenas; Ubuntu's default 100 passes up to 68 arenas) | one connection per match worker, 4 for the lobby's pool, 8 for the Account API's, the rest for psql, backups, monitoring and the superuser reserve. Not managed by `ru_host.py`: set it in `/etc/postgresql/<version>/main/conf.d/50-omoba-ru.conf` (`max_connections = 128`) and `systemctl restart postgresql@<version>-main`; `ru_host.py status`, `bootstrap` and `ship` refuse a host below the requirement |
+| Uplink | ≥ 500 Mbit/s planning allowance for 16 arenas, not a measurement | conservative `arenas × 10 players × 250 kB/s` of snapshot egress must stay under 60 % of the port: 16 arenas ≈ 40 MB/s ≈ 320 Mbit/s. Replace the planning input with the actual release/workload measurement and include network overhead. About 1000 concurrent players (100 arenas) need multiple hosts (LR-57) |
+
+**Measured per-arena cost on this host** — still unfilled; #13 remains open:
+
+| Arena type | Arenas | Snapshot gap p95 / p99 | Slowest to Running | Bytes/s per player | Lobby + workers CPU (mean) | RSS (peak) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| vs Bots | — | — | — | — | — | — |
+| Casual native 20 Hz | — | — | — | — | — | — |
+| Mixed (vs Bots, Casual, Ranked) | — | — | — | — | — | — |
+
+**Dev-VPS diagnostic only, not measured on the RU host.** On the shared 2-vCPU
+Linux dev VPS, with the same 450M/500M/190%/96 server cgroup, instrumented native
+Casual clients gave the following 120 s results ([complete evidence and verifier](../../../docs/evidence/linux-capacity-2026-11-09/README.md)):
+
+| Casual arenas / clients | Input gate | Input min–max /s | Accepted snapshots p50 /s | Server CPU mean | Lobby + workers RSS peak |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 4 / 40 | PASS | 19.9890–19.9933 | 19.2026 | 50.64% | 213.70 MiB |
+| 6 / 60 | PASS | 19.7334–19.8022 | 18.5699 | 72.77% | 297.70 MiB |
+| 8 / 80 | **FAIL** | 15.9626–16.5988 | 17.6672 | 95.20% | 382.23 MiB |
+
+Peak summed RSS divided by arena count is about 53.43 MiB at four and 49.62 MiB
+at six arenas, including the lobby; it is not a pure marginal per-arena cost.
+The eight-arena run also recorded seven signed sequence gaps. The generator
+consumed substantial additional host CPU outside the server cgroup. These are
+instrumented loopback Casual observations on a shared host, not vs Bots/mixed,
+WAN, RU uplink or production-SLA evidence.
+
+A separate [300-second six-arena A/B packet](../../../docs/evidence/linux-capacity-soak-2026-11-09/README.md)
+retains a mixed result on the same dev host and exact binaries:
+
+| Server metrics | Verdict | Input min–max /s | Accepted snapshots p50 /s | Server CPU mean | Server RSS peak |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Enabled | **FAIL** | 19.4589–19.5355 | 18.3411 | 72.27% | 300.60 MiB |
+| Disabled | PASS | 19.5349–19.6209 | 18.4171 | 72.46% | 299.86 MiB |
+
+The instrumented rejection must not be hidden by the later pass. Its worker logs
+still reconstruct 356001 gameplay transforms with zero signed sequence gaps or
+restarts. A single A/B does not identify metrics as the cause: server CPU was
+0.19 percentage points higher without them and generator CPU was 2.13 points
+higher. Median wire rates imply about 41.711/42.136 Mbit/s aggregate application
+traffic at 60 players, excluding network headers; this is loopback, not uplink
+acceptance. Six arenas therefore remain a borderline dev fixture, not an RU
+capacity setting.
+
+A newer [exact-Release workload packet](../../../docs/evidence/linux-capacity-workloads-2026-11-10/README.md)
+covers all queue types on the same diagnostic host. Release `42657406745` at
+`73651bc6` succeeded for macOS, Windows, Linux and Android and supplied the
+matching server, bots and Ranked fixture. Each run lasted 30 s with server
+metrics enabled:
+
+| Workload | Signed humans / arenas | Input min–max /s | Sequence gaps / restarts | Server CPU mean | Summed server RSS peak |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| vs Bots | 10 / 10 | 19.9967–19.9967 | 0 / 0 | 49.27% | 474.46 MiB |
+| Ranked | 10 / 1 | 19.9991–19.9991 | 0 / 0 | 14.12% | 84.25 MiB |
+| Mixed | 30 / 12 | 19.9941–19.9985 | 0 / 0 | 59.32% | 549.64 MiB |
+
+Mixed contained one Casual, one Ranked and ten vs Bots arenas. Ranked eligibility
+was explicitly synthetic. Summed RSS counts shared pages in each process and is
+not PSS or cgroup usage; nevertheless the mixed peak means the historical
+500 MiB setting is **not accepted**. Do not raise or lower it from these shared
+loopback samples alone: measure actual cgroup usage and sustained capacity on
+the isolated target host first. The standalone verifier recomputes all 133
+payload files and signed worker counters. Final checks found no owned process,
+disposable database or role; both ordinary dev services remained active.
+
+For historical scale only (not this host, no cgroup limits): on the developer Mac
+(Apple M4 Pro, dev build, 2026-10-25) 20 vs Bots arenas took 26% of one core and
+312 MiB in all (about 1.3% and 16 MiB each), every player reached Running within
+14 s, snapshot gaps were p95 65 / p99 110 ms, and each player received about
+270 kB/s of snapshots. That estimate must not size the Linux unit by itself.
+
+**When every arena is busy.** A search whose match is ready but has no free arena waits in
+line: the searching screen shows its place («Все арены заняты · ваше место в очереди: 2 ·
+примерно 3 мин.»; the estimate appears once arenas have freed in the last 15 minutes) and
+offers **Офлайн-тренировка, пока ждёте**, which leaves the queue. vs Bots goes first, then
+Ranked, then Casual PvP, as the lobby seats them. The lobby reports it:
+
+- `<match root>/capacity.json` (`/var/lib/omoba-ru/matches/capacity.json`), rewritten every
+  5 s: `capacity`, `occupied` (arenas holding their port), `searching`,
+  `waiting_for_arena` (players in line), `busy_since_ms` (since when someone waits),
+  `longest_wait_secs`, `busy_periods`. `ru_monitor.py check` alerts when the wait reaches
+  `OMOBA_ALERT_CAPACITY_WAIT_SECONDS` (120) ([Monitoring and alerts](#monitoring-and-alerts)).
+- The journal: `CAPACITY_METRIC event=busy|still_busy|clear capacity=… occupied=…
+  searching=… waiting_for_arena=… longest_wait_secs=… busy_secs=…` when the line forms or
+  clears and every minute while it lasts
+  (`journalctl -u omoba-lobby-ru -g CAPACITY_METRIC`).
+- A full server answers instead of staying silent: at 2048 endpoints a new player's
+  transport probe gets `server_full`, at 2048 career clients its sign-in gets the
+  `server_full` code, and so does a new source of an IP that already holds its
+  `OMOBA_LIMIT_ENDPOINTS_PER_IP` share. The game shows «Сервер заполнен. Повторяем
+  попытку…» and keeps trying. 2048 is the lobby's player ceiling; the configured arenas
+  run out long before it, and the rest wait in line.
+
+**Measure** on this host before launch (or on an identical isolated one), with the
+exact release that will run. Use independent native Rust generator shards for
+multi-arena acceptance. The older single-process
+[scripts/test_public_mvp.mjs](../../../scripts/test_public_mvp.mjs) remains useful
+for lifecycle/small diagnostics, but its 40-client Node loop itself distorted the
+four-arena receive gate and is not a multi-arena 20 Hz capacity oracle.
+
+1. Copy the release server and the Release workflow's `linux-capacity-bots`
+   artifact. It contains `bots` and `examples/qualify-ranked-fixture`; keep the
+   latter beside the server under `examples/`, where the fixture runner expects
+   it. Copy [scripts/public_playing_capacity.py](../../../scripts/public_playing_capacity.py)
+   and its current fixture dependencies. Verify all hashes against the same
+   reviewed release/source; never reuse a generator or qualification helper from
+   another candidate.
+2. Create a new disposable loopback `/omoba_test` database and restricted roles,
+   migrate career13/portal11 and apply the matching current grants. Refuse to
+   reuse an existing database. Bind a separate loopback lobby and workers on free
+   test ports under the measured unit's cgroup limits. Do not stop or reconfigure
+   the running RU services, `omoba_ru`, public ports or firewall. Loopback-only
+   admission allowances must be explicit in the report.
+3. Run a 10-client/30 s control, then independent native 40/60/… client steps,
+   one at a time. The current runner accepts 15–300 s soak intervals; a longer
+   interval requires a separately reviewed runner change. A typical stepped
+   Casual command is:
+   ```sh
+   OMOBA_TEST_DATABASE_URL=<loopback-omoba_test-uri> \
+   python3 scripts/public_playing_capacity.py \
+     --server-bin /root/capacity/server-under-unit-limits \
+     --bots-bin /root/capacity/bots --output /root/capacity/native-60 \
+     --workload=casual --clients=60 --seconds=120 --input-hz=20 --server-load-metrics
+   ```
+   Keep the 19.5–20.5 Hz per-peer actual-send gate unchanged. Require exact Running
+   rosters, fresh health-v2/SQL/journal state, zero signed sequence restarts and
+   investigate every sequence gap. Record accepted snapshots, wire bytes,
+   latest-transform-age and broadcast histograms as their documented bucket-bound
+   scopes, not per-command ACK/SLA claims. Stop at the first rejected step; do not
+   overwrite its report. Repeat the accepted step uninstrumented and for 300 s
+   before deriving host capacity. Retain any instrumented rejection even when
+   the uninstrumented comparison passes; one A/B is not a root-cause proof.
+4. Add equivalent native vs Bots, Ranked and mixed coverage with `--workload=bots`,
+   `--workload=ranked` and `--workload=mixed`. Ten vs Bots clients consume ten
+   arenas, not one. Mixed requires a multiple of 30 clients and assigns equal
+   Casual/Ranked/vs Bots shards: the minimum 30-client run consumes 12 arenas.
+   Size worker-port ranges and PostgreSQL connections by arenas, not client
+   shards. Ranked and mixed require `--qualify-ranked-fixtures`; this seeds ten
+   disclosed synthetic prior Casual receipts per Ranked profile only in the
+   disposable database and is not organic eligibility or rated-settlement proof.
+   Measure the real uplink and include IP/UDP/NIC overhead. Only then set and
+   record `OMOBA_MATCH_CAPACITY`, cgroup limits, the same arena range in
+   `nftables-omoba.conf` and PostgreSQL `max_connections` (≥ capacity + 32,
+   [data.md](../../../docs/architecture/data.md)). `ru_host.py bootstrap --apply`
+   and `ship` remain separate reviewed/owner-controlled deployment actions.
+5. Remove every owned process, disposable database and role, and verify the
+   ordinary services are still active. Keep concise conclusions, small summaries,
+   source/binary hashes and a recomputing verifier in `docs/evidence/`; store raw
+   reports, worker metric logs and archived sources in the external evidence
+   archive described by [its README](../../../docs/evidence/README.md). Do not
+   archive private keys, DSNs or raw identity-rich bot logs. The exact dev fixture
+   and cleanup record are in the evidence packet above.
+
+`test_public_mvp.mjs --scenario=capacity-wait` still checks the full-pool path end
+to end: with one arena busy, a second vs Bots player sees its place in line and
+the lobby reports the busy pool. This functional check is not capacity evidence.
+
+## YooKassa
+
+Hero Supporter (LR-67) is sold in RU through one-time YooKassa payments on
+`omoba.ru/supporter`. The Account API holds the shop and is the only process that
+talks to YooKassa; the portal forwards the checkout and redirects the player.
+Without the shop settings the portal sells nothing and everything else works, so
+the host can launch before the shop exists.
+
+**The shop (owner, in the YooKassa merchant profile):**
+- A shop of an ИП or ООО for the site `https://omoba.ru` (receipts for
+  самозанятые are not covered by this design), with «Чеки от ЮKassa» connected.
+- The VAT code of the receipts, confirmed with the accountant (`1` = без НДС, for
+  example on УСН).
+- Integration → HTTP notifications: URL
+  `https://account.omoba.ru/v1/supporter/yookassa/notifications` and the events
+  `payment.succeeded`, `payment.waiting_for_capture`, `payment.canceled`,
+  `refund.succeeded`.
+- Integration → API keys: a secret key. It goes only into
+  `/opt/omoba-ru/account-api.env`, never into a chat, a commit or a ticket.
+- A separate **test shop** (test cards, no money) for staging runs.
+- The public offer at `omoba.ru/offer` with the refund terms and the seller's
+  requisites (LR-06), and a real test payment whose fiscal receipt is checked
+  before announcing.
+
+**Settings** in `/opt/omoba-ru/account-api.env` (examples, commented out, in
+[account-api.env.example](account-api.env.example)); then
+`systemctl restart omoba-account-api-ru`:
+
+| Setting | Value |
+| --- | --- |
+| `OMOBA_YOOKASSA_SHOP_ID` | the shop id (digits) |
+| `OMOBA_YOOKASSA_SECRET_KEY` | the shop's secret key |
+| `OMOBA_YOOKASSA_VAT_CODE` | 54-FZ `vat_code` 1–12 of the receipt item |
+| `OMOBA_YOOKASSA_NEW_CHARGES` | `0` (paused) or `1` (new charges open) |
+
+The first three together or none; the API refuses to start with a partial shop
+and `ru_host.py status` reports one. `OMOBA_YOOKASSA_TEST_API_ORIGIN` (a loopback
+test stand-in) is refused by the release build and by `status`.
+
+**Turning it on:**
+1. Fill the settings with `OMOBA_YOOKASSA_NEW_CHARGES=0` and restart. Within a
+   minute the reconciliation loop has scanned the shop's refunds:
+   `SELECT to_timestamp(last_successful_at) FROM portal.supporter_yookassa_refund_scan;`
+   is recent and `journalctl -u omoba-account-api-ru` shows no `yookassa` errors.
+2. Run the whole flow against the test shop first (a staging host or a local
+   stack): a tier and a custom amount, the redirect and the return to
+   `/supporter?paid=1`, the aura in a match, a partial and a full refund from the
+   YooKassa dashboard (the tier drops, then the aura disappears).
+3. Set `OMOBA_YOOKASSA_NEW_CHARGES=1`, restart, make one real payment and check its
+   fiscal receipt e-mail, then announce.
+4. To pause sales, set `0` and restart. Paid and open payments still settle: the
+   webhook and the reconciliation loop always run.
+
+**What the API guarantees.** The notification body is never trusted: unknown
+objects (a payment not bound to an attempt, a refund of such a payment) are
+acknowledged without a call, also while attempts wait in manual review; known
+ones are re-read with the shop key and settled once, and one YooKassa answers
+404 for is acknowledged too. A checkout commits its Idempotence-Key before the POST; a lost
+create is replayed with the same key for 23 hours, then goes to manual review.
+New charges stop by themselves (`503 new_charges_paused`) when the refund scan has
+not succeeded for 30 minutes (YooKassa unreachable or the key wrong). Logs carry
+only operations, statuses and YooKassa's `x-request-id`, never card or customer
+data. Details: [docs/supporter.md › YooKassa donations](../../../docs/supporter.md#yookassa-donations).
+
+**Manual review.** Open issues:
+
+```sql
+SELECT provider_object_id, object_type, code, occurrences, to_timestamp(last_seen_at)
+  FROM portal.supporter_yookassa_issues WHERE resolved_at IS NULL ORDER BY last_seen_at;
+```
+
+- `replay_window_expired` (`provider_object_id` is the attempt id): a create whose
+  reply was lost for 23 hours. Search the YooKassa dashboard for a payment with
+  that `attempt_id` in its metadata. If there is one, deliver its notification by
+  hand (below); the API binds and settles it.
+- `amount_mismatch`, `settlement_failed`: YooKassa's object did not settle; compare
+  it with `portal.supporter_yookassa_attempts` before doing anything.
+- `pending_refund` and failed refunds are retried every minute; `unknown_payment`
+  is a refund of a payment this API did not create (not an OMOBA donation).
+
+Because the API re-reads every object, a hand-made notification is safe and is the
+way to settle one object now (`<payment>`, `<refund>`, `<attempt>` from the dashboard
+or the issue):
+
+```sh
+curl -sS -X POST https://account.omoba.ru/v1/supporter/yookassa/notifications \
+  -H 'content-type: application/json' \
+  -d '{"event":"payment.succeeded","object":{"id":"<payment>","metadata":{"attempt_id":"<attempt>"}}}'
+curl -sS -X POST https://account.omoba.ru/v1/supporter/yookassa/notifications \
+  -H 'content-type: application/json' \
+  -d '{"event":"refund.succeeded","object":{"id":"<refund>","payment_id":"<payment>"}}'
+```
+
+Then close the issue as the database owner:
+`UPDATE portal.supporter_yookassa_issues SET resolved_at=extract(epoch from now())::bigint WHERE provider_object_id='<id>';`.
+The receipt e-mail is stored with each attempt (the frozen 54-FZ receipt): it is
+personal data the privacy policy names (LR-04).
+
+## Chat and moderation (LR-15)
+
+- **Chat is off.** The lobby unit sets `OMOBA_CHAT=off` (owner default O-9): no text chat
+  on RU servers; reactions stay. Match workers inherit it, and the lobby logs
+  `Chat: off (OMOBA_CHAT; …)` at start. `ru_host.py` refuses a lobby unit without it, and
+  `lobby.env` must not repeat it. Turning chat on needs the owner's legal check (ОРИ,
+  149-FZ), then `Environment=OMOBA_CHAT=on` in the unit and the matching rule in
+  `ru_host.py` (`UNIT_ENV_RULES`), and a `ship`.
+- **Sanctions and the runtime kill switch** are `omoba-account-api` commands run on the
+  host as `omoba-ru` with the Account API's env file, so the database password is never
+  typed: `systemd-run --quiet --pipe --wait --uid=omoba-ru --gid=omoba-ru -p
+  EnvironmentFile=/opt/omoba-ru/account-api.env /opt/omoba-ru/current/omoba-account-api
+  player 'Name#1234'`. Applying, lifting, renaming and `chat off` take effect within
+  about 10 seconds, without a restart. Procedure: [RUNBOOK.md › Moderation](../../../RUNBOOK.md#moderation-lr-15).
+- Career schema 5 (sanctions, the moderation audit, the chat switch) and its grants are
+  applied by `ship` like every migration.
+
+## Rollback
+
+`python3 ops/vps/ru/ru_host.py rollback --kind server --release <v>-ru-<sha7> --apply`
+(or `--kind portal --release <rev7>-<sha8>`) points `current` at a release that is
+still staged and restarts; it runs no migration, so an older server only works on a
+schema it understands. To undo a migration, restore the rollback dump taken by that
+ship, `/var/backups/omoba-ru/omoba_ru-before-<release>-<UTC>.dump` (the newest three
+are kept; older ones are in the off-host sets), with the lobby and the Account API
+stopped: `runuser -u postgres -- pg_restore --clean --if-exists -d omoba_ru < <dump>`.
+Never drop the database or delete match directories.
