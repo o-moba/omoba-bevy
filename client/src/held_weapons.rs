@@ -48,6 +48,7 @@ impl Plugin for HeldWeaponsPlugin {
             );
     }
 }
+
 fn sync_held_weapons(
     mut commands: Commands,
     mode: Res<crate::sprite::PlayerVisualMode>,
@@ -86,7 +87,7 @@ fn sync_held_weapons(
                 loadout.and_then(|l| l.0.as_ref()),
                 actions.0.get(&owner),
             );
-            let Some((def, class_default)) = resolve_held(
+            let Some((def, _)) = resolve_held(
                 &selection.0,
                 class.0,
                 mode,
@@ -106,7 +107,7 @@ fn sync_held_weapons(
                 rotation: Quat::from_euler(EulerRot::XYZ, r[0], r[1], r[2]),
                 scale: Vec3::splat(def.grip.scale),
             };
-            let model = shown_model(class.0, class_default, &def);
+            let model = def.model.clone();
             wanted.insert(
                 root,
                 (owner, hand, def, frame.mul_transform(offset), model, mode),
@@ -150,16 +151,6 @@ fn sync_held_weapons(
             Visibility::Inherited,
             ChildOf(hand),
         ));
-    }
-}
-
-/// The model a held definition is drawn with: Wildspark's own repeater for its
-/// class-default repeater, else the definition's model.
-pub(crate) fn shown_model(class: shared::HeroClass, class_default: bool, def: &Weapon) -> String {
-    if class == shared::HeroClass::Wildspark && class_default && def.id == "wild-repeater" {
-        "weapons/wildspark-repeater.glb".to_owned()
-    } else {
-        def.model.clone()
     }
 }
 
@@ -218,7 +209,10 @@ fn resolve_held(
 ) -> Option<(Weapon, bool)> {
     let id = selection.resolve_mode(class, mode)?;
     if let Some(def) = definition(id) {
-        return Some((def, selection.is_default()));
+        return Some((
+            def,
+            !matches!(selection, HandheldSelection::Item(item) if item == id),
+        ));
     }
     if !matches!(selection, HandheldSelection::Item(_)) {
         return None;
@@ -491,7 +485,12 @@ fn animate_parts(
 ) {
     for (entity, weapon, base, parts) in &attachments {
         let mechanical = parts.is_some_and(|p| !p.rotors.is_empty() || !p.slides.is_empty());
-        if !mechanical && !matches!(weapon.id.as_str(), "wild-repeater" | "wild-launcher") {
+        if !mechanical
+            && !matches!(
+                weapon.id.as_str(),
+                "wild-repeater" | "wildspark-repeater" | "wild-launcher"
+            )
+        {
             continue;
         }
         let Some(action) = actions.0.get(&weapon.owner) else {
@@ -527,6 +526,38 @@ fn animate_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::HeroClass;
+
+    #[test]
+    fn wildspark_renders_the_model_for_each_accepted_mode() {
+        let model = |item: &str, mode| {
+            resolve_held(
+                &HandheldSelection::Item(item.into()),
+                HeroClass::Wildspark,
+                mode,
+                omoba_passport::weapon_store::definition,
+            )
+            .unwrap()
+            .0
+            .model
+        };
+        assert_eq!(
+            model("forge-sword", WeaponMode::Repeater),
+            "weapons/wildspark-repeater.glb"
+        );
+        assert_eq!(
+            model("wild-launcher", WeaponMode::Repeater),
+            "weapons/wildspark-repeater.glb"
+        );
+        assert_eq!(
+            model("wild-repeater", WeaponMode::Repeater),
+            "weapons/wildspark-repeater.glb"
+        );
+        assert_eq!(
+            model("wildspark-repeater", WeaponMode::Rockets),
+            "weapons/wild-launcher.glb"
+        );
+    }
     #[test]
     fn mechanical_motion_starts_on_an_accepted_edge_and_freezes_with_the_sandbox() {
         let mut app = App::new();
@@ -581,7 +612,7 @@ mod tests {
         assert!(app.world().resource::<WeaponActions>().0.is_empty());
     }
 
-    const SDK_SET: &str = "ekza-0123456789abcdef0123456789abcdef";
+    const SDK_SET: &str = shared::handheld::REVIEWED_WILDSPARK_SETS[0];
 
     fn action(skill: Option<SkillId>, age: f32) -> ActionTime {
         ActionTime {
@@ -647,7 +678,7 @@ mod tests {
         let item = HandheldSelection::Item(SDK_SET.into());
         let id = |held: Option<(Weapon, bool)>| held.map(|(def, default)| (def.id, default));
         for (mode, default) in [
-            (WeaponMode::Repeater, "wild-repeater"),
+            (WeaponMode::Repeater, "wildspark-repeater"),
             (WeaponMode::Rockets, "wild-launcher"),
         ] {
             // Downloading or failed: the real store has no runtime in unit tests.
@@ -701,7 +732,7 @@ mod tests {
                 WeaponMode::Rockets,
                 packaged
             )),
-            Some(("dagger".to_owned(), false))
+            Some(("wild-launcher".to_owned(), true))
         );
     }
 

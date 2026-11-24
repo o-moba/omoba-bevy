@@ -181,8 +181,7 @@ the gate still runs it and records a warning; rebuild and re-run `--verify`.
 4. After the curator accepts the source, use **Prepare for Omoba**
    (`desktop / handheld-glb-v1`), then **Submit to Omoba**. Choose the requirement
    "Wildspark — repeater + launcher set" where Studio offers it; through the
-   API it is `requirementId: "wildspark.handheld.set"` on the submission. The game
-   detects a set by its node names, not by the requirement.
-5. The OMOBA owner reviews the exact rendition. An approved free set joins the
-   game's weapon catalogue like any other approved handheld; equipped on
-   Wildspark, it replaces both guns.
+   API it is `requirementId: "wildspark.handheld.set"` on the submission. The two node names identify the variants. Equipping also requires a binding
+   for the exact approved GLB on Wildspark.
+5. The OMOBA owner reviews the exact rendition. The server checks current Registry approval and the exact Wildspark
+   binding. Equipped on Wildspark, the set replaces both guns.

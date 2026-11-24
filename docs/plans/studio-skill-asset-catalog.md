@@ -1,6 +1,120 @@
 # Game asset requirements in Studio
 
-> Status update, 2026-10-10: the first game-owned export and public catalogue are implemented; see [asset catalogue](../progress/2026-10-10-asset-catalog.md) and [class workshop](../progress/2026-10-10-class-workshop.md). The proposal below remains the roadmap for exact-slot Studio submissions, moderation and runtime cosmetic sets.
+## Weapon eligibility and Studio integration
+
+The game owns the meaning of a handheld slot. Registry owns publication, game
+review and the exact approved rendition. Ekza Library owns player access to
+the asset. Equipping requires each applicable check to pass independently.
+
+### Runtime policy
+
+- Check the exact model against the selected gameplay class and its
+  presentation mode. The weapon kind narrows the authoring brief. Eligibility
+  requires an explicit binding from that model ID to the character's slot.
+  Multi-class use requires a binding for each class. A class with no approved
+  handheld uses its packaged appearance.
+- Every shipped handheld records its approved classes and the SHA-256 of its
+  exact GLB. The game validates the class list against its shared rules. The
+  creator export checks these approvals for each hero referenced by a brief,
+  and package validation checks the bindings against the reviewed inventory.
+- A weapon kind describes presentation, such as sword, bow, repeater or
+  launcher. The class, validated skill recipe and server own damage, range,
+  hit timing, projectiles and skill effects. The choice of avatar rig is
+  independent. Rig-specific authoring can add a stable avatar ID constraint
+  when needed, alongside the gameplay requirement.
+- Use the same rule in the picker, offline practice, join, draft and reconnect.
+  The server checks the requested ID against its own trusted catalogue and the
+  effective class for the request. A class change should use its default when
+  a saved weapon is incompatible. Keep access to the saved item in the library.
+- Wildspark has repeater and launcher presentations. A compatible single-gun
+  skin appears in its own mode. The other mode uses its packaged weapon, including
+  launcher presentation for accepted skills that draw it. A complete Wildspark
+  skin needs evidence for both variants.
+- The current rollout uses game-owned bindings for model IDs in the game package.
+  The packaged Forge Hammer has explicit Warrior and Cinderforge bindings. The
+  hosted Hammer pilot has the same class bindings for an ID derived from its
+  asset identity and the file's SHA-256. It also needs current Registry approval.
+  Other generic releases retain library ownership and can be reviewed for a
+  supported requirement. Unknown models and ambiguous bindings fail closed.
+  The picker can fall back to a valid default for older saved preferences. An
+  older client can still offer an incompatible item and get a server rejection.
+
+| Shipped model ID | Weapon kind | Approved gameplay slot |
+| --- | --- | --- |
+| `wildspark-repeater` | Repeater | Wildspark repeater mode |
+| `wild-repeater` | Repeater | Riftshot basic weapon |
+| `wild-launcher` | Launcher | Wildspark rocket mode and accepted launcher draws |
+
+Both repeaters share a technical kind. Their different model IDs and bindings
+preserve each character's approved appearance and motion.
+
+### Existing integration and remaining work
+
+OMOBA already exports class, skill and appearance requirement IDs for the
+[creator catalogue](../asset-catalog.md). The October 11 Registry migration
+`202610110002_project_requirements.sql` added an optional `requirementId` to
+Studio submissions and exposes it on the selected approval in `/v2/assets`.
+Studio validates that the target is active and matches the project, kind,
+platform and profile. Its Games picker and owner queue already display the
+target. The schema stores one target per rendition and project. The target
+itself carries no machine-checked weapon kind or animation capability.
+
+Registry has a `wildspark.handheld.set` target for one static GLB containing both
+gun variants. On dev, Astral Ivory, Scrap Punk and Candy Neon have exact
+Wildspark-only bindings for their approved Registry renditions. The renderer
+switches variants on Q and draws the launcher for accepted W/R. Future sets
+follow the same approval and rendered review steps before receiving a binding.
+A multi-file release becomes useful when one set composes independently
+reviewed assets.
+
+1. **Publish the game policy with the creator requirements.** Each stable
+   requirement identifies a character, slot, modes, accepted kind, rendering
+   capabilities and baseline. Send the creator to this exact target from the
+   gallery. Keep requirements versioned and validate their references when the
+   gallery is generated.
+2. **Turn a submitted target into a reviewed binding.** Reuse the Registry
+   game-owner review and persist the catalogue revision, requirement ID, asset
+   revision, rendition ID, SHA-256 and profile version. Validate the file against
+   the target's format, size budgets, grip, scale, reachable geometry and
+   required attachment or muzzle anchors. Derive the permitted kind from the
+   game-owned requirement. The reviewer looks at the exact model on that
+   character from the game camera in idle, movement and attack. Check the
+   silhouette, hand contact, clipping, shot or strike pose and every supported
+   mode change. Retain the selected binding until a successor is approved or the
+   existing binding is revoked. Record each approved use independently when the
+   same bytes answer multiple targets.
+   This lets a single art asset and library claim serve several approved classes
+   without duplicating the file or sharing review results implicitly. A retired
+   slot remains in review history and stops accepting new admissions.
+3. **Carry binding metadata to OMOBA.** The SDK pinned by 0.44 drops
+   `projectSupport.requirementId` from its typed catalogue. OMOBA can read the
+   field from the same bounded response if it needs the existing one-target
+   bridge before the SDK evolves. Pair the metadata with the SDK-validated
+   identity, exact selector and rendition hash from that response. Preserve
+   complete-response checks and existing install integrity checks. Publish
+   additive typed SDK metadata once the binding contract is agreed.
+4. **Use reviewed bindings at admission and pin the match choice.** Take the
+   asset ID and rendition digest from the server's verified catalogue. A fresh
+   authoritative catalogue can withdraw eligibility for new admissions. Preserve
+   the existing last-known-good rules during temporary Registry outages and the
+   admitted immutable rendition during a running match.
+
+The purchase or claim grants access to an asset identity. Game bindings state
+where it can be used and which exact bytes the game approved. Price, entitlements
+and any optional NFT provenance belong to Ekza. Class slots, presentation and
+gameplay balance belong to OMOBA. Once reviewed bindings are available, the
+storefront should list the approved characters and slots for the selected
+release before a claim or purchase. Use those bindings for character filters,
+preview selection and the equipped-state check. When one character binding is
+retired, keep the library entitlement and surface the available approved uses.
+
+## October 9 proposal
+
+This section records the original proposal and its assumptions as of October 9.
+The first game-owned export and public gallery are covered by the
+[asset catalogue](../progress/2026-10-10-asset-catalog.md) and
+[class workshop](../progress/2026-10-10-class-workshop.md). The status above
+records later Registry and game changes.
 
 Status: **proposal / TODO**, 2026-10-09. This draft defines a product direction
 and an implementation backlog; it does not add endpoints, a schema migration or

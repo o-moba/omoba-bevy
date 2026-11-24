@@ -80,10 +80,13 @@ pub(super) fn load(name: &str) -> Result<SandboxConfig, String> {
     if bytes.len() > 64 * 1024 {
         return Err("Preset exceeds 64 KiB".into());
     }
-    let c: SandboxConfig =
+    let mut c: SandboxConfig =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid preset: {e}"))?;
     if c.version != PRESET_VERSION {
         return Err("Unsupported preset version".into());
+    }
+    for actor in [&mut c.player, &mut c.enemy.actor] {
+        super::normalize_handheld(actor);
     }
     Ok(c)
 }
@@ -101,6 +104,7 @@ mod tests {
     use super::*;
     #[test]
     fn persisted_presets_reject_missing_partial_malformed_and_unknown_versions() {
+        use shared::{HeroClass, handheld::HandheldSelection};
         let path = std::env::temp_dir().join(format!(
             "omoba-preset-{}-{}.json",
             std::process::id(),
@@ -121,6 +125,13 @@ mod tests {
         assert!(load(name).unwrap_err().contains("version"));
         config.version = PRESET_VERSION;
         std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert_eq!(load(name).unwrap(), config);
+        config.player.hero = HeroClass::Wildspark;
+        config.player.handheld = HandheldSelection::Item("forge-sword".into());
+        config.enemy.actor.hero = HeroClass::Ranger;
+        config.enemy.actor.handheld = HandheldSelection::Item("verdant-bow".into());
+        std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        config.player.handheld = HandheldSelection::ClassDefault;
         assert_eq!(load(name).unwrap(), config);
         std::fs::remove_file(path).unwrap();
     }

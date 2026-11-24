@@ -1,6 +1,8 @@
 {
   "draft.notice.unlock_first": "请先解除锁定再修改选择。",
   "draft.notice.avatar_unavailable": "你的收藏中没有这个形象。",
+  "draft.notice.weapon_incompatible": "该手持装备不适用于当前职业。",
+  "draft.weapons_for": "{hero}可用的手持装备",
   "draft.notice.verifying": "正在验证你的形象…",
   "draft.notice.verification_failed": "形象验证失败。已确认的选择保持不变。",
   "draft.warning.same_avatar": "有队友选择了相同的形象 · 锁定前请先商量。",

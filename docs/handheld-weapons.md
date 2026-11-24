@@ -1,15 +1,21 @@
 # Handheld weapons
 
-A handheld is a cosmetic asset, independent of hero class, VRM appearance and
-combat inventory. Warrior defaults to Forge Sword; Adventurer to the dagger;
-Ranger to Verdant Bow; Wildspark to the repeater or launcher matching its
-accepted weapon mode; Riftshot to the repeater; Dawnweaver to Dawn Scepter.
-Explicitly equipped local/SDK skins and empty hands override those defaults. Combat Test's **Hero / Enemy
-→ Handheld appearance** selects the sword, hammer, scepter, an installed Ekza
-item, class default or empty hands. These choices are stored in sandbox presets,
-validated by the server and replicated to both local and remote actors. Any
-class can select any installed handheld in Combat Test; changing a prop never
-changes damage, reach, projectiles or the skill recipe.
+A handheld is a cosmetic asset selected for the hero's class, independently
+of VRM appearance and combat inventory. Warrior defaults to Forge Sword,
+Adventurer to the dagger, Ranger to Verdant Bow, Wildspark to the accepted
+mode's repeater or launcher, Riftshot to the repeater and Dawnweaver to Dawn
+Scepter. Other classes can use empty hands or a compatible cosmetic if one is
+available. Damage, reach, projectiles and skill recipes come from the class kit.
+
+[The shared compatibility rules](../shared/src/handheld.rs) check the class's
+weapon type and the exact model's approved classes. For example, Warrior and
+Cinderforge can equip Forge Hammer. The Wildspark and Riftshot repeaters have
+different model IDs and are approved for their respective classes.
+Collection, draft and Combat Test offer choices for the active class. The server
+checks the selection independently when the player joins, switches class in
+draft, reconnects or applies a Combat Test preset. Changing class falls back to
+the new class default if the previous item is incompatible. Explicit empty
+hands remain selected.
 
 ## Current product route
 
@@ -18,8 +24,7 @@ below. Studio supports weapon upload/publication and separate OMOBA review.
 The SDK reads `/v2/assets?kind=weapon&project=omoba&platform=desktop&profile=handheld-glb-v1`;
 Collection → Weapons and draft equipment selection download verified approved
 files into the writable runtime cache. Peers install the same immutable IDs;
-the server independently checks eligibility. A per-model packaged manifest edit
-or game rebuild is not required for this route. Weapons in the player's own
+the server checks current Registry approval and an exact hero binding. Weapons in the player's own
 Ekza library are listed first, see [Owned items](#owned-items).
 
 The hosted free-weapon route and two desktop clients have recorded pilot
@@ -120,9 +125,14 @@ remain separate work. No visual prop changes the accepted attack profile.
 
 ## One contract for shipped and Ekza assets
 
-Shipped catalog: `client/assets/weapons/manifest.json`. Each entry has stable
-`id`, display `name`, packaged `model` path and `grip`. The same grip is embedded
-inside the model's hashed GLB JSON:
+Each entry in `client/assets/weapons/manifest.json` records a stable `id`,
+display `name`, packaged `model` path, `grip`, `sha256` and `approved_classes`.
+The game checks those class IDs against the shared approvals when it loads the
+manifest. The creator export verifies every model hash and checks that each
+handheld baseline is approved for the heroes it illustrates. The package
+content check compares the manifest and the GLBs with the reviewed inventory.
+Replacing a model requires reviewing the exact new rendition for each intended
+hero and recording its new hash. The GLB carries the same grip metadata.
 
 ```json
 "asset": {
@@ -155,7 +165,7 @@ needed. Omoba adds the static attachment validator.
 
 A single approved weapon asset can carry both Wildspark guns. It is one
 submission, approval and claim, travels as the same `HandheldSelection::Item`
-and needs no protocol or server change. The art pipeline and recipe live in
+and is approved for Wildspark in both firing modes. The art pipeline and recipe live in
 [Wildspark skin sets](wildspark-skin-sets.md); the runtime contract is:
 
 ```text
@@ -184,7 +194,7 @@ optional hint moves the muzzle flash:
 ```
 
 It sits next to `ekza_handheld_v1` in `asset.extras`. The game identifies the
-set by the two node names alone. Without the hint, or for a malformed tip (not
+variants by the two node names after the set passes the model and hero approval checks. Without the hint, or for a malformed tip (not
 three finite numbers within ±2 m), the baseline tip of the shown gun is used;
 the hint never rejects a model.
 
@@ -195,7 +205,7 @@ actors, from replicated class, weapon mode and accepted actions:
   glTF nodes, the variant for the owner's current mode is shown at scale 1 and
   the other is `Visibility::Hidden`. Q switches it in place without reloading
   the model; an accepted W/R draws the launcher for 1.1 s, like the class
-  default. Owners of any other class always see the repeater variant.
+  default. The reviewed set IDs can only be equipped by Wildspark.
 - `WildsparkRotor` and `WildsparkSlide` move on any held model that has them,
   packaged or SDK, relative to the rest transform read when the scene spawned.
   Inside a set, a part belongs to the variant above it and moves only while

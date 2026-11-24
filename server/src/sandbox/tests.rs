@@ -1328,19 +1328,62 @@ fn reclaimed_actor_keeps_ack_and_sequence_after_address_change() {
 }
 
 #[test]
-fn handheld_choices_are_cosmetic_and_unknown_imports_are_rejected() {
-    for hero in shared::HeroClass::ALL {
-        let mut actor = shared::sandbox::ActorConfig {
-            hero,
-            handheld: shared::handheld::HandheldSelection::Item("forge-hammer".into()),
-            ..Default::default()
-        };
-        assert!(super::validate_actor(&actor).is_ok());
-        actor.handheld = shared::handheld::HandheldSelection::Unequipped;
-        assert!(super::validate_actor(&actor).is_ok());
-        actor.handheld = shared::handheld::HandheldSelection::Item(
-            "https://unapproved.example/weapon.glb".into(),
+fn handheld_configs_reject_incompatible_models_atomically() {
+    use shared::handheld::HandheldSelection;
+    let (mut rt, addr, _) = fixture();
+    let mut c = config(&rt);
+    c.player.hero = HeroClass::Wildspark;
+    c.enemy.actor.handheld = HandheldSelection::ClassDefault;
+    apply(&mut rt, addr, c.clone());
+    let damage = hero_stats::basic_attack_damage(&rt.world.players[&addr]);
+
+    c.player.handheld = HandheldSelection::Item("wildspark-repeater".into());
+    apply(&mut rt, addr, c.clone());
+    assert_eq!(
+        rt.world.players[&addr].hero.identity.handheld,
+        c.player.handheld
+    );
+    assert_eq!(
+        hero_stats::basic_attack_damage(&rt.world.players[&addr]),
+        damage
+    );
+
+    for id in [
+        "forge-sword",
+        "wild-repeater",
+        "https://unapproved.example/weapon.glb",
+    ] {
+        let mut invalid = c.clone();
+        invalid.player.handheld = HandheldSelection::Item(id.into());
+        invalid.enemy.actor.hero = HeroClass::Ranger;
+        let ack = command(
+            &mut rt,
+            addr,
+            SandboxCommand::ApplyConfig { config: invalid },
         );
-        assert!(super::validate_actor(&actor).is_err());
+        assert!(!ack.accepted, "{id}");
+        assert_eq!(config(&rt), c);
+        assert_eq!(
+            rt.world.players[&addr].hero.identity.handheld,
+            c.player.handheld
+        );
     }
+
+    for hero in [HeroClass::Warrior, HeroClass::Cinderforge] {
+        assert!(
+            super::validate_actor(&ActorConfig {
+                hero,
+                handheld: HandheldSelection::Item("forge-hammer".into()),
+                ..Default::default()
+            })
+            .is_ok()
+        );
+    }
+
+    c.player.handheld = HandheldSelection::Unequipped;
+    apply(&mut rt, addr, c);
+    assert_eq!(
+        rt.world.players[&addr].hero.identity.handheld,
+        HandheldSelection::Unequipped
+    );
 }

@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Require exact model approval for each hero when equipping a handheld. Filter
+  the Collection and draft by the selected hero and enforce the same rules on
+  the server, including reconnects. Pin packaged weapons by SHA-256 and keep
+  the three approved Wildspark sets available in both firing modes.
+
 - Support the RU dev lobby and match worker on dedicated ports of the Russian game host. Android RU dev packages use their own regional service endpoints.
 
 - Recognize Ubuntu's standard `/etc/os-release` → `/usr/lib/os-release` symlink

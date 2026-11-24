@@ -5,6 +5,8 @@
       "id": "forge-sword",
       "name": "Forge Sword",
       "model": "weapons/forge-sword.glb",
+      "sha256": "a3ce6addf6d75faebd3de130e87031bf85231f8e1a3124dd3d7dc4d9de1a2162",
+      "approved_classes": ["warrior"],
       "grip": {
         "bone": "rightHand",
         "offset": [
@@ -24,6 +26,8 @@
       "id": "forge-hammer",
       "name": "Forge Hammer",
       "model": "weapons/forge-hammer.glb",
+      "sha256": "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659",
+      "approved_classes": ["cinderforge", "warrior"],
       "grip": {
         "bone": "rightHand",
         "offset": [
@@ -43,6 +47,8 @@
       "id": "dawn-scepter",
       "name": "Dawn Scepter",
       "model": "weapons/dawn-scepter.glb",
+      "sha256": "2d7ef62704dfd39d3b17ed3b7d7e01064978ed3d13ef06e3d930b028dcb000cb",
+      "approved_classes": ["cleric", "dawnweaver", "mage"],
       "grip": {
         "bone": "rightHand",
         "offset": [
@@ -62,6 +68,8 @@
       "id": "dagger",
       "name": "Adventurer Dagger",
       "model": "weapons/dagger.glb",
+      "sha256": "7fc975a6b166f871cff0214a52d65eb63c41c90955e42308a869bcf71db32cc1",
+      "approved_classes": ["adventurer"],
       "grip": {
         "bone": "rightHand",
         "offset": [
@@ -79,8 +87,31 @@
     },
     {
       "id": "wild-repeater",
-      "name": "Wildspark Repeater",
+      "name": "Riftshot Repeater",
       "model": "weapons/wild-repeater.glb",
+      "sha256": "2508a3cac976af173457be42d80480a16ab58a75776235331a186ef7cccebe8a",
+      "approved_classes": ["riftshot"],
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "id": "wildspark-repeater",
+      "name": "Wildspark Repeater",
+      "model": "weapons/wildspark-repeater.glb",
+      "sha256": "09edd94f6296e15ce0b19e80c06970e987c06827707aad9bec13e42ecc9df29e",
+      "approved_classes": ["wildspark"],
       "grip": {
         "bone": "rightHand",
         "offset": [
@@ -100,6 +131,8 @@
       "id": "wild-launcher",
       "name": "Wildspark Rocket Launcher",
       "model": "weapons/wild-launcher.glb",
+      "sha256": "f89e32ad001c94fb0178f9740ddfe9c177f28847818153703c2ae9c007ecacf0",
+      "approved_classes": ["wildspark"],
       "grip": {
         "bone": "rightHand",
         "offset": [
@@ -119,6 +152,8 @@
       "id": "verdant-bow",
       "name": "Verdant Bow",
       "model": "weapons/verdant-bow.glb",
+      "sha256": "9a7861a6900422d7053c5e4837ff7a0f8950e99757427e970694385a5cfce547",
+      "approved_classes": ["ranger"],
       "grip": {
         "bone": "rightHand",
         "offset": [
