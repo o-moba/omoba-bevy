@@ -255,16 +255,13 @@ impl PracticeSession {
                     participation: None,
                     player_id: p.hero.identity.id,
                     is_bot: p.hero.identity.is_bot,
+                    bot_persona: p.bot_persona.map(|persona| persona.slug().to_owned()),
                     profile_id: None,
-                    nickname: format!(
-                        "{} {}",
-                        if p.hero.identity.is_bot {
-                            "Bot"
-                        } else {
-                            "Practice"
-                        },
-                        p.hero.identity.id
-                    ),
+                    nickname: if p.hero.identity.is_bot {
+                        p.display_nickname()
+                    } else {
+                        format!("Practice {}", p.hero.identity.id)
+                    },
                     team: p.hero.identity.team,
                     hero_class: p.hero.identity.hero_class,
                     character: "ipfs".into(),

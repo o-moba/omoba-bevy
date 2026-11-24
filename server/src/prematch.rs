@@ -499,20 +499,7 @@ pub(super) fn snapshot(
         .map(|p| DraftPlayer {
             handheld: p.hero.identity.handheld.clone(),
             player_id: p.hero.identity.id,
-            nickname: p.career_profile.as_ref().map_or_else(
-                || {
-                    format!(
-                        "{} {}",
-                        if p.hero.identity.is_bot {
-                            "Bot"
-                        } else {
-                            "Guest"
-                        },
-                        p.hero.identity.id
-                    )
-                },
-                |v| v.nickname.clone(),
-            ),
+            nickname: p.display_nickname(),
             team: p.hero.identity.team,
             character: p.hero.identity.character,
             hero_class: p.hero.identity.hero_class,
@@ -520,6 +507,7 @@ pub(super) fn snapshot(
             sprite_character: p.hero.identity.sprite_character.clone(),
             role: p.draft.role,
             is_bot: p.hero.identity.is_bot,
+            bot_persona: p.bot_persona.map(|persona| persona.slug().to_owned()),
             locked: p.hero.identity.is_bot || !p.draft.capable || p.draft.locked,
             loaded: p.hero.identity.is_bot || !p.draft.capable || p.draft.loaded,
         })

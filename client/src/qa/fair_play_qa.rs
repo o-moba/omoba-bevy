@@ -236,6 +236,7 @@ fn draft(wide: bool) -> PrematchSnapshot {
                 sprite_character: None,
                 role: Role::ALL[i as usize % 5],
                 is_bot: false,
+                bot_persona: None,
                 locked: i == 0,
                 loaded: false,
             })

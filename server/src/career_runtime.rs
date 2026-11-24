@@ -73,21 +73,13 @@ fn participant(player: &ConnectedPlayer) -> ParticipantResult {
         input_kind: Default::default(),
         participation: None,
         is_bot: player.hero.identity.is_bot,
+        bot_persona: player.bot_persona.map(|persona| persona.slug().to_owned()),
         player_id: player.hero.identity.id,
         profile_id: player
             .career_profile
             .as_ref()
             .map(|profile| profile.profile_id.clone()),
-        nickname: player.career_profile.as_ref().map_or_else(
-            || {
-                if player.hero.identity.is_bot {
-                    format!("Bot {}", player.hero.identity.id)
-                } else {
-                    format!("Guest {}", player.hero.identity.id)
-                }
-            },
-            |profile| profile.nickname.clone(),
-        ),
+        nickname: player.display_nickname(),
         team: player.hero.identity.team,
         hero_class: player.hero.identity.hero_class,
         character: serde_json::to_value(player.hero.identity.character)

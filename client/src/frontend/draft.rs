@@ -455,12 +455,15 @@ pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> Str
     let team: Vec<_> = players.iter().filter(|p| p.team == local.team).collect();
     let duplicate = local.avatar.as_ref().is_some_and(|avatar| {
         team.iter()
-            .any(|p| p.player_id != local_id && p.avatar.as_ref() == Some(avatar))
+            .any(|p| !p.is_bot && p.player_id != local_id && p.avatar.as_ref() == Some(avatar))
     });
     if duplicate {
         return tr("draft.warning.same_avatar").into();
     }
-    let same_role = team.iter().filter(|p| p.role == local.role).count();
+    let same_role = team
+        .iter()
+        .filter(|p| !p.is_bot && p.role == local.role)
+        .count();
     if same_role > 1 {
         return trf(
             "draft.warning.same_role",
@@ -558,6 +561,7 @@ pub(super) fn roster_row(
     player: &DraftPlayer,
     your_id: u64,
     thumbnails: &AvatarThumbnails,
+    assets: &AssetServer,
     loading: bool,
     compact: bool,
 ) {
@@ -584,13 +588,21 @@ pub(super) fn roster_row(
             Name::new(format!("DraftPlayer-{}", player.player_id)),
         ))
         .with_children(|row| {
-            if let Some(image) = player
-                .avatar
-                .as_ref()
-                .and_then(|slug| thumbnails.0.get(slug))
-            {
+            let portrait = shared::bot_personas::portrait_asset_path(
+                player.is_bot,
+                player.bot_persona.as_deref(),
+            )
+            .map(|path| assets.load(path))
+            .or_else(|| {
+                player
+                    .avatar
+                    .as_ref()
+                    .and_then(|slug| thumbnails.0.get(slug))
+                    .cloned()
+            });
+            if let Some(image) = portrait {
                 row.spawn((
-                    ImageNode::new(image.clone()),
+                    ImageNode::new(image),
                     Node {
                         width: Val::Px(40.0),
                         height: Val::Px(40.0),
@@ -859,6 +871,7 @@ fn render_draft(
                         draft,
                         game.your_id,
                         party_stage.as_deref(),
+                        &assets,
                         roster_width,
                         (window.height() - if compact { 136.0 } else { 152.0 }).max(180.0),
                         false,
@@ -1504,6 +1517,7 @@ mod tests {
                 sprite_character: None,
                 role: Role::Mid,
                 is_bot: false,
+                bot_persona: None,
                 locked: false,
                 loaded: false,
             }],
@@ -2075,10 +2089,14 @@ mod tests {
             sprite_character: None,
             role: Role::Jungle,
             is_bot: false,
+            bot_persona: None,
             locked: false,
             loaded: false,
         };
         let mut players = vec![player(1), player(2)];
+        players[1].is_bot = true;
+        assert!(composition_warning(&players, 1).contains("class determines"));
+        players[1].is_bot = false;
         assert!(composition_warning(&players, 1).contains("same avatar"));
         players[1].avatar = Some("another".into());
         assert!(composition_warning(&players, 1).contains("Jungle"));
@@ -2119,6 +2137,7 @@ mod tests {
                 sprite_character: None,
                 role: Role::Mid,
                 is_bot: false,
+                bot_persona: None,
                 locked: false,
                 loaded: false,
             }],

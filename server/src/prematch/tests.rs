@@ -523,6 +523,64 @@ fn practice_bots_auto_ready_and_loading_timeout_returns_to_draft() {
     );
     assert!(!rt.world.players[&address(1)].draft.loaded);
 }
+
+#[test]
+fn bot_personas_are_unique_and_frozen_from_draft_to_scoreboard_and_result() {
+    let now = Instant::now();
+    let mut rt = ServerRuntime::for_test(
+        crate::runtime::ports::MemoryTransport::new(address(10)),
+        crate::runtime::ports::ManualClock::new(now),
+        career_backend::MemoryCareer::disabled(1),
+        MatchConfig {
+            mode: MatchMode::Practice,
+            team_size: 5,
+        },
+    );
+    let addr = address(1);
+    join(&mut rt, addr, "solo", now, true);
+    let draft = view(&rt, addr, now);
+    let bots: Vec<_> = draft
+        .players
+        .iter()
+        .filter(|player| player.is_bot)
+        .collect();
+    assert_eq!(bots.len(), 9);
+    for role in Role::ALL {
+        assert!(bots.iter().any(|bot| bot.role == role));
+    }
+    let mut names = std::collections::HashSet::new();
+    let mut portraits = std::collections::HashSet::new();
+    for bot in &bots {
+        assert!(names.insert(&bot.nickname));
+        let portrait =
+            shared::bot_personas::portrait_asset_path(bot.is_bot, bot.bot_persona.as_deref());
+        assert!(portraits.insert(portrait.unwrap()));
+    }
+    send(&mut rt, addr, 1, PrematchAction::Lock { locked: true }, now);
+    let loaded_at = now + Duration::from_millis(COUNTDOWN_MS.into());
+    rt.tick_prematch(loaded_at);
+    send(&mut rt, addr, 2, PrematchAction::Loaded, loaded_at);
+    let ledger = &rt.combat_log.ledger;
+    let board = ledger.live_scoreboard().unwrap();
+    let receipt = ledger.snapshot();
+    for bot in bots {
+        let live = board
+            .players
+            .iter()
+            .find(|p| p.player_id == bot.player_id)
+            .unwrap();
+        let result = receipt
+            .iter()
+            .find(|p| p.player_id == bot.player_id)
+            .unwrap();
+        assert!(live.is_bot && result.is_bot);
+        assert!(result.profile_id.is_none());
+        assert_eq!(live.nickname, bot.nickname);
+        assert_eq!(result.nickname, bot.nickname);
+        assert_eq!(live.bot_persona, bot.bot_persona);
+        assert_eq!(result.bot_persona, bot.bot_persona);
+    }
+}
 #[test]
 fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
     let (mut rt, now) = fixture(MatchMode::Release, 1);

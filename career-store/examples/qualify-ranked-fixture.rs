@@ -48,6 +48,7 @@ fn main() -> Result<(), String> {
                     profile_id: (i == 0).then(|| id.to_owned()),
                     nickname: if i == 0 { profile.nickname.clone() } else { format!("FixtureBot{i}") },
                     is_bot: i != 0,
+                    bot_persona: None,
                     team: if i < 5 { Team::Green } else { Team::Blue },
                     hero_class: shared::HeroClass::Ranger,
                     character: "archer".into(), avatar: None, sprite_character: None,

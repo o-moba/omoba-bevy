@@ -93,6 +93,8 @@ pub struct DraftPlayer {
     pub sprite_character: Option<String>,
     pub role: Role,
     pub is_bot: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_persona: Option<String>,
     pub locked: bool,
     pub loaded: bool,
 }

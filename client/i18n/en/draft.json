@@ -11,6 +11,7 @@
   "draft.warning.default": "Roles describe your plan; class determines your abilities.",
   "draft.roster.you": " · YOU",
   "draft.roster.bot": " · BOT",
+  "draft.roster.bot_label": "BOT",
   "draft.roster.class_role": "{hero} · {role}",
   "draft.roster.ready": "READY",
   "draft.roster.loading": "LOADING",

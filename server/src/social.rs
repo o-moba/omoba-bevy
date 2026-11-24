@@ -6,13 +6,15 @@ use std::time::{Duration, Instant};
 use shared::map::Team;
 use shared::moderation::{CHAT_DISABLED_TEXT, CHAT_MUTED_TEXT, Sanction, SanctionKind};
 use shared::social::{
-    Entitlements, SocialChannel, SocialCommand, SocialEvent, SocialEventKind, SocialRequest,
-    SocialTeam, SocialView, allowed_reactions, normalize_chat_text, reaction_allowed,
-    validate_request,
+    BotChatTranslation, Entitlements, SocialChannel, SocialCommand, SocialEvent, SocialEventKind,
+    SocialRequest, SocialTeam, SocialView, allowed_reactions, normalize_chat_text,
+    reaction_allowed, validate_request,
 };
 use shared::wire::{GameState, ServerPacket};
 
 use crate::runtime::{RateLimitedDiagnostic, ServerRuntime};
+
+mod bot_chat;
 
 const MAX_EVENTS: usize = 32;
 const MAX_SENDERS: usize = 512;
@@ -59,6 +61,7 @@ pub(super) struct SocialRuntime {
     last_sent: Option<Instant>,
     events: VecDeque<RecordedEvent>,
     receipts: HashMap<u64, Receipt>,
+    bot_chat: bot_chat::BotChatRuntime,
     // Account/session identity survives endpoint replacement and round changes.
     limits: HashMap<String, RateBudget>,
     send_diagnostic: RateLimitedDiagnostic,
@@ -141,6 +144,7 @@ impl SocialRuntime {
             self.last_sent = None;
             self.events.clear();
             self.receipts.clear();
+            self.bot_chat = Default::default();
         }
         self.events
             .retain(|event| now.saturating_duration_since(event.at) < HISTORY_TTL);
@@ -236,22 +240,42 @@ impl SocialRuntime {
                 }
             }
         };
+        self.append_event(
+            sender.id,
+            sender.nickname.clone(),
+            sender.team,
+            kind,
+            None,
+            now,
+        );
+        Ok(())
+    }
+
+    fn append_event(
+        &mut self,
+        player_id: u64,
+        nickname: String,
+        team: SocialTeam,
+        kind: SocialEventKind,
+        bot_chat: Option<BotChatTranslation>,
+        now: Instant,
+    ) {
         self.next_event = self.next_event.saturating_add(1);
         self.events.push_back(RecordedEvent {
             at: now,
             event: SocialEvent {
                 id: self.next_event,
-                player_id: sender.id,
-                nickname: sender.nickname.clone(),
-                team: sender.team,
+                player_id,
+                nickname,
+                team,
                 age_ms: 0,
                 kind,
+                bot_chat,
             },
         });
         while self.events.len() > MAX_EVENTS {
             self.events.pop_front();
         }
-        Ok(())
     }
 
     fn view(&self, sender: &Sender, now: Instant) -> SocialView {
@@ -392,6 +416,7 @@ impl ServerRuntime {
     pub(super) fn send_social_views(&mut self, now: Instant) {
         self.social
             .sync_round(self.server_epoch, self.match_id, now);
+        self.tick_bot_chat(now);
         if self
             .social
             .last_sent

@@ -216,7 +216,7 @@ impl ServerRuntime {
             public_transport: public_transport::PublicTransport::default(),
             load_metrics: crate::load_metrics::LoadMetrics::from_env(now),
             prematch: prematch::PrematchRuntime::default(),
-            bots: bots::BotControllers::default(),
+            bots: bots::BotControllers::with_persona_seed(server_epoch),
             social: social::SocialRuntime::default(),
             party: party::PartyState::default(),
             career: career_runtime::CareerRuntime::new(career),

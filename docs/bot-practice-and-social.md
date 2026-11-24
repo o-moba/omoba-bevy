@@ -50,7 +50,13 @@ their independent 2D sprite kits. They use ordinary hero navigation, attacks and
 push lanes, engage nearby enemies and structures, retreat at low health, and
 can die and respawn. The controller uses the existing movement, targeting,
 damage, cooldown and mana rules. Bot actor IDs are marked explicitly and their
-internal addresses reject network commands. They do not send chat or reactions.
+internal addresses reject network commands. Standalone practice bots are silent.
+
+Publicly allocated roster bots have individual nicknames and bundled portraits.
+They can greet the match, acknowledge a teammate's hero kill and close out the
+match in Match chat. The server authors these lines from public events and sends
+them through the same bounded social stream. See the
+[low-population matchmaking plan](plans/ranked-bot-fill.md).
 
 In standalone practice, late humans receive their own player identity and safe
 spawn; the server removes

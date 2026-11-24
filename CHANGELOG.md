@@ -1345,6 +1345,20 @@ All notable changes are recorded here. The canonical version is
   An iPhone export refused on the command line now hands the kept archive to Xcode
   Organizer instead of failing. Release tooling only; no game, protocol or CI change.
 
+## [0.47.0] - 2026-11-24
+
+- Give public Casual PvP and vs Bots rosters 30 bot personas with bundled
+  portraits, visible bot labels, and lane duties assigned by the server.
+  Each arena draws its own roster.
+- Let bots greet the match, congratulate a connected teammate by name after
+  a confirmed hero kill, and close out the game in Match chat. The server
+  limits the frequency of these lines, and the usual mute controls apply.
+  The client displays the lines in English, Russian or Simplified Chinese.
+- Keep the separate Ranked ready check and human-only Elo policy. Casual PvP
+  can fill vacancies with bots after 30 seconds and uses the existing casual XP.
+- Show bot roles in draft and keep avatar and role negotiation advice focused
+  on human teammates.
+
 ## [0.44.0] - 2026-10-10
 
 ### Community Beta 1 — first GitHub release

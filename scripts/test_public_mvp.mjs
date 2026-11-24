@@ -143,10 +143,13 @@ assert(maxWaitSecs===null || maxWaitSecs>0, 'max-wait-secs must be positive');
 const allowLarge = 'allow-large' in opts;
 const queueOnly = 'queue-only' in opts;
 const verifyPresence = 'verify-presence' in opts;
+const expectBotChat = 'expect-bot-chat' in opts;
 assert(!verifyPresence||queueOnly,'--verify-presence is a queue-only disposable-DB check requiring psql');
 assert(!queueOnly || scenario==='load', '--queue-only is a load option');
 assert(!queueOnly||!exerciseStaleHandoff, '--exercise-stale-handoff requires a worker handoff');
 const soakSecs = Number(opts.seconds || (scenario==='early-recovery'?2:15));
+assert(!expectBotChat || (scenario==='load' && !queueOnly && preference==='quick' && clientsCount<10 && soakSecs>=15),
+ 'bot chat verification needs an incomplete Casual roster and at least 15 seconds in play');
 assert(!verifyPresence||soakSecs>=12,'--verify-presence requires at least12s soak to observe the ordinary10s presence cadence');
 const inputHz = Number(opts['input-hz'] ?? 20);
 assert(Number.isFinite(inputHz)&&inputHz>=0&&inputHz<=60, 'input-hz must be between 0 and 60');
@@ -278,6 +281,8 @@ class Client {
   this.publicKey=crypto.createPublicKey(this.key).export({type:'spki',format:'der'}).subarray(-32).toString('hex');
   this.session=identity?.session || `mvp-${Date.now()}-${index}`;this.nickname=identity?.nickname || `Probe-${index}`;
   this.packets=0;this.bytes=0;this.sentPackets=0;this.sentBytes=0;this.transforms=0;this.lastInput=0;this.firstTransform=null;this.lastTransform=null;this.snapshots=0;this.gaps=[];this.frames=new Map();this.errors=[];this.stage='probing';this.next=0;this.queueId=1;
+  this.lastSocialSubscribe = 0;
+  this.botGreeting = null;
   this.bind();
  }
  bind() {
@@ -341,6 +346,11 @@ class Client {
    }
    return;
   }
+  if (expectBotChat && packet.type==='social') {
+   this.socialAck ||= packet.social.request_id === 1;
+   this.botGreeting ??= packet.social.events.find(event => event.bot_chat);
+   return;
+  }
   if(packet.type!=='snapshot')return;
   if(["players","structures","minions","neutrals","projectiles"].some(key=>packet[key]?.length))this.worldSnapshots++;
   else this.bootstrapSnapshots++;
@@ -361,6 +371,11 @@ class Client {
   if(!this.auth&&now-this.lastProbe>=1000){this.lastProbe=now;this.send({type:'transport_probe',protocol_version:protocolVersion,client_nonce:this.nonce,padding:'0'.repeat(384)});}
   if(!this.path)return;
   if(!this.auth){if(now>=this.next){this.next=now+2000;const c=this.authChallenge;this.bootstrap({type:'career',request:c?{action:'authenticate',challenge:c,signature:sign(this.key,['omoba.career.auth.v1',c.public_key,c.nonce,c.server_epoch,c.session_id,c.nickname])}:{action:'challenge',public_key:this.publicKey,nickname:this.nickname,session_id:this.session}});}return;}
+  if (expectBotChat && this.stage==='running' && !this.socialAck && now-this.lastSocialSubscribe>1000) {
+   this.lastSocialSubscribe = now;
+   this.account({action:'social',request:{request_id:1,server_epoch:this.epoch,match_id:this.match,
+    session_id:this.session,command:{kind:'subscribe'}}});
+  }
   // Representative signed movement-command verification/dispatch load. Current
   // authoritative pose avoids inventing movement or bypassing collision rules.
   const intentional=this.keepActive||['remake','surrender'].includes(scenario), hz=intentional?Math.max(1,inputHz):inputHz;
@@ -1536,6 +1551,29 @@ try {
  assert.equal(new Set([...allocations.values()].map(cs=>cs[0].port)).size,allocations.size,'distinct arenas require distinct ports');
  for(const cs of allocations.values()){const roster=new Set(ids(cs[0].snapshot));for(const c of cs)assert(roster.has(String(c.snapshot.your_id)));}
  report.scenarios.push('allocated_draft_countdown_loading_running','distinct_workers_and_ten_player_rosters');
+ if (expectBotChat) {
+  assert.equal(allocations.size,1);
+  for (const c of all) {
+   assert.equal(c.allocation.rated,false);
+   assert.equal(c.allocation.human_count,clientsCount);
+   assert.equal(c.allocation.bot_count,10-clientsCount);
+   assert(c.socialAck,'social subscription was not acknowledged');
+   const bots = c.snapshot.scoreboard.players.filter(row => row.is_bot);
+   assert.equal(bots.length,10-clientsCount);
+   assert(bots.every(row => row.bot_persona));
+   assert.equal(new Set(bots.map(row => row.bot_persona)).size,bots.length);
+   const event = c.botGreeting;
+   assert(event,'server bot chat did not arrive');
+   assert.equal(event.id,all[0].botGreeting.id);
+   assert.equal(event.kind.kind,'chat');
+   assert.equal(event.kind.channel,'match');
+   assert.match(event.kind.text,/[А-Яа-яЁё]/u);
+   assert(event.bot_chat.en && event.bot_chat.zh_hans);
+   assert.equal(bots.find(row => row.player_id===event.player_id)?.nickname,event.nickname);
+  }
+  report.bot_chat = all[0].botGreeting;
+  report.scenarios.push('mixed_casual_roster_and_shared_bot_greeting');
+ }
  report.arenas=allocations.size;report.total_bytes=all.reduce((n,c)=>n+c.bytes,0);report.total_datagrams=all.reduce((n,c)=>n+c.packets,0);report.elapsed_seconds=(performance.now()-start)/1000;
  const gaps=all.flatMap(c=>c.gaps).sort((a,b)=>a-b);report.snapshot_gap_ms={p50:gaps[Math.floor(gaps.length*.5)],p95:gaps[Math.floor(gaps.length*.95)],p99:gaps[Math.floor(gaps.length*.99)],max:gaps.at(-1)};
  measure(allocations, runningAt);

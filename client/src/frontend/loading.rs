@@ -720,6 +720,7 @@ fn render_loading(
                         prematch,
                         game.your_id,
                         &thumbnails,
+                        &assets,
                         &scroll,
                         party_stage.as_deref(),
                         Vec2::new(window.width(), window.height()),
@@ -986,6 +987,7 @@ fn spawn_roster(
     prematch: &shared::prematch::PrematchSnapshot,
     your_id: u64,
     thumbnails: &AvatarThumbnails,
+    assets: &AssetServer,
     scroll: &DraftScrollMemory,
     stage: Option<&super::party_stage::PartyStage>,
     viewport: Vec2,
@@ -1020,6 +1022,7 @@ fn spawn_roster(
             prematch,
             your_id,
             stage,
+            assets,
             stage_width,
             body_height,
             prematch.phase == PrematchPhase::Loading,
@@ -1056,7 +1059,9 @@ fn spawn_roster(
                     ))
                     .with_children(|rows| {
                         for player in prematch.players.iter().filter(|p| Some(p.team) != own_team) {
-                            draft::roster_row(rows, player, your_id, thumbnails, true, compact);
+                            draft::roster_row(
+                                rows, player, your_id, thumbnails, assets, true, compact,
+                            );
                         }
                     });
             });

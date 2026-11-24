@@ -32,6 +32,10 @@ Installed from the Omoba UI design handoff into `client/assets/ui/verdant/`
 
 ## Original Omoba 2D assets
 
+The portraits in `client/assets/ui/bot-profiles/` were generated for Open Moba
+using OpenAI ImageGen and Higgsfield. The release assets, exact prompts and
+permission scope are documented in the [bot portrait notice](client/assets/ui/bot-profiles/README.md).
+
 The terrain/prop atlases in `client/assets/world2d/` were generated specifically
 for Omoba on 2026-07-27 through the Higgsfield MCP with Recraft V4.1, then
 processed deterministically into checked-in atlases. No third-party game art

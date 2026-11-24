@@ -170,6 +170,7 @@ impl Vec3f {
 }
 
 pub struct ConnectedPlayer {
+    pub bot_persona: Option<shared::bot_personas::BotPersonaId>,
     pub career_profile: Option<shared::career::ProfileSummary>,
     pub career_capable: bool,
     pub draft: prematch::DraftState,
@@ -195,6 +196,19 @@ pub struct ConnectedPlayer {
 }
 
 impl ConnectedPlayer {
+    pub fn display_nickname(&self) -> String {
+        if self.hero.identity.is_bot {
+            return self.bot_persona.map_or_else(
+                || format!("Bot {}", self.hero.identity.id),
+                |persona| persona.nickname().to_owned(),
+            );
+        }
+        self.career_profile.as_ref().map_or_else(
+            || format!("Guest {}", self.hero.identity.id),
+            |profile| profile.nickname.clone(),
+        )
+    }
+
     /// The replicated `PlayerState` as the owning client sees it: the
     /// authoritative `hero` and `economy` plus the fields derived at
     /// replication time (the cooldown and utility clocks from `hero_timers`,

@@ -17,6 +17,10 @@ pub struct LiveScoreboard {
 pub struct LiveScorePlayer {
     pub player_id: u64,
     pub nickname: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_bot: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_persona: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     pub team: Team,
