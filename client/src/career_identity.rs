@@ -88,11 +88,29 @@ fn private_create(path: &Path) -> io::Result<fs::File> {
 }
 
 // Android app sandboxes may deny hard links. Serialize cooperating publishers
-// on the directory inode and atomically rename a fully synced temporary file.
+// on a stable private lock file and atomically rename the synced temporary file.
 #[cfg(any(target_os = "android", all(test, unix)))]
 fn rename_new_key(directory: &Path, temporary: &Path, path: &Path) -> io::Result<()> {
-    let guard = fs::File::open(directory)?;
-    guard.lock()?;
+    use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+    let guard = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(directory.join(".career-key.lock"))?;
+    // Rust 1.97 File::lock returns Unsupported on Android. Bionic provides
+    // flock(2) on every supported ABI. Closing guard releases the lock.
+    unsafe extern "C" {
+        fn flock(fd: std::ffi::c_int, operation: std::ffi::c_int) -> std::ffi::c_int;
+    }
+    const LOCK_EX: std::ffi::c_int = 2;
+    while unsafe { flock(guard.as_raw_fd(), LOCK_EX) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
     match fs::symlink_metadata(path) {
         Ok(_) => Err(io::ErrorKind::AlreadyExists.into()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => fs::rename(temporary, path),

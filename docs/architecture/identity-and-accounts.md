@@ -72,7 +72,7 @@ The dotted edges are nullable foreign keys. Only `social_identities.profile_id` 
 
 ## Device key
 
-- **Creation.** `load_or_create_key` generates a 32-byte seed with `getrandom` and writes `{version: 1, seed, public_key}` to a temporary file created with `create_new` and mode `0600`. After syncing the file, Android publishes it with an atomic rename under an exclusive directory lock. Other platforms use an exclusive hard link. Concurrent clients use the winning key. It never overwrites an existing or damaged identity ([`career_identity.rs`](../../client/src/career_identity.rs)).
+- **Creation.** `load_or_create_key` generates a 32-byte seed with `getrandom` and writes `{version: 1, seed, public_key}` to a temporary file created with `create_new` and mode `0600`. After syncing the file, Android publishes it with an atomic rename under an exclusive lock on a private sibling lock file. Other platforms use an exclusive hard link. Concurrent clients use the winning key. It never overwrites an existing or damaged identity ([`career_identity.rs`](../../client/src/career_identity.rs)).
 - **Reading.** `read_key` refuses:
   - non-regular files, such as symlinks,
   - files over 1 KiB,
