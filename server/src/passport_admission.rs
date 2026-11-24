@@ -37,12 +37,13 @@ impl WeaponCatalogue {
             self.items = items
                 .into_iter()
                 .filter(|item| {
-                    ekza_bevy_sdk::assets::validate_item(
-                        item,
-                        ekza_bevy_sdk::assets::AssetKind::Weapon,
-                        &omoba_passport::weapon_store::selector(),
-                    )
-                    .is_ok()
+                    shared::handheld::weapon_binding(&item.slug).is_some()
+                        && ekza_bevy_sdk::assets::validate_item(
+                            item,
+                            ekza_bevy_sdk::assets::AssetKind::Weapon,
+                            &omoba_passport::weapon_store::selector(),
+                        )
+                        .is_ok()
                 })
                 .map(|item| item.slug)
                 .collect();
@@ -185,12 +186,12 @@ impl PassportAdmissions {
             _ => None,
         };
         if let Some(shared::handheld::HandheldSelection::Item(id)) = handheld {
+            if shared::handheld::weapon_binding(id).is_none() {
+                return Admission::Denied;
+            }
             // Only shipped props bypass hosted approval. Operator imports are
             // useful for local sandbox rehearsal but do not grant online use.
-            let shipped = omoba_passport::weapons::Catalog::parse(include_bytes!(
-                "../../client/assets/weapons/manifest.json"
-            ))
-            .expect("shipped props");
+            let shipped = omoba_passport::weapons::shipped_catalog();
             if !shipped.items.iter().any(|item| item.id == *id) {
                 if id.len() != 37
                     || !id.starts_with("ekza-")
@@ -997,8 +998,8 @@ mod weapon_tests {
     };
     use shared::{HeroClass, handheld::HandheldSelection, map::Team, wire::CharacterChoice};
     fn item() -> StoreAsset {
-        let id = "ekza:weapon:1c366765-3f44-4d36-b14c-acaba3bfce53".to_string();
-        let hash = "b".repeat(64);
+        let id = "ekza:weapon:38a9903e-b3ec-4b12-a5f8-83516c77ba8b".to_string();
+        let hash = "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659".to_string();
         StoreAsset {
             slug: asset_slug(AssetKind::Weapon, &id, &hash),
             asset_id: id,
@@ -1158,11 +1159,6 @@ mod weapon_tests {
             HandheldSelection::Item(item().slug)
         );
         let hp = rt.world.players[&owner].hero.max_hp;
-        rt.passport_admissions
-            .weapons
-            .lock()
-            .unwrap()
-            .apply(Ok(vec![]), Instant::now());
         let request = |request_id, handheld| PrematchRequest {
             server_epoch: rt.server_epoch,
             match_id: rt.match_id,
@@ -1178,8 +1174,36 @@ mod weapon_tests {
                 passport_ticket: None,
             },
         };
-        let denied = request(1, HandheldSelection::Item(item().slug));
-        let unequip = request(2, HandheldSelection::Unequipped);
+        let mut incompatible = request(1, HandheldSelection::Item(item().slug));
+        let PrematchAction::Select { hero_class, .. } = &mut incompatible.action else {
+            unreachable!()
+        };
+        *hero_class = HeroClass::Wildspark;
+        let denied = request(2, HandheldSelection::Item(item().slug));
+        let unequip = request(3, HandheldSelection::Unequipped);
+        rt.handle_packet(
+            owner,
+            ClientPacket::Prematch {
+                request: incompatible,
+            },
+            now,
+        );
+        let player = &rt.world.players[&owner];
+        assert_eq!(player.hero.identity.hero_class, HeroClass::Warrior);
+        assert_eq!(
+            player.hero.identity.handheld,
+            HandheldSelection::Item(item().slug)
+        );
+        assert_eq!(player.draft.acknowledged_request_id, 1);
+        assert_eq!(
+            player.draft.error.as_deref(),
+            Some("Choose a weapon compatible with this class.")
+        );
+        rt.passport_admissions
+            .weapons
+            .lock()
+            .unwrap()
+            .apply(Ok(vec![]), Instant::now());
         rt.handle_packet(owner, ClientPacket::Prematch { request: denied }, now);
         assert!(rt.world.players[&owner].draft.error.is_some());
         assert_eq!(
@@ -1193,6 +1217,69 @@ mod weapon_tests {
             HandheldSelection::Unequipped
         );
         assert_eq!(rt.world.players[&owner].hero.max_hp, hp);
+    }
+
+    #[test]
+    fn direct_join_and_reclaim_check_the_class_actually_equipped() {
+        use crate::{match_rules::MatchConfig, runtime::ServerRuntime};
+        use shared::protocol::{JoinRejection, PROTOCOL_VERSION};
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let mut rt = ServerRuntime::new(socket, MatchConfig::dev());
+        let owner: SocketAddr = "127.0.0.1:50321".parse().unwrap();
+        let resumed: SocketAddr = "127.0.0.1:50322".parse().unwrap();
+        let now = Instant::now();
+        rt.handle_packet(
+            owner,
+            ClientPacket::Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
+            now,
+        );
+        let wildspark = |weapon| {
+            let mut packet = join(weapon, None);
+            let ClientPacket::Join { hero_class, .. } = &mut packet else {
+                unreachable!()
+            };
+            *hero_class = HeroClass::Wildspark;
+            packet
+        };
+        for id in ["forge-sword", "wild-repeater"] {
+            rt.handle_packet(owner, wildspark(id), now);
+            assert!(!rt.world.players[&owner].joined, "{id}");
+            assert_eq!(
+                rt.world.players[&owner].join_error,
+                Some(JoinRejection::AvatarNotAuthorized)
+            );
+        }
+        rt.handle_packet(owner, wildspark("wildspark-repeater"), now);
+        assert!(rt.world.players[&owner].joined);
+        let id = rt.world.players[&owner].hero.identity.id;
+        rt.world.players.get_mut(&owner).unwrap().last_seen = now - Duration::from_secs(6);
+
+        rt.handle_packet(
+            resumed,
+            ClientPacket::Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
+            now,
+        );
+        // These packets advertise Warrior, but a reclaim keeps Wildspark.
+        rt.handle_packet(resumed, join("forge-sword", None), now);
+        assert!(!rt.world.players[&resumed].joined);
+        assert_eq!(
+            rt.world.players[&resumed].join_error,
+            Some(JoinRejection::AvatarNotAuthorized)
+        );
+        rt.handle_packet(resumed, join("wildspark-repeater", None), now);
+        let player = &rt.world.players[&resumed];
+        assert!(player.joined);
+        assert_eq!(player.hero.identity.id, id);
+        assert_eq!(player.hero.identity.hero_class, HeroClass::Wildspark);
+        assert_eq!(
+            player.hero.identity.handheld,
+            HandheldSelection::Item("wildspark-repeater".into())
+        );
     }
 
     #[test]
@@ -1246,7 +1333,7 @@ mod weapon_tests {
     }
 
     #[test]
-    fn wrong_kind_profile_pending_and_owned_items_never_authorize_weapons() {
+    fn wrong_kind_profile_pending_owned_and_unreviewed_items_never_authorize_weapons() {
         let mut variants = vec![];
         let mut bad = item();
         bad.support.status = "pending".into();
@@ -1260,6 +1347,22 @@ mod weapon_tests {
         let mut bad = item();
         bad.support.profile = "humanoid-glb-v1".into();
         variants.push(bad);
+        let mut unreviewed = item();
+        unreviewed.support.rendition.sha256 = "b".repeat(64);
+        unreviewed.slug = asset_slug(
+            AssetKind::Weapon,
+            &unreviewed.asset_id,
+            &unreviewed.support.rendition.sha256,
+        );
+        assert!(
+            ekza_bevy_sdk::assets::validate_item(
+                &unreviewed,
+                AssetKind::Weapon,
+                &omoba_passport::weapon_store::selector()
+            )
+            .is_ok()
+        );
+        variants.push(unreviewed);
         for bad in variants {
             let mut cache = WeaponCatalogue::default();
             cache.apply(Ok(vec![bad]), Instant::now());

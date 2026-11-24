@@ -216,6 +216,7 @@ pub fn definition(id: &str) -> Option<Weapon> {
         name: item.name.clone(),
         model: format!("ekza://weapons/{id}.glb"),
         grip: grip.clone(),
+        approved_classes: Vec::new(),
         source_id: Some(item.asset_id.clone()),
         sha256: Some(item.support.rendition.sha256.clone()),
     })

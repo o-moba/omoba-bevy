@@ -59,7 +59,7 @@ impl MatchServiceClient {
         self.active = true;
         self.resume_scope = Some((saved.server_epoch, saved.match_id));
         self.pending_join = Some(NetworkCommand::JoinPrematch {
-            handheld: saved.join.handheld.clone(),
+            handheld: crate::team::handheld_for_class(&saved.join.handheld, saved.join.hero_class),
             character: saved.join.character,
             hero_class: saved.join.hero_class,
             avatar: saved.join.avatar.clone(),

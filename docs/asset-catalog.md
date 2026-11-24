@@ -5,11 +5,9 @@ It describes all 17 classes, their 68 skills, current basic attacks, semantic
 motion references and authored cosmetic requirements. The executable game and
 combat protocol do not consume this document in this iteration.
 
-The original [Studio proposal (PR #78)](https://github.com/o-moba/omoba-bevy/pull/78) remains the
-roadmap for Registry publication, requirement-targeted review and playable sets.
-This export implements discovery and preparation of a contribution brief. It does
-not add a Registry endpoint or imply that publishing a model approves it for a
-particular requirement.
+This export supports discovery and preparation of a contribution brief.
+The [Studio integration plan](plans/studio-skill-asset-catalog.md) tracks
+exact model approval for character slots, Registry publication and playable sets.
 
 ## Export and check
 
@@ -123,30 +121,26 @@ advertised. Generated IDs `skill.<skillId>.presentation`,
 `basic.<classId>.presentation` and `motion.<motionId>` are reserved and cannot be
 overridden by an authored requirement.
 
-Wildspark illustrates why semantic bindings matter: Q has two handhelds;
-rocket-mode basic attacks normally use the procedural `tumbler`, despite a
-configured GLB fallback; Last Spark uses a different flying rocket; Snapline's
-three traps reuse one model. Shockline and explosion effects remain engine-owned.
-The exporter asserts the current tumbler precedence so a presentation change
-cannot silently preserve an obsolete brief. Explicitly selected handhelds still
-remain selected in both weapon modes; coordinated two-gun skins are future work.
+Wildspark uses separate models for the repeater and launcher. Each single-gun
+selection applies to its approved mode, with the packaged weapon filling the
+other mode. The Wildspark repeater and Riftshot's original repeater each have
+their own manifest identity and authored baseline. The exporter checks those
+bindings and the source of the rocket-mode basic attack. Last Spark uses a
+different flying rocket. Snapline's three traps reuse one model. Shockline and
+explosion effects remain engine-owned.
 
-Only the six current class-default handheld GLBs are publicly copied, with the
-CC-BY-4.0 grant from `client/assets/weapons/LICENSE.md`. The seven-item weapon
-manifest also contains a hammer that is not currently a class default. Icons
-retain CC-BY-4.0 attribution and motion references retain Quaternius CC0 credit.
-World-prop notices currently lack an unambiguous asset-specific redistribution
-grant, so their source hashes are references and their GLB bytes are withheld.
-No new license is assigned. Avatar files are outside this export.
+The catalogue publishes the seven default handheld GLBs used as authored
+baselines under the CC-BY-4.0 grant in `client/assets/weapons/LICENSE.md`.
+Icons retain CC-BY-4.0 attribution and motion references retain Quaternius CC0
+credit. World props with unresolved redistribution notices appear as hashed
+references.
 
 ## Next integration slices
 
 The website can pin a contribution brief to `projectId`, catalogue `revision` and
-`requirementId`, link to the supported Studio surface, and let the creator carry
-that context into an existing upload. Completing the loop requires Registry to
-store an exact requirement-to-rendition association and provide owner review.
-After that, SDK/runtime work can admit a complete reviewed cosmetic set, keep
-asset identities pinned for a match, and fall back to packaged defaults.
-Projectile/prop profiles and constrained motion capabilities need their own
-validation and native-game proof. These later stages do not require changing
-the catalogue's discovery purpose or moving gameplay authority into uploads.
+`requirementId` and carry that context into the Studio upload. Registry already
+records a submission target when it is available. The next step is to make the
+reviewed association authoritative for the exact rendition and character slot,
+then carry it through SDK admission and storefront previews. Projectile and
+prop profiles and constrained motion capabilities need their own validation
+and native-game proof.

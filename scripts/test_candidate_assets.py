@@ -142,6 +142,15 @@ class CandidateAssetGateTests(unittest.TestCase):
                 self.assertEqual(result["status"], "PASS", result)
                 self.assertEqual(result["errors"], [])
 
+    def test_packaged_handheld_manifest_cannot_rebind_another_approved_model(self):
+        relative = "weapons/manifest.json"
+        manifest = json.loads((self.assets / relative).read_text())
+        items = {item["id"]: item for item in manifest["items"]}
+        hammer = items["forge-hammer"]
+        items["forge-sword"].update(model=hammer["model"], sha256=hammer["sha256"])
+        self.write_json(relative, manifest)
+        self.expect_failure("packaged handheld manifest differs from approved model bindings")
+
     def test_every_denied_binary_and_preview_fails_when_renamed(self):
         denied = self.denied_fixture()
         if denied is None:

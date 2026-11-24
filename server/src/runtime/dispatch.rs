@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 use shared::debug::DebugCommand;
+use shared::handheld::HandheldSelection;
 use shared::wire::ClientPacket;
 
 use crate::runtime::ServerRuntime;
@@ -22,6 +23,19 @@ pub(crate) const CLIENT_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 
 impl ServerRuntime {
+    fn retained_join_player(&self, session: &str) -> Option<&crate::entities::ConnectedPlayer> {
+        self.world
+            .players
+            .values()
+            .find(|player| player.session_id.as_deref() == Some(session))
+            .or_else(|| {
+                self.world
+                    .disconnected_sessions
+                    .get(session)
+                    .map(|saved| &saved.player)
+            })
+    }
+
     pub(crate) fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
             if let ClientPacket::Prematch { request } = completion.packet {
@@ -170,17 +184,9 @@ impl ServerRuntime {
                 // Reclaim uses the normalized value too; whitespace must not
                 // make this authorization check inspect a different session.
                 let session = normalize_session_id(Some(session.clone()));
-                let retained = self
-                    .world
-                    .players
-                    .values()
-                    .find(|player| session.is_some() && player.session_id == session)
-                    .or_else(|| {
-                        session
-                            .as_ref()
-                            .and_then(|session| self.world.disconnected_sessions.get(session))
-                            .map(|saved| &saved.player)
-                    });
+                let retained = session
+                    .as_deref()
+                    .and_then(|session| self.retained_join_player(session));
                 if retained
                     .and_then(|player| player.hero.identity.avatar.as_deref())
                     .is_some_and(|slug| {
@@ -241,9 +247,28 @@ impl ServerRuntime {
         {
             return;
         }
-        if matches!(packet, ClientPacket::Join { .. }) {
+        if let ClientPacket::Join {
+            handheld,
+            hero_class,
+            session_id,
+            ..
+        } = &packet
+        {
             if !self.authorize_career_join(addr, &packet, now) {
                 return;
+            }
+            if matches!(handheld, HandheldSelection::Item(_)) && !self.world.players[&addr].joined {
+                // A retained seat keeps its server-owned class when the endpoint changes.
+                let class = normalize_session_id(session_id.clone())
+                    .as_deref()
+                    .and_then(|session| self.retained_join_player(session))
+                    .filter(|player| player.joined)
+                    .map_or(*hero_class, |player| player.hero.identity.hero_class);
+                if !handheld.compatible(class) {
+                    self.world.players.get_mut(&addr).unwrap().join_error =
+                        Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
+                    return;
+                }
             }
             if !self.prepare_practice_join(addr, &packet, now) {
                 return;

@@ -1,15 +1,21 @@
 # Handheld weapons
 
-A handheld is a cosmetic asset, independent of hero class, VRM appearance and
-combat inventory. Warrior defaults to Forge Sword; Adventurer to the dagger;
-Ranger to Verdant Bow; Wildspark to the repeater or launcher matching its
-accepted weapon mode; Riftshot to the repeater; Dawnweaver to Dawn Scepter.
-Explicitly equipped local/SDK skins and empty hands override those defaults. Combat Test's **Hero / Enemy
-→ Handheld appearance** selects the sword, hammer, scepter, an installed Ekza
-item, class default or empty hands. These choices are stored in sandbox presets,
-validated by the server and replicated to both local and remote actors. Any
-class can select any installed handheld in Combat Test; changing a prop never
-changes damage, reach, projectiles or the skill recipe.
+A handheld is a cosmetic asset selected for the hero's class, independently
+of VRM appearance and combat inventory. Warrior defaults to Forge Sword,
+Adventurer to the dagger, Ranger to Verdant Bow, Wildspark to the accepted
+mode's repeater or launcher, Riftshot to the repeater and Dawnweaver to Dawn
+Scepter. Other classes can use empty hands or a compatible cosmetic if one is
+available. Damage, reach, projectiles and skill recipes come from the class kit.
+
+[The shared compatibility rules](../shared/src/handheld.rs) check the class's
+weapon type and the exact model's approved classes. For example, Warrior and
+Cinderforge can equip Forge Hammer. The Wildspark and Riftshot repeaters have
+different model IDs and are approved for their respective classes.
+Collection, draft and Combat Test offer choices for the active class. The server
+checks the selection independently when the player joins, switches class in
+draft, reconnects or applies a Combat Test preset. Changing class falls back to
+the new class default if the previous item is incompatible. Explicit empty
+hands remain selected.
 
 ## Current product route
 
@@ -17,19 +23,23 @@ The October 1–2 typed lifecycle supersedes the historical operator-import pilo
 below. Studio supports weapon upload/publication and separate OMOBA review.
 The SDK reads `/v2/assets?kind=weapon&project=omoba&platform=desktop&profile=handheld-glb-v1`;
 Collection → Weapons and draft equipment selection download verified approved
-files into the writable runtime cache. Peers install the same immutable IDs;
-the server independently checks eligibility. A per-model packaged manifest edit
-or game rebuild is not required for this route.
+files into the writable runtime cache. Peers install the same immutable IDs.
+Generic project approval establishes that Registry can serve the rendition.
+Equipping it also requires a game-approved weapon binding. The reviewed Forge
+Hammer pilot retains compatibility for its exact published ID. Other generic
+approvals need a reviewed binding before a player can equip the model. The
+[Studio integration plan](plans/studio-skill-asset-catalog.md) describes that
+approval flow.
 
 The hosted free-weapon route and two desktop clients have recorded pilot
 acceptance, not a fresh production availability check in this document. Mobile
 runtime integration exists; physical iPhone/Android visual and performance
 acceptance is still separate. Paid ownership/checkout remains future work.
 
-Artists must currently export valid embedded grip metadata: Studio has a generic
-model preview, but no grip editor or avatar-hand placement preview. The export
-contract below is current. Priorities for making this authorable without an
-engineer are in the [creator roadmap](plans/creator-loop-and-class-builder.md).
+The GLB carries validated embedded grip metadata. Studio can preview placement
+against a reference hand. Game review uses the target character and its attack
+poses. The [creator roadmap](plans/creator-loop-and-class-builder.md) covers the
+rest of the authoring flow.
 See [typed lifecycle and runtime ownership](progress/2026-10-01-asset-lifecycle.md).
 
 ## Attachment
@@ -45,15 +55,27 @@ The prop follows the skeletal hierarchy during idle, run, attack and death.
 Unequip, avatar replacement, actor removal and switching to Sprite2d remove the
 attachment. Model normalization scales the prop together with the character.
 No IK, new collider, root motion or per-frame transform copying is required.
-Adventurer uses a right-hand thrust for contact attacks. Wildspark uses a burst-fire motion for the repeater and a heavy shot for launcher rounds; its named rotor and recoil slide are animated only after accepted actions. W/R temporarily select the launcher for class-default equipment. The default repeater uses `weapons/wildspark-repeater.glb`; Riftshot and explicit legacy repeater skins retain `wild-repeater.glb`. Pausing the sandbox freezes these parts and muzzle flashes use the real hand socket. The new bow currently uses the existing ranged avatar
+Adventurer uses a right-hand thrust for contact attacks. Wildspark uses a
+burst-fire motion for the repeater and a heavy shot for launcher rounds. Its
+rotor and recoil slide are animated after accepted actions. W/R temporarily
+select the launcher. An explicit Wildspark cosmetic replaces its own mode and
+the other mode uses the matching bundled model. The default repeater uses
+`weapons/wildspark-repeater.glb`. Riftshot uses `weapons/wild-repeater.glb`.
+Pausing the sandbox freezes these parts. Muzzle flashes use the real hand
+socket. The bow uses the existing ranged avatar
 motion path: dedicated bow-draw animation, string deformation and two-handed IK
 remain separate work. No visual prop changes the accepted attack profile.
 
 ## One contract for shipped and Ekza assets
 
-Shipped catalog: `client/assets/weapons/manifest.json`. Each entry has stable
-`id`, display `name`, packaged `model` path and `grip`. The same grip is embedded
-inside the model's hashed GLB JSON:
+Each entry in `client/assets/weapons/manifest.json` records a stable `id`,
+display `name`, packaged `model` path, `grip`, `sha256` and `approved_classes`.
+The game checks those class IDs against the shared approvals when it loads the
+manifest. The creator export verifies every model hash and checks that each
+handheld baseline is approved for the heroes it illustrates. The package
+content check compares the manifest and the GLBs with the reviewed inventory.
+Replacing a model requires reviewing the exact new rendition for each intended
+hero and recording its new hash. The GLB carries the same grip metadata.
 
 ```json
 "asset": {

@@ -5,7 +5,11 @@ use crate::{
     net::{NetworkHeroClass, PlayerHandheld},
 };
 use bevy::prelude::*;
-use shared::loadout::SkillId;
+use shared::{
+    HeroClass,
+    handheld::HandheldSelection,
+    loadout::{SkillId, WeaponMode},
+};
 #[derive(Component, Debug)]
 pub(crate) struct HeldWeapon {
     pub owner: Entity,
@@ -33,6 +37,19 @@ impl Plugin for HeldWeaponsPlugin {
             );
     }
 }
+
+fn resolve_held_weapon(
+    selection: &HandheldSelection,
+    class: HeroClass,
+    mode: WeaponMode,
+) -> Option<omoba_passport::weapons::Weapon> {
+    use omoba_passport::weapon_store::definition;
+
+    let id = selection.resolve_mode(class, mode)?;
+    definition(id)
+        .or_else(|| definition(HandheldSelection::ClassDefault.resolve_mode(class, mode)?))
+}
+
 fn sync_held_weapons(
     mut commands: Commands,
     mode: Res<crate::sprite::PlayerVisualMode>,
@@ -68,23 +85,18 @@ fn sync_held_weapons(
             };
             let mut mode = loadout
                 .and_then(|l| l.0.as_ref())
-                .map_or(shared::loadout::WeaponMode::Repeater, |state| {
-                    state.weapon_mode
-                });
-            // An accepted ultimate draws the launcher even when Q is in repeater mode.
+                .map_or(WeaponMode::Repeater, |state| state.weapon_mode);
+            // Accepted W/R actions draw the launcher even while Q is in repeater mode.
             // The actual loadout, cadence and mana accounting remain authoritative.
-            if class.0 == shared::HeroClass::Wildspark
+            if class.0 == HeroClass::Wildspark
                 && actions.0.get(&owner).is_some_and(|action| {
                     matches!(action.skill, Some(SkillId::WildRocket | SkillId::WildZap))
                         && action.age < 1.1
                 })
             {
-                mode = shared::loadout::WeaponMode::Rockets;
+                mode = WeaponMode::Rockets;
             }
-            let Some(id) = selection.0.resolve_mode(class.0, mode) else {
-                continue;
-            };
-            let Some(def) = omoba_passport::weapon_store::definition(id) else {
+            let Some(def) = resolve_held_weapon(&selection.0, class.0, mode) else {
                 continue;
             };
             let Some((node, frame)) = library.hand_socket(rig.model, &def.grip.bone) else {
@@ -99,40 +111,30 @@ fn sync_held_weapons(
                 rotation: Quat::from_euler(EulerRot::XYZ, r[0], r[1], r[2]),
                 scale: Vec3::splat(def.grip.scale),
             };
-            let model = if class.0 == shared::HeroClass::Wildspark
-                && selection.0.is_default()
-                && def.id == "wild-repeater"
-            {
-                "weapons/wildspark-repeater.glb".to_owned()
-            } else {
-                def.model.clone()
-            };
-            wanted.insert(root, (owner, hand, def, frame.mul_transform(offset), model));
+            wanted.insert(root, (owner, hand, def, frame.mul_transform(offset)));
         }
     }
     for (entity, old) in &attachments {
-        if wanted
-            .get(&old.root)
-            .is_some_and(|(owner, hand, def, _, model)| {
-                *owner == old.owner && *hand == old.hand && def.id == old.id && *model == old.model
-            })
-        {
+        if wanted.get(&old.root).is_some_and(|(owner, hand, def, _)| {
+            *owner == old.owner && *hand == old.hand && def.id == old.id && def.model == old.model
+        }) {
             wanted.remove(&old.root);
         } else {
             commands.entity(entity).despawn();
         }
     }
-    for (root, (owner, hand, def, transform, model)) in wanted {
+    for (root, (owner, hand, def, transform)) in wanted {
+        let scene = assets.load(format!("{}#Scene0", def.model));
         commands.spawn((
             HeldWeapon {
                 owner,
                 root,
                 hand,
                 id: def.id.clone(),
-                model: model.clone(),
+                model: def.model,
             },
             Name::new(format!("Handheld-{}", def.id)),
-            WorldAssetRoot(assets.load(format!("{model}#Scene0"))),
+            WorldAssetRoot(scene),
             transform,
             WeaponPose(transform),
             Visibility::Inherited,
@@ -276,7 +278,10 @@ fn animate_parts(
     mut parts: Query<(Option<&Name>, &mut Transform)>,
 ) {
     for (entity, weapon, base) in &attachments {
-        if !matches!(weapon.id.as_str(), "wild-repeater" | "wild-launcher") {
+        if !matches!(
+            weapon.id.as_str(),
+            "wild-repeater" | "wildspark-repeater" | "wild-launcher"
+        ) {
             continue;
         }
         let Some(action) = actions.0.get(&weapon.owner) else {
@@ -309,6 +314,35 @@ fn animate_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wildspark_renders_the_model_for_each_accepted_mode() {
+        let model = |item: &str, mode| {
+            resolve_held_weapon(
+                &HandheldSelection::Item(item.into()),
+                HeroClass::Wildspark,
+                mode,
+            )
+            .unwrap()
+            .model
+        };
+        assert_eq!(
+            model("forge-sword", WeaponMode::Repeater),
+            "weapons/wildspark-repeater.glb"
+        );
+        assert_eq!(
+            model("wild-launcher", WeaponMode::Repeater),
+            "weapons/wildspark-repeater.glb"
+        );
+        assert_eq!(
+            model("wild-repeater", WeaponMode::Repeater),
+            "weapons/wildspark-repeater.glb"
+        );
+        assert_eq!(
+            model("wildspark-repeater", WeaponMode::Rockets),
+            "weapons/wild-launcher.glb"
+        );
+    }
     #[test]
     fn mechanical_motion_starts_on_an_accepted_edge_and_freezes_with_the_sandbox() {
         let mut app = App::new();

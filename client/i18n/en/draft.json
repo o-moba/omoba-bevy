@@ -1,6 +1,8 @@
 {
   "draft.notice.unlock_first": "Unlock your choice before making changes.",
   "draft.notice.avatar_unavailable": "This avatar is not available in your library.",
+  "draft.notice.weapon_incompatible": "This weapon is unavailable for the selected class.",
+  "draft.weapons_for": "Weapons for {hero}",
   "draft.notice.verifying": "Verifying your avatar…",
   "draft.notice.verification_failed": "Avatar verification failed. Your accepted choice is unchanged.",
   "draft.warning.same_avatar": "A teammate chose the same avatar · coordinate before locking.",

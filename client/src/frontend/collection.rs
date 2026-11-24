@@ -11,12 +11,13 @@ use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use omoba_passport::avatars::AvatarDefinition;
+use shared::{HeroClass, handheld::HandheldSelection};
 
 use super::AppScreen;
 use super::card::ProfileCard;
 use super::preview::{AvatarPreview, PreviewStatus};
 use super::widgets;
-use crate::i18n::{Locale, Localized, tr};
+use crate::i18n::{Locale, Localized, data, tr, trf};
 use crate::team::{AvatarThumbnails, TeamSelection};
 use crate::ui::kit_assets::{Frame, Icon, KitImage};
 use crate::ui::living_background::{self, LivingBands, LivingScene};
@@ -183,7 +184,7 @@ fn spawn_catalogue_grid(
     thumbnails: &AvatarThumbnails,
     phone: bool,
     filter: CollectionFilter,
-    handheld: &shared::handheld::HandheldSelection,
+    selection: &TeamSelection,
 ) {
     grid.spawn(Node {
         flex_wrap: FlexWrap::Wrap,
@@ -238,8 +239,9 @@ fn spawn_catalogue_grid(
     .with_children(|grid| {
         if filter == CollectionFilter::Weapons {
             grid.spawn(widgets::heading(tr("collection.weapons"), 17.0));
+            let hero_name = data::hero_name(selection.hero_class);
             grid.spawn(widgets::label(
-                tr("collection.weapons_hint"),
+                &trf("collection.weapons_hint", &[("hero", &hero_name)]),
                 12.0,
                 theme::MUTED,
             ));
@@ -250,29 +252,37 @@ fn spawn_catalogue_grid(
                 CollectionAction::Refresh,
                 "CollectionRefreshWeapons",
             );
-            let (_, status, _) = omoba_passport::weapon_store::snapshot();
+            let (_, status, studio_weapons) = omoba_passport::weapon_store::snapshot();
             let key = match status {
                 omoba_passport::store::CatalogueStatus::Loading { .. } => {
                     "collection.weapons_loading"
                 }
-                omoba_passport::store::CatalogueStatus::Empty => "collection.weapons_empty",
                 omoba_passport::store::CatalogueStatus::Unavailable { .. } => {
                     "collection.weapons_unavailable"
                 }
-                omoba_passport::store::CatalogueStatus::Ready { .. } => "collection.weapons_ready",
+                omoba_passport::store::CatalogueStatus::Ready { .. }
+                    if studio_weapons.into_iter().any(|weapon| {
+                        HandheldSelection::Item(weapon.id).compatible(selection.hero_class)
+                    }) =>
+                {
+                    "collection.weapons_ready"
+                }
+                omoba_passport::store::CatalogueStatus::Ready { .. }
+                | omoba_passport::store::CatalogueStatus::Empty => "collection.weapons_empty",
             };
             grid.spawn(widgets::label(tr(key), 12.0, theme::MUTED));
-            if let Some(status) = handheld_status(handheld) {
+            let handheld = selection.effective_handheld();
+            if let Some(status) = handheld_status(&handheld) {
                 grid.spawn((
                     widgets::label(status, 12.0, theme::GOLD),
                     Name::new("SelectedWeaponStatus"),
                 ));
             }
-            for (choice, name, id) in handheld_choices() {
+            for (choice, name, id) in handheld_choices(selection.hero_class) {
                 compact_screen_tile(
                     grid,
                     name,
-                    *handheld == choice,
+                    handheld == choice,
                     CollectionAction::Handheld(choice),
                     id,
                     phone,
@@ -448,7 +458,7 @@ fn refresh_collection_catalogue(
                     &thumbnails,
                     platform.is_mobile(),
                     *filter,
-                    &selection.handheld,
+                    &selection,
                 );
             });
     }
@@ -574,7 +584,7 @@ fn spawn_collection(
                         &thumbnails,
                         phone,
                         *filter,
-                        &selection.handheld,
+                        &selection,
                     );
                 });
 
@@ -744,7 +754,10 @@ fn collection_actions(
                 omoba_passport::weapon_store::refresh(true);
             }
             CollectionAction::Handheld(choice) => {
-                if let shared::handheld::HandheldSelection::Item(id) = choice {
+                if !choice.compatible(selection.hero_class) {
+                    continue;
+                }
+                if let HandheldSelection::Item(id) = choice {
                     if !omoba_passport::weapon_store::eligible(id) {
                         continue;
                     }
@@ -1149,9 +1162,9 @@ fn clip_display(name: &str) -> String {
         .map_or_else(|| AvatarPreview::clip_label(name), str::to_owned)
 }
 
-/// Identical cosmetic choices in the collection and the authoritative draft.
-pub(super) fn handheld_choices() -> Vec<(shared::handheld::HandheldSelection, String, String)> {
-    use shared::handheld::HandheldSelection as H;
+/// Collection and draft offer the same cosmetics for a selected class.
+pub(super) fn handheld_choices(class: HeroClass) -> Vec<(HandheldSelection, String, String)> {
+    use HandheldSelection as H;
     let mut result = vec![
         (
             H::ClassDefault,
@@ -1177,6 +1190,7 @@ pub(super) fn handheld_choices() -> Vec<(shared::handheld::HandheldSelection, St
             .into_iter()
             .map(|w| (H::Item(w.id.clone()), w.name, format!("Handheld-{}", w.id))), // i18n-allow: stable test id, never displayed
     );
+    result.retain(|(choice, _, _)| choice.compatible(class));
     result
 }
 
@@ -1201,6 +1215,25 @@ pub(super) fn handheld_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weapon_picker_only_offers_models_for_the_selected_class() {
+        let offered = |class, id: &str| {
+            handheld_choices(class)
+                .iter()
+                .any(|(_, _, test_id)| test_id == id)
+        };
+        assert!(offered(HeroClass::Warrior, "Handheld-forge-sword"));
+        assert!(offered(HeroClass::Warrior, "Handheld-forge-hammer"));
+        assert!(offered(HeroClass::Cinderforge, "Handheld-forge-hammer"));
+        assert!(!offered(HeroClass::Wildspark, "Handheld-forge-sword"));
+        assert!(!offered(HeroClass::Warrior, "Handheld-verdant-bow"));
+        assert!(offered(HeroClass::Wildspark, "Handheld-wildspark-repeater"));
+        assert!(!offered(HeroClass::Wildspark, "Handheld-wild-repeater"));
+        assert!(offered(HeroClass::Riftshot, "Handheld-wild-repeater"));
+        assert!(!offered(HeroClass::Riftshot, "Handheld-wildspark-repeater"));
+        assert!(offered(HeroClass::Wildspark, "Handheld-wild-launcher"));
+    }
 
     /// The per-frame connection refresh keeps the Studio line in the active
     /// language instead of the passport crate's English label.

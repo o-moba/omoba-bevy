@@ -698,7 +698,7 @@ fn observe(
                     1 => shared::handheld::HandheldSelection::Item("forge-hammer".into()),
                     2 => shared::handheld::HandheldSelection::Item(
                         std::env::var("OMOBA_HANDHELD_QA_IMPORT")
-                            .unwrap_or_else(|_| "dawn-scepter".into()),
+                            .unwrap_or_else(|_| "forge-sword".into()),
                     ),
                     _ => shared::handheld::HandheldSelection::Unequipped,
                 };
@@ -1091,7 +1091,7 @@ fn capture(commands: &mut Commands, qa: &mut Qa, index: usize, frame: serde_json
             "01-selection.png",
             "02-sword-attack.png",
             "03-hammer-attack.png",
-            "04-scepter-avatar-swap.png",
+            "04-weapon-avatar-swap.png",
             "05-empty-hands.png",
             "06-idle.png",
             "07-running.png",

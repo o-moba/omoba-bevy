@@ -9,7 +9,7 @@
 
 use bevy::prelude::*;
 use omoba_passport::avatars::avatar_roster;
-use shared::HeroClass;
+use shared::{HeroClass, handheld::HandheldSelection};
 use std::collections::HashMap;
 
 pub use crate::domain::Team;
@@ -59,7 +59,7 @@ enum HeroSelectAction {
 
 #[derive(Resource)]
 pub struct TeamSelection {
-    pub handheld: shared::handheld::HandheldSelection,
+    pub handheld: HandheldSelection,
     pub team: Option<Team>,
     /// Legacy SDK character; used as the model when no roster avatar is picked.
     pub character: CharacterChoice,
@@ -69,6 +69,28 @@ pub struct TeamSelection {
     pub avatar: Option<String>,
     /// Selected 2D sprite character, preserved independently of the 3D avatar.
     pub sprite_character: String,
+}
+
+pub(crate) fn handheld_for_class(
+    choice: &HandheldSelection,
+    class: HeroClass,
+) -> HandheldSelection {
+    if choice.compatible(class) {
+        choice.clone()
+    } else {
+        HandheldSelection::ClassDefault
+    }
+}
+
+impl TeamSelection {
+    pub(crate) fn effective_handheld(&self) -> HandheldSelection {
+        handheld_for_class(&self.handheld, self.hero_class)
+    }
+
+    pub(crate) fn pick_class(&mut self, class: HeroClass) {
+        self.hero_class = class;
+        self.handheld = self.effective_handheld();
+    }
 }
 
 impl Default for TeamSelection {
@@ -1560,7 +1582,7 @@ fn team_select_ui_system(
                 }
             }
             HeroSelectAction::Class(class) => {
-                selection.hero_class = *class;
+                selection.pick_class(*class);
                 selection_changed = true;
             }
             HeroSelectAction::Avatar(slug) => {
@@ -1678,9 +1700,10 @@ fn lock_in(
         return LockIn::Reconnect;
     }
     let sprite_character = Some(selection.sprite_character.clone());
+    let handheld = selection.effective_handheld();
     let command = if sandbox || offline {
         NetworkCommand::Join {
-            handheld: selection.handheld.clone(),
+            handheld,
             team,
             character: selection.character,
             hero_class: selection.hero_class,
@@ -1689,7 +1712,7 @@ fn lock_in(
         }
     } else {
         NetworkCommand::JoinPrematch {
-            handheld: selection.handheld.clone(),
+            handheld,
             character: selection.character,
             hero_class: selection.hero_class,
             avatar: selection.avatar.clone(),
@@ -1739,16 +1762,18 @@ fn autojoin_from_env(
     };
     let sprite_character = shared::normalize_sprite_character_id(parts.next()).to_owned();
 
-    // QA/operator launch chooses the same normal loadout as the equipment UI;
-    // the server remains responsible for live catalogue approval.
+    selection.hero_class = class;
+    // An explicit QA/operator choice still reaches server admission for validation.
+    // Saved preferences use the same effective choice as regular joins.
     if let Ok(id) = std::env::var("OMOBA_AUTOJOIN_WEAPON") {
         selection.handheld = match id.as_str() {
-            "empty" => shared::handheld::HandheldSelection::Unequipped,
-            "default" => shared::handheld::HandheldSelection::ClassDefault,
-            _ => shared::handheld::HandheldSelection::Item(id),
+            "empty" => HandheldSelection::Unequipped,
+            "default" => HandheldSelection::ClassDefault,
+            _ => HandheldSelection::Item(id),
         };
+    } else {
+        selection.handheld = selection.effective_handheld();
     }
-    selection.hero_class = class;
     selection.avatar = avatar.clone();
     selection.team = Some(team);
     selection.sprite_character.clone_from(&sprite_character);
@@ -2169,6 +2194,7 @@ mod tests {
     fn lock_in_ignores_in_flight_reconnects_dead_and_routes_by_mode() {
         let selection = TeamSelection {
             hero_class: HeroClass::Mage,
+            handheld: HandheldSelection::Item("forge-sword".into()),
             avatar: Some("agnes".into()),
             sprite_character: "ronin".into(),
             ..default()
@@ -2214,7 +2240,13 @@ mod tests {
         assert_eq!(screen, AppScreen::Searching);
         assert!(matches!(
             command,
-            NetworkCommand::JoinPrematch { hero_class: HeroClass::Mage, avatar: Some(ref a), sprite_character: Some(ref s), .. }
+            NetworkCommand::JoinPrematch {
+                hero_class: HeroClass::Mage,
+                handheld: HandheldSelection::ClassDefault,
+                avatar: Some(ref a),
+                sprite_character: Some(ref s),
+                ..
+            }
                 if a == "agnes" && s == "ronin"
         ));
 
@@ -2230,10 +2262,28 @@ mod tests {
                 NetworkCommand::Join {
                     team: Team::Blue,
                     hero_class: HeroClass::Mage,
+                    handheld: HandheldSelection::ClassDefault,
                     ..
                 }
             ));
         }
+    }
+
+    #[test]
+    fn picking_a_class_preserves_shared_weapons_and_empty_hands() {
+        let hammer = HandheldSelection::Item("forge-hammer".into());
+        let mut selection = TeamSelection {
+            hero_class: HeroClass::Warrior,
+            handheld: hammer.clone(),
+            ..default()
+        };
+        selection.pick_class(HeroClass::Cinderforge);
+        assert_eq!(selection.handheld, hammer);
+        selection.pick_class(HeroClass::Wildspark);
+        assert_eq!(selection.handheld, HandheldSelection::ClassDefault);
+        selection.handheld = HandheldSelection::Unequipped;
+        selection.pick_class(HeroClass::Ranger);
+        assert_eq!(selection.handheld, HandheldSelection::Unequipped);
     }
 
     #[test]

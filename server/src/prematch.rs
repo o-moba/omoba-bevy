@@ -232,7 +232,17 @@ impl ServerRuntime {
                 Some("This selection is frozen. Wait for the match or the next draft.".into());
             return;
         }
-        if let PrematchAction::Select { avatar, .. } = &request.action {
+        if let PrematchAction::Select {
+            avatar,
+            hero_class,
+            handheld,
+            ..
+        } = &request.action
+        {
+            if !handheld.compatible(*hero_class) {
+                player.draft.error = Some("Choose a weapon compatible with this class.".into());
+                return;
+            }
             // Re-selecting the already admitted exact avatar (e.g. changing an
             // intended role) needs no second single-use ownership ticket.
             let same_avatar =

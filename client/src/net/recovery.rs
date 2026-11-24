@@ -158,9 +158,9 @@ pub(crate) fn resume_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn saved_resume_round_trips_loadout_without_credentials_and_rejects_other_identity() {
-        let saved = SavedResume {
+
+    fn saved_resume() -> SavedResume {
+        SavedResume {
             allocation: shared::match_service::MatchAllocation {
                 allocation_id: "a".repeat(32),
                 endpoint: "127.0.0.1:41000".into(),
@@ -176,12 +176,48 @@ mod tests {
             server_epoch: 9,
             match_id: 1,
             join: CommittedJoin::for_test(),
-        };
+        }
+    }
+
+    #[test]
+    fn saved_resume_round_trips_loadout_without_credentials_and_rejects_other_identity() {
+        let saved = saved_resume();
         let json = serde_json::to_string(&saved).unwrap();
         assert!(!json.contains("passport_ticket"));
         let decoded: SavedResume = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, saved);
         assert!(valid_resume(&decoded, "stable-session"));
         assert!(!valid_resume(&decoded, "another-session"));
+    }
+
+    #[test]
+    fn resume_preserves_the_hero_when_legacy_equipment_is_no_longer_compatible() {
+        use crate::net::NetworkCommand;
+        use shared::{HeroClass, handheld::HandheldSelection};
+
+        let mut saved = saved_resume();
+        saved.join.hero_class = HeroClass::Wildspark;
+        saved.join.handheld = HandheldSelection::Item("wild-repeater".into());
+        let mut flow = MatchServiceClient::default();
+        flow.restore_resume(&saved);
+        assert!(matches!(
+            &flow.pending_join,
+            Some(NetworkCommand::JoinPrematch {
+                hero_class: HeroClass::Wildspark,
+                handheld: HandheldSelection::ClassDefault,
+                ..
+            })
+        ));
+
+        saved.join.hero_class = HeroClass::Riftshot;
+        flow.restore_resume(&saved);
+        assert!(matches!(
+            &flow.pending_join,
+            Some(NetworkCommand::JoinPrematch {
+                hero_class: HeroClass::Riftshot,
+                handheld: HandheldSelection::Item(id),
+                ..
+            }) if id == "wild-repeater"
+        ));
     }
 }

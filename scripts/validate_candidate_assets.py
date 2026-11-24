@@ -12,6 +12,7 @@ import struct
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "client/assets/config/asset_policy.json"
+WEAPON_MANIFEST = ROOT / "client/assets/weapons/manifest.json"
 
 
 def sha(path):
@@ -177,6 +178,14 @@ def validate(asset_root, policy_path=POLICY):
         if set(skill_models) & set(originals):
             errors.append("duplicate original model inventory")
         skill_models.update(originals)
+        handheld_manifest = safe_path(root, "weapons/manifest.json")
+        if sha(handheld_manifest) != sha(WEAPON_MANIFEST):
+            errors.append("packaged handheld manifest differs from approved model bindings")
+        for item in json.loads(WEAPON_MANIFEST.read_text())["items"]:
+            relative = item["model"]
+            approved = skill_models.get(relative)
+            if not approved or item["sha256"] != approved["sha256"]:
+                errors.append(f"handheld model binding differs from reviewed asset hash: {relative}")
         for relative, approved in skill_models.items():
             path = safe_path(root, relative)
             if approved.get("provenance") != "original project-authored geometry" or approved.get("source") not in {"scripts/build_standard_skill_models.py", "scripts/build_wildspark_models.py", "scripts/build_roster_skill_models.py", "scripts/build_handheld_models.py", "scripts/build_dagger_model.py", "scripts/build_ranged_handhelds.py", "scripts/build_verdant_dragon.py"}:
@@ -200,7 +209,8 @@ def validate(asset_root, policy_path=POLICY):
         checks = ["denied filenames and hashes across every packaged file", "reviewed model inventory and SHA-256",
                   "manifest references, previews and provenance", "embedded actor permissions", "reviewed original environment manifest",
                   "reviewed original prop inventory, provenance and SHA-256",
-                  "reviewed skill prop inventory, provenance, SHA-256 and embedded dependencies"]
+                  "reviewed skill prop inventory, provenance, SHA-256 and embedded dependencies",
+                  "packaged handheld model bindings and approved SHA-256"]
     # JSON with unexpected object/array shapes must still return a closed gate.
     except (OSError, ValueError, KeyError, TypeError, AttributeError, struct.error) as error:
         errors.append(f"invalid or incomplete asset inventory: {error}")

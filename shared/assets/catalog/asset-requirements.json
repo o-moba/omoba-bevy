@@ -12,7 +12,7 @@
           "phase": "attack"
         }
       ],
-      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "brief": "Warrior sword reference for a one-handed melee silhouette. Prepare a static Studio weapon rendition with an aligned grip. In-game use requires compatibility with the Warrior handheld slot.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -35,7 +35,7 @@
           "phase": "attack"
         }
       ],
-      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "brief": "Adventurer dagger reference for the class's right-hand thrust. Prepare a static Studio weapon rendition with an aligned grip. In-game use requires compatibility with the Adventurer handheld slot.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -58,7 +58,7 @@
           "phase": "attack"
         }
       ],
-      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "brief": "Ranger bow reference for the class's ranged attack. Prepare a static Studio weapon rendition with an aligned grip. In-game use requires compatibility with the Ranger handheld slot.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -81,7 +81,7 @@
           "phase": "attack"
         }
       ],
-      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "brief": "Dawnweaver scepter reference for the class's casting silhouette. Prepare a static Studio weapon rendition with an aligned grip. In-game use requires compatibility with the Dawnweaver handheld slot.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -110,7 +110,7 @@
           "state": "repeater"
         }
       ],
-      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. Static handheld submissions are supported; custom moving-part animation and coordinated two-gun sets require a future profile. Explicit item selection stays selected in both modes.",
+      "brief": "Wildspark's approved repeater reference has engine-controlled rotor animation. Submit the exact model for Wildspark's repeater slot and check its grip and silhouette in burst-fire motion. A single-gun release for this slot uses the packaged launcher in rocket mode and during accepted launcher draws.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -139,7 +139,7 @@
           "state": "rockets"
         }
       ],
-      "brief": "The second gun in the class-default Q switch. Individual static handheld submission is supported. Mode-specific cosmetic set approval and equipment are future work; this is not a third Q weapon.",
+      "brief": "Wildspark's approved launcher reference applies in rocket mode and during accepted launcher draws. Review the exact model on Wildspark in those states. A single-gun release for this slot uses Wildspark's packaged repeater in repeater mode.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -344,7 +344,7 @@
           "phase": "attack"
         }
       ],
-      "brief": "Riftshot retains the original repeater model. Submit a static handheld through the existing weapon profile.",
+      "brief": "Riftshot's approved default is the original repeater. Submit the exact model for Riftshot's slot and review it in Riftshot's firing pose. Use by another character requires its own approved slot binding.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -360,7 +360,7 @@
   "sourceEvidence": [
     {
       "sourcePath": "shared/src/handheld.rs",
-      "sha256": "fe7c7e8567c1fd11d23833ad5a6bda0af850b4478f3b01336ef3528e21c684b8"
+      "sha256": "f72f9b129605579e83cbd57b6e57c67f4673ab244a11c5a77a27002ab49311aa"
     },
     {
       "sourcePath": "client/src/skill_presentation/effects.rs",
@@ -376,7 +376,7 @@
     },
     {
       "sourcePath": "client/src/held_weapons.rs",
-      "sha256": "0e53506c86688591d7c55450deb6a2595371208d793c6231cb9ec2c2f687d644"
+      "sha256": "2d39dc0275edf98f220169ce590b3565f3f177730306dbd3574a920f691cb24f"
     }
   ],
   "iconAtlases": [
