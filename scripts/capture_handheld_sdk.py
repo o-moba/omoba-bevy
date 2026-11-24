@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""One native Warrior check with an actual Ekza SDK-imported prop.
-The HTTP fixture is explicit local approval evidence, not a live Space listing.
+"""One native Warrior check with a local copy of the reviewed Forge Hammer.
+The loopback fixture reproduces the pilot asset identity and rendition.
 """
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +14,9 @@ import threading
 from urllib.parse import urlparse, parse_qs
 from capture_standard_skills import capture
 
+PILOT_WEAPON_ID = 'ekza:weapon:38a9903e-b3ec-4b12-a5f8-83516c77ba8b'
+PILOT_WEAPON_SLUG = 'ekza-64a577b6a472c3bacbf809a045c6327d'
+
 
 def verify_attachments(directory, imported_id):
     summary = json.loads((directory / 'qa-summary.json').read_text())
@@ -23,7 +26,7 @@ def verify_attachments(directory, imported_id):
         '07-running.png': ('forge-sword', 'Run'),
         '02-sword-attack.png': ('forge-sword', 'Attack'),
         '03-hammer-attack.png': ('forge-hammer', 'Attack'),
-        '04-scepter-avatar-swap.png': (imported_id, 'Attack'),
+        '04-weapon-avatar-swap.png': (imported_id, 'Attack'),
         '05-empty-hands.png': (None, 'Attack'),
     }
     assert set(frames) == set(expected) | {'01-selection.png'}
@@ -38,7 +41,7 @@ def verify_attachments(directory, imported_id):
         assert [w['id'] for w in attached if w['owner'] == 1] == ([item] if item else []), name
         assert [w['id'] for w in attached if w['owner'] == 2] == ['forge-sword'], name
         assert frame['animations']['1'][0] == animation, name
-        avatar = 'orion' if name in ('04-scepter-avatar-swap.png', '05-empty-hands.png') else 'agnes'
+        avatar = 'orion' if name in ('04-weapon-avatar-swap.png', '05-empty-hands.png') else 'agnes'
         assert any(r['owner'] == 1 and r['avatar'] == avatar and r['bound_to_model']
                    and r['model'] == f'avatars/{avatar}.glb' for r in frame['rigs']), name
         if animation == 'Attack':
@@ -56,7 +59,11 @@ def main():
     a.output=a.output.resolve();a.output.mkdir(parents=True,exist_ok=False)
     assets=a.output/'assets'
     shutil.copytree(a.assets.resolve(),assets,copy_function=os.link,ignore=shutil.ignore_patterns('imported','ekza-manifest.json'))
-    build=subprocess.run([str(a.builder_bin.resolve()),'--source',str(assets/'weapons/dawn-scepter.glb'),'--output-dir',str(a.output/'rendition')],capture_output=True,text=True,check=True)
+    build = subprocess.run(
+        [str(a.builder_bin.resolve()), '--source', str(assets / 'weapons/forge-hammer.glb'),
+         '--output-dir', str(a.output / 'rendition')],
+        capture_output=True, text=True, check=True,
+    )
     report=json.loads(build.stdout)
     (a.output/'builder-report.json').write_text(json.dumps(report,indent=2)+'\n')
     model=Path(report['assetPath']).read_bytes()
@@ -68,9 +75,17 @@ def main():
             u=urlparse(self.path);requests.append(self.path)
             if u.path=='/v2/avatars':
                 assert parse_qs(u.query)=={'project':['omoba'],'platform':['desktop'],'profile':['handheld-glb-v1']}
-                entry=dict(id='ekza:avatar:3d11cb41-7c3a-4c32-bf90-b97431235935',name='SDK Dawn Scepter',access='free',projectSupport=[dict(projectId='omoba',platform='desktop',profile='handheld-glb-v1',status='approved')],renditions=[dict(platform='desktop',profile='handheld-glb-v1',format='glb',sha256=report['sha256'],sizeBytes=len(model),downloadUrl=f'http://127.0.0.1:{server.server_port}/scepter.glb')])
+                entry = dict(
+                    id=PILOT_WEAPON_ID, name='Forge Hammer', access='free',
+                    projectSupport=[dict(projectId='omoba', platform='desktop',
+                                         profile='handheld-glb-v1', status='approved')],
+                    renditions=[dict(platform='desktop', profile='handheld-glb-v1', format='glb',
+                                     sha256=report['sha256'], sizeBytes=len(model),
+                                     downloadUrl=f'http://127.0.0.1:{server.server_port}/forge-hammer.glb')],
+                )
                 body=json.dumps(dict(schema='ekza.avatar.catalog.v2',count=1,items=[entry])).encode()
-            elif u.path=='/scepter.glb':body=model
+            elif u.path == '/forge-hammer.glb':
+                body = model
             else:self.send_error(404);return
             self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
@@ -81,6 +96,7 @@ def main():
     finally:server.shutdown();server.server_close();thread.join()
     manifest=assets/'weapons/ekza-manifest.json'
     entry=json.loads(manifest.read_text())['items'][0]
+    assert entry['id'] == PILOT_WEAPON_SLUG
     assert (assets/entry['model']).read_bytes()==model
     os.environ['OMOBA_WEAPON_MANIFEST']=str(manifest)
     result=capture('warrior',a.client_bin.resolve(),a.server_bin.resolve(),assets,a.output/'native',timeout=90,roster=True,handhelds=True,sdk_weapon=entry['id'])

@@ -19,9 +19,7 @@
 //! both files; `python3 scripts/export_game_contract.py --output shared/assets/catalog`
 //! then adds the header (see [`HEADER_KEYS`], [`PROVENANCE_KEYS`]). Without the variable the
 //! test fails when a committed file is stale.
-use crate::held_weapons::{
-    MUZZLE_WINDOW_SECS, flashes_muzzle, muzzle_point, shown_model, slot_mode,
-};
+use crate::held_weapons::{MUZZLE_WINDOW_SECS, flashes_muzzle, muzzle_point, slot_mode};
 use crate::humanoid::SharedHumanoidMotion;
 use crate::skill_presentation::cast::CastKey;
 use crate::skill_presentation::category;
@@ -644,7 +642,7 @@ impl Facts {
             };
             let def = omoba_passport::weapon_store::definition(item)
                 .ok_or_else(|| format!("{cid}: unknown handheld {item}"))?;
-            let model = shown_model(class, true, &def);
+            let model = def.model.clone();
             handheld_assets.push(HandheldAsset {
                 mode: switches.then(|| mode_id(mode)),
                 item: item.to_owned(),
@@ -759,7 +757,7 @@ fn slot_handheld(
     let shown = slot_mode(class, skill, mode);
     let item = HandheldSelection::ClassDefault.resolve_mode(class, shown)?;
     let def = omoba_passport::weapon_store::definition(item)?;
-    let model = shown_model(class, true, &def);
+    let model = def.model.clone();
     let muzzle = flashes_muzzle(action_slot, skill) && muzzle_point(&model, shown, None).is_some();
     let base = HandheldSelection::ClassDefault.resolve_mode(class, WeaponMode::Repeater);
     let by_mode = [WeaponMode::Rockets]
@@ -1201,7 +1199,7 @@ fn render_asset_notes(facts: &Facts) -> Result<Value, String> {
             },
         },
         "sources": {
-            "handhelds": "shared/src/handheld.rs (HandheldSelection::resolve_mode), client/assets/weapons/manifest.json (grip), client/src/held_weapons.rs (shown_model, slot_mode, muzzle_point)",
+            "handhelds": "shared/src/handheld.rs (HandheldSelection::resolve_mode), client/assets/weapons/manifest.json (grip), client/src/held_weapons.rs (slot_mode, muzzle_point)",
             "weaponModes": "shared/src/loadout.rs (AttackProfileId::Repeater, WeaponMode), client/src/held_weapons.rs (slot_mode)",
             "basicAttack": "common/src/basic_attack.rs (melee contact, repeater bullet or rocket, else the catalogue projectile_style), shared/assets/catalog/heroes.json",
             "bodies": "client/assets/config/skills.skillfx (body.model, aux.<kind>.model), client/src/skill_presentation/effects.rs (cosmetics/standard/<model>.glb)",

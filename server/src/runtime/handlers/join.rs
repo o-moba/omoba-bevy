@@ -77,6 +77,13 @@ impl ServerRuntime {
             self.fill_practice_bots(now);
             return ControlFlow::Break(());
         }
+        // A practice round restart may have removed the retained seat that
+        // supplied the class during admission. A fresh seat uses this class.
+        if !handheld.compatible(hero_class) {
+            world.players.get_mut(&addr).unwrap().join_error =
+                Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
+            return ControlFlow::Break(());
+        }
         // Team resolution: `ClientChoice` (dev) honors the client's
         // choice; `Balanced` (release) balances teams server-side
         // (rejoining players keep their original team);

@@ -124,6 +124,10 @@ impl PracticeSession {
                 {
                     return;
                 }
+                if !handheld.compatible(hero_class) {
+                    self.reject_join(JoinRejection::AvatarNotAuthorized);
+                    return;
+                }
                 self.error = None;
                 self.world.ensure_connected(LOCAL_ADDR, self.now);
                 let p = self.world.players.get_mut(&LOCAL_ADDR).unwrap();
@@ -392,6 +396,31 @@ mod tests {
             p.advance(0.05);
         }
     }
+
+    #[test]
+    fn incompatible_handheld_is_rejected_before_join_and_can_be_retried() {
+        use shared::handheld::HandheldSelection;
+        let mut practice = PracticeSession::new(Instant::now());
+        let equipped = |id: &str| {
+            let mut packet = join(HeroClass::Wildspark);
+            let ClientPacket::Join { handheld, .. } = &mut packet else {
+                unreachable!()
+            };
+            *handheld = HandheldSelection::Item(id.into());
+            packet
+        };
+        practice.command(equipped("forge-sword"));
+        assert_eq!(practice.error, Some(JoinRejection::AvatarNotAuthorized));
+        assert!(practice.world.players.is_empty());
+
+        practice.command(equipped("wildspark-repeater"));
+        assert_eq!(practice.error, None);
+        assert_eq!(
+            practice.world.players[&LOCAL_ADDR].hero.identity.handheld,
+            HandheldSelection::Item("wildspark-repeater".into())
+        );
+    }
+
     #[test]
     fn terminal_rematch_is_once_only_and_late_retries_do_not_reset_movement() {
         let mut p = PracticeSession::new(Instant::now());

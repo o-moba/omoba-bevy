@@ -159,8 +159,6 @@ class Exporter:
                     "Only licensed bundled handheld GLBs are published in v1")
             require(raw.get("license") == "CC-BY-4.0"
                     and raw.get("attribution") == "Open Moba contributors", "Missing model provenance")
-            require(len(data) >= 12 and data[:4] == b"glTF"
-                    and struct.unpack("<II", data[4:12]) == (2, len(data)), "Invalid GLB header")
             result.update(self.publish(data, "glb"))
             if self.preview_dir:
                 preview = self.preview_dir / f"{result['sha256']}.png"
@@ -288,12 +286,29 @@ class Exporter:
         require(not runtime_rocket.get("form") and rocket.get("sourcePath") ==
                 "client/assets/" + runtime_rocket.get("model", {}).get("path", ""),
                 "Wildspark effective rocket form changed; update its authored brief")
-        # The class-default override is pinned through held_weapons.rs evidence.
-        default_repeater = "client/assets/weapons/wildspark-repeater.glb"
-        require(requirements.get("wildspark.handheld.repeater", {}).get("baseline", {}).get("sourcePath")
-                == default_repeater, "Wildspark default repeater binding changed")
-        licensed_models = {"client/assets/" + weapon["model"] for weapon in weapons.values()}
-        licensed_models.add(default_repeater)
+        # The two repeaters have distinct packaged identities and creator references.
+        for character, weapon_id in (("wildspark", "wildspark-repeater"), ("riftshot", "wild-repeater")):
+            baseline = requirements.get(f"{character}.handheld.repeater", {}).get("baseline", {})
+            require(weapon_id in weapons and baseline.get("sourcePath") == "client/assets/" + weapons[weapon_id]["model"],
+                    f"{character.capitalize()} default repeater binding changed")
+        licensed_models = {}
+        for weapon in weapons.values():
+            source = "client/assets/" + weapon["model"]
+            require(source.startswith("client/assets/weapons/") and source.endswith(".glb"),
+                    f"Invalid handheld model path: {source}")
+            expected = weapon.get("sha256")
+            require(isinstance(expected, str) and re.fullmatch(r"[0-9a-f]{64}", expected),
+                    f"Missing or invalid handheld approval SHA-256: {source}")
+            data = self.read(source)
+            require(len(data) >= 12 and data[:4] == b"glTF"
+                    and struct.unpack("<II", data[4:12]) == (2, len(data)), "Invalid GLB header")
+            require(digest(data) == expected, f"Handheld manifest SHA-256 mismatch: {source}")
+            approved_classes = weapon.get("approved_classes")
+            require(isinstance(approved_classes, list) and approved_classes
+                    and all(isinstance(cid, str) and cid in heroes for cid in approved_classes)
+                    and len(set(approved_classes)) == len(approved_classes),
+                    f"Invalid handheld hero approvals: {weapon['id']}")
+            licensed_models.setdefault(source, set()).update(approved_classes)
         # A symbolic runtime model is a real requirement only when its usage is
         # described explicitly, including secondary bodies such as the orb.
         for sid, row in presentation["skills"].items():
@@ -341,9 +356,13 @@ class Exporter:
                     classes[cid]["basicAttack"]["requirementIds"].append(rid)
             row["classIds"] = sorted(class_ids)
             row["uses"] = sorted(row["uses"], key=canonical)
-            if row["baseline"]["kind"] == "model":
-                require(row["baseline"]["sourcePath"] in licensed_models, f"Unlisted handheld model: {rid}")
-            row["baseline"] = self.baseline(row["baseline"])
+            baseline = row["baseline"]
+            if baseline["kind"] == "model":
+                source = baseline["sourcePath"]
+                require(source in licensed_models, f"Unlisted handheld model: {rid}")
+                require(class_ids <= licensed_models[source],
+                        f"Handheld baseline lacks approval for its heroes: {rid}")
+            row["baseline"] = self.baseline(baseline)
             for cid in class_ids:
                 classes[cid]["requirementIds"].append(rid)
 

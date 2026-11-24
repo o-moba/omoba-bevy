@@ -7,6 +7,7 @@
 // i18n-strict
 use crate::ui::Button;
 use bevy::{prelude::*, window::PrimaryWindow};
+use omoba_passport::weapon_store;
 use shared::{
     HeroClass,
     prematch::{DraftPlayer, PrematchAction, PrematchPhase, PrematchRequest, Role},
@@ -97,12 +98,13 @@ impl Choice {
             self.role = class.primary_role();
         }
         self.hero_class = class;
+        self.handheld = crate::team::handheld_for_class(&self.handheld, class);
     }
 }
 impl From<&DraftPlayer> for Choice {
     fn from(player: &DraftPlayer) -> Self {
         Self {
-            handheld: player.handheld.clone(),
+            handheld: crate::team::handheld_for_class(&player.handheld, player.hero_class),
             character: player.character,
             hero_class: player.hero_class,
             avatar: player.avatar.clone(),
@@ -179,13 +181,14 @@ fn sync_draft(
     let namespace = (game.meta.server_epoch, game.meta.match_id, draft.generation);
     let local = draft.players.iter().find(|p| p.player_id == game.your_id);
     if let Some(local) = local {
+        let handheld = crate::team::handheld_for_class(&local.handheld, local.hero_class);
         if let Some(selection) = selection.as_mut() {
-            if selection.handheld != local.handheld {
-                selection.handheld = local.handheld.clone();
+            if selection.handheld != handheld {
+                selection.handheld = handheld.clone();
             }
         }
         if let Some(session) = session.as_mut() {
-            session.remember_handheld(&local.handheld);
+            session.remember_handheld(&handheld);
         }
     }
     if state.namespace != Some(namespace) {
@@ -302,16 +305,20 @@ fn draft_actions(
                 state.notice = None;
             }
             DraftAction::Handheld(value) => {
+                let choice = state.choice.get_or_insert_with(|| Choice::from(local));
+                if !value.compatible(choice.hero_class) {
+                    state.notice = Some(tr("draft.notice.weapon_incompatible").into());
+                    continue;
+                }
                 if let shared::handheld::HandheldSelection::Item(id) = value {
-                    if !omoba_passport::weapon_store::eligible(id) {
+                    if !weapon_store::eligible(id) {
+                        state.notice = Some(tr("collection.weapon_not_available").into());
                         continue;
                     }
-                    omoba_passport::weapon_store::model_state(id);
+                    weapon_store::model_state(id);
                 }
-                state
-                    .choice
-                    .get_or_insert_with(|| Choice::from(local))
-                    .handheld = value.clone();
+                choice.handheld = value.clone();
+                state.notice = None;
             }
             DraftAction::Role(role) => {
                 if let Some(choice) = &mut state.choice {
@@ -898,10 +905,19 @@ fn render_draft(
                                 }
                             });
                     }
-                    if !compact || state.picker_tab == PickerTab::Weapons {
+                    if let Some(class) = choice
+                        .map(|choice| choice.hero_class)
+                        .or_else(|| local.map(|player| player.hero_class))
+                        && (!compact || state.picker_tab == PickerTab::Weapons)
+                    {
                         use super::collection::HandheldGroup;
-                        let choices = super::collection::handheld_choices();
-                        picker.spawn(widgets::label(tr("collection.weapons"), 12.0, theme::MUTED));
+                        let choices = super::collection::handheld_choices(class);
+                        let hero_name = data::hero_name(class);
+                        picker.spawn(widgets::label(
+                            &trf("draft.weapons_for", &[("hero", &hero_name)]),
+                            12.0,
+                            theme::MUTED,
+                        ));
                         if let Some(status) = choice
                             .and_then(|choice| super::collection::handheld_status(&choice.handheld))
                         {
@@ -1849,6 +1865,78 @@ mod tests {
         assert_eq!(
             app.world().resource::<DraftClient>().notice.as_deref(),
             Some("Состав изменился. Проверьте команду и подтвердите выбор снова.")
+        );
+    }
+
+    #[test]
+    fn draft_class_change_clears_an_incompatible_weapon_and_ignores_stale_presses() {
+        use shared::handheld::HandheldSelection;
+        let mut app = request_app();
+        app.add_message::<Activated<DraftAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(
+                Update,
+                draft_actions.after(sync_draft).before(send_requests),
+            );
+        let sword = HandheldSelection::Item("forge-sword".into());
+        for action in [
+            DraftAction::Handheld(sword.clone()),
+            DraftAction::Class(HeroClass::Wildspark),
+        ] {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
+        let requests = drain_requests(&mut app);
+        assert!(matches!(
+            requests.as_slice(),
+            [PrematchRequest {
+                action: PrematchAction::Select {
+                    hero_class: HeroClass::Wildspark,
+                    handheld: HandheldSelection::ClassDefault,
+                    ..
+                },
+                ..
+            }]
+        ));
+        app.world_mut().write_message(Activated {
+            action: DraftAction::Handheld(sword),
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(drain_requests(&mut app).is_empty());
+        let state = app.world().resource::<DraftClient>();
+        assert_eq!(
+            state.choice.as_ref().unwrap().handheld,
+            HandheldSelection::ClassDefault
+        );
+        assert_eq!(
+            state.notice.as_deref(),
+            Some(tr("draft.notice.weapon_incompatible"))
+        );
+
+        app.init_resource::<crate::team::TeamSelection>();
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.generation += 1;
+            draft.players[0].hero_class = HeroClass::Wildspark;
+            draft.players[0].handheld = HandheldSelection::Item("wild-repeater".into());
+        }
+        app.update();
+        assert!(drain_requests(&mut app).is_empty());
+        let state = app.world().resource::<DraftClient>();
+        assert_eq!(
+            state.choice.as_ref().unwrap().handheld,
+            HandheldSelection::ClassDefault
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::team::TeamSelection>()
+                .handheld,
+            HandheldSelection::ClassDefault
         );
     }
 

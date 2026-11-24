@@ -4,7 +4,7 @@ mod ui;
 
 use crate::net::{GameStateSnapshot, NetworkCommand};
 use bevy::prelude::*;
-use shared::sandbox::*;
+use shared::{handheld::HandheldSelection, sandbox::*};
 use std::{
     collections::{HashMap, VecDeque},
     sync::OnceLock,
@@ -192,6 +192,23 @@ impl SandboxClient {
     }
 }
 
+fn handheld_available(choice: &HandheldSelection, class: shared::HeroClass) -> bool {
+    choice.compatible(class)
+        && match choice {
+            HandheldSelection::Item(id) => omoba_passport::weapons::catalog()
+                .items
+                .iter()
+                .any(|weapon| weapon.id == *id),
+            _ => true,
+        }
+}
+
+fn normalize_handheld(actor: &mut ActorConfig) {
+    if !handheld_available(&actor.handheld, actor.hero) {
+        actor.handheld = HandheldSelection::ClassDefault;
+    }
+}
+
 pub(crate) struct SandboxPlugin;
 impl Plugin for SandboxPlugin {
     fn build(&self, app: &mut App) {
@@ -223,7 +240,7 @@ fn autojoin(
     let Some(hero) = launch().hero else {
         return;
     };
-    selection.hero_class = hero;
+    selection.pick_class(hero);
     selection.team = Some(crate::team::Team::Green);
     commands.write(NetworkCommand::Join {
         handheld: Default::default(),

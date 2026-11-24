@@ -12,6 +12,7 @@ use bevy::{
     input::keyboard::{Key, KeyboardInput},
     window::PrimaryWindow,
 };
+use shared::HeroClass;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Tab {
@@ -247,7 +248,7 @@ enum Action {
     Step(Field, f32),
     Hero(shared::HeroClass),
     Avatar(String),
-    Handheld(shared::handheld::HandheldSelection),
+    Handheld(HandheldSelection),
     Stage(u32),
     Xp(i32),
     Command(SandboxCommand),
@@ -322,6 +323,8 @@ struct Root;
 struct Body;
 #[derive(Component)]
 struct Overlay;
+#[derive(Component)]
+struct HandheldOptions(HeroClass);
 
 pub(super) fn install(app: &mut App) {
     #[cfg(feature = "qa")]
@@ -335,6 +338,7 @@ pub(super) fn install(app: &mut App) {
                 edit_keys,
                 teleport,
                 build_panel,
+                refresh_handheld_options,
                 refresh_labels,
                 overlay,
             )
@@ -429,6 +433,43 @@ fn toggle(parent: &mut ChildSpawnerCommands, t: Toggle, s: &SandboxClient) {
 fn heading(parent: &mut ChildSpawnerCommands, text: &str) {
     parent.spawn(w::label(text, 16.0, theme::GOLD));
 }
+
+fn handheld_buttons(parent: &mut ChildSpawnerCommands, class: HeroClass) {
+    button(
+        parent,
+        "Class default",
+        Action::Handheld(HandheldSelection::ClassDefault),
+    );
+    button(
+        parent,
+        "Empty hands",
+        Action::Handheld(HandheldSelection::Unequipped),
+    );
+    for item in &omoba_passport::weapons::catalog().items {
+        let choice = HandheldSelection::Item(item.id.clone());
+        if choice.compatible(class) {
+            button(parent, &item.name, Action::Handheld(choice));
+        }
+    }
+}
+
+fn refresh_handheld_options(
+    mut commands: Commands,
+    state: Res<SandboxClient>,
+    mut rows: Query<(Entity, &mut HandheldOptions)>,
+) {
+    let class = state.actor_config().hero;
+    for (entity, mut options) in &mut rows {
+        if options.0 != class {
+            options.0 = class;
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .with_children(|row| handheld_buttons(row, class));
+        }
+    }
+}
+
 fn build_panel(
     mut commands: Commands,
     mut state: ResMut<SandboxClient>,
@@ -468,7 +509,9 @@ fn build_panel(
                 }
                 p.spawn(row()).with_children(|r|for i in 0..4{button(r,format!("Cast {}",["Q","W","E","R"][i]),Action::Command(SandboxCommand::ForceCast{actor:state.actor,slot:i as u8,target_id:None}));});
                 heading(p,"Grant equipment");p.spawn(row()).with_children(|r|{for item in shared::shop::items(){button(r,item.name,Action::Item(item.id));}button(r,"Clear inventory",Action::ClearItems);});
-                heading(p,"Handheld appearance");p.spawn(row()).with_children(|r|{button(r,"Class default",Action::Handheld(Default::default()));button(r,"Empty hands",Action::Handheld(shared::handheld::HandheldSelection::Unequipped));for item in &omoba_passport::weapons::catalog().items {button(r,&item.name,Action::Handheld(shared::handheld::HandheldSelection::Item(item.id.clone())));}});
+                heading(p,"Handheld appearance");
+                let class = state.actor_config().hero;
+                p.spawn((row(), HandheldOptions(class))).with_children(|r| handheld_buttons(r, class));
                 heading(p,"Shipped appearances");p.spawn(row()).with_children(|r|for avatar in omoba_passport::avatars::avatar_roster().iter().filter(|a|a.passport.is_none()){button(r,&avatar.slug,Action::Avatar(avatar.slug.clone()));});
             },
             Tab::Dummy=>{
@@ -581,11 +624,17 @@ fn actions(
                 let actor = s.actor_config_mut();
                 actor.hero = *hero;
                 actor.recipe = None;
+                normalize_handheld(actor);
                 s.apply();
             }
             Action::Handheld(choice) => {
-                s.actor_config_mut().handheld = choice.clone();
-                s.apply();
+                let actor = s.actor_config_mut();
+                if handheld_available(choice, actor.hero) {
+                    actor.handheld = choice.clone();
+                    s.apply();
+                } else {
+                    s.status = "This weapon is unavailable for the selected class.".into();
+                }
             }
             Action::Avatar(slug) => {
                 s.actor_config_mut().avatar = Some(slug.clone());
@@ -1032,6 +1081,69 @@ fn draw_geometry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn combat_test_updates_weapon_buttons_without_rebuilding_the_panel() {
+        let mut app = App::new();
+        crate::ui::scroll::harness::install(&mut app, crate::platform::UiProfile::Desktop);
+        app.insert_resource(SandboxClient {
+            enabled: true,
+            open: true,
+            rebuild: true,
+            ..default()
+        })
+        .insert_resource(crate::net::ClientSession::admitted_for_test())
+        .init_resource::<GameStateSnapshot>()
+        .add_message::<NetworkCommand>()
+        .add_message::<Activated<Action>>()
+        .add_systems(
+            Update,
+            (actions, build_panel, refresh_handheld_options).chain(),
+        );
+        let sword_choice = HandheldSelection::Item("forge-sword".into());
+        let riftshot_repeater = HandheldSelection::Item("wild-repeater".into());
+        app.world_mut()
+            .resource_mut::<SandboxClient>()
+            .config
+            .player
+            .handheld = sword_choice.clone();
+        app.update();
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<Root>>()
+            .single(app.world())
+            .unwrap();
+        let sword = Action::Handheld(sword_choice.clone()).test_id();
+        let repeater =
+            Action::Handheld(HandheldSelection::Item("wildspark-repeater".into())).test_id();
+        let riftshot_repeater_button = Action::Handheld(riftshot_repeater.clone()).test_id();
+        assert!(crate::ui::test_id::harness::find(app.world_mut(), &sword).is_some());
+        assert!(crate::ui::test_id::harness::find(app.world_mut(), &repeater).is_none());
+
+        for action in [
+            Action::Hero(HeroClass::Wildspark),
+            Action::Handheld(sword_choice),
+            Action::Handheld(riftshot_repeater),
+        ] {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
+        assert!(app.world().get::<Root>(root).is_some());
+        assert!(crate::ui::test_id::harness::find(app.world_mut(), &sword).is_none());
+        assert!(crate::ui::test_id::harness::find(app.world_mut(), &repeater).is_some());
+        assert!(
+            crate::ui::test_id::harness::find(app.world_mut(), &riftshot_repeater_button).is_none()
+        );
+        let state = app.world().resource::<SandboxClient>();
+        assert_eq!(
+            state.config.player.handheld,
+            HandheldSelection::ClassDefault
+        );
+        assert_eq!(state.queue.len(), 1);
+    }
+
     #[test]
     fn combat_test_body_scrolls_by_wheel_on_every_build() {
         use crate::platform::UiProfile;

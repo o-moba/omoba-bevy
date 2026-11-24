@@ -319,13 +319,37 @@ fn frozen_result_contains_offline_totals_and_survives_round_reset_until_ack() {
 
 #[test]
 fn authenticated_reclaim_requires_profile_and_signed_session_preserving_round_id() {
+    use shared::handheld::HandheldSelection;
     let mut rt = runtime(MatchConfig::release(1), true);
     let now = Instant::now();
-    authenticated_join(&mut rt, addr(59331), 31, 1000, false, now);
+    let owner = addr(59331);
+    let sword = HandheldSelection::Item("forge-sword".into());
+    let packet = |item| {
+        let mut packet = join("session-31");
+        let ClientPacket::Join {
+            hero_class,
+            handheld,
+            ..
+        } = &mut packet
+        else {
+            unreachable!()
+        };
+        *hero_class = HeroClass::Warrior;
+        *handheld = item;
+        packet
+    };
+    rt.career
+        .backend
+        .test_authenticated(owner, profile(31, 1000, false), "session-31");
+    rt.handle_packet(owner, packet(sword.clone()), now);
+    rt.world.players.get_mut(&owner).unwrap().career_capable = true;
+    assert_eq!(rt.world.players[&owner].hero.identity.handheld, sword);
     authenticated_join(&mut rt, addr(59332), 32, 1000, false, now);
     start(&mut rt, now);
-    let id = rt.world.players[&addr(59331)].hero.identity.id;
-    rt.world.players.get_mut(&addr(59331)).unwrap().hero.hp = 17.0;
+    rt.handle_packet(owner, packet(HandheldSelection::Unequipped), now);
+    assert_eq!(rt.world.players[&owner].hero.identity.handheld, sword);
+    let id = rt.world.players[&owner].hero.identity.id;
+    rt.world.players.get_mut(&owner).unwrap().hero.hp = 17.0;
     let later = now + PLAYER_TIMEOUT + Duration::from_secs(1);
     rt.world.players.get_mut(&addr(59332)).unwrap().last_seen = later;
     rt.maintain_roster(later);
@@ -350,9 +374,13 @@ fn authenticated_reclaim_requires_profile_and_signed_session_preserving_round_id
     rt.career
         .backend
         .test_authenticated(addr(59335), profile(31, 1000, false), "session-31");
-    rt.handle_packet(addr(59335), join("session-31"), later);
+    rt.handle_packet(addr(59335), packet(HandheldSelection::Unequipped), later);
     assert_eq!(rt.world.players[&addr(59335)].hero.identity.id, id);
     assert_eq!(rt.world.players[&addr(59335)].hero.hp, 17.0);
+    assert_eq!(
+        rt.world.players[&addr(59335)].hero.identity.handheld,
+        HandheldSelection::Unequipped
+    );
     assert_eq!(rt.combat_log.ledger.snapshot().len(), 2);
     assert!(
         !rt.combat_log
