@@ -1868,6 +1868,7 @@ mod tests {
                 sprite_character: Some("ronin".into()),
                 role: Default::default(),
                 is_bot: false,
+                bot_persona: None,
                 locked: false,
                 loaded: false,
             };

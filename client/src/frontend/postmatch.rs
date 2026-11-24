@@ -2557,6 +2557,8 @@ mod tests {
                 elapsed_secs: 720,
                 kills: Vec::new(),
                 players: vec![LiveScorePlayer {
+                    is_bot: false,
+                    bot_persona: None,
                     avatar: None,
                     player_id: 11,
                     nickname: "Guest".into(),

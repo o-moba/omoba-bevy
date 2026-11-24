@@ -75,6 +75,14 @@ pub enum SocialEventKind {
     },
 }
 
+/// Server-authored alternatives for an authored chat line. The regular chat
+/// text remains the Russian fallback for peers that predate these alternatives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BotChatTranslation {
+    pub en: String,
+    pub zh_hans: String,
+}
+
 /// Every field is supplied by the server after admission and audience checks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SocialEvent {
@@ -85,6 +93,21 @@ pub struct SocialEvent {
     /// Age at serialization, so a delayed/repeated event cannot restart a bubble.
     pub age_ms: u32,
     pub kind: SocialEventKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_chat: Option<BotChatTranslation>,
+}
+
+impl SocialEvent {
+    pub fn chat_text(&self, locale: &str) -> Option<&str> {
+        let SocialEventKind::Chat { text, .. } = &self.kind else {
+            return None;
+        };
+        Some(match (&self.bot_chat, locale) {
+            (Some(line), "zh-Hans") => &line.zh_hans,
+            (Some(line), locale) if locale != "ru" => &line.en,
+            _ => text,
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -600,11 +623,36 @@ mod tests {
                 channel: SocialChannel::Team,
                 text: "走吧".into(),
             },
+            bot_chat: None,
         };
         let encoded = serde_json::to_vec(&event).unwrap();
+        assert!(
+            serde_json::to_value(&event)
+                .unwrap()
+                .get("bot_chat")
+                .is_none()
+        );
+        assert_eq!(event.chat_text("en"), Some("走吧"));
         assert_eq!(
             serde_json::from_slice::<SocialEvent>(&encoded).unwrap(),
             event
         );
+        let bot_event = SocialEvent {
+            kind: SocialEventKind::Chat {
+                channel: SocialChannel::Match,
+                text: "Удачи!".into(),
+            },
+            bot_chat: Some(BotChatTranslation {
+                en: "Good luck!".into(),
+                zh_hans: "好运！".into(),
+            }),
+            ..event
+        };
+        let encoded = serde_json::to_vec(&bot_event).unwrap();
+        let decoded = serde_json::from_slice::<SocialEvent>(&encoded).unwrap();
+        assert_eq!(decoded, bot_event);
+        assert_eq!(decoded.chat_text("ru"), Some("Удачи!"));
+        assert_eq!(decoded.chat_text("en"), Some("Good luck!"));
+        assert_eq!(decoded.chat_text("zh-Hans"), Some("好运！"));
     }
 }

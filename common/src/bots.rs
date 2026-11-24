@@ -5,8 +5,10 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use shared::bot_personas::BotPersonaId;
 use shared::bot_profile::BotDifficulty;
 use shared::map::{Lane, Team};
+use shared::prematch::Role;
 use shared::progression::equipped_skill_upgrade_order;
 use shared::shop::plan_purchases;
 use shared::wire::{GameState, TargetId, TargetKind, default_character_choice};
@@ -33,12 +35,12 @@ use shared::math::hero_yaw_towards;
 /// A five-player team, one class per duty. Bots take the first entry whose
 /// class is not on their team yet (humans pick first); the lane is the fallback
 /// when the Warden has no living camp to clear.
-const BOT_COMPOSITION: [(HeroClass, Lane, bool); 5] = [
-    (HeroClass::Mage, Lane::Mid, false),
-    (HeroClass::Warrior, Lane::Top, false),
-    (HeroClass::Ranger, Lane::Bot, false),
-    (HeroClass::Warden, Lane::Mid, true),
-    (HeroClass::Cleric, Lane::Bot, false),
+const BOT_COMPOSITION: [(HeroClass, Lane, bool, Role); 5] = [
+    (HeroClass::Mage, Lane::Mid, false, Role::Mid),
+    (HeroClass::Warrior, Lane::Top, false, Role::Solo),
+    (HeroClass::Ranger, Lane::Bot, false, Role::Carry),
+    (HeroClass::Warden, Lane::Mid, true, Role::Jungle),
+    (HeroClass::Cleric, Lane::Bot, false, Role::Support),
 ];
 const HERO_SPACING: f32 = shared::PLAYER_TARGET_RADIUS * 2.0 + 0.08;
 
@@ -1047,6 +1049,8 @@ pub struct BotControllers {
     /// Scratch for the sight of the team a lower-level bot thinks for. It is
     /// reused, so the level gates allocate nothing per think tick.
     sight: Vec<shared::vision::VisionSource>,
+    persona_seed: u64,
+    roster_personas: Option<VecDeque<BotPersonaId>>,
     pub defer_fill: bool,
     /// A practice sandbox command replaced the standard roster: no automatic
     /// refill or trimming until `PracticeCommand::Roster` or a round reset
@@ -1055,6 +1059,47 @@ pub struct BotControllers {
 }
 
 impl BotControllers {
+    pub fn with_persona_seed(persona_seed: u64) -> Self {
+        Self {
+            persona_seed,
+            ..Self::default()
+        }
+    }
+
+    fn next_roster_persona(
+        &mut self,
+        players: &HashMap<SocketAddr, ConnectedPlayer>,
+        match_id: u64,
+    ) -> Option<BotPersonaId> {
+        let personas = self.roster_personas.get_or_insert_with(|| {
+            let mut personas = BotPersonaId::ALL;
+            let mut state = self.persona_seed.wrapping_add(match_id.rotate_left(32));
+            // Fisher–Yates with a locally seeded SplitMix64 stream.
+            for index in (1..personas.len()).rev() {
+                state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                let sample = (state ^ (state >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                let sample = (sample ^ (sample >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                let sample = sample ^ (sample >> 31);
+                let swap = (sample % (index as u64 + 1)) as usize;
+                personas.swap(index, swap);
+            }
+            VecDeque::from(personas)
+        });
+        while let Some(persona) = personas.pop_front() {
+            let nickname = persona.nickname().to_lowercase();
+            if !players.values().any(|player| {
+                player.joined
+                    && player
+                        .career_profile
+                        .as_ref()
+                        .is_some_and(|profile| profile.nickname.to_lowercase() == nickname)
+            }) {
+                return Some(persona);
+            }
+        }
+        None
+    }
+
     /// Attach AI to an existing retained human without changing its identity,
     /// build, progression or the controller's current plan on repeated votes.
     /// Takeover always plays Elite, whatever the team's level.
@@ -1075,11 +1120,11 @@ impl BotControllers {
     }
 
     fn attach(&mut self, addr: SocketAddr, class: HeroClass, profile: BotProfile, now: Instant) {
-        let (_, lane, jungle) = BOT_COMPOSITION
+        let (_, lane, jungle, _) = BOT_COMPOSITION
             .iter()
             .copied()
             .find(|(candidate, ..)| *candidate == class)
-            .unwrap_or((class, Lane::Mid, false));
+            .unwrap_or((class, Lane::Mid, false, Role::Mid));
         self.controllers
             .entry(addr)
             .or_insert_with(|| Controller::new(BotKind::Duelist, lane, jungle, profile, now));
@@ -1149,6 +1194,7 @@ impl BotControllers {
 
     pub fn clear(&mut self) {
         self.controllers.clear();
+        self.roster_personas = None;
         self.sandbox = false;
     }
 
@@ -1159,6 +1205,36 @@ impl BotControllers {
     /// Standard roster bots count toward the team size; sandbox spawns never do.
     fn is_lane_bot(&self, addr: SocketAddr) -> bool {
         self.kind(addr) == Some(BotKind::Lane)
+    }
+}
+
+#[cfg(test)]
+mod persona_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn roster_personas_use_a_fresh_deterministic_permutation_each_round() {
+        fn order(bots: &mut BotControllers, match_id: u64) -> Vec<BotPersonaId> {
+            let players = HashMap::new();
+            std::iter::from_fn(|| bots.next_roster_persona(&players, match_id)).collect()
+        }
+
+        let mut bots = BotControllers::with_persona_seed(21);
+        let initial = order(&mut bots, 1);
+        assert_eq!(initial.len(), BotPersonaId::ALL.len());
+        let unique: HashSet<_> = initial.iter().map(|persona| persona.slug()).collect();
+        assert_eq!(unique.len(), initial.len());
+        assert!(order(&mut bots, 1).is_empty());
+
+        let mut replay = BotControllers::with_persona_seed(21);
+        assert_eq!(order(&mut replay, 1), initial);
+        assert_ne!(
+            order(&mut BotControllers::with_persona_seed(22), 1)[..9],
+            initial[..9]
+        );
+        bots.clear();
+        assert_ne!(order(&mut bots, 2)[..9], initial[..9]);
     }
 }
 
@@ -1429,18 +1505,27 @@ impl CombatHost<'_> {
             .filter(|p| p.joined && p.hero.identity.team == team)
             .map(|p| p.hero.identity.hero_class)
             .collect();
-        let (composition_class, composition_lane, composition_jungle) = BOT_COMPOSITION
-            .into_iter()
-            .find(|(class, ..)| !teammates.contains(class))
-            .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
+        let (composition_class, composition_lane, composition_jungle, composition_role) =
+            BOT_COMPOSITION
+                .into_iter()
+                .find(|(class, ..)| !teammates.contains(class))
+                .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
         let class = class.unwrap_or(composition_class);
-        let (lane, jungle) = if kind == BotKind::Lane {
-            (composition_lane, composition_jungle)
+        let (lane, jungle, role) = if kind == BotKind::Lane {
+            (composition_lane, composition_jungle, composition_role)
         } else {
-            (Lane::Mid, false)
+            (Lane::Mid, false, Role::Mid)
+        };
+        let persona = if kind == BotKind::Lane {
+            self.bots
+                .next_roster_persona(&self.world.players, self.match_id)
+        } else {
+            None
         };
         let player = self.world.players.get_mut(&addr).unwrap();
+        player.bot_persona = persona;
         player.hero.identity.is_bot = true;
+        player.draft.role = role;
         handle_join_request_with_sprite(
             player,
             team,

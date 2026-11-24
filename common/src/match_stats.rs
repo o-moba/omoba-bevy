@@ -160,6 +160,16 @@ impl RoundLedger {
         }
     }
 
+    pub fn public_kills(&self) -> &[shared::live_score::KillNotice] {
+        &self.kills
+    }
+
+    pub fn participant(&self, player_id: u64) -> Option<&ParticipantResult> {
+        self.participants
+            .get(&PlayerId(player_id))
+            .map(|participant| &participant.result)
+    }
+
     pub fn live_scoreboard(&self) -> Option<shared::live_score::LiveScoreboard> {
         self.started.then(|| shared::live_score::LiveScoreboard {
             elapsed_secs: 0,
@@ -172,6 +182,8 @@ impl RoundLedger {
                     shared::live_score::LiveScorePlayer {
                         player_id: p.player_id,
                         nickname: p.nickname.clone(),
+                        is_bot: p.is_bot,
+                        bot_persona: p.bot_persona.clone(),
                         avatar: p.avatar.clone(),
                         team: p.team,
                         hero_class: p.hero_class,
@@ -358,6 +370,7 @@ mod tests {
             input_kind: Default::default(),
             participation: None,
             is_bot: false,
+            bot_persona: None,
             player_id: id,
             profile_id: Some(format!("{id:064x}")),
             nickname: format!("Hero {id}"),

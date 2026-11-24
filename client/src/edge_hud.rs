@@ -1544,6 +1544,7 @@ fn render_rows(
     mut previous: Local<Option<(Option<LiveScoreboard>, Option<u64>, u32)>>,
     avatars: Query<(&NetworkPlayerId, &NetworkAvatar)>,
     thumbnails: Option<Res<crate::team::AvatarThumbnails>>,
+    assets: Option<Res<AssetServer>>,
 ) {
     let id = local.single().ok().map(|p| p.0);
     let generation = locale.as_ref().map_or(0, |locale| locale.generation());
@@ -1566,17 +1567,30 @@ fn render_rows(
                 text(parent, tr("edge.scoreboard.empty"), 12.0, ui::MUTED);
             }
             for p in players {
-                let name = if p.connected {
-                    p.nickname.clone()
+                let nickname = if p.is_bot {
+                    trf("career.player.bot", &[("name", &p.nickname)])
                 } else {
-                    trf("edge.scoreboard.offline", &[("name", &p.nickname)])
+                    p.nickname.clone()
                 };
-                let art = avatars
-                    .iter()
-                    .find(|(id, _)| id.0 == p.player_id)
-                    .and_then(|(_, avatar)| avatar.0.as_ref())
-                    .and_then(|slug| thumbnails.as_ref().and_then(|thumbs| thumbs.0.get(slug)))
-                    .cloned();
+                let name = if p.connected {
+                    nickname
+                } else {
+                    trf("edge.scoreboard.offline", &[("name", &nickname)])
+                };
+                let art =
+                    shared::bot_personas::portrait_asset_path(p.is_bot, p.bot_persona.as_deref())
+                        .zip(assets.as_ref())
+                        .map(|(path, assets)| assets.load(path))
+                        .or_else(|| {
+                            avatars
+                                .iter()
+                                .find(|(id, _)| id.0 == p.player_id)
+                                .and_then(|(_, avatar)| avatar.0.as_ref())
+                                .and_then(|slug| {
+                                    thumbnails.as_ref().and_then(|thumbs| thumbs.0.get(slug))
+                                })
+                                .cloned()
+                        });
                 spawn_live_score_row(parent, p, name, Some(p.player_id) == id, art);
             }
         });
@@ -2054,6 +2068,8 @@ mod tests {
             elapsed_secs: 0,
             kills: Vec::new(),
             players: vec![LiveScorePlayer {
+                is_bot: false,
+                bot_persona: None,
                 avatar: None,
                 player_id: 7,
                 nickname: "DarkSentinel".into(),
@@ -2268,6 +2284,8 @@ mod tests {
     #[test]
     fn live_score_totals_use_both_teams_and_distinguish_missing_data() {
         let player = |id, team, kills| LiveScorePlayer {
+            is_bot: false,
+            bot_persona: None,
             avatar: None,
             player_id: id,
             nickname: "Player".into(),

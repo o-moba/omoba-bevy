@@ -88,6 +88,7 @@ async fn main() {
                 participation: None,
                 player_id: i as u64 + 1,
                 is_bot: false,
+                bot_persona: None,
                 profile_id: Some(p.profile_id.clone()),
                 nickname: p.nickname.clone(),
                 team: if i == 0 { Team::Green } else { Team::Blue },

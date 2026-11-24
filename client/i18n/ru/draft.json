@@ -9,6 +9,7 @@
   "draft.warning.default": "Роли описывают ваш план; класс определяет ваши способности.",
   "draft.roster.you": " · ВЫ",
   "draft.roster.bot": " · БОТ",
+  "draft.roster.bot_label": "БОТ",
   "draft.roster.class_role": "{hero} · {role}",
   "draft.roster.ready": "ГОТОВО",
   "draft.roster.loading": "ЗАГРУЗКА",

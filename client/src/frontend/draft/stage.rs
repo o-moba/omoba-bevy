@@ -72,6 +72,7 @@ pub(crate) fn spawn_team_stage(
     prematch: &PrematchSnapshot,
     your_id: u64,
     stage: Option<&PartyStage>,
+    assets: &AssetServer,
     width: f32,
     height: f32,
     loading: bool,
@@ -181,10 +182,25 @@ pub(crate) fn spawn_team_stage(
                                 Name::new(format!("PrematchStagePlayer-{}", player.player_id)),
                             ))
                             .with_children(|plate| {
+                                if let Some(path) = shared::bot_personas::portrait_asset_path(
+                                    player.is_bot,
+                                    player.bot_persona.as_deref(),
+                                ) {
+                                    let size = if compact { 24.0 } else { 32.0 };
+                                    plate.spawn((
+                                        ImageNode::new(assets.load(path)),
+                                        Node {
+                                            width: Val::Px(size),
+                                            height: Val::Px(size),
+                                            flex_shrink: 0.0,
+                                            ..default()
+                                        },
+                                        Pickable::IGNORE,
+                                        Name::new("PrematchBotPortrait"),
+                                    ));
+                                }
                                 let identity = if mine {
                                     format!("{}{}", player.nickname, tr("draft.roster.you"))
-                                } else if player.is_bot {
-                                    format!("{}{}", player.nickname, tr("draft.roster.bot"))
                                 } else {
                                     player.nickname.clone()
                                 };
@@ -205,7 +221,9 @@ pub(crate) fn spawn_team_stage(
                                         if compact { 10.0 } else { 12.0 },
                                     ),
                                     (
-                                        if loading {
+                                        if player.is_bot {
+                                            tr("draft.roster.bot_label")
+                                        } else if loading {
                                             if player.loaded {
                                                 tr("draft.roster.ready")
                                             } else {
@@ -216,7 +234,7 @@ pub(crate) fn spawn_team_stage(
                                         } else {
                                             tr("draft.roster.picking")
                                         },
-                                        if player.locked {
+                                        if player.locked && !player.is_bot {
                                             theme::JADE
                                         } else {
                                             theme::MUTED
@@ -293,6 +311,7 @@ mod tests {
                 sprite_character: None,
                 role: Role::Jungle,
                 is_bot: false,
+                bot_persona: None,
                 locked: id % 2 == 0,
                 loaded: false,
             })

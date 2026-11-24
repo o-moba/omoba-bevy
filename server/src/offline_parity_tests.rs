@@ -270,6 +270,7 @@ fn every_bot_level_plays_the_same_online_and_offline() {
             input_kind: Default::default(),
             participation: None,
             is_bot: true,
+            bot_persona: None,
             player_id: player.hero.identity.id,
             profile_id: None,
             nickname: format!("Bot {}", player.hero.identity.id),
