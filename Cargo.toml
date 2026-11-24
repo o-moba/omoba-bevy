@@ -40,3 +40,5 @@ opt-level = 3
 # drop when bevy_audio moves to rodio/cpal 0.18. See third_party/cpal-0.17.3/OMOBA-PATCH.md.
 [patch.crates-io]
 cpal = { path = "third_party/cpal-0.17.3" }
+# Mali descriptor-pool recovery from gfx-rs/wgpu#10264.
+wgpu-hal = { path = "third_party/wgpu-hal-30.0.0" }
