@@ -176,7 +176,7 @@
       ],
       "handhelds": [
         {
-          "item": "wild-repeater",
+          "item": "wildspark-repeater",
           "mode": "repeater",
           "model": "weapons/wildspark-repeater.glb",
           "muzzle": [
@@ -412,7 +412,7 @@
     "assetRequirements": "shared/assets/catalog/asset-requirements.json (ids of omoba.asset-catalog.v1)",
     "basicAttack": "common/src/basic_attack.rs (melee contact, repeater bullet or rocket, else the catalogue projectile_style), shared/assets/catalog/heroes.json",
     "bodies": "client/assets/config/skills.skillfx (body.model, aux.<kind>.model), client/src/skill_presentation/effects.rs (cosmetics/standard/<model>.glb)",
-    "handhelds": "shared/src/handheld.rs (HandheldSelection::resolve_mode), client/assets/weapons/manifest.json (grip), client/src/held_weapons.rs (shown_model, slot_mode, muzzle_point)",
+    "handhelds": "shared/src/handheld.rs (HandheldSelection::resolve_mode), client/assets/weapons/manifest.json (grip), client/src/held_weapons.rs (slot_mode, muzzle_point)",
     "weaponModes": "shared/src/loadout.rs (AttackProfileId::Repeater, WeaponMode), client/src/held_weapons.rs (slot_mode)"
   },
   "status": "notes for GP5 (asset slots of omoba.character.v1); not part of the game contract"

@@ -6,13 +6,13 @@
     "id": "omoba",
     "name": "OMOBA"
   },
-  "revision": "sha256-bae71784fff170720fcaf18da3992c05a4800257f89954157b687406b1257402",
-  "previousRevision": null,
+  "revision": "sha256-a8f3ffaf95b4f57bab3f56ce0aed8d44d713c5d10ae47ed576ceb7bfbf8101b4",
+  "previousRevision": "sha256-bae71784fff170720fcaf18da3992c05a4800257f89954157b687406b1257402",
   "license": "CC0-1.0",
   "source": {
-    "commit": "6d34f986355880f787979a3bcee5d69130f28672",
+    "commit": "9eb642bd32418839db050bb8aa00fb7e83f905d4",
     "exporter": "scripts/export_game_contract.py",
-    "inputsSha256": "7b6d78d4ca9b132f62b0f53c76d88d49e87f36e6edace546de8da43c21ceeeb0"
+    "inputsSha256": "505642738c574ba77859a5980932fdf5c534175cbd1dbf69456c4af7f87153bf"
   },
   "profiles": {
     "required": [],
@@ -2079,7 +2079,7 @@
             "byMode": {
               "rockets": "wild-launcher"
             },
-            "item": "wild-repeater",
+            "item": "wildspark-repeater",
             "muzzleWindowSecs": [
               0.08,
               0.25
@@ -7495,7 +7495,7 @@
             "byMode": {
               "rockets": "wild-launcher"
             },
-            "item": "wild-repeater",
+            "item": "wildspark-repeater",
             "muzzleWindowSecs": null
           },
           "phase": "instant",
@@ -7567,7 +7567,7 @@
             "byMode": {
               "rockets": "wild-launcher"
             },
-            "item": "wild-repeater",
+            "item": "wildspark-repeater",
             "muzzleWindowSecs": null
           },
           "phase": "instant",
@@ -8662,7 +8662,7 @@
             "byMode": {
               "rockets": "wild-launcher"
             },
-            "default": "wild-repeater"
+            "default": "wildspark-repeater"
           },
           "heroKind": "class",
           "kit": [
@@ -10062,7 +10062,7 @@
         "sha256": "2af1a6a0332bee5a840554efd7f4efdbf85941efe744c4b03df7fad382879a9a"
       },
       "presentationSha256": "fe544cd0df722b9dd21753804c77091e3d8ddb64e863aebbfcfb3f0db4958ae4",
-      "protocolVersion": 11,
+      "protocolVersion": 16,
       "timing": {
         "blendSecs": 0.12,
         "contactLimitSecs": 0.15,
