@@ -6,6 +6,8 @@
 use bevy::prelude::*;
 use std::path::PathBuf;
 
+#[cfg(target_os = "android")]
+mod android_browser;
 mod match_attention;
 mod ui_profile;
 pub(crate) use ui_profile::{UiProfile, ui_profile};
@@ -233,7 +235,12 @@ pub fn open_external_url(raw: &str) -> Result<(), String> {
         unsafe { omoba_browser_open(url.as_ptr()) };
         Ok(())
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(target_os = "android")]
+    {
+        android_browser::open(&url)
+            .map_err(|_| crate::i18n::tr("account.browser.failed").to_owned())
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     omoba_passport::open_in_browser(&url)
 }
 

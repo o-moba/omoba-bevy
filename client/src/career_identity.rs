@@ -87,8 +87,19 @@ fn private_create(path: &Path) -> io::Result<fs::File> {
     options.open(path)
 }
 
-/// Publish a complete key with an exclusive hard link. Concurrent clients use
-/// the winning file; neither an existing nor a corrupt identity is overwritten.
+// Android app sandboxes may deny hard links. Serialize cooperating publishers
+// on the directory inode and atomically rename a fully synced temporary file.
+#[cfg(any(target_os = "android", all(test, unix)))]
+fn rename_new_key(directory: &Path, temporary: &Path, path: &Path) -> io::Result<()> {
+    let guard = fs::File::open(directory)?;
+    guard.lock()?;
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(io::ErrorKind::AlreadyExists.into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::rename(temporary, path),
+        Err(error) => Err(error),
+    }
+}
+
 pub(super) fn load_or_create_key(directory: &Path) -> Result<SigningKey, String> {
     let path = directory.join(KEY_FILE);
     match fs::symlink_metadata(&path) {
@@ -99,7 +110,11 @@ pub(super) fn load_or_create_key(directory: &Path) -> Result<SigningKey, String>
     fs::create_dir_all(directory).map_err(|_| tr("identity.storage.create_failed"))?;
     let mut seed = [0; 32];
     getrandom::fill(&mut seed).map_err(|_| tr("identity.random_unavailable"))?;
-    let key = SigningKey::from_bytes(&seed);
+    store_new_key(directory, &path, SigningKey::from_bytes(&seed))
+}
+
+/// Publish a complete key or read the existing winner without overwriting it.
+fn store_new_key(directory: &Path, path: &Path, key: SigningKey) -> Result<SigningKey, String> {
     let mut suffix = [0; 16];
     getrandom::fill(&mut suffix).map_err(|_| tr("identity.random_unavailable"))?;
     let temporary = directory.join(format!(".career-key-{}.tmp", hex(&suffix)));
@@ -109,14 +124,18 @@ pub(super) fn load_or_create_key(directory: &Path) -> Result<SigningKey, String>
         created = true;
         let saved = IdentityFile {
             version: 1,
-            seed: hex(&seed),
+            seed: hex(key.as_bytes()),
             public_key: hex(key.verifying_key().as_bytes()),
         };
         let encoded = serde_json::to_vec(&saved).map_err(|_| tr("identity.key.encode_failed"))?;
         file.write_all(&encoded)
             .and_then(|_| file.sync_all())
             .map_err(|_| tr("identity.key.save_failed"))?;
-        match fs::hard_link(&temporary, &path) {
+        #[cfg(target_os = "android")]
+        let published = rename_new_key(directory, &temporary, path);
+        #[cfg(not(target_os = "android"))]
+        let published = fs::hard_link(&temporary, path);
+        match published {
             Ok(()) => {
                 #[cfg(unix)]
                 fs::File::open(directory)
@@ -124,7 +143,7 @@ pub(super) fn load_or_create_key(directory: &Path) -> Result<SigningKey, String>
                     .map_err(|_| tr("identity.key.confirm_failed"))?;
                 Ok(key)
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => read_key(&path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => read_key(path),
             Err(_) => Err(tr("identity.key.publish_failed").into()),
         }
     })();
@@ -365,7 +384,11 @@ impl CareerIdentity {
         self.directory
             .as_ref()
             .map(|d| d.join("device-enrollment"))
-            .ok_or_else(|| tr("identity.storage.unavailable").into())
+            .ok_or_else(|| {
+                self.error
+                    .clone()
+                    .unwrap_or_else(|| tr("identity.storage.unavailable").into())
+            })
     }
 
     /// Activate on the next launch only. Preserve the current key before replacing
@@ -384,6 +407,13 @@ impl CareerIdentity {
         let backup = directory.join("saved-devices");
         fs::create_dir_all(&backup).map_err(|_| tr("identity.switch.preserve_failed"))?;
         let backup_path = backup.join(format!("{old_public}.json"));
+        #[cfg(target_os = "android")]
+        if store_new_key(&backup, &backup_path, existing.clone())?.verifying_key()
+            != existing.verifying_key()
+        {
+            return Err(tr("identity.switch.backup_mismatch").into());
+        }
+        #[cfg(not(target_os = "android"))]
         match fs::hard_link(directory.join(KEY_FILE), &backup_path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
@@ -791,6 +821,27 @@ mod tests {
         getrandom::fill(&mut suffix).unwrap();
         std::env::temp_dir().join(format!("omoba-identity-test-{}", hex(&suffix)))
     }
+    #[test]
+    #[cfg(unix)]
+    fn android_key_publication_never_replaces_an_existing_identity() {
+        let directory = temporary_directory();
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(KEY_FILE);
+        let first = directory.join("first.tmp");
+        let second = directory.join("second.tmp");
+        fs::write(&first, b"first").unwrap();
+        fs::write(&second, b"second").unwrap();
+        rename_new_key(&directory, &first, &path).unwrap();
+        assert_eq!(
+            rename_new_key(&directory, &second, &path)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(path).unwrap(), b"first");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn enrolled_key_activates_after_restart_and_preserves_old_account() {
         let directory = temporary_directory();

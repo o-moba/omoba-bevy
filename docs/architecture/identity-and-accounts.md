@@ -72,7 +72,7 @@ The dotted edges are nullable foreign keys. Only `social_identities.profile_id` 
 
 ## Device key
 
-- **Creation.** `load_or_create_key` generates a 32-byte seed with `getrandom` and writes `{version: 1, seed, public_key}` to a temporary file created with `create_new` and mode `0600`. The file is fsynced and published with an exclusive `hard_link`, so two clients starting at once both end up using the winning key. It never overwrites an existing or damaged identity ([`career_identity.rs`](../../client/src/career_identity.rs)).
+- **Creation.** `load_or_create_key` generates a 32-byte seed with `getrandom` and writes `{version: 1, seed, public_key}` to a temporary file created with `create_new` and mode `0600`. After syncing the file, Android publishes it with an atomic rename under an exclusive directory lock. Other platforms use an exclusive hard link. Concurrent clients use the winning key. It never overwrites an existing or damaged identity ([`career_identity.rs`](../../client/src/career_identity.rs)).
 - **Reading.** `read_key` refuses:
   - non-regular files, such as symlinks,
   - files over 1 KiB,
@@ -236,7 +236,7 @@ Sources:
   - Otherwise the server stores the 8-character code as `HMAC("device-code")` plus a sealed copy (`code_delivery`, AAD = enrollment id) for the life of the row, which makes retries return the same code.
 - **Portal approval.** The account owner's fresh session calls `me/devices/lookup`. It returns the enrollment id, the full public key, the label, the expiry, and the session's own nickname and profile id. The session then calls `me/devices/approve` with the enrollment id and public key. The game shows the first and last 8 hex characters of the pending key, and the portal computes the same fingerprint (`connect.tsx`, `devices.tsx`), so the player can compare them.
 - **`complete`.** Takes the same advisory lock as `CareerStore::authenticate`, so a racing login cannot register the key as a new profile. It requires the enrollment to be approved for that exact target. It refuses a key that is registered elsewhere (`device_key_already_registered`) and a profile that already has 16 active keys (`device_limit`). It then inserts the `career_keys` row and marks the enrollment consumed.
-- **Activation.** `stage_enrolled_identity` hard-links the current key into `saved-devices/<old public key>.json` and atomically replaces `career_identity.json` with the enrolled key (temporary file, then rename). The running game keeps its old identity until restart.
+- **Activation.** `stage_enrolled_identity` preserves the current key in `saved-devices/<old public key>.json` and atomically replaces `career_identity.json` with the enrolled key (temporary file, then rename). The running game keeps its old identity until restart.
 
 **Recovery codes.**
 

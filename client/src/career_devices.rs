@@ -443,7 +443,7 @@ fn open_sign_in(code: Option<&str>) -> Option<String> {
         Ok(url) if crate::platform::open_external_url(&url).is_ok() => {
             Some(tr("devices.vk.opened").to_owned())
         }
-        Ok(_) => None,
+        Ok(_) => Some(tr("account.browser.failed").to_owned()),
         Err(error) => Some(error),
     }
 }
