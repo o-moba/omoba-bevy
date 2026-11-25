@@ -11,8 +11,8 @@
 //! `Confirm` writes [`SyntheticPress`] for the focused button, so activation
 //! goes through the same gate as a click or a tap. When the set of
 //! candidates changes (a modal opened, a page changed, a section hid) or a
-//! modal bumps [`GestureEpoch`], focus returns to the first button and the
-//! next confirm must be a fresh press. A focused button inside a
+//! modal bumps [`GestureEpoch`], focus normally returns to the first button and
+//! the next confirm must be a fresh press. A focused button inside a
 //! [`ScrollArea`] scrolls into view. The ring is drawn by
 //! [`super::widgets::paint_focus_ring`].
 #[cfg(test)]
@@ -71,6 +71,8 @@ pub(crate) enum FocusEntry {
     /// Never focused by the surface appearing; the first direction focuses
     /// it (a Cancel on a shared countdown: a stray confirm must not press it).
     Deferred,
+    /// Keeps focus while sibling sections change and this button remains eligible.
+    Preserve,
 }
 
 /// The focused kit button, if a focus driver is active.
@@ -138,12 +140,19 @@ impl UiFocus {
             self.focused = candidates
                 .iter()
                 .find(|c| entry(c.entity) == Some(FocusEntry::Preferred))
+                .map(|c| c.entity)
+                .or_else(|| {
+                    self.focused.filter(|&entity| {
+                        self.surface.contains(&entity)
+                            && entry(entity) == Some(FocusEntry::Preserve)
+                    })
+                })
                 .or_else(|| {
                     candidates
                         .iter()
                         .find(|c| entry(c.entity) != Some(FocusEntry::Deferred))
-                })
-                .map(|c| c.entity);
+                        .map(|c| c.entity)
+                });
             self.confirm_ready = false;
             return None;
         }
@@ -490,6 +499,34 @@ mod tests {
         assert_eq!(focus.focused(), Some(replaced[0].entity));
         focus.set_enabled(false);
         assert_eq!(focus.focused(), None, "no driver, no focus");
+    }
+
+    #[test]
+    fn changing_siblings_keeps_opted_in_focus_and_requires_a_fresh_confirm() {
+        let mut focus = UiFocus {
+            enabled: true,
+            ..default()
+        };
+        let back = candidate(1, Vec2::ZERO);
+        let class = candidate(2, Vec2::X * 40.0);
+        let skin = candidate(3, Vec2::X * 80.0);
+        let entry = |entity| (entity == class.entity).then_some(FocusEntry::Preserve);
+
+        focus.step_with(&[back, class], [], entry);
+        focus.step_with(&[back, class], [FocusNav::Right], entry);
+        assert_eq!(focus.focused(), Some(class.entity));
+        assert_eq!(
+            focus.step_with(&[back, class, skin], [FocusNav::Confirm], entry),
+            None
+        );
+        assert_eq!(focus.focused(), Some(class.entity));
+        focus.step_with(&[back, class, skin], [], entry);
+        assert_eq!(
+            focus.step_with(&[back, class, skin], [FocusNav::Confirm], entry),
+            Some(class.entity)
+        );
+        focus.step_with(&[back], [], entry);
+        assert_eq!(focus.focused(), Some(back.entity));
     }
 
     #[test]

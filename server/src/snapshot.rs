@@ -9,7 +9,7 @@ use crate::balance::VICTORY_REMATCH_DELAY;
 use crate::runtime::ports::Transport;
 use crate::runtime::{RateLimitedDiagnostic, ServerRuntime};
 use crate::sim::towers::structure_is_protected;
-use crate::{prematch, vision};
+use crate::vision;
 
 use std::net::SocketAddr;
 
@@ -222,13 +222,7 @@ impl ServerRuntime {
                 // player is redacted, in the sandbox too.
                 players: build_players_snapshot(world, Some(player.hero.identity.id), now),
                 scoreboard: scoreboard.clone(),
-                prematch: prematch::snapshot(
-                    &self.prematch,
-                    &world.players,
-                    player,
-                    self.rules,
-                    now,
-                ),
+                prematch: self.prematch_snapshot(player, now),
                 skill_effects: crate::skills::effects(world, now),
                 projectiles: projectiles_snapshot.clone(),
                 combat_events: self.combat_log.snapshot(now),

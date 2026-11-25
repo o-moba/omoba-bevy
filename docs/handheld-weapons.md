@@ -4,8 +4,9 @@ A handheld is a cosmetic asset selected for the hero's class, independently
 of VRM appearance and combat inventory. Warrior defaults to Forge Sword,
 Adventurer to the dagger, Ranger to Verdant Bow, Wildspark to the accepted
 mode's repeater or launcher, Riftshot to the repeater and Dawnweaver to Dawn
-Scepter. Other classes can use empty hands or a compatible cosmetic if one is
-available. Damage, reach, projectiles and skill recipes come from the class kit.
+Scepter. Classes without a default handheld may equip an approved model when
+one is available. Damage, reach, projectiles and skill recipes come from the
+class kit.
 
 [The shared compatibility rules](../shared/src/handheld.rs) check the class's
 weapon type and the exact model's approved classes. For example, Warrior and
@@ -13,9 +14,9 @@ Cinderforge can equip Forge Hammer. The Wildspark and Riftshot repeaters have
 different model IDs and are approved for their respective classes.
 Collection, draft and Combat Test offer choices for the active class. The server
 checks the selection independently when the player joins, switches class in
-draft, reconnects or applies a Combat Test preset. Changing class falls back to
-the new class default if the previous item is incompatible. Explicit empty
-hands remain selected.
+draft, reconnects or applies a Combat Test preset. Each class has its own saved
+match selection and starts with its class default. Combat Test offers explicit
+empty hands for previewing models and animations.
 
 ## Current product route
 
@@ -55,7 +56,7 @@ qualify, and each one is the same `StoreAsset` the public catalogue would give.
 The order is:
 
 1. My Ekza library, by name.
-2. Included: class default, empty hands and the packaged props.
+2. Included: class default and the packaged props approved for the selected class.
 3. Ekza catalogue: the public `/v2/assets` list, minus every asset already in
    the library.
 

@@ -333,13 +333,6 @@ impl ClientSession {
         )
     }
 
-    /// Keep reconnect equipment aligned with a server-confirmed draft choice.
-    pub(crate) fn remember_handheld(&mut self, handheld: &shared::handheld::HandheldSelection) {
-        if let Some(join) = self.last_join.as_mut() {
-            join.handheld = handheld.clone();
-        }
-    }
-
     fn legacy_retry_addr(&self) -> Option<String> {
         if self.is_offline() {
             return Some(offline::ADDRESS.to_owned());
@@ -474,6 +467,10 @@ impl ClientSession {
     /// The committed join is a prematch (draft) join.
     pub fn joined_prematch(&self) -> bool {
         self.last_join.as_ref().is_some_and(|join| join.prematch)
+    }
+
+    pub(crate) fn committed_avatar(&self) -> Option<Option<&str>> {
+        self.last_join.as_ref().map(|join| join.avatar.as_deref())
     }
 
     pub fn join_confirmed(&self) -> bool {
@@ -974,10 +971,6 @@ pub(in crate::net) fn update_session_lifecycle(
                 client_session.ephemeral_endpoint = true;
                 client_session.abandon_join();
                 team_selection.team = None;
-                // Practice only uses avatars bundled with the app; no wallet or download.
-                if !offline::shipped_avatar(team_selection.avatar.as_deref()) {
-                    team_selection.avatar = None;
-                }
                 despawn_tracked_net_entities(
                     &mut commands,
                     &mut network_state,

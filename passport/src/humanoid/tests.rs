@@ -115,12 +115,17 @@ fn all_shipped_vrm_rigs_are_supported_without_modifying_or_using_clips() {
     let manifest: Value =
         serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
     let avatars = manifest["avatars"].as_array().unwrap();
-    assert_eq!(avatars.len(), 15);
     for avatar in avatars {
         let slug = avatar["slug"].as_str().unwrap();
         let data = std::fs::read(root.join(format!("{slug}.glb"))).unwrap();
         let rig = HumanoidRig::from_glb(&data).unwrap_or_else(|error| panic!("{slug}: {error}"));
-        assert_eq!(rig.version, VrmVersion::Vrm0);
+        let is_class_default = crate::avatars::is_class_default_slug(slug);
+        let expected = if is_class_default {
+            VrmVersion::Vrm1
+        } else {
+            VrmVersion::Vrm0
+        };
+        assert_eq!(rig.version, expected, "{slug}");
         assert!(rig.bones.contains_key("leftUpperLeg"));
         let length = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
         let mut document: Value = serde_json::from_slice(&data[20..20 + length]).unwrap();

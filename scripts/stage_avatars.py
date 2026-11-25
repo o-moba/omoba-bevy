@@ -11,7 +11,8 @@ A `manifest.json` is written alongside with provenance (collection, license,
 source URL, author) taken from each avatar's `meta.json`.
 
 The roster below retains the 15 approved release avatars (VRM 0.x,
-Mixamo-compatible skeletons); excluded distribution-review models are not staged. The separate `bosses` set (TASK-19) stages the raid-boss models
+Mixamo-compatible skeletons); curated Set 01 entries already at the roster
+destination are preserved. The separate `bosses` set (TASK-19) stages the raid-boss models
 into `client/assets/bosses/` with the same manifest schema, keeping boss slugs
 out of the player-selectable roster manifest. Run from the repo root:
 
@@ -102,6 +103,12 @@ def main() -> int:
     entries, default_out = AVATAR_SETS[args.avatar_set]
     out_dir: Path = args.out if args.out is not None else default_out
     out_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = out_dir / "manifest.json"
+    kept = []
+    if args.avatar_set == "roster" and manifest_path.is_file():
+        existing = json.loads(manifest_path.read_text())
+        kept = [entry for entry in existing["avatars"]
+                if entry.get("collection") == "OMOBA Set 01" and entry["slug"] not in entries]
     manifest = {"avatars": []}
     failures = []
 
@@ -145,9 +152,10 @@ def main() -> int:
         thumb_note = "" if thumb_name else " (no thumbnail in source)"
         print(f"OK    {slug}: {len(data)} bytes{thumb_note}")
 
-    manifest_path = out_dir / "manifest.json"
+    staged_count = len(manifest["avatars"])
+    manifest["avatars"].extend(kept)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"\nStaged {len(manifest['avatars'])}/{len(entries)} avatars -> {out_dir}")
+    print(f"\nStaged {staged_count}/{len(entries)} avatars -> {out_dir}")
     print(f"Manifest: {manifest_path}")
     if failures:
         print(f"Failures: {failures}")

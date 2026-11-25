@@ -27,7 +27,7 @@ use bevy::prelude::*;
 pub use apply::SnapshotApplied;
 pub use commands::NetworkCommand;
 pub use components::*;
-pub(crate) use interpolate::NetworkGroundingSet;
+pub(crate) use interpolate::{NetworkGroundingSet, RemotePlayerInterpolation};
 pub use session::{
     ClientConnectionState, ClientSession, NetIncomingDisconnected, SessionEvent, SessionUiCommand,
 };

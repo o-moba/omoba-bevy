@@ -97,7 +97,7 @@ struct RemotePose {
 /// samples avoids the old 50ms ease/stop/restart cycle whenever Wi-Fi delivers
 /// the next snapshot a little late. Never extrapolate through another actor.
 #[derive(Component, Clone, Debug)]
-pub(in crate::net) struct RemotePlayerInterpolation {
+pub(crate) struct RemotePlayerInterpolation {
     poses: VecDeque<RemotePose>,
 }
 
@@ -140,6 +140,15 @@ impl RemotePlayerInterpolation {
     /// Latest authoritative sample, independent of the render delay.
     pub(in crate::net) fn latest_translation(&self) -> Option<Vec3> {
         self.poses.back().map(|pose| pose.translation)
+    }
+
+    /// Two still segments confirm a stop at the current render position. A
+    /// single duplicated pose can also occur between client movement updates.
+    pub(crate) fn has_confirmed_stop(&self) -> bool {
+        self.poses.get(2).is_some_and(|last| {
+            let position = last.translation.xz();
+            self.poses[0].translation.xz() == position && self.poses[1].translation.xz() == position
+        })
     }
 
     /// An accepted dash is an instant relocation: drop the history so the hero
@@ -246,6 +255,31 @@ mod tests {
             Vec3::X * 0.309,
             "never extrapolate on packet loss"
         );
+        assert!(
+            !track.has_confirmed_stop(),
+            "packet loss does not confirm a stop"
+        );
+    }
+
+    #[test]
+    fn buffered_stop_is_confirmed_after_the_visible_motion_and_ignores_height() {
+        let start = Instant::now();
+        let mut track = RemotePlayerInterpolation::new(Vec3::ZERO, Quat::IDENTITY, start);
+        for (ms, y) in [(50, 0.0), (100, 0.1), (150, 0.2)] {
+            track.push(
+                Vec3::new(1.0, y, 0.0),
+                Quat::IDENTITY,
+                start + Duration::from_millis(ms),
+            );
+        }
+
+        let moving = track.sample(start + Duration::from_millis(140));
+        assert!(moving.translation.x < 1.0);
+        assert!(!track.has_confirmed_stop());
+
+        let reached = track.sample(start + Duration::from_millis(150));
+        assert_eq!(reached.translation.x, 1.0);
+        assert!(track.has_confirmed_stop());
     }
 
     #[test]

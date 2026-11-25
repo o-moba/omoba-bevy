@@ -586,7 +586,6 @@ mod tests {
 
     use super::*;
     use crate::match_rules::MatchConfig;
-    use crate::prematch;
     use crate::runtime::ServerRuntime;
     use ekza_bevy_sdk::passport::{ConsumedTicket, ProjectSupport, Rendition};
 
@@ -701,15 +700,10 @@ mod tests {
             },
             now,
         );
-        let generation = prematch::snapshot(
-            &rt.prematch,
-            &rt.world.players,
-            &rt.world.players[&addr],
-            rt.rules,
-            now,
-        )
-        .unwrap()
-        .generation;
+        let generation = rt
+            .prematch_snapshot(&rt.world.players[&addr], now)
+            .unwrap()
+            .generation;
         let free = store_item(STUDIO_FREE, 'c', true);
         let owned = store_item(
             &format!("solana:devnet:avatar-data:{}", "4".repeat(32)),
@@ -719,7 +713,7 @@ mod tests {
         let action = |slug: String| PrematchAction::Select {
             handheld: Default::default(),
             character: CharacterChoice::Ipfs,
-            hero_class: HeroClass::Cleric,
+            hero_class: HeroClass::Warden,
             avatar: Some(slug),
             sprite_character: None,
             role: Role::Support,
@@ -740,7 +734,7 @@ mod tests {
             ..
         } = &mut denied_request.action
         {
-            *hero_class = HeroClass::Warrior;
+            *hero_class = HeroClass::Dawnweaver;
             *handheld = shared::handheld::HandheldSelection::Unequipped;
         }
         rt.handle_packet(
@@ -752,15 +746,9 @@ mod tests {
         );
         // Receipt alone must not look like a final approval to the frontend.
         assert_eq!(
-            prematch::snapshot(
-                &rt.prematch,
-                &rt.world.players,
-                &rt.world.players[&addr],
-                rt.rules,
-                now
-            )
-            .unwrap()
-            .last_request_id,
+            rt.prematch_snapshot(&rt.world.players[&addr], now)
+                .unwrap()
+                .last_request_id,
             0
         );
         rt.handle_packet(
@@ -771,15 +759,9 @@ mod tests {
             now,
         );
         assert_eq!(
-            prematch::snapshot(
-                &rt.prematch,
-                &rt.world.players,
-                &rt.world.players[&addr],
-                rt.rules,
-                now
-            )
-            .unwrap()
-            .last_request_id,
+            rt.prematch_snapshot(&rt.world.players[&addr], now)
+                .unwrap()
+                .last_request_id,
             0
         );
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -795,18 +777,12 @@ mod tests {
         );
         assert_eq!(
             rt.world.players[&addr].hero.identity.hero_class,
-            HeroClass::Cleric
+            HeroClass::Warden
         );
         assert_eq!(
-            prematch::snapshot(
-                &rt.prematch,
-                &rt.world.players,
-                &rt.world.players[&addr],
-                rt.rules,
-                now
-            )
-            .unwrap()
-            .last_request_id,
+            rt.prematch_snapshot(&rt.world.players[&addr], now)
+                .unwrap()
+                .last_request_id,
             1
         );
         rt.handle_packet(
@@ -821,7 +797,7 @@ mod tests {
             Some(free.slug.as_str())
         );
         let retained = &rt.world.players[&addr];
-        assert_eq!(retained.hero.identity.hero_class, HeroClass::Cleric);
+        assert_eq!(retained.hero.identity.hero_class, HeroClass::Warden);
         assert_eq!(
             retained.hero.identity.handheld,
             shared::handheld::HandheldSelection::ClassDefault
@@ -830,9 +806,7 @@ mod tests {
         assert!(!rt.passport_admissions.is_pending(addr));
         assert_eq!(
             retained.draft.error.as_deref(),
-            Some(
-                "This avatar or weapon is unavailable. Refresh Studio and choose approved equipment."
-            )
+            Some("This avatar or weapon is unavailable. Choose different equipment.")
         );
     }
 
@@ -1315,7 +1289,7 @@ mod weapon_tests {
     }
     #[test]
     fn ordinary_join_replicates_weapon_and_draft_rejection_preserves_last_equipment() {
-        use crate::{match_rules::MatchConfig, prematch, runtime::ServerRuntime};
+        use crate::{match_rules::MatchConfig, runtime::ServerRuntime};
         use shared::prematch::{PrematchAction, PrematchRequest, Role};
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.set_nonblocking(true).unwrap();
@@ -1352,14 +1326,7 @@ mod weapon_tests {
             *prematch = true
         }
         rt.handle_packet(peer, peer_join, now);
-        let view = prematch::snapshot(
-            &rt.prematch,
-            &rt.world.players,
-            &rt.world.players[&peer],
-            rt.rules,
-            now,
-        )
-        .unwrap();
+        let view = rt.prematch_snapshot(&rt.world.players[&peer], now).unwrap();
         assert_eq!(
             view.players
                 .iter()
@@ -1390,7 +1357,7 @@ mod weapon_tests {
         };
         *hero_class = HeroClass::Wildspark;
         let denied = request(2, HandheldSelection::Item(item().slug));
-        let unequip = request(3, HandheldSelection::Unequipped);
+        let old_empty_selection = request(3, HandheldSelection::Unequipped);
         rt.handle_packet(
             owner,
             ClientPacket::Prematch {
@@ -1420,11 +1387,21 @@ mod weapon_tests {
             rt.world.players[&owner].hero.identity.handheld,
             HandheldSelection::Item(item().slug)
         );
-        rt.handle_packet(owner, ClientPacket::Prematch { request: unequip }, now);
+        rt.handle_packet(
+            owner,
+            ClientPacket::Prematch {
+                request: old_empty_selection,
+            },
+            now,
+        );
         assert!(rt.world.players[&owner].draft.error.is_none());
         assert_eq!(
             rt.world.players[&owner].hero.identity.handheld,
-            HandheldSelection::Unequipped
+            HandheldSelection::ClassDefault
+        );
+        assert_eq!(
+            rt.world.players[&peer].hero.identity.handheld,
+            HandheldSelection::Item("forge-hammer".into())
         );
         assert_eq!(rt.world.players[&owner].hero.max_hp, hp);
     }
@@ -1493,7 +1470,7 @@ mod weapon_tests {
     }
 
     #[test]
-    fn revoked_weapon_reconnect_can_unequip_without_restoring_revoked_prop() {
+    fn revoked_weapon_reconnect_uses_class_default_without_restoring_revoked_prop() {
         use crate::{match_rules::MatchConfig, runtime::ServerRuntime};
         for fallback in [
             HandheldSelection::Unequipped,
@@ -1537,7 +1514,10 @@ mod weapon_tests {
             assert!(player.joined);
             assert_eq!(player.hero.identity.id, id);
             assert_eq!(player.hero.hp, hp);
-            assert_eq!(player.hero.identity.handheld, fallback);
+            assert_eq!(
+                player.hero.identity.handheld,
+                HandheldSelection::ClassDefault
+            );
             assert!(!rt.world.players.contains_key(&owner));
         }
     }

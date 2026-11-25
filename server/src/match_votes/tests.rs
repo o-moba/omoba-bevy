@@ -76,6 +76,13 @@ impl Game {
             );
             rt.handle_packet(
                 peers[i],
+                ClientPacket::Hello {
+                    protocol_version: shared::protocol::PROTOCOL_VERSION,
+                },
+                start,
+            );
+            rt.handle_packet(
+                peers[i],
                 ClientPacket::Join {
                     handheld: Default::default(),
                     prematch: false,

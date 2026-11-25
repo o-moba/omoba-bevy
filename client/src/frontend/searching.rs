@@ -132,16 +132,17 @@ pub fn status_text(queue: &QueueView, game: &GameState, session: &ClientSession)
 }
 
 /// "Hero · avatar" for the chosen hero, in the active language.
-fn hero_line(selection: &TeamSelection) -> String {
+fn hero_line(selection: &TeamSelection, session: Option<&ClientSession>) -> String {
+    let avatar = session
+        .and_then(ClientSession::committed_avatar)
+        .unwrap_or_else(|| selection.effective_avatar());
     trf(
         "searching.hero",
         &[
             ("hero", &data::hero_name(selection.hero_class)),
             (
                 "avatar",
-                &selection
-                    .avatar
-                    .as_deref()
+                &avatar
                     .and_then(omoba_passport::avatars::avatar_definition)
                     .map_or(tr("searching.default_avatar"), |avatar| {
                         avatar.display_name.as_str()
@@ -154,9 +155,10 @@ fn hero_line(selection: &TeamSelection) -> String {
 fn spawn_searching(
     mut commands: Commands,
     selection: Res<TeamSelection>,
+    session: Option<Res<ClientSession>>,
     platform: Res<crate::ui::UiPlatform>,
 ) {
-    let hero = hero_line(&selection);
+    let hero = hero_line(&selection, session.as_deref());
     let form = theme::Form::of(platform.is_mobile());
     commands
         .spawn(widgets::screen_root(
@@ -370,7 +372,7 @@ fn refresh_status(
     mut hero: Query<&mut Text, (With<SearchingHero>, Without<SearchingStatus>)>,
 ) {
     if let Some(selection) = selection.as_deref() {
-        let line = hero_line(selection);
+        let line = hero_line(selection, Some(&session));
         for mut label in &mut hero {
             if label.0 != line {
                 label.0.clone_from(&line);
@@ -525,6 +527,18 @@ fn refresh_offline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn searching_names_the_class_avatar_instead_of_the_preferred_look() {
+        let selection = TeamSelection {
+            hero_class: shared::HeroClass::Mage,
+            avatar: Some("agnes".into()),
+            ..default()
+        };
+        let slug = selection.hero_class.default_avatar_slug();
+        let avatar = omoba_passport::avatars::avatar_definition(slug).unwrap();
+        assert!(hero_line(&selection, None).contains(&avatar.display_name));
+    }
 
     #[test]
     fn formation_counters_are_shown_when_the_career_queue_is_idle() {

@@ -447,6 +447,7 @@ fn apply_lighting_settings_system(
 
 fn sync_selected_player_assets(
     team_selection: Res<TeamSelection>,
+    session: Res<crate::net::ClientSession>,
     visual_mode: Res<PlayerVisualMode>,
     mut models: PlayerModelResolver,
     mut player_assets: ResMut<PlayerAssets>,
@@ -454,10 +455,15 @@ fn sync_selected_player_assets(
     if *visual_mode != PlayerVisualMode::Models3d {
         return;
     }
-    let (scene, gltf) = models.resolve(team_selection.character, team_selection.avatar.as_deref());
-    let label = team_selection
-        .avatar
-        .as_deref()
+    let avatar = if team_selection.team.is_some() {
+        session
+            .committed_avatar()
+            .unwrap_or_else(|| team_selection.effective_avatar())
+    } else {
+        team_selection.effective_avatar()
+    };
+    let (scene, gltf) = models.resolve(team_selection.character, avatar);
+    let label = avatar
         .and_then(omoba_passport::avatars::avatar_definition)
         .map(|avatar| avatar.display_name.clone())
         .unwrap_or_else(|| {
@@ -495,7 +501,10 @@ fn spawn_local_player_on_team(
     }
     let team = team_selection.team.unwrap();
     let character = team_selection.character;
-    let avatar = team_selection.avatar.clone();
+    let avatar = session
+        .committed_avatar()
+        .unwrap_or_else(|| team_selection.effective_avatar())
+        .map(str::to_owned);
     let spawn = map_layout.team_spawn(team);
 
     spawn_player_entity(

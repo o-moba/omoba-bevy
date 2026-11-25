@@ -622,6 +622,9 @@ fn actions(
             }
             Action::Hero(hero) => {
                 let actor = s.actor_config_mut();
+                if actor.hero != *hero {
+                    actor.avatar = Some(hero.default_avatar_slug().to_owned());
+                }
                 actor.hero = *hero;
                 actor.recipe = None;
                 normalize_handheld(actor);

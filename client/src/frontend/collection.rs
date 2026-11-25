@@ -866,7 +866,7 @@ fn collection_actions(
                 omoba_passport::weapon_store::refresh(true);
             }
             CollectionAction::Handheld(choice) => {
-                if !choice.compatible(selection.hero_class) {
+                if !choice.allowed_in_match() || !choice.compatible(selection.hero_class) {
                     continue;
                 }
                 if let HandheldSelection::Item(id) = choice {
@@ -875,7 +875,7 @@ fn collection_actions(
                     }
                     omoba_passport::weapon_store::model_state(id);
                 }
-                selection.handheld = choice.clone();
+                selection.set_match_handheld(choice.clone());
             }
             CollectionAction::ConnectAccount => crate::passport::connect_account(),
             CollectionAction::ConnectWallet => crate::passport::connect(),
@@ -893,13 +893,11 @@ fn collection_actions(
                 card.showcase_avatar = preview.slug.clone();
             }
             CollectionAction::Equip => {
-                if preview
-                    .slug
-                    .as_deref()
-                    .and_then(omoba_passport::avatars::avatar_definition)
-                    .is_some_and(crate::passport::can_select)
+                if let Some(slug) = preview.slug.as_deref()
+                    && crate::team::combat_avatar_available(selection.hero_class, slug)
                 {
-                    selection.avatar = preview.slug.clone();
+                    selection.avatar = (slug != selection.hero_class.default_avatar_slug())
+                        .then(|| slug.to_owned());
                 }
             }
         }
@@ -1094,6 +1092,7 @@ fn refresh_collection_details(
             bool,
             bool,
             bool,
+            bool,
             u64,
             u32,
         )>,
@@ -1112,6 +1111,10 @@ fn refresh_collection_details(
                 .and_then(omoba_passport::avatars::avatar_definition)
         });
     let playable = definition.is_some_and(crate::passport::can_select);
+    let combat_selectable = definition.is_some_and(|avatar| {
+        crate::team::combat_avatar_available(selection.hero_class, &avatar.slug)
+    });
+    let is_equipped = selection.effective_avatar() == preview.slug.as_deref();
     let current = (
         preview.slug.clone(),
         preview.status,
@@ -1119,8 +1122,9 @@ fn refresh_collection_details(
         preview.selected,
         preview.auto_spin,
         card.showcase_avatar == preview.slug,
-        selection.avatar == preview.slug,
+        is_equipped,
         playable,
+        combat_selectable,
         catalogue.revision,
         locale.as_ref().map_or(0, |locale| locale.generation()),
     );
@@ -1201,7 +1205,6 @@ fn refresh_collection_details(
     if let Ok((panel, _)) = detail.single() {
         commands.entity(panel).despawn_related::<Children>();
         let is_showcase = card.showcase_avatar == preview.slug;
-        let is_equipped = selection.avatar == preview.slug;
         commands.entity(panel).with_children(|panel| {
             if let Some(definition) = definition {
                 panel.spawn(widgets::heading(&definition.display_name, 20.0));
@@ -1248,7 +1251,7 @@ fn refresh_collection_details(
                         CollectionAction::Showcase,
                         "AvatarShowcase",
                     );
-                    if playable {
+                    if playable && combat_selectable {
                         screen_tile(
                             row,
                             if is_equipped {
@@ -1260,7 +1263,7 @@ fn refresh_collection_details(
                             CollectionAction::Equip,
                             "AvatarEquip",
                         );
-                    } else {
+                    } else if !playable {
                         row.spawn(widgets::label(
                             tr("collection.not_unlocked"),
                             12.0,
@@ -1291,7 +1294,7 @@ fn clip_display(name: &str) -> String {
 pub(super) enum HandheldGroup {
     /// "My Ekza library": weapons the connected account created, saved or claimed.
     Library,
-    /// Class default, empty hands and the packaged props.
+    /// Class default and the packaged props.
     Included,
     /// The rest of the public Ekza catalogue (approved free weapons).
     Catalogue,
@@ -1363,11 +1366,6 @@ fn handheld_choices_from(
         tr("collection.weapon_default").into(),
         "default",
     ));
-    result.push(included(
-        H::Unequipped,
-        tr("collection.weapon_empty").into(),
-        "empty",
-    ));
     result.extend(
         packaged
             .iter()
@@ -1415,6 +1413,10 @@ mod tests {
     fn weapon_picker_only_offers_models_for_the_selected_class() {
         let offered =
             |class, id: &str| handheld_choices(class).iter().any(|choice| choice.id == id);
+        for class in HeroClass::ALL {
+            assert!(offered(class, "Handheld-default"));
+            assert!(!offered(class, "Handheld-empty"));
+        }
         assert!(offered(HeroClass::Warrior, "Handheld-forge-sword"));
         assert!(offered(HeroClass::Warrior, "Handheld-forge-hammer"));
         assert!(offered(HeroClass::Cinderforge, "Handheld-forge-hammer"));
@@ -1486,6 +1488,24 @@ mod tests {
             UiGlobalTransform::from_translation(Vec2::splat(100.0)),
         ));
         (app, window)
+    }
+
+    #[test]
+    fn collection_ignores_an_empty_hands_action() {
+        let (mut app, _) = drag_app();
+        let hammer = HandheldSelection::Item("forge-hammer".into());
+        app.world_mut()
+            .resource_mut::<TeamSelection>()
+            .set_match_handheld(hammer.clone());
+        app.world_mut().write_message(Activated {
+            action: CollectionAction::Handheld(HandheldSelection::Unequipped),
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert_eq!(
+            app.world().resource::<TeamSelection>().effective_handheld(),
+            hammer
+        );
     }
 
     fn touch(app: &mut App, window: Entity, id: u64, phase: TouchPhase, position: Vec2) {
@@ -1879,7 +1899,6 @@ mod tests {
             [
                 ("Handheld-ekza-owned", HandheldGroup::Library),
                 ("Handheld-default", HandheldGroup::Included),
-                ("Handheld-empty", HandheldGroup::Included),
                 (shipped.as_str(), HandheldGroup::Included),
                 ("Handheld-ekza-public", HandheldGroup::Catalogue),
             ]
@@ -1890,15 +1909,15 @@ mod tests {
             Some("jinx-artist · CC-BY-4.0")
         );
         assert_eq!(
-            choices[4].credit.as_deref(),
+            choices[3].credit.as_deref(),
             Some("jinx-artist · CC-BY-4.0")
         );
-        assert!(choices[1..4].iter().all(|c| c.credit.is_none()));
+        assert!(choices[1..3].iter().all(|c| c.credit.is_none()));
         assert_eq!(
-            choices[4].attribution.as_deref(),
+            choices[3].attribution.as_deref(),
             Some("ekza-public by jinx-artist, CC-BY-4.0")
         );
-        assert!(choices[1..4].iter().all(|c| c.attribution.is_none()));
+        assert!(choices[1..3].iter().all(|c| c.attribution.is_none()));
         // Signed out: no library group, the shipped choices lead as before.
         let signed_out = handheld_choices_from(packaged, vec![entry("ekza-public", false)]);
         assert_eq!(signed_out[0].value, H::ClassDefault);

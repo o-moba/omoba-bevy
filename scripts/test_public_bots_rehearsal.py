@@ -112,9 +112,10 @@ class PublicBotsRehearsalTests(unittest.TestCase):
             bots.chmod(0o755)
             with mock.patch.dict(os.environ, {"OMOBA_TEST_DATABASE_URL": "postgres://tester@127.0.0.1/omoba_test"}):
                 with self.assertRaisesRegex(AssertionError, "AI clients exited"):
+                    # Allow subprocess startup and the one-second final log drain under load.
                     rehearsal.main(["--server-bin", str(server), "--bots-bin", str(bots),
                                     "--output", str(output), "--require-victory", "--rush-objectives",
-                                    "--seconds", "1", "--timeout", "2"])
+                                    "--seconds", "1", "--timeout", "10"])
             arguments = (root / "bots.args").read_text().splitlines()
             self.assertIn("--rush-objectives", arguments)
             self.assertIn("--exit-after-result", arguments)
