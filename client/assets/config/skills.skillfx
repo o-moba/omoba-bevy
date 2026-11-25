@@ -254,7 +254,7 @@
       "impact": { "kind": "blast", "shape": "star", "count": 12, "scale": 1.8, "lifetime": 0.7, "slots": ["primary", "accent"] },
       "sound": {
         "cast": { "base": "caster", "speed": 0.75, "slice": "tail", "gain": 1.0, "notes": [{ "delay_ms": 60, "speed": 0.7, "gain": 0.8 }] },
-        "release": { "base": "arrow", "speed": 0.65, "slice": "full", "gain": 0.95 },
+        "release": { "base": "arrow", "speed": 0.75, "slice": "full", "gain": 0.95 },
         "impact": { "base": "tower", "speed": 0.85, "slice": "full", "gain": 1.0 } }
     },
     "fault_line": {

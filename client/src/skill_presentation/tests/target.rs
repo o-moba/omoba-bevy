@@ -93,14 +93,14 @@ fn target_parses() {
     assert_eq!(count(|row| row.cast.is_some()), 68);
     assert_eq!(count(|row| row.body.is_some()), 26);
     assert_eq!(count(|row| row.impact.is_some()), 51);
-    assert_eq!(count(|row| row.windup.is_some()), 5);
+    assert_eq!(count(|row| row.windup.is_some()), 6);
     assert_eq!(count(|row| row.motion.fit_windup), 1);
     assert_eq!(count(|row| row.motion.recast.is_some()), 8);
     assert_eq!(
         rows.iter()
             .map(|(_, _, profile)| profile.aux.len())
             .sum::<usize>(),
-        6
+        7
     );
     let phases = |phase: MotionPhase| {
         rows.iter()
@@ -115,7 +115,7 @@ fn target_parses() {
             MotionPhase::Parry
         ]
         .map(phases),
-        [63, 2, 2, 1]
+        [62, 3, 2, 1]
     );
     let cast = |pick: fn(&CastAccent) -> bool| {
         rows.iter()
@@ -136,7 +136,7 @@ fn target_parses() {
     assert_eq!(voices(|sound| sound.cast.is_some()), 68);
     assert_eq!(voices(|sound| sound.impact.is_some()), 51);
     assert_eq!(voices(|sound| sound.recast.is_some()), 8);
-    assert_eq!(voices(|sound| sound.release.is_some()), 5);
+    assert_eq!(voices(|sound| sound.release.is_some()), 6);
 
     // The thirteen thrown legacy abilities have a form, four profiles hug the ground as a
     // wave, and the two melee basics throw nothing.
