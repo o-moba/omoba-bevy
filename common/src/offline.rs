@@ -8,6 +8,8 @@ use crate::{
     match_rules::{MatchMode, MatchRules},
 };
 use shared::clock::Instant;
+#[cfg(any(test, feature = "test-support"))]
+use shared::{HeroClass, map::Team, prematch::Role};
 use shared::{
     bot_profile::BotDifficulty,
     debug::{DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE},
@@ -193,6 +195,9 @@ impl PracticeSession {
     /// boss schedule and the started ledger, then the practice bots, each on
     /// the scoreboard.
     fn start_round(&mut self) {
+        self.start_round_with(|host, now| host.fill_practice_bots(now));
+    }
+    fn start_round_with(&mut self, spawn_bots: impl FnOnce(&mut CombatHost<'_>, Instant)) {
         self.world.game_state = GameState::Running;
         self.world.last_wave_spawn_at = self.now
             - (crate::balance::MINION_WAVE_INTERVAL - crate::balance::FIRST_MINION_WAVE_DELAY);
@@ -202,7 +207,7 @@ impl PracticeSession {
             .begin(Vec::new())
             .expect("fresh practice ledger");
         let now = self.now;
-        self.host().fill_practice_bots(now);
+        spawn_bots(&mut self.host(), now);
         self.register_scoreboard();
     }
     /// A human-less round for the difficulty simulator
@@ -212,16 +217,40 @@ impl PracticeSession {
     /// Leave or Rematch.
     #[cfg(any(test, feature = "test-support"))]
     pub fn bots_only(now: Instant, levels: [BotDifficulty; 2]) -> Self {
+        let mut practice = Self::with_team_levels(now, levels);
+        practice.start_round();
+        practice
+    }
+
+    /// A human-less 5v5 round with explicit picks for Green then Blue.
+    /// Each roster follows `Role::ALL` order and each pick must match its role.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn bots_with_rosters(
+        now: Instant,
+        levels: [BotDifficulty; 2],
+        rosters: [[HeroClass; 5]; 2],
+    ) -> Self {
+        let mut practice = Self::with_team_levels(now, levels);
+        practice.start_round_with(|host, now| {
+            for (team, roster) in [Team::Green, Team::Blue].into_iter().zip(rosters) {
+                for (role, class) in Role::ALL.into_iter().zip(roster) {
+                    assert_eq!(class.primary_role(), role, "{class:?} in {team:?} roster");
+                    host.spawn_roster_bot(team, class, role, now)
+                        .expect("fresh practice roster has room for both teams");
+                }
+            }
+        });
+        practice
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn with_team_levels(now: Instant, levels: [BotDifficulty; 2]) -> Self {
         let mut practice = Self::new(now);
-        for (team, level) in [shared::map::Team::Green, shared::map::Team::Blue]
-            .into_iter()
-            .zip(levels)
-        {
+        for (team, level) in [Team::Green, Team::Blue].into_iter().zip(levels) {
             practice
                 .bots
                 .set_difficulty(team, level, &practice.world.players);
         }
-        practice.start_round();
         practice
     }
     pub fn advance(&mut self, dt: f32) {

@@ -1494,14 +1494,6 @@ impl CombatHost<'_> {
         kind: BotKind,
         now: Instant,
     ) -> Option<SocketAddr> {
-        let slot = (1..=32_u16).find(|slot| {
-            !self
-                .world
-                .players
-                .contains_key(&SocketAddr::from(([0_u16; 8], *slot)))
-        })?;
-        let addr = SocketAddr::from(([0_u16; 8], slot));
-        self.world.ensure_connected(addr, now);
         // Roster bots complete the Mid/Solo/Carry/Jungle/Support composition;
         // sandbox bots take the requested class and hold mid without jungling.
         let teammates: Vec<_> = self
@@ -1516,12 +1508,52 @@ impl CombatHost<'_> {
                 .into_iter()
                 .find(|(class, ..)| !teammates.contains(class))
                 .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
-        let class = class.unwrap_or(composition_class);
-        let (lane, jungle, role) = if kind == BotKind::Lane {
+        let assignment = if kind == BotKind::Lane {
             (composition_lane, composition_jungle, composition_role)
         } else {
             (Lane::Mid, false, Role::Mid)
         };
+        self.spawn_assigned_bot(
+            team,
+            class.unwrap_or(composition_class),
+            kind,
+            assignment,
+            now,
+        )
+    }
+
+    /// Seat a simulated roster pick according to its explicit draft role.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn spawn_roster_bot(
+        &mut self,
+        team: Team,
+        class: HeroClass,
+        role: Role,
+        now: Instant,
+    ) -> Option<SocketAddr> {
+        let (_, lane, jungle, _) = BOT_COMPOSITION
+            .into_iter()
+            .find(|(_, _, _, duty)| *duty == role)
+            .expect("each draft role has a bot assignment");
+        self.spawn_assigned_bot(team, class, BotKind::Lane, (lane, jungle, role), now)
+    }
+
+    fn spawn_assigned_bot(
+        &mut self,
+        team: Team,
+        class: HeroClass,
+        kind: BotKind,
+        (lane, jungle, role): (Lane, bool, Role),
+        now: Instant,
+    ) -> Option<SocketAddr> {
+        let slot = (1..=32_u16).find(|slot| {
+            !self
+                .world
+                .players
+                .contains_key(&SocketAddr::from(([0_u16; 8], *slot)))
+        })?;
+        let addr = SocketAddr::from(([0_u16; 8], slot));
+        self.world.ensure_connected(addr, now);
         let persona = if kind == BotKind::Lane {
             self.bots
                 .next_roster_persona(&self.world.players, self.match_id)
@@ -3840,6 +3872,54 @@ mod profile_tests {
 
     fn profile_of(bots: &BotControllers, addr: SocketAddr) -> BotProfile {
         bots.controllers[&addr].profile
+    }
+
+    #[test]
+    fn custom_roster_picks_keep_their_role_lane_and_jungle_assignment() {
+        use HeroClass::*;
+        let rosters = [
+            [Warrior, Warden, Mage, Ranger, Frostguard],
+            [Cinderforge, Stormfist, Orbitwright, Wildspark, Chainkeeper],
+        ];
+        let levels = [BotDifficulty::Veteran, BotDifficulty::Elite];
+        let practice =
+            crate::offline::PracticeSession::bots_with_rosters(Instant::now(), levels, rosters);
+        let participants = practice.combat_log.ledger.snapshot();
+        assert_eq!(participants.len(), 10);
+        let seats = [
+            (Role::Solo, Lane::Top, false),
+            (Role::Jungle, Lane::Mid, true),
+            (Role::Mid, Lane::Mid, false),
+            (Role::Carry, Lane::Bot, false),
+            (Role::Support, Lane::Bot, false),
+        ];
+        for ((team, roster), level) in [Team::Green, Team::Blue]
+            .into_iter()
+            .zip(rosters)
+            .zip(levels)
+        {
+            for (class, (role, lane, jungle)) in roster.into_iter().zip(seats) {
+                let (&addr, player) = practice
+                    .world
+                    .players
+                    .iter()
+                    .find(|(_, p)| {
+                        p.hero.identity.team == team && p.hero.identity.hero_class == class
+                    })
+                    .expect("the selected class joined its team");
+                let controller = &practice.bots.controllers[&addr];
+                assert_eq!(player.draft.role, role);
+                assert_eq!(player.hero.progress.level, 1);
+                assert_eq!(controller.kind, BotKind::Lane);
+                assert_eq!((controller.lane, controller.jungle), (lane, jungle));
+                assert_eq!(controller.profile, BotProfile::for_level(level));
+                assert!(participants.iter().any(|p| {
+                    p.player_id == player.hero.identity.id
+                        && p.hero_class == class
+                        && p.team == team
+                }));
+            }
+        }
     }
 
     fn join(world: &mut GameWorld, addr: SocketAddr, team: Team, class: HeroClass, x: f32) {

@@ -37,6 +37,35 @@ In the repeatable live-camp opening probe, Warden cleared the same three camps
 and full health. Warden earned 171 camp gold and Stormfist earned 122. This
 route leaves out enemy pressure and passive income.
 
+## Simulator comparisons
+
+Run the launch matrix from the game repository. It uses the same in-process
+combat simulation as practice, with ten Elite bots starting at level one on
+Verdant Confluence.
+
+```sh
+OMOBA_LAUNCH_SIM_REPORT="$PWD/launch-roster-sim.json" \
+  cargo test --release --locked -p common --features test-support \
+  --test bot_difficulty_sim -- --ignored --exact --nocapture launch_roster::launch_roster_matrix
+```
+
+Each comparison changes one duty and gives the two teams the same four allied
+classes. Each lineup plays once on each side with the same tick schedule. The
+default 16 pairs per duty cover every combination of those four allies. Use
+`OMOBA_LAUNCH_SIM_PAIRS`, `OMOBA_LAUNCH_SIM_CAP_MIN` (default 45 minutes), and
+`OMOBA_LAUNCH_SIM_SEED` to repeat the comparison at a different sample size,
+round length, or tick schedule.
+
+The report records actual base wins and results at the time cap separately.
+At the cap, compare the fractions of enemy structure health removed, counting
+each destroyed structure as one. A lead under 0.05 is a draw. A pair favors
+the class that wins more of its two games, and a pair with equal wins is tied.
+The 95% Wilson bands describe the first class's share of decisive pairs, once
+using base wins alone and once including the results at the cap. Keep the
+number of tied pairs, actual base wins and the structure score beside the
+bands. The bots clear ordinary camps and gank opportunistically. Use their
+results to prioritize human scenarios, including deliberate boss rotations.
+
 ## Scenarios to record
 
 Record the build, side, player count, actual roles, input device and whether

@@ -61,6 +61,9 @@ use shared::hero_balance::BOT_ENGAGE_RANGE as VISION;
 use shared::map::Team;
 use shared::wire::{GameState, TargetKind};
 
+#[path = "bot_difficulty_sim/launch_roster.rs"]
+mod launch_roster;
+
 const TEAMS: [Team; 2] = [Team::Green, Team::Blue];
 /// How often the fight sample runs: the bots' think interval.
 const SAMPLE_SECS: f32 = 0.25;
@@ -218,8 +221,20 @@ fn play(
     profiles: [BotProfile; 2],
     config: Config,
 ) -> Outcome {
-    let start = Instant::now();
-    let mut practice = PracticeSession::bots_only(start, levels);
+    play_practice(
+        PracticeSession::bots_only(Instant::now(), levels),
+        seed,
+        profiles,
+        config,
+    )
+}
+
+fn play_practice(
+    mut practice: PracticeSession,
+    seed: u64,
+    profiles: [BotProfile; 2],
+    config: Config,
+) -> Outcome {
     for (team, profile) in TEAMS.into_iter().zip(profiles) {
         practice
             .bots
@@ -238,12 +253,13 @@ fn play(
         .map(|p| (p.hero.identity.id, side_of(p.hero.identity.team)))
         .collect();
     assert_eq!(side_by_addr.len(), 10, "a full 5v5 bot roster");
-    let structures: Vec<(u64, usize, f32)> = practice
+    let mut structures: Vec<(u64, usize, f32)> = practice
         .world
         .structures
         .values()
         .map(|s| (s.state.id, side_of(s.state.team), s.state.max_hp))
         .collect();
+    structures.sort_unstable_by_key(|&(id, ..)| id);
     let mut rng = Rng(seed);
     let mut sides = [Side::default(), Side::default()];
     let mut last_event = 0_u64;
