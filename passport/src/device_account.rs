@@ -79,10 +79,24 @@ impl DeviceAccountApi {
     pub fn sign_in_url(&self, code: &str) -> Result<String, String> {
         sign_in_url(self.origin(), code)
     }
+    /// Start VK's browser flow and return to this specific device enrollment.
+    pub fn vk_sign_in_url(&self, code: &str) -> Result<String, String> {
+        let return_to = connection_path(code)?;
+        reqwest::Url::parse_with_params(
+            &format!("{}/api/auth/vk/start", self.origin()),
+            [("method", "vkid"), ("returnTo", return_to.as_str())],
+        )
+        .map(String::from)
+        .map_err(|_| "Invalid portal origin.".into())
+    }
 }
 
 /// `{portal}/connect?code=CODE` for an eight-character enrollment code.
 pub fn sign_in_url(origin: &str, code: &str) -> Result<String, String> {
+    Ok(format!("{origin}{}", connection_path(code)?))
+}
+
+fn connection_path(code: &str) -> Result<String, String> {
     if code.len() != 8
         || !code
             .bytes()
@@ -90,11 +104,27 @@ pub fn sign_in_url(origin: &str, code: &str) -> Result<String, String> {
     {
         return Err("Invalid device code.".into());
     }
-    Ok(format!("{origin}/connect?code={code}"))
+    Ok(format!("/connect?code={code}"))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn vk_redirect_returns_to_the_same_enrollment() {
+        let api = super::DeviceAccountApi {
+            inner: super::WebAccountApi::new(
+                "http://127.0.0.1:8000",
+                "http://127.0.0.1:3000",
+                true,
+            )
+            .unwrap(),
+        };
+        assert_eq!(
+            api.vk_sign_in_url("ABCD2345").unwrap(),
+            "http://127.0.0.1:3000/api/auth/vk/start?method=vkid&returnTo=%2Fconnect%3Fcode%3DABCD2345"
+        );
+        assert!(api.vk_sign_in_url("ABCD&123").is_err());
+    }
     #[test]
     fn sign_in_urls_carry_only_a_well_formed_code() {
         assert_eq!(

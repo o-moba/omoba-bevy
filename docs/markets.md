@@ -199,7 +199,9 @@ not a game profile: the site asks the player to install OMOBA and press
 **Sign-in from the game.** Profile → «Войти через VK ID» creates a device request
 (the same native enrollment as "Use an existing account") and opens
 `<portal>/connect?code=<code>` in the browser; the game checks the request every
-three seconds for five minutes.
+three seconds for five minutes. On Android the VK ID button opens the portal's
+VK authorization route directly. Its return URL points to the same enrollment.
+The device screen also displays the portal connection URL for manual use.
 
 - The VK account is new: after VK sign-in the portal offers the sign-in to the
   game's request (`POST /v1/auth/social/attach`). The game asks «Привязать вход

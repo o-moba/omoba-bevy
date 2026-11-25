@@ -5,6 +5,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fix an Android startup crash on Mali GPUs and restore VK ID sign-in on Android by saving the device key in private storage and opening the regional portal in the system browser.
+
 - Require exact model approval for each hero when equipping a handheld. Filter
   the Collection and draft by the selected hero and enforce the same rules on
   the server, including reconnects. Pin packaged weapons by SHA-256 and keep

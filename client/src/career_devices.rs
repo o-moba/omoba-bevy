@@ -438,12 +438,18 @@ fn social_next(
 /// Open the portal's sign-in page; the modal always shows its address too
 /// (phones without a browser bridge open it by hand).
 fn open_sign_in(code: Option<&str>) -> Option<String> {
-    let url = DeviceAccountApi::from_env().and_then(|api| api.sign_in_url(code.unwrap_or("")));
+    let url = DeviceAccountApi::from_env().and_then(|api| {
+        if cfg!(target_os = "android") {
+            api.vk_sign_in_url(code.unwrap_or(""))
+        } else {
+            api.sign_in_url(code.unwrap_or(""))
+        }
+    });
     match url {
         Ok(url) if crate::platform::open_external_url(&url).is_ok() => {
             Some(tr("devices.vk.opened").to_owned())
         }
-        Ok(_) => None,
+        Ok(_) => Some(tr("account.browser.failed").to_owned()),
         Err(error) => Some(error),
     }
 }
