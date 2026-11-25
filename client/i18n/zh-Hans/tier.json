@@ -1,0 +1,9 @@
+{
+  "tier.status.step_down": "Hero 等级 {tier} 至 {until} UTC，之后为 {next}。",
+  "tier.status.until": "Hero 等级 {tier} 至 {until} UTC。",
+  "tier.status.none": "每次支持有效 30 天，30 天内的支持会叠加，达到更高等级。",
+  "tier.style.locked": "{aura} · 未解锁",
+  "tier.purchase.website": "在网站上支持",
+  "tier.website.unavailable": "此版本未配置网站。",
+  "tier.website.opened": "支持页面已在浏览器中打开。付款后请刷新。"
+}

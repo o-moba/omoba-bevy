@@ -37,10 +37,18 @@ pub struct Weapon {
     pub name: String,
     pub model: String,
     pub grip: Grip,
+    /// Mirrors game-owned approvals in the shipped manifest for catalogue consumers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approved_classes: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+}
+impl Weapon {
+    pub fn binding(&self) -> Option<shared::handheld::WeaponBinding> {
+        shared::handheld::weapon_binding(&self.id)
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,12 +96,45 @@ impl Catalog {
         }
         Ok(c)
     }
+
+    fn parse_shipped(bytes: &[u8]) -> Result<Self, String> {
+        let catalog = Self::parse(bytes)?;
+        for item in &catalog.items {
+            let Some(binding) = item.binding() else {
+                return Err(format!("Shipped weapon lacks hero approval: {}", item.id));
+            };
+            if item.source_id.is_some() || item.sha256.is_none() {
+                return Err(format!(
+                    "Shipped weapon lacks an exact model approval: {}",
+                    item.id
+                ));
+            }
+            let classes: HashSet<_> = item.approved_classes.iter().map(String::as_str).collect();
+            let approved: HashSet<_> = shared::HeroClass::ALL
+                .into_iter()
+                .filter(|class| binding.supports(*class))
+                .map(shared::HeroClass::id)
+                .collect();
+            if classes.len() != item.approved_classes.len() || classes != approved {
+                return Err(format!("Shipped weapon hero approval differs: {}", item.id));
+            }
+        }
+        Ok(catalog)
+    }
 }
+
+pub fn shipped_catalog() -> &'static Catalog {
+    static SHIPPED: OnceLock<Catalog> = OnceLock::new();
+    SHIPPED.get_or_init(|| {
+        Catalog::parse_shipped(include_bytes!("../../client/assets/weapons/manifest.json"))
+            .expect("shipped handheld approvals")
+    })
+}
+
 pub fn catalog() -> &'static Catalog {
     static CATALOG: OnceLock<Catalog> = OnceLock::new();
     CATALOG.get_or_init(|| {
-        let mut base = Catalog::parse(include_bytes!("../../client/assets/weapons/manifest.json"))
-            .expect("shipped handheld catalog");
+        let mut base = shipped_catalog().clone();
         if let Some(path) = std::env::var_os("OMOBA_WEAPON_MANIFEST") {
             let loaded = std::fs::read(path)
                 .map_err(|e| e.to_string())
@@ -108,8 +149,20 @@ pub fn catalog() -> &'static Catalog {
                         let verified = (|| {
                             let bytes =
                                 std::fs::read(root.join(&item.model)).map_err(|e| e.to_string())?;
-                            if item.sha256.as_deref() != Some(&ekza_bevy_sdk::sha256_hex(&bytes)) {
+                            let hash = ekza_bevy_sdk::sha256_hex(&bytes);
+                            if item.sha256.as_deref() != Some(&hash) {
                                 return Err("Weapon hash mismatch".into());
+                            }
+                            let source =
+                                item.source_id.as_deref().ok_or("Missing source identity")?;
+                            if item.id
+                                != ekza_bevy_sdk::assets::asset_slug(
+                                    ekza_bevy_sdk::assets::AssetKind::Weapon,
+                                    source,
+                                    &hash,
+                                )
+                            {
+                                return Err("Weapon ID differs from verified rendition".into());
                             }
                             if validate_model(&bytes)? != item.grip {
                                 return Err("Grip differs from verified rendition".into());
@@ -222,9 +275,46 @@ pub fn validate_model(bytes: &[u8]) -> Result<Grip, String> {
     grip.validate()?;
     Ok(grip)
 }
+/// Optional `asset.extras.omoba_wildspark_set_v1` of a repeater + launcher set
+/// GLB. The client identifies the set by its node names alone; this hint only
+/// moves the muzzle flash. A missing or malformed tip uses the baseline tip.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WildsparkSetHint {
+    /// Canonical grip-frame metres, like the grip offset.
+    pub repeater_muzzle: Option<[f32; 3]>,
+    pub launcher_muzzle: Option<[f32; 3]>,
+}
+/// Read after `validate_model` has accepted the same bytes; never rejects a model.
+pub fn wildspark_set_hint(bytes: &[u8]) -> Option<WildsparkSetHint> {
+    let len = u32::from_le_bytes(bytes.get(12..16)?.try_into().ok()?) as usize;
+    if bytes.get(16..20) != Some(b"JSON") {
+        return None;
+    }
+    let d: serde_json::Value =
+        serde_json::from_slice(bytes.get(20..20usize.checked_add(len)?)?).ok()?;
+    let hint = d["asset"]["extras"]
+        .get("omoba_wildspark_set_v1")
+        .filter(|v| v.is_object())?;
+    let tip = |variant: &str| -> Option<[f32; 3]> {
+        let values = hint["muzzle"][variant]
+            .as_array()
+            .filter(|a| a.len() == 3)?;
+        let mut tip = [0.0; 3];
+        for (out, value) in tip.iter_mut().zip(values) {
+            *out = value.as_f64()? as f32;
+        }
+        tip.iter()
+            .all(|v| v.is_finite() && v.abs() <= 2.0)
+            .then_some(tip)
+    };
+    Some(WildsparkSetHint {
+        repeater_muzzle: tip("repeater"),
+        launcher_muzzle: tip("launcher"),
+    })
+}
 /// The profile caps the graph at 64 nodes before this check. Validate the
 /// entire forest, including unused nodes, before Bevy traverses any scene.
-fn validate_scene_graph(document: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn validate_scene_graph(document: &serde_json::Value) -> Result<(), String> {
     let nodes = document["nodes"].as_array().unwrap();
     let meshes = document["meshes"].as_array().unwrap();
     let index = |value: &serde_json::Value, bound: usize| -> Result<usize, String> {
@@ -344,6 +434,7 @@ pub fn import_entries(
             name: a.name,
             model: format!("weapons/imported/{}.glb", file.sha256),
             grip,
+            approved_classes: Vec::new(),
             source_id: Some(a.id),
             sha256: Some(file.sha256),
         });
@@ -364,8 +455,7 @@ mod tests {
     use std::io::{Read, Write};
     #[test]
     fn shipped_props_and_catalog_follow_the_same_import_contract() {
-        let c =
-            Catalog::parse(include_bytes!("../../client/assets/weapons/manifest.json")).unwrap();
+        let c = shipped_catalog();
         for w in &c.items {
             let bytes = std::fs::read(
                 Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -374,6 +464,13 @@ mod tests {
             )
             .unwrap();
             assert_eq!(validate_model(&bytes).unwrap(), w.grip);
+            let hash = ekza_bevy_sdk::sha256_hex(&bytes);
+            assert_eq!(
+                w.sha256.as_deref(),
+                Some(hash.as_str()),
+                "Wrong model for {}",
+                w.id
+            );
         }
         let mut bad = c.clone();
         bad.items[0].model = "weapons/../../escape.glb".into();
@@ -384,6 +481,65 @@ mod tests {
         bad = c.clone();
         bad.items.push(c.items[0].clone());
         assert!(Catalog::parse(&serde_json::to_vec(&bad).unwrap()).is_err());
+    }
+
+    #[test]
+    fn every_shipped_item_has_an_exact_hero_allowlist() {
+        use shared::HeroClass::{self, *};
+
+        // Check the full matrix so adding a hero or a model cannot create an implicit approval.
+        let expected: [(&str, &[HeroClass]); 8] = [
+            ("forge-sword", &[Warrior]),
+            ("forge-hammer", &[Warrior, Cinderforge]),
+            ("dawn-scepter", &[Dawnweaver, Mage, Cleric]),
+            ("dagger", &[Adventurer]),
+            ("verdant-bow", &[Ranger]),
+            ("wild-repeater", &[Riftshot]),
+            ("wildspark-repeater", &[Wildspark]),
+            ("wild-launcher", &[Wildspark]),
+        ];
+        let catalog = shipped_catalog();
+        assert_eq!(catalog.items.len(), expected.len());
+        for (id, approved) in expected {
+            let item = catalog.items.iter().find(|item| item.id == id).unwrap();
+            for hero in HeroClass::ALL {
+                assert_eq!(
+                    item.binding().unwrap().supports(hero),
+                    approved.contains(&hero),
+                    "{id} on {hero:?}"
+                );
+            }
+        }
+
+        let mut bad = catalog.clone();
+        bad.items[0].sha256 = None;
+        assert!(Catalog::parse_shipped(&serde_json::to_vec(&bad).unwrap()).is_err());
+        bad = catalog.clone();
+        bad.items[0].id = "unknown-model".into();
+        assert!(Catalog::parse_shipped(&serde_json::to_vec(&bad).unwrap()).is_err());
+        bad = catalog.clone();
+        bad.items[0].approved_classes.push("ranger".into());
+        assert!(Catalog::parse_shipped(&serde_json::to_vec(&bad).unwrap()).is_err());
+    }
+
+    #[test]
+    fn reviewed_registry_hammer_matches_the_packaged_bytes() {
+        use ekza_bevy_sdk::assets::{AssetKind, asset_slug};
+        use shared::{
+            HeroClass,
+            handheld::{REVIEWED_FORGE_HAMMER, weapon_binding},
+        };
+
+        let asset_id = "ekza:weapon:38a9903e-b3ec-4b12-a5f8-83516c77ba8b";
+        let bytes = include_bytes!("../../client/assets/weapons/forge-hammer.glb");
+        let hash = ekza_bevy_sdk::sha256_hex(bytes);
+        assert_eq!(
+            asset_slug(AssetKind::Weapon, asset_id, &hash),
+            REVIEWED_FORGE_HAMMER
+        );
+        let binding = weapon_binding(REVIEWED_FORGE_HAMMER).unwrap();
+        assert_eq!(Some(binding), weapon_binding("forge-hammer"));
+        assert!(!binding.supports(HeroClass::Wildspark));
     }
     /// Preserve the real buffer payload while mutating untrusted JSON fields:
     /// these cases are valid GLB containers but unsafe runtime scene inputs.
@@ -477,6 +633,62 @@ mod tests {
             validate_model(&valid).is_ok(),
             "nested mesh and unused valid nodes are allowed"
         );
+    }
+    #[test]
+    fn wildspark_set_shape_passes_and_its_muzzle_hint_is_optional() {
+        use serde_json::json;
+        let set = |hint: Option<serde_json::Value>| {
+            with_document(|d| {
+                d["scenes"][0]["nodes"] = json!([0]);
+                d["nodes"] = json!([
+                    {"name":"wildspark-set","children":[1,3]},
+                    {"name":"WildsparkSetRepeater","mesh":0,"children":[2]},
+                    {"name":"WildsparkRotor","mesh":0,"translation":[0,0.12,0.25]},
+                    {"name":"WildsparkSetLauncher","scale":[0,0,0],"children":[4]},
+                    {"name":"WildsparkSlide","mesh":0,"translation":[0,0.13,0.2]}
+                ]);
+                if let Some(hint) = hint {
+                    d["asset"]["extras"]["omoba_wildspark_set_v1"] = hint;
+                }
+            })
+        };
+        let plain = set(None);
+        assert!(validate_model(&plain).is_ok(), "hidden launcher at scale 0");
+        assert_eq!(wildspark_set_hint(&plain), None);
+        let hinted = set(Some(json!({
+            "repeater": "WildsparkSetRepeater",
+            "launcher": "WildsparkSetLauncher",
+            "muzzle": {"repeater": [0, 0.12, 0.735], "launcher": [0, 0.13, 0.81]}
+        })));
+        assert!(validate_model(&hinted).is_ok());
+        assert_eq!(
+            wildspark_set_hint(&hinted),
+            Some(WildsparkSetHint {
+                repeater_muzzle: Some([0.0, 0.12, 0.735]),
+                launcher_muzzle: Some([0.0, 0.13, 0.81]),
+            })
+        );
+        // A malformed tip falls back on its own and never rejects the model.
+        for bad in [
+            json!([0, 0.1]),
+            json!([0, "up", 1]),
+            json!([0, 0, 9.0]),
+            json!(null),
+        ] {
+            let bytes = set(Some(
+                json!({"muzzle": {"repeater": bad, "launcher": [0, 0.2, 0.9]}}),
+            ));
+            assert!(validate_model(&bytes).is_ok());
+            assert_eq!(
+                wildspark_set_hint(&bytes),
+                Some(WildsparkSetHint {
+                    repeater_muzzle: None,
+                    launcher_muzzle: Some([0.0, 0.2, 0.9]),
+                })
+            );
+        }
+        assert_eq!(wildspark_set_hint(&set(Some(json!("set")))), None);
+        assert_eq!(wildspark_set_hint(b"not a glb"), None);
     }
     #[test]
     fn sdk_catalog_download_import_and_hash_rejection_use_real_http() {

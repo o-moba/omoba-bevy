@@ -1,0 +1,84 @@
+{
+  "status": "PASS",
+  "scope": "Disposable PG18 native loopback physical-base/WAL proof only; no production configuration, off-host encryption/storage, RPO or game-completion proof.",
+  "source_parent": "8c9f9351857c63a8cf121dd7d90ae9a3d1bae247",
+  "migrator_sha256": "2742a5def9afe6268fa43c4174c47862db4e5bdb9e390f0facbca441a826154d",
+  "wal_segment_mib": 1,
+  "checks": [
+    "actual schema10/portal11 physical base backup verified",
+    "two post-base rating/history fixtures committed and their WAL durably archived",
+    "point recovery replays real career rows to the exact expected rating/history state",
+    "latest recovery replays real career rows to the exact expected rating/history state",
+    "missing post-base WAL refuses target recovery instead of reporting an old snapshot as success"
+  ],
+  "minimum_root_gib": 11.318862915039062,
+  "postgres": "postgres (PostgreSQL) 18.3 (Postgres.app)",
+  "system_identifier": "7705139901683423845",
+  "schema": {
+    "career": 10,
+    "portal": 11
+  },
+  "base_manifest_sha256": "aa813df35076e592b6788dbe44b3de2aadb3b87f2dbe0d2c7f06265ccd8ca77f",
+  "base_snapshot": {
+    "rating": 1000,
+    "rated_matches": 20,
+    "matches_played": 20,
+    "history": 0
+  },
+  "target_lsn": "0/1124C60",
+  "post_base_segment": {
+    "name": "000000010000000000000011",
+    "bytes": 1048576,
+    "sha256": "9e97734dc3630e36e468b8a8d0f95e2d72c3d8ddca4302a946f85aefa8971d40"
+  },
+  "point": {
+    "expected": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1
+    },
+    "actual": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1
+    },
+    "recovered_without_primary_connection": true
+  },
+  "latest": {
+    "expected": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2
+    },
+    "actual": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2
+    },
+    "recovered_without_primary_connection": true
+  },
+  "all_owned_postgres_stopped": true,
+  "temporary_cluster_data_removed": true,
+  "rehearsal_sha256": "1cac6fe080da3e2d0812c9db9f881c4d6d2c04de33959cfbfcc13a875921eba9",
+  "wal_callback_sha256": "9c32a5522084ccb53c4eec759d1ace750304b04f7d68b54cdcc2fa46632f3d0f",
+  "raw_report_sha256": "bce11a2d04c44065bf4eda27c3dc60a8cfffcd419c8eb0f2139bbe9572e6c9aa",
+  "fixture_disclosure": "One isolated fresh cluster migrated by prebuilt RU API to actual career10/portal11. Rating/history rows are direct-SQL synthetic fixtures following real append-only match transitions, not won matches.1MiB WAL segments bound fixture size; production defaults/capacity/RPO are not proved.",
+  "rejected_attempt": "v1 treated hot-standby readiness as completed promotion and failed; its processes/data were cleaned and no acceptance claimed. Corrected positive gate waits for pg_is_in_recovery=false. Negative gate waits for actual terminal unmet-target failure even if pg_ctl briefly reports read-only readiness. v2 passed; v3 adds the explicit negative readiness-race fence and also passes.",
+  "critic_C4_status": "OPEN: actual encrypted signed off-host WAL/base sets, production archiving/check/restore kit, retention/alerts and approved host rollout remain to implement/prove. This is a local mechanism proof only.",
+  "sources": [
+    "https://www.postgresql.org/docs/18/continuous-archiving.html",
+    "https://www.postgresql.org/docs/18/app-pgbasebackup.html"
+  ],
+  "artifact_sha256": {
+    "rehearse.py": "1cac6fe080da3e2d0812c9db9f881c4d6d2c04de33959cfbfcc13a875921eba9",
+    "wal-copy.py": "9c32a5522084ccb53c4eec759d1ace750304b04f7d68b54cdcc2fa46632f3d0f",
+    "source.log": "4d5b15ab2e3ae86e5d649e2919aacb5c00f89072110e2ccd643e578dad316a23",
+    "point.log": "1eca9acf87984a306231c10cb7ae08cc09cc32841c07bf28a387eae1acf2834f",
+    "latest.log": "aebc7be6d328faf0e460449540790f38f38f5c139fd325a28a5ef2902e3b52ee",
+    "missing.log": "9c24e63b5c16aff58d2f50874e22655a85f98c324810c0f8cf449be9e15204cd"
+  }
+}

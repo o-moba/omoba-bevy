@@ -17,5 +17,6 @@
   "searching.match.waiting": "Игроки найдены · {humans}/{needed}\n{policy} · ожидание {elapsed}с",
   "searching.match.allocating": "Матч найден · подготовка арены…",
   "searching.match.assigned": "Матч найден · подключение к команде…",
-  "searching.match.failed": "Не удалось начать матч: {code}\nОтмените поиск и попробуйте снова."
+  "searching.match.failed": "Не удалось начать матч: {code}\nОтмените поиск и попробуйте снова.",
+  "searching.status.resumed": "Поиск был приостановлен. Обновляем поиск…"
 }

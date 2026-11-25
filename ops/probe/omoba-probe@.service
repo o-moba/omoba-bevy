@@ -1,0 +1,31 @@
+# External probe of one market's public servers (LR-17), the instance name being the
+# market (omoba-probe@ru.service): the lobby's UDP compatibility check, the Account API
+# /health/ready and the portal; Telegram after 2 failed rounds in a row. It runs on a
+# probe host OUTSIDE that market's own host, never on it (ops/probe/README.md).
+# Started every minute by omoba-probe@<market>.timer. Settings, written by
+# `scripts/market_probe.py config --market <market>` and holding the bot token, are in
+# /etc/omoba-probe/<market>.env (root 0600); systemd reads them, the probe runs unprivileged.
+[Unit]
+Description=OMOBA external probe of the %i market
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+EnvironmentFile=/etc/omoba-probe/%i.env
+ExecStart=/usr/bin/python3 /opt/omoba-probe/market_probe.py run
+StateDirectory=omoba-probe/%i
+TimeoutStartSec=50s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=96M

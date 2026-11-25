@@ -35,9 +35,8 @@ pub fn camp_layout(map_size: f32) -> [(Point, JungleCampKind); CAMP_COUNT] {
 pub const WARDEN_CAMP_DAMAGE_MULTIPLIER: f32 = 1.35;
 /// Bosses are team objectives, so the jungler only gets a small edge there.
 pub const WARDEN_BOSS_DAMAGE_MULTIPLIER: f32 = 1.15;
-/// Extra gold and XP a Warden earns per ordinary camp kill.
+/// Extra gold a Warden earns per ordinary camp kill.
 pub const WARDEN_CAMP_GOLD_MULTIPLIER: f32 = 1.4;
-pub const WARDEN_CAMP_XP_MULTIPLIER: f32 = 1.25;
 
 /// Outgoing damage multiplier for a hero hitting a neutral monster.
 pub fn neutral_damage_multiplier(class: HeroClass, boss: bool) -> f32 {
@@ -49,6 +48,7 @@ pub fn neutral_damage_multiplier(class: HeroClass, boss: bool) -> f32 {
 }
 
 /// Gold and XP a hero of `class` earns for the final blow on a neutral.
+/// All heroes receive the same camp XP.
 /// Boss rewards stay flat: their value is the team buff.
 pub fn neutral_kill_rewards(class: HeroClass, boss: bool, gold: u32, xp: u32) -> (u32, u32) {
     if class != HeroClass::Warden || boss {
@@ -56,7 +56,7 @@ pub fn neutral_kill_rewards(class: HeroClass, boss: bool, gold: u32, xp: u32) ->
     }
     (
         (gold as f32 * WARDEN_CAMP_GOLD_MULTIPLIER).round() as u32,
-        (xp as f32 * WARDEN_CAMP_XP_MULTIPLIER).round() as u32,
+        xp,
     )
 }
 
@@ -66,21 +66,18 @@ mod tests {
     use crate::navigation::world_navigation;
 
     #[test]
-    fn only_the_warden_farms_camps_faster_and_bosses_stay_team_objectives() {
+    fn warden_farms_camps_faster_and_earns_extra_gold_with_standard_xp() {
         for class in HeroClass::ALL {
-            let warden = class == HeroClass::Warden;
-            assert_eq!(neutral_damage_multiplier(class, false) > 1.0, warden);
-            assert!(
-                neutral_damage_multiplier(class, true) <= neutral_damage_multiplier(class, false)
-            );
+            let (camp_damage, boss_damage, camp_gold) = if class == HeroClass::Warden {
+                (1.35, 1.15, 73)
+            } else {
+                (1.0, 1.0, 52)
+            };
+            assert_eq!(neutral_damage_multiplier(class, false), camp_damage);
+            assert_eq!(neutral_damage_multiplier(class, true), boss_damage);
+            assert_eq!(neutral_kill_rewards(class, false, 52, 85), (camp_gold, 85));
             assert_eq!(neutral_kill_rewards(class, true, 150, 200), (150, 200));
-            let (gold, xp) = neutral_kill_rewards(class, false, 52, 85);
-            assert_eq!((gold > 52, xp > 85), (warden, warden));
         }
-        assert_eq!(
-            neutral_kill_rewards(HeroClass::Warden, false, 52, 85),
-            (73, 106)
-        );
     }
 
     #[test]

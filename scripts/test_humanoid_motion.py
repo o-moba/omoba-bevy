@@ -46,7 +46,7 @@ NEW_MOTIONS = (
     "overhead_plant", "rally_raise", "raise_from_earth", "two_hand_push", "shot_heavy", "burst_fire",
     "sky_shot", "ground_shot", "reload_snap", "aim_hold_loop", "aim_loose_r", "cast_thrust_r",
     "point_command", "hover_pulse", "levitate_loop", "draw_in", "hurl_overhand", "toss_underhand",
-    "place_quick", "kneel_plant",
+    "place_quick", "kneel_plant", "spell_charge", "ray_release",
 )
 FINGERS = ("Index", "Middle", "Ring", "Little", "Thumb")
 
@@ -59,10 +59,7 @@ class SharedHumanoidMotionTests(unittest.TestCase):
         cls.source = legacy.SourceRig(legacy.Gltf.from_gltf_file(motion.SOURCE))
         cls.bones = motion.semantic_source_bones(cls.source)
         cls.document = legacy.Gltf.from_glb(motion.ROOT / legacy.AVATARS_DIR / "agnes.glb")
-        cls.humanoid = {
-            item["bone"]: item["node"]
-            for item in cls.document.js["extensions"]["VRM"]["humanoid"]["humanBones"]
-        }
+        _, cls.humanoid = legacy.humanoid_bone_map(cls.document.js)
 
     def joints(self, clip_name, library=None):
         """World positions of the mapped joints of one rig at every key of a clip."""
@@ -128,7 +125,8 @@ class SharedHumanoidMotionTests(unittest.TestCase):
 
     def test_every_shipped_rig_has_finite_run_leg_and_hips_motion(self):
         report = motion.audit_roster(self.library)
-        self.assertEqual(report["rig_count"], 15)
+        self.assertEqual(report["rig_count"], 32)
+        self.assertEqual(sum(rig["slug"].startswith("set01-") for rig in report["rigs"]), 17)
         self.assertEqual(report["status"], "PASS")
         for rig in report["rigs"]:
             self.assertTrue(rig["source_bytes_unchanged"])

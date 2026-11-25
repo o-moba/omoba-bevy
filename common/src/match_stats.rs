@@ -1,7 +1,8 @@
 //! Lifetime round accounting from accepted HP-loss receipts, independent of
 //! connected endpoints and the short, repeated cosmetic event stream.
+use shared::clock::Instant;
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::career::{MAX_PARTICIPANTS, MatchStats, ParticipantResult};
 use shared::combat::{CombatEntityKind, CombatEvent};
@@ -87,6 +88,7 @@ impl RoundLedger {
         // Progression and rating are awarded later by result finalization,
         // never inherited from an earlier result supplied as an identity DTO.
         participant.rating = None;
+        participant.participation = None;
         participant.progression_xp_gained = 0;
         self.participants.insert(
             id,
@@ -111,6 +113,26 @@ impl RoundLedger {
 
     pub fn is_started(&self) -> bool {
         self.started
+    }
+
+    /// The hostile players that damaged `victim` within `window` before
+    /// `now`, each with the time of its latest hit, in player-id order. The
+    /// window is capped at the assist window, the longest this record keeps,
+    /// and a victim's record clears when it dies. Read-only: the bots' threat
+    /// response uses it, because being hit is something a human knows too.
+    pub fn recent_attackers(
+        &self,
+        victim: u64,
+        now: Instant,
+        window: Duration,
+    ) -> impl Iterator<Item = (u64, Instant)> + '_ {
+        let window = window.min(ASSIST_WINDOW);
+        self.contributors
+            .get(&PlayerId(victim))
+            .into_iter()
+            .flatten()
+            .filter(move |(_, at)| now.saturating_duration_since(**at) <= window)
+            .map(|(attacker, at)| (attacker.0, *at))
     }
     pub fn is_frozen(&self) -> bool {
         self.frozen
@@ -138,6 +160,16 @@ impl RoundLedger {
         }
     }
 
+    pub fn public_kills(&self) -> &[shared::live_score::KillNotice] {
+        &self.kills
+    }
+
+    pub fn participant(&self, player_id: u64) -> Option<&ParticipantResult> {
+        self.participants
+            .get(&PlayerId(player_id))
+            .map(|participant| &participant.result)
+    }
+
     pub fn live_scoreboard(&self) -> Option<shared::live_score::LiveScoreboard> {
         self.started.then(|| shared::live_score::LiveScoreboard {
             elapsed_secs: 0,
@@ -150,6 +182,8 @@ impl RoundLedger {
                     shared::live_score::LiveScorePlayer {
                         player_id: p.player_id,
                         nickname: p.nickname.clone(),
+                        is_bot: p.is_bot,
+                        bot_persona: p.bot_persona.clone(),
                         avatar: p.avatar.clone(),
                         team: p.team,
                         hero_class: p.hero_class,
@@ -304,7 +338,7 @@ impl RoundLedger {
 pub fn update_live_timers(
     board: &mut shared::live_score::LiveScoreboard,
     world: &crate::game_world::GameWorld,
-    now: std::time::Instant,
+    now: shared::clock::Instant,
 ) {
     board.elapsed_secs = world.match_elapsed_secs.max(0.0) as u64;
     for row in &mut board.players {
@@ -333,7 +367,10 @@ mod tests {
 
     fn participant(id: u64, team: Team) -> ParticipantResult {
         ParticipantResult {
+            input_kind: Default::default(),
+            participation: None,
             is_bot: false,
+            bot_persona: None,
             player_id: id,
             profile_id: Some(format!("{id:064x}")),
             nickname: format!("Hero {id}"),
@@ -663,6 +700,64 @@ mod tests {
             stats(&ledger, 1).assists,
             1,
             "older than ten seconds expires"
+        );
+    }
+
+    #[test]
+    fn recent_attackers_are_hostile_players_inside_the_window_until_the_victim_dies() {
+        let now = Instant::now();
+        let mut ledger = ledger();
+        let window = Duration::from_secs(2);
+        let attackers = |ledger: &RoundLedger, at: Instant, window: Duration| {
+            ledger.recent_attackers(1, at, window).collect::<Vec<_>>()
+        };
+        assert!(attackers(&ledger, now, window).is_empty());
+        // A teammate, a minion and a hostile player hit player 1.
+        for (id, kind, source) in [
+            (1, CombatEntityKind::Player, 2),
+            (2, CombatEntityKind::Minion, 3),
+            (3, CombatEntityKind::Player, 3),
+        ] {
+            ledger.record(
+                now,
+                &hit(id, kind, source, CombatEntityKind::Player, 1, 5.0, false),
+            );
+        }
+        assert_eq!(attackers(&ledger, now, window), [(3, now)]);
+        assert_eq!(attackers(&ledger, now + window, window), [(3, now)]);
+        assert!(
+            attackers(&ledger, now + window + Duration::from_millis(1), window).is_empty(),
+            "older than the window"
+        );
+        assert_eq!(
+            attackers(&ledger, now + ASSIST_WINDOW, Duration::from_secs(60)),
+            [(3, now)],
+            "a longer window is capped at the assist window"
+        );
+        assert!(
+            attackers(
+                &ledger,
+                now + ASSIST_WINDOW + Duration::from_millis(1),
+                Duration::from_secs(60)
+            )
+            .is_empty()
+        );
+        let later = now + Duration::from_secs(1);
+        ledger.record(
+            later,
+            &hit(
+                4,
+                CombatEntityKind::Player,
+                3,
+                CombatEntityKind::Player,
+                1,
+                5.0,
+                true,
+            ),
+        );
+        assert!(
+            attackers(&ledger, later, window).is_empty(),
+            "a death clears the victim's record"
         );
     }
 

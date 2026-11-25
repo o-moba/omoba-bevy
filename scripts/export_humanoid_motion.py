@@ -527,7 +527,7 @@ def audit_roster(library, avatars_dir=ROOT / legacy.AVATARS_DIR):
         for node in doc.nodes:
             if any(abs(s - 1) > 1e-5 for s in node.get("scale", [1, 1, 1])):
                 raise ValueError(f"{entry['slug']}: audit expects unit-scale shipped rig")
-        humanoid = {bone["bone"]: bone["node"] for bone in doc.js["extensions"]["VRM"]["humanoid"]["humanBones"]}
+        _, humanoid = legacy.humanoid_bone_map(doc.js)
         if not set(REQUIRED) <= set(humanoid):
             raise ValueError(f"{entry['slug']}: incomplete humanoid")
         rest = doc.rest_local_pose()

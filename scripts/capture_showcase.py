@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from qa_account_fixture import prepare_capture_account
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -102,6 +103,7 @@ def free_address():
 
 
 def base_env(scene, assets, workdir, output):
+    prepare_capture_account(workdir)
     width, height = scene["size"]
     env = dict(os.environ, OMOBA_CLIENT_CONFIG_DIR=str(Path(workdir) / "config"),
                OMOBA_ASSET_DIR=str(assets), OMOBA_PLAYER_VISUAL_MODE="models3d", OMOBA_DEBUG_UI="0",

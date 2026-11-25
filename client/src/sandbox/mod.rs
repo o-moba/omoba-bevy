@@ -4,7 +4,7 @@ mod ui;
 
 use crate::net::{GameStateSnapshot, NetworkCommand};
 use bevy::prelude::*;
-use shared::sandbox::*;
+use shared::{handheld::HandheldSelection, sandbox::*};
 use std::{
     collections::{HashMap, VecDeque},
     sync::OnceLock,
@@ -172,6 +172,11 @@ impl SandboxClient {
         self.queue.push_back(command);
     }
     pub fn apply(&mut self) {
+        for actor in [&mut self.config.player, &mut self.config.enemy.actor] {
+            if actor.avatar.is_none() {
+                actor.avatar = Some(actor.hero.default_avatar_slug().to_owned());
+            }
+        }
         self.submit(SandboxCommand::ApplyConfig {
             config: self.config.clone(),
         });
@@ -189,6 +194,23 @@ impl SandboxClient {
         } else {
             &self.config.player
         }
+    }
+}
+
+fn handheld_available(choice: &HandheldSelection, class: shared::HeroClass) -> bool {
+    choice.compatible(class)
+        && match choice {
+            HandheldSelection::Item(id) => omoba_passport::weapons::catalog()
+                .items
+                .iter()
+                .any(|weapon| weapon.id == *id),
+            _ => true,
+        }
+}
+
+fn normalize_handheld(actor: &mut ActorConfig) {
+    if !handheld_available(&actor.handheld, actor.hero) {
+        actor.handheld = HandheldSelection::ClassDefault;
     }
 }
 
@@ -217,20 +239,21 @@ fn autojoin(
         return;
     }
     *done = true;
-    if launch().avatar.is_some() {
-        selection.avatar.clone_from(&launch().avatar);
-    }
     let Some(hero) = launch().hero else {
         return;
     };
-    selection.hero_class = hero;
+    selection.pick_class(hero);
     selection.team = Some(crate::team::Team::Green);
     commands.write(NetworkCommand::Join {
         handheld: Default::default(),
         team: crate::team::Team::Green,
         character: selection.character,
         hero_class: hero,
-        avatar: selection.avatar.clone(),
+        avatar: launch()
+            .avatar
+            .as_deref()
+            .or_else(|| selection.effective_avatar())
+            .map(str::to_owned),
         sprite_character: Some(selection.sprite_character.clone()),
     });
 }
@@ -419,6 +442,25 @@ mod command_tests {
         app.update();
         app
     }
+
+    #[test]
+    fn standard_preset_fills_the_missing_avatar_and_keeps_the_manual_override() {
+        let mut sandbox = SandboxClient::default();
+        sandbox.config.player.hero = shared::HeroClass::Cleric;
+        sandbox.config.enemy.actor.hero = shared::HeroClass::Mage;
+        sandbox.config.enemy.actor.avatar = Some("agnes".into());
+        sandbox.apply();
+
+        let Some(SandboxCommand::ApplyConfig { config }) = sandbox.queue.front() else {
+            panic!("sandbox preset request")
+        };
+        assert_eq!(
+            config.player.avatar.as_deref(),
+            Some(shared::HeroClass::Cleric.default_avatar_slug())
+        );
+        assert_eq!(config.enemy.actor.avatar.as_deref(), Some("agnes"));
+    }
+
     #[test]
     fn commands_wait_for_ack_and_rejection_cancels_dependent_reset() {
         let mut app = app();

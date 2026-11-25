@@ -1,0 +1,20 @@
+{
+  "status": "not acceptance",
+  "attempts": [
+    {
+      "scope": "real Ready/Flush full output",
+      "result": "FAIL before fix; only2.986547s remain after12s; fixture receiver is dropped before join so failure cannot hang teardown",
+      "resolution": "same live-receiver test passes unchanged>60s threshold and exact Ready/Flush ACKs"
+    },
+    {
+      "scope": "first bounded-budget stress setup",
+      "result": "legitimate retryable Ready ownership change from concurrent first-time claims; blanket unwrap was an invalid fixture assumption",
+      "resolution": "seed/ACK immutable ownership before duplication; retain the same boundedness, lease, every-sequence and canonical-expiry assertions; accepted stress passes"
+    },
+    {
+      "scope": "initial termination probe invocation",
+      "result": "local generic wrapper selected unsupported10-human Ranked arguments; harness refused before starting a game",
+      "resolution": "correct supported one-client bot-practice preset; actual SIGTERM/durable Interrupted journey passes"
+    }
+  ]
+}

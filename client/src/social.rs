@@ -1,5 +1,6 @@
 //! Ephemeral match communication: local debug feedback offline, server authority online.
 // i18n-strict
+use crate::ui::Button;
 use crate::{
     camera::MainCamera,
     combat::{CombatStats, PendingCast},
@@ -267,6 +268,10 @@ pub(crate) struct SocialClient {
     last_viewport: Option<Vec2>,
     mute_all: bool,
     muted: HashSet<u64>,
+    /// Text chat is off on this server (LR-15); reactions still work.
+    chat_disabled: bool,
+    /// This player's chat mute, with its end (LR-15).
+    mute: Option<shared::moderation::Sanction>,
     /// What this frame's button presses may act on; `None` while social input
     /// is gated (another modal, no admitted match, window not usable).
     buttons: Option<ButtonFrame>,
@@ -310,6 +315,8 @@ impl Default for SocialClient {
             last_viewport: None,
             mute_all: false,
             muted: HashSet::new(),
+            chat_disabled: false,
+            mute: None,
             buttons: None,
         }
     }
@@ -349,11 +356,21 @@ impl SocialClient {
         self.subscribed = true;
         self.subscription = None;
         self.allowed = view.allowed_reactions.into_iter().take(256).collect();
+        self.chat_disabled = view.chat_disabled;
+        self.mute = view.mute;
         if let Some(pending) = &self.pending
             && view.request_id == Some(pending.id)
         {
             if let Some(error) = view.error {
-                self.set_status(SocialStatus::from_text(error));
+                // A moderation refusal (LR-15) reads in the player's language.
+                let moderated = view
+                    .error_code
+                    .as_deref()
+                    .and_then(|code| crate::moderation::refusal_text(code, self.mute.as_slice()));
+                self.set_status(match moderated {
+                    Some(text) => SocialStatus::Text(text),
+                    None => SocialStatus::from_text(error),
+                });
             } else {
                 if let SocialCommand::Chat { text, .. } = &pending.command
                     && self.draft.trim() == text
@@ -458,6 +475,7 @@ impl SocialClient {
                     team: sender.team,
                     age_ms: 0,
                     kind,
+                    bot_chat: None,
                 },
                 Instant::now(),
             );
@@ -485,7 +503,16 @@ impl SocialClient {
             command,
         });
     }
+    /// Why this player cannot chat now (LR-15): chat is off on the server,
+    /// or a mute; reactions still work.
+    fn moderation_notice(&self) -> Option<String> {
+        crate::moderation::chat_notice(self.chat_disabled, self.mute)
+    }
     fn send_chat(&mut self, out: &mut MessageWriter<NetworkCommand>) {
+        if let Some(notice) = self.moderation_notice() {
+            self.set_status(SocialStatus::Text(notice));
+            return;
+        }
         match normalize_chat_text(&self.draft) {
             Ok(text) => self.send(
                 SocialCommand::Chat {
@@ -507,7 +534,8 @@ impl SocialClient {
     }
     fn open_chat(&mut self) {
         self.chat_open = true;
-        self.keyboard_requested = true;
+        // Nothing to type while chat is off or muted: the notice shows instead.
+        self.keyboard_requested = self.moderation_notice().is_none();
         self.wheel.cancel();
         self.opened_frame = true;
         self.blocked_frame = true;
@@ -1441,6 +1469,9 @@ fn render_phone_chat(
                             "SocialLocalNotice",
                         );
                     }
+                    if let Some(notice) = social.moderation_notice() {
+                        text(p, notice, 12.0, ui::GOLD, "SocialModeration");
+                    }
                     render_chat_log(p, social, old_scroll);
                 }
             });
@@ -1473,11 +1504,14 @@ fn render_chat_log(
             .iter()
             .filter(|e| social.visible_sender(e.player_id))
         {
-            if let SocialEventKind::Chat {
-                channel,
-                text: message,
-            } = &event.kind
+            if let SocialEventKind::Chat { channel, .. } = &event.kind
+                && let Some(message) = event.chat_text(crate::i18n::active().code())
             {
+                let bot_nickname = event
+                    .bot_chat
+                    .as_ref()
+                    .map(|_| trf("career.player.bot", &[("name", &event.nickname)]));
+                let nickname = bot_nickname.as_deref().unwrap_or(&event.nickname);
                 p.spawn(row()).with_children(|p| {
                     text(
                         p,
@@ -1485,8 +1519,8 @@ fn render_chat_log(
                             "social.message",
                             &[
                                 ("channel", &channel_label(*channel)),
-                                ("nickname", &event.nickname),
-                                ("message", message),
+                                ("nickname", &nickname),
+                                ("message", &message),
                             ],
                         ),
                         14.0,
@@ -1533,7 +1567,8 @@ fn render(
     };
     let ui_scale_value = ui_scale.as_ref().map_or(1.0, |scale| scale.0);
     let key = format!(
-        "{ui_scale_value}{:?}{:?}{:?}{:?}{}{}{:?}{}{}{}{}{:?}{}{:?}{:?}",
+        "{ui_scale_value}{:?}{:?}{:?}{:?}{:?}{}{}{:?}{}{}{}{}{:?}{}{:?}{:?}",
+        social.moderation_notice(),
         social.chat_open,
         social.wheel,
         social.events,
@@ -1601,14 +1636,23 @@ fn render(
                 Name::new("SocialEntry"),
             ))
             .with_children(|p| {
-                let chat = crate::ui::widgets::controls::sized_icon_button(
-                    p,
-                    crate::ui::kit_assets::Icon::NavMessageCircle,
-                    crate::ui::theme::Form::Desktop,
-                    ButtonKind::Secondary,
-                    SocialAction::Chat,
-                    "SocialOpenChat",
-                );
+                let chat = if phone {
+                    crate::ui::widgets::controls::compact_hud_icon_button(
+                        p,
+                        crate::ui::kit_assets::Icon::NavMessageCircle,
+                        SocialAction::Chat,
+                        "SocialOpenChat",
+                    )
+                } else {
+                    crate::ui::widgets::controls::sized_icon_button(
+                        p,
+                        crate::ui::kit_assets::Icon::NavMessageCircle,
+                        crate::ui::theme::Form::Desktop,
+                        ButtonKind::Secondary,
+                        SocialAction::Chat,
+                        "SocialOpenChat",
+                    )
+                };
                 p.commands()
                     .entity(chat)
                     .insert(crate::ui::widgets::surfaces::Tooltip {
@@ -1703,6 +1747,9 @@ fn render(
                         ui::MUTED,
                         "SocialMode",
                     );
+                    if let Some(notice) = social.moderation_notice() {
+                        text(p, notice, 12.0, ui::GOLD, "SocialModeration");
+                    }
                     render_chat_log(p, &social, old_scroll);
                     text(
                         p,
@@ -1823,12 +1870,15 @@ fn render_bubbles(
         Option<&crate::model_scale::NormalizeModelScale>,
         Option<&crate::net::NetworkSpriteCharacter>,
     )>,
-    bubbles: Query<(Entity, &SocialBubble)>,
+    bubbles: Query<(Entity, &SocialBubble, Option<&Text>)>,
     ui_scale: Option<Res<UiScale>>,
     mobile: Option<Res<MobileControls>>,
     bars: Query<(&crate::combat::CombatBarAnchor, &Transform)>,
 ) {
-    let current: Vec<_> = bubbles.iter().map(|(entity, key)| (entity, *key)).collect();
+    let current: Vec<_> = bubbles
+        .iter()
+        .map(|(entity, key, text)| (entity, *key, text.map(|text| text.0.as_str())))
+        .collect();
     let mut desired = Vec::new();
     let Ok((camera_entity, camera)) = camera.single() else {
         reconcile_bubbles(&mut commands, &current, desired);
@@ -1920,7 +1970,7 @@ fn render_bubbles(
                 },
             });
         }
-        if let SocialEventKind::Chat { text, .. } = &event.kind {
+        if let Some(text) = event.chat_text(crate::i18n::active().code()) {
             desired.push(BubbleDraw {
                 node: Node {
                     padding: UiRect::all(Val::Px(5.0)),
@@ -2001,13 +2051,18 @@ struct BubbleDraw {
 
 fn reconcile_bubbles(
     commands: &mut Commands,
-    current: &[(Entity, SocialBubble)],
+    current: &[(Entity, SocialBubble, Option<&str>)],
     desired: Vec<BubbleDraw>,
 ) {
     let mut retained = HashSet::new();
     for draw in desired {
-        let existing = current.iter().find(|(_, key)| *key == draw.key);
-        let entity = if let Some((entity, _)) = existing {
+        let existing = current.iter().find(|(_, key, _)| *key == draw.key);
+        let entity = if let Some((entity, _, old_text)) = existing {
+            if let Some(text) = draw.text.as_ref()
+                && Some(text.as_str()) != *old_text
+            {
+                commands.entity(*entity).insert(Text::new(text.clone()));
+            }
             *entity
         } else if let Some(text) = draw.text.clone() {
             commands
@@ -2076,7 +2131,7 @@ fn reconcile_bubbles(
                 .insert(image);
         }
     }
-    for (entity, _) in current {
+    for (entity, _, _) in current {
         if !retained.contains(entity) {
             commands.entity(*entity).despawn();
         }
@@ -2185,6 +2240,65 @@ mod tests {
         );
     }
 
+    /// LR-15: with chat off on the server or a mute, the panel says why and
+    /// offers no keyboard; a refused message reads in the player's language.
+    #[test]
+    fn switched_off_or_muted_chat_says_why_instead_of_typing() {
+        use shared::moderation::{Sanction, SanctionKind, code};
+        let mut social = SocialClient::default();
+        social.bind(7, 2);
+        social.apply_view(
+            7,
+            2,
+            1,
+            SocialView {
+                chat_disabled: true,
+                ..default()
+            },
+        );
+        social.open_chat();
+        assert!(!social.keyboard_requested);
+        assert_eq!(
+            social.moderation_notice().as_deref(),
+            Some(tr("moderation.chat_disabled"))
+        );
+        let mute = Sanction {
+            kind: SanctionKind::ChatMute,
+            until: Some(1_893_456_000), // 2030-01-01 00:00 UTC
+        };
+        let now = Instant::now();
+        social.pending = Some(PendingSend {
+            id: 3,
+            command: SocialCommand::Chat {
+                channel: SocialChannel::Team,
+                text: "hello".into(),
+            },
+            started: now,
+            next: now,
+        });
+        social.apply_view(
+            7,
+            2,
+            2,
+            SocialView {
+                request_id: Some(3),
+                error: Some(shared::moderation::CHAT_MUTED_TEXT.into()),
+                error_code: Some(code::CHAT_MUTED.into()),
+                mute: Some(mute),
+                ..default()
+            },
+        );
+        let status = social.status.text().to_owned();
+        assert!(status.contains("2030-01-01 00:00"), "{status}");
+        assert_eq!(social.moderation_notice(), Some(status));
+        // Lifted: the next view clears the notice and chat opens with keys.
+        social.apply_view(7, 2, 3, SocialView::default());
+        assert_eq!(social.moderation_notice(), None);
+        social.close();
+        social.open_chat();
+        assert!(social.keyboard_requested);
+    }
+
     #[test]
     fn unchanged_chat_keyboard_does_not_dirty_the_native_window_every_frame() {
         let mut app = App::new();
@@ -2253,6 +2367,7 @@ mod tests {
                     channel: SocialChannel::Team,
                     text: "confirmed".into(),
                 },
+                bot_chat: None,
             },
             now,
         );
@@ -2850,7 +2965,7 @@ mod tests {
             let current: Vec<_> = world
                 .query::<(Entity, &SocialBubble)>()
                 .iter(world)
-                .map(|(entity, key)| (entity, *key))
+                .map(|(entity, key)| (entity, *key, None))
                 .collect();
             reconcile_bubbles(&mut world.commands(), &current, desired);
             world.flush();
@@ -2918,6 +3033,7 @@ mod tests {
             team: shared::social::SocialTeam::Green,
             age_ms: 0,
             kind,
+            bot_chat: None,
         }
     }
     fn view(events: Vec<SocialEvent>) -> SocialView {

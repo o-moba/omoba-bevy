@@ -23,6 +23,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from package_licenses import collect_legal_notices, copy_legal_notices
+from universal_links import associated_domains, require_associated_domains
 
 TARGET = "aarch64-apple-ios"
 BUNDLE_ID = "space.ekza.omoba.beta"
@@ -189,7 +190,8 @@ def resolve_identity(requested: str, listing: str) -> str:
 
 
 def validate_profile(profile: dict, bundle_id: str, identity: str,
-                     device_udid: str | None = None, now: datetime | None = None) -> dict:
+                     device_udid: str | None = None, now: datetime | None = None,
+                     domains: list[str] | None = None) -> dict:
     """Validate a development profile and return only the needed app entitlements."""
     now = now or datetime.now(timezone.utc)
     expiration = profile.get("ExpirationDate")
@@ -227,7 +229,8 @@ def validate_profile(profile: dict, bundle_id: str, identity: str,
     if identity.upper() not in fingerprints:
         raise ValueError("Selected code-signing identity is not included in the provisioning profile.")
     return {"application-identifier": f"{prefix}.{bundle_id}",
-            "com.apple.developer.team-identifier": team, "get-task-allow": True}
+            "com.apple.developer.team-identifier": team, "get-task-allow": True,
+            **require_associated_domains(profile, domains or [])}
 
 
 def tracked_assets(root: Path) -> list[tuple[Path, Path]]:
@@ -246,9 +249,12 @@ def tracked_assets(root: Path) -> list[tuple[Path, Path]]:
     return sorted(paths, key=lambda item: item[1].as_posix())
 
 
-def app_info(root: Path, binary_info: dict, bundle_id: str) -> dict:
+def app_info(root: Path, binary_info: dict, bundle_id: str, display_name: str | None = None) -> dict:
+    """The app's Info.plist; `display_name` renames a contour's app (OMOBA Dev)."""
     with (root / "mobile/ios/Info.plist").open("rb") as source:
         info = plistlib.load(source)
+    if display_name:
+        info.update({"CFBundleName": display_name, "CFBundleDisplayName": display_name})
     cargo = (root / "Cargo.toml").read_text()
     version = re.search(r'(?ms)^\[workspace\.package\]\s*\n(?:(?!^\[).)*?^version\s*=\s*"([^"\n]+)"', cargo)
     if not version:
@@ -261,6 +267,19 @@ def app_info(root: Path, binary_info: dict, bundle_id: str) -> dict:
                  "CFBundleSupportedPlatforms": ["iPhoneOS"], "DTPlatformName": "iphoneos",
                  "UIDeviceFamily": [1, 2], "MinimumOSVersion": ".".join(map(str, os_version))})
     return info
+
+
+def compile_delegate_nib(root: Path, bundle: Path) -> None:
+    output(["xcrun", "ibtool", "--target-device", "iphone", "--target-device", "ipad",
+            "--minimum-deployment-target", DEPLOYMENT_TARGET, "--compile",
+            str(bundle / "OmobaAppDelegate.nib"), str(root / "mobile/ios/OmobaAppDelegate.xib")])
+
+
+def require_link_delegate(binary: Path) -> None:
+    symbols = set(output(['xcrun', 'nm', '-j', str(binary)]).decode().splitlines())
+    if not {'_OBJC_CLASS_$_OmobaLinkDelegate', '_omoba_universal_links_prepare'} <= symbols:
+        raise ValueError('This executable predates the iOS Universal Link delegate. '
+                         'Rebuild from current source before packaging with the new main nib.')
 
 
 def check_tools(names: list[str]) -> None:
@@ -301,8 +320,9 @@ def main(argv: list[str] | None = None) -> int:
         dsym = Path(str(binary) + ".dSYM").resolve()
     if dsym and (out == dsym.resolve() or dsym.resolve() in out.parents):
         raise ValueError("Output cannot be inside the input dSYM bundle.")
+    needs_delegate_nib = plistlib.loads((ROOT / 'mobile/ios/Info.plist').read_bytes()).get('NSMainNibFile') == 'OmobaAppDelegate'
     check_tools(["git"] + ([] if binary else ["cargo", "rustc", "xcrun"]) +
-                (["xcrun"] if dsym and binary else []) +
+                (["xcrun"] if binary and (dsym or needs_delegate_nib) else []) +
                 (["security", "codesign"] if args.profile else []))
     assets = tracked_assets(ROOT)
     notices = collect_legal_notices(ROOT)
@@ -310,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
     if any(path != "SOURCE-REVISION.json" and path not in tracked for path in notices):
         raise ValueError("Package legal notices must be tracked source files.")
     binary_info = inspect_macho(binary) if binary else None
+    if binary and needs_delegate_nib:
+        require_link_delegate(binary)
     symbols = validate_dsym(binary, dsym) if binary and dsym else None
     sdk = None
     if binary is None:
@@ -328,7 +350,8 @@ def main(argv: list[str] | None = None) -> int:
         profile_bytes = profile_path.read_bytes()
         decoded = plistlib.loads(output(["security", "cms", "-D", "-i", str(profile_path)]))
         identity = resolve_identity(args.identity, output(["security", "find-identity", "-v", "-p", "codesigning"]).decode())
-        entitlements = validate_profile(decoded, args.bundle_id, identity, args.device_udid)
+        entitlements = validate_profile(decoded, args.bundle_id, identity, args.device_udid,
+                                        domains=associated_domains(args.bundle_id))
     report = {"target": TARGET, "preflight_passed": True, "existing_binary": binary_info,
               "tracked_asset_count": len(assets), "signing_credentials_checked": bool(entitlements),
               "device_profile_membership_checked": bool(args.device_udid), "debug_symbols": symbols,
@@ -346,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
         binary_info = inspect_macho(binary)
         dsym = Path(str(binary) + ".dSYM").resolve()
         symbols = validate_dsym(binary, dsym)
+    if needs_delegate_nib and not args.binary:
+        require_link_delegate(binary)
     bundle.mkdir()
     shutil.copy2(binary, bundle / "client")
     (bundle / "client").chmod(0o755)
@@ -356,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     copy_legal_notices(notices, bundle / "assets/legal")
     with (bundle / "Info.plist").open("wb") as destination:
         plistlib.dump(app_info(ROOT, binary_info, args.bundle_id), destination)
+    if needs_delegate_nib:
+        compile_delegate_nib(ROOT, bundle)
     if entitlements:
         (bundle / "embedded.mobileprovision").write_bytes(profile_bytes)
         # Personal team/profile details remain in this transient file and the local signed app.

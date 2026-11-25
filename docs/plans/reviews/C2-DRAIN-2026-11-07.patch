@@ -1,0 +1,845 @@
+diff --git a/ops/vps/ru/ru_host.py b/ops/vps/ru/ru_host.py
+--- a/ops/vps/ru/ru_host.py
++++ b/ops/vps/ru/ru_host.py
+@@ -66,6 +66,7 @@
+ import secrets
+ import shutil
+ import socket
++import stat
+ import subprocess
+ import sys
+ import tarfile
+@@ -1626,6 +1627,135 @@
+         workers = self.running_matches()
+         if workers:
+             raise Refused(f"match workers are running ({workers}); retry when no RU match is in progress")
++
++    def drain_marker(self) -> dict:
++        marker = self.p(STATE + "/matches/drain")
++        try:
++            info = os.lstat(marker)
++        except FileNotFoundError:
++            return {"active": False, "operation_id": None}
++        except OSError:
++            return {"active": True, "operation_id": None, "problem": "unreadable_marker"}
++        invalid = {"active": True, "operation_id": None, "problem": "invalid_marker"}
++        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
++            return invalid
++        try:
++            with os.scandir(marker) as entries:
++                first = next(entries, None)
++                second = next(entries, None)
++                if first is None or second is not None or not re.fullmatch(r"[0-9a-f]{32}", first.name):
++                    return invalid
++                file_info = first.stat(follow_symlinks=False)
++                if not stat.S_ISREG(file_info.st_mode) or file_info.st_size != 0:
++                    return invalid
++                return {"active": True, "operation_id": first.name}
++        except OSError:
++            return invalid
++
++    def drain_report(self) -> dict | None:
++        path = self.p(STATE + "/matches/capacity.json")
++        try:
++            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
++            with os.fdopen(fd, "rb") as file:
++                if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
++                    return None
++                raw = file.read(65537)
++            if len(raw) > 65536:
++                return None
++            report = json.loads(raw)
++            age = self.now() * 1000 - report["updated_ms"]
++            if (report.get("version") != 1 or type(report.get("draining")) is not bool
++                    or type(report.get("occupied")) is not int or not 0 <= report["occupied"] <= 100
++                    or not 0 <= age <= 10000):
++                return None
++            return report
++        except (OSError, ValueError, TypeError, KeyError):
++            return None
++
++    def drain_status(self) -> dict:
++        return {"marker": self.drain_marker(), "report": self.drain_report(),
++                "workers": self.running_matches()}
++
++    def begin_drain(self) -> str | None:
++        if self.drain_marker()["active"]:
++            raise Refused("maintenance marker already exists; inspect its operation before continuing")
++        if not self.active(unit_name("lobby")):
++            self.guard_no_matches()
++            return None  # First install: no running lobby or workers to drain.
++        if self.drain_report() is None:
++            raise Refused("current lobby has no fresh drain capability report; install support during a quiet window")
++        marker_path = STATE + "/matches/drain"
++        self.write_guard(marker_path)
++        marker = self.p(marker_path)
++        operation = secrets.token_hex(16)
++        try:
++            os.mkdir(marker, 0o755)  # Atomic no-replace; an empty window fails closed.
++        except FileExistsError:
++            raise Refused("another maintenance marker appeared; nothing was replaced") from None
++        os.chmod(marker, 0o755)
++        # After mkdir, any failure deliberately leaves maintenance fail-closed.
++        fd = os.open(os.path.join(marker, operation), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
++        try:
++            os.fchmod(fd, 0o644)
++            os.fsync(fd)
++        finally:
++            os.close(fd)
++        for path in (marker, os.path.dirname(marker)):
++            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
++            try:
++                os.fsync(fd)
++            finally:
++                os.close(fd)
++        return operation
++
++    def wait_drained(self, operation: str, seconds: int) -> None:
++        if type(seconds) is not int or not 30 <= seconds <= 3600:
++            raise Refused("drain timeout must be30..3600 seconds")
++        for _ in range(seconds + 1):
++            if self.drain_marker().get("operation_id") != operation:
++                raise Refused("maintenance marker changed; no services were stopped or migrated")
++            report = self.drain_report()
++            if (report and report["draining"] and report.get("drain_operation_id") == operation
++                    and report["occupied"] == 0 and not self.running_matches()):
++                return
++            if _ < seconds:
++                self.sleep(1)
++        raise Refused(f"drain timed out; matches and maintenance remain active (operation {operation})")
++
++    def cancel_drain(self, operation: str) -> dict:
++        if not re.fullmatch(r"[0-9a-f]{32}", operation or ""):
++            raise Refused("a32-character lowercase hex operation ID is required")
++        marker_path = STATE + "/matches/drain"
++        self.write_guard(marker_path)
++        if self.drain_marker().get("operation_id") != operation:
++            raise Refused("refusing to remove another or invalid maintenance operation")
++        marker = self.p(marker_path)
++        os.unlink(os.path.join(marker, operation))
++        os.rmdir(marker)  # Unknown extra entries are never recursively removed.
++        fd = os.open(os.path.dirname(marker), os.O_RDONLY | os.O_DIRECTORY)
++        try:
++            os.fsync(fd)
++        finally:
++            os.close(fd)
++        return {"status": "RESUMING", "operation_id": operation}
++
++    def drain_action(self, payload: dict) -> dict:
++        self.guard_identity(payload)
++        self.payload_units(payload)
++        problems = self.env_file_report("lobby", payload)[0]
++        if problems:
++            raise Refused("; ".join(problems))
++        action = payload.get("action", "status")
++        if action == "status":
++            return self.drain_status()
++        self.mutating = True
++        if action == "begin":
++            operation = self.begin_drain()
++            return {"status": "DRAINING" if operation else "IDLE", "operation_id": operation}
++        if action == "cancel":
++            return self.cancel_drain(payload.get("operation_id"))
++        raise Refused("unknown maintenance action")
++
+ 
+     def available_mib(self) -> int | None:
+         for line in (self.read("/proc/meminfo") or "").splitlines():
+@@ -2424,7 +2554,14 @@
+                       f"systemctl enable + restart {unit_name('account-api')} {unit_name('lobby')}",
+                       f"verify UDP {LOBBY_PORT}, the lobby's exe, Account API /health/ready; roll back on failure"]
+             workers = self.running_matches()
+-            if workers:
++            if payload.get("drain"):
++                seconds = payload.get("drain_timeout", 2800)
++                if type(seconds) is not int or not 30 <= seconds <= 3600:
++                    problems.append("drain timeout must be30..3600 seconds")
++                if self.active(unit_name("lobby")) and self.drain_report() is None:
++                    problems.append("current lobby has no fresh drain capability report")
++                would.insert(0, "pause new matches; require exact fresh acknowledgement and zero workers before migration/restart")
++            elif workers:
+                 problems.append(f"match workers are running ({workers}); ship when no RU match is in progress")
+         elif kind == "portal":
+             release = validate_portal_release(payload.get("release"))
+@@ -2562,6 +2699,14 @@
+         if previous == release and not changed and self.server_answers(directory) and \
+                 (grants is None or self.schema_ready()):
+             return {"status": "UNCHANGED", "mode": mode, "release": release}
++        drain_operation = None
++        if payload.get("drain"):
++            seconds = payload.get("drain_timeout", 2800)
++            if type(seconds) is not int or not 30 <= seconds <= 3600:
++                raise Refused("drain timeout must be30..3600 seconds")
++            drain_operation = self.begin_drain()
++            if drain_operation:
++                self.wait_drained(drain_operation, seconds)
+         self.guard_no_matches()
+         database = None
+         if grants is not None:
+@@ -2593,10 +2738,39 @@
+         except BaseException as error:
+             rolled = self._rollback_server(previous, old_units, changed, was_active)
+             raise SystemExit(f"{mode} of {release} failed ({error}); {rolled}") from error
++        # Admission stays paused through migration, health checks and rollback.
++        # An old capacity report cannot acknowledge the restarted lobby.
++        if drain_operation:
++            acknowledge_after = self.now() * 1000
++            def acknowledged():
++                report = self.drain_report()
++                return (report and report["draining"]
++                        and report.get("drain_operation_id") == drain_operation
++                        and report["updated_ms"] > acknowledge_after
++                        and report["occupied"] == 0 and not self.running_matches())
++            if not self._wait(acknowledged, 10):
++                # Health passed, so do not roll back here. Keep maintenance and
++                # record the deployed release for explicit operator recovery.
++                record = {"mode": mode, "kind": "server", "release": release,
++                          "previous": previous, "drain_operation_id": drain_operation,
++                          "maintenance": "restarted lobby has no fresh empty-drain acknowledgement"}
++                self._record(record)
++                return {"status": "DEPLOYED_DRAIN_HELD", **record}
+         record = {"mode": mode, "kind": "server", "release": release, "previous": previous,
+                   "sha256": files["omoba-server"], "account_api_sha256": files["omoba-account-api"],
+                   "units_changed": changed, "database": database}
++        if drain_operation:
++            record["drain_operation_id"] = drain_operation
+         self._record(record)
++        if drain_operation:
++            try:
++                self.cancel_drain(drain_operation)
++            except (Refused, OSError) as error:
++                marker = self.drain_marker()
++                held = {**record, "maintenance": str(error), "maintenance_marker": marker}
++                status = "DEPLOYED_DRAIN_HELD" if marker["active"] else "DEPLOYED_RESUME_UNCONFIRMED"
++                self._record(held)
++                return {"status": status, **held}
+         return {"status": "DEPLOYED", **record}
+ 
+     def _rollback_server(self, previous, old_units: dict, changed: list, was_active: dict) -> str:
+@@ -2792,7 +2966,7 @@
+     return json.loads(data)
+ 
+ 
+-REMOTE_MODES = ("status", "preflight", "bootstrap", "stage", "activate", "rollback", "boot-id")
++REMOTE_MODES = ("status", "preflight", "bootstrap", "stage", "activate", "rollback", "boot-id", "drain")
+ 
+ 
+ def remote_main(argv: list) -> int:
+@@ -2808,6 +2982,8 @@
+         result = host.boot_id()
+     elif mode == "status":
+         result = host.status(payload)
++    elif mode == "drain" and payload.get("action", "status") == "status":
++        result = host.drain_action(payload)
+     elif mode == "preflight":
+         result = host.bootstrap_preflight(payload) if payload.get("kind") == "bootstrap" else host.ship_preflight(payload)
+     else:
+@@ -2817,7 +2993,9 @@
+                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+             except OSError:
+                 raise Refused("another ru_host.py run holds the lock") from None
+-            if mode == "bootstrap":
++            if mode == "drain":
++                result = host.drain_action(payload)
++            elif mode == "bootstrap":
+                 result = host.bootstrap(payload)
+             elif mode == "stage":
+                 result = host.stage(payload)
+@@ -3231,7 +3409,9 @@
+              "package_sha256": sha256_file(args.package), "tool": TOOL}
+     payload = {**base_payload(target, files), "kind": "server", "release": release, "grants": grants,
+                "sha256": digests["omoba-server"], "account_api_sha256": digests["omoba-account-api"], "build": build,
+-               "local_backup_only": bool(args.local_backup_only)}
++               "local_backup_only": bool(args.local_backup_only),
++               "drain": bool(getattr(args, "drain", False)),
++               "drain_timeout": getattr(args, "drain_timeout", 2800)}
+     backup = ("plain rollback dump only (--local-backup-only, before launch)" if args.local_backup_only else
+               "encrypted off-host set + rollback dump (ru_backup.py)")
+     plan = {"release": release, "build": build, "steps": [
+@@ -3249,9 +3429,27 @@
+                 local.write_bytes(data)
+                 allowed[f"{RELEASES}/{release}/{name}.part"] = local
+             upload(target["alias"], stage.get("upload_to") or [], allowed)
+-        print(ssh_remote(target["alias"], "activate", payload))
++        result = json.loads(ssh_remote(target["alias"], "activate", payload))
++        print(json.dumps(result, indent=2))
++        return 0 if result.get("status") in ("DEPLOYED", "UNCHANGED") else 2
++    if payload["drain"]:
++        plan["steps"].insert(0, "pause new matches and wait for exact fresh acknowledgement plus zero workers; timeout leaves maintenance active")
++    return plan_or_run(args, target, payload, plan, apply)
++
++
++def command_drain(args) -> int:
++    files = kit()
++    target = resolve_target(args, need_ip=args.check or args.apply)
++    payload = {**base_payload(target, files), "action": args.action,
++               "operation_id": args.operation_id}
++    if not (args.check or args.apply):
++        print(json.dumps({"dry_run": True, "target": target, "maintenance_action": args.action,
++                          "operation_id": args.operation_id}, indent=2))
+         return 0
+-    return plan_or_run(args, target, payload, plan, apply)
++    if not args.apply:
++        payload["action"] = "status"
++    print(ssh_remote(target["alias"], "drain", payload))
++    return 0
+ 
+ 
+ def command_portal_bundle(args) -> int:
+@@ -3320,21 +3518,28 @@
+ 
+ 
+ def command_rollback(args) -> int:
++    if getattr(args, "drain", False) and args.kind != "server":
++        raise Refused("--drain applies only to a server rollback")
+     files = kit()
+     if args.kind == "server":
+         validate_server_release(args.release)
+     else:
+         validate_portal_release(args.release)
+     target = resolve_target(args, need_ip=args.check or args.apply)
+-    payload = {**base_payload(target, files), "kind": args.kind, "release": args.release}
++    payload = {**base_payload(target, files), "kind": args.kind, "release": args.release,
++               "drain": bool(getattr(args, "drain", False)),
++               "drain_timeout": getattr(args, "drain_timeout", 2800)}
+     if args.kind == "server":
+         payload["units"] = {kind: text for kind, text in payload["units"].items() if kind in SERVER_KINDS}
+     plan = {"steps": [f"point the {args.kind} at the staged release {args.release} (no migration), "
+                       "restart, verify, roll back on failure"]}
+ 
++    if payload["drain"]:
++        plan["steps"].insert(0, "pause new matches; wait for exact fresh acknowledgement and zero workers; failure holds maintenance")
+     def apply() -> int:
+-        print(ssh_remote(target["alias"], "rollback", payload))
+-        return 0
++        result = json.loads(ssh_remote(target["alias"], "rollback", payload))
++        print(json.dumps(result, indent=2))
++        return 0 if result.get("status") in ("DEPLOYED", "UNCHANGED") else 2
+     return plan_or_run(args, target, payload, plan, apply)
+ 
+ 
+@@ -3468,6 +3673,11 @@
+     ship.add_argument("--package", required=True,
+                       help="omoba-<v>-ru-server-linux-x64.tar.gz from release.py build server --market ru")
+     ship.add_argument("--revision", help="source commit (default: HEAD of this clean checkout)")
++    ship.add_argument("--drain", action="store_true", help="pause new matches and wait for live matches before updating")
++    ship.add_argument("--drain-timeout", type=int, default=2800, help="bounded drain wait in seconds (30..3600)")
++    drain = sub.add_parser("drain", help="inspect, begin or cancel maintenance (dry run by default)")
++    drain.add_argument("--action", choices=("status", "begin", "cancel"), default="status")
++    drain.add_argument("--operation-id", help="exact maintenance operation to cancel")
+     ship.add_argument("--local-backup-only", action="store_true",
+                       help="before launch, while backup.env names no storage: only a plain rollback dump on the "
+                            "host before the migration (LR-03)")
+@@ -3479,6 +3689,8 @@
+     rollback = sub.add_parser("rollback", help="point the lobby/Account API or the portal at an earlier release")
+     rollback.add_argument("--kind", required=True, choices=("server", "portal"))
+     rollback.add_argument("--release", required=True)
++    rollback.add_argument("--drain", action="store_true", help="server only: wait for live matches before rollback")
++    rollback.add_argument("--drain-timeout", type=int, default=2800, help="bounded drain wait in seconds (30..3600)")
+     status = sub.add_parser("status", help="read-only check of the whole RU host")
+     reboot = sub.add_parser("reboot-check", help="reboot the RU host and verify everything comes back")
+     reboot.add_argument("--apply", action="store_true", help="really reboot (default: status and plan only)")
+@@ -3494,18 +3706,19 @@
+                                                  "the download path (read-only; totals only)")
+     downloads.add_argument("--since", help="first UTC day counted, YYYY-MM-DD")
+     downloads.add_argument("--until", help="last UTC day counted, YYYY-MM-DD")
+-    for command in (bootstrap, ship, portal, rollback, status, reboot, escrow, downloads):
++    for command in (bootstrap, ship, portal, rollback, status, reboot, escrow, downloads, drain):
+         command.add_argument("--host", help=f"ssh alias of the RU VPS (default: ${HOST_ENV} or {DEFAULT_HOST})")
+         command.add_argument("--ip", help=f"RU VPS IPv4 the alias must connect to (default: ${IP_ENV})")
+         command.add_argument("--behind-nat", action="store_true",
+                              help="the RU address is the provider's NAT, not on a local interface")
+-    for command in (bootstrap, ship, portal, rollback):
++    for command in (bootstrap, ship, portal, rollback, drain):
+         mode = command.add_mutually_exclusive_group()
+         mode.add_argument("--check", action="store_true", help="run the read-only host preflight only")
+         mode.add_argument("--apply", action="store_true", help="change the host")
+     args = parser.parse_args(argv)
+     return {"bootstrap": command_bootstrap, "ship": command_ship, "portal-bundle": command_portal_bundle,
+             "ship-portal": command_ship_portal, "rollback": command_rollback, "status": command_status,
++            "drain": command_drain,
+             "reboot-check": command_reboot_check, "names": command_names,
+             "escrow": command_escrow, "downloads": command_downloads}[args.command](args)
+ 
+diff --git a/ops/vps/ru/DRAIN.md b/ops/vps/ru/DRAIN.md
+new file mode 100644
+--- /dev/null
++++ b/ops/vps/ru/DRAIN.md
+@@ -0,0 +1,76 @@
++# C2: wait for matches before an RU update or rollback
++
++This procedure belongs to the reviewed host kit. Actual RU execution still needs
++owner approval and a configured current backup/PITR kit. Never use production or
++dev aliases in place of the dedicated RU target.
++
++`ship --drain` pauses new match allocation, preserves queued parties and FIFO age,
++and waits for all current matches to finish. The running lobby must publish a
++fresh capacity report acknowledging this exact maintenance operation. Both
++occupied slots and real worker processes must reach zero before backup,
++migration, service stop or release switch. The default wait is2800 seconds;
++`--drain-timeout` accepts30..3600. Timeout leaves the previous services/matches
++running and admission paused; it never kills a match to finish an update.
++
++```sh
++python3 ops/vps/ru/ru_host.py ship --package <reviewed-RU-server-bundle> --drain
++python3 ops/vps/ru/ru_host.py ship --package <reviewed-RU-server-bundle> --drain --check
++# Only after the separate owner-approved host rollout:
++python3 ops/vps/ru/ru_host.py ship --package <reviewed-RU-server-bundle> --drain --apply
++```
++
++The first command is a local dry run. `--check` only reads the remote preflight;
++it does not create a marker or stop services. The tool stages and verifies the
++package before opening a new maintenance operation. An existing marker is never
++borrowed or replaced, including when the lobby is stopped.
++
++After migration/restart the new release must answer its normal health checks and
++publish a newer, empty capacity acknowledgement for the same operation, with no
++worker processes. Only then does the tool remove its own maintenance marker.
++A startup/health failure attempts the existing binary/unit rollback and keeps
++admission paused. A backup/migration failure leaves the previous release in
++place and keeps the marker. No automatic database rollback is performed.
++
++A server rollback supports the same wait, without running migrations or backups:
++
++```sh
++python3 ops/vps/ru/ru_host.py rollback --kind server --release <staged-release> --drain --check
++python3 ops/vps/ru/ru_host.py rollback --kind server --release <staged-release> --drain --apply
++```
++
++The older binary must support the already installed schema. `--drain` is refused
++for a portal rollback. Without `--drain`, existing live-worker refusal remains.
++
++## Recover a held or uncertain operation
++
++Use the dedicated read-only view first:
++
++```sh
++python3 ops/vps/ru/ru_host.py drain --action status --check
++```
++
++Inspect its exact operation ID, marker, fresh capacity report and workers,
++release history, backup result and service health. `DEPLOYED_DRAIN_HELD` returns
++nonzero and means the marker still blocks admission. A late filesystem error can
++occur after marker removal; then `DEPLOYED_RESUME_UNCONFIRMED` returns nonzero and
++records the observed marker state instead of claiming admission is held. Verify
++the real lobby/queue state; do not blindly retry a deployment or remove files.
++
++Once the selected release and services are verified healthy, the separately
++authorized operator can cancel only the exact still-active owned operation:
++
++```sh
++python3 ops/vps/ru/ru_host.py drain --action cancel --operation-id <32-lowercase-hex> --check
++python3 ops/vps/ru/ru_host.py drain --action cancel --operation-id <32-lowercase-hex> --apply
++```
++
++The check form only inspects. A missing, changed, malformed, extra-entry or
++otherwise unowned marker is never recursively removed. Normal runtime resumes
++queued matchmaking after observing cancellation and requires a new unanimous
++15-second ready check. Manual maintenance is preserved by an unrelated rollback.
++
++The local controller tests use temporary files and simulated operating-system
++commands. They do not certify systemd, a real RU migration, storage, network or
++host capacity. Separate signed runtime proofs cover live-match progress,
++queue/party preservation, lobby restart/adoption and Resume. Final RU acceptance
++must exercise both the operator tool and actual services on the selected host.
+diff --git a/scripts/test_ru_host_drain.py b/scripts/test_ru_host_drain.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/test_ru_host_drain.py
+@@ -0,0 +1,396 @@
++"""C2: real host controller against temporary files and simulated OS services.
++No SSH, systemd, production database or deployment is used by these tests.
++"""
++from pathlib import Path
++import contextlib
++import io
++import json
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++from unittest import mock
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'ops/vps/ru')]
++import test_ru_host as base
++rh=base.ru_host
++
++
++class DrainControllerTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.clock = 1_000_000.0
++        self.workers = [101]
++        self.host = rh.Host(root=self.temp.name, root_uid=os.getuid(), now=lambda: self.clock)
++        self.host.mutating = True
++        self.host.active = lambda unit: True
++        self.host.running_matches = lambda: list(self.workers)
++        self.host.sleep = self.sleep
++        self.marker = Path(self.host.p(rh.STATE + '/matches/drain'))
++        self.report_path = self.marker.parent / 'capacity.json'
++        self.marker.parent.mkdir(parents=True)
++        self.write_report()
++
++    def sleep(self, seconds):
++        self.clock += seconds
++
++    def write_report(self, **extra):
++        value = dict(version=1, updated_ms=self.clock*1000, occupied=len(self.workers), draining=False)
++        value.update(extra)
++        self.report_path.write_text(json.dumps(value))
++
++    def test_begin_is_no_replace_and_read_only_state_cannot_create_it(self):
++        self.host.mutating = False
++        with self.assertRaises(rh.Refused):
++            self.host.begin_drain()
++        self.assertFalse(self.marker.exists())
++        self.host.mutating = True
++        operation = self.host.begin_drain()
++        self.assertEqual(self.host.drain_marker(), {'active': True, 'operation_id': operation})
++        self.assertEqual(list(self.marker.iterdir())[0].stat().st_size, 0)
++        with self.assertRaises(rh.Refused):
++            self.host.begin_drain()
++        with self.assertRaises(rh.Refused):
++            self.host.cancel_drain('f'*32 if operation != 'f'*32 else 'e'*32)
++        self.assertEqual(self.host.drain_marker()['operation_id'], operation)
++        self.host.cancel_drain(operation)
++        self.assertFalse(self.marker.exists())
++
++    def test_wait_requires_exact_fresh_ack_zero_occupied_and_no_processes(self):
++        operation = self.host.begin_drain()
++        observed = []
++        def advance(seconds):
++            self.clock += seconds
++            observed.append(self.clock)
++            if len(observed) == 1:
++                self.write_report(draining=True, drain_operation_id='f'*32, occupied=0)
++            elif len(observed) == 2:
++                self.write_report(draining=True, drain_operation_id=operation, occupied=0)
++            elif len(observed) == 3:
++                self.workers.clear()
++                self.write_report(draining=True, drain_operation_id=operation, occupied=0)
++        self.host.sleep = advance
++        self.host.wait_drained(operation, 30)
++        self.assertEqual(len(observed), 3)
++        self.assertTrue(self.marker.exists(), 'wait must not reopen admission')
++
++    def test_timeout_preserves_marker_and_does_not_touch_services(self):
++        operation = self.host.begin_drain()
++        before = self.clock
++        self.host.wait_drained
++        with self.assertRaisesRegex(rh.Refused, 'timed out'):
++            self.host.wait_drained(operation, 30)
++        self.assertEqual(self.clock-before, 30)
++        self.assertEqual(self.host.drain_marker()['operation_id'], operation)
++        for invalid in (0, 29, 3601, True):
++            with self.assertRaises(rh.Refused):
++                self.host.wait_drained(operation, invalid)
++
++    def test_old_runtime_missing_stale_symlink_oversized_and_fifo_reports_are_refused(self):
++        for value in ({'version':1, 'updated_ms':self.clock*1000, 'occupied':0},
++                      {'version':1, 'updated_ms':0, 'occupied':0, 'draining':False}):
++            self.report_path.write_text(json.dumps(value))
++            with self.assertRaises(rh.Refused):
++                self.host.begin_drain()
++            self.assertFalse(self.marker.exists())
++        self.report_path.write_text('x'*65537)
++        self.assertIsNone(self.host.drain_report())
++        self.report_path.unlink()
++        other = self.marker.parent / 'other'
++        other.write_text('{}')
++        self.report_path.symlink_to(other)
++        self.assertIsNone(self.host.drain_report())
++        self.report_path.unlink()
++        os.mkfifo(self.report_path)
++        self.assertIsNone(self.host.drain_report(), 'special reports must not block on open/read')
++
++    def test_malformed_or_swapped_marker_cannot_be_acknowledged_or_cancelled(self):
++        operation = self.host.begin_drain()
++        (self.marker / ('f'*32)).touch()
++        self.assertIsNone(self.host.drain_marker()['operation_id'])
++        with self.assertRaises(rh.Refused):
++            self.host.wait_drained(operation,30)
++        with self.assertRaises(rh.Refused):
++            self.host.cancel_drain(operation)
++        self.assertTrue((self.marker / operation).exists())
++
++    def test_stopped_lobby_cannot_skip_an_existing_maintenance_operation(self):
++        operation = self.host.begin_drain()
++        self.host.active = lambda unit: False
++        self.workers.clear()
++        with self.assertRaisesRegex(rh.Refused, 'already exists'):
++            self.host.begin_drain()
++        self.assertEqual(self.host.drain_marker()['operation_id'], operation)
++
++    def test_first_install_skips_marker_only_without_lobby_or_workers(self):
++        self.host.active = lambda unit: False
++        with self.assertRaises(rh.Refused):
++            self.host.begin_drain()
++        self.workers.clear()
++        self.assertIsNone(self.host.begin_drain())
++        self.assertFalse(self.marker.exists())
++
++
++
++
++class ShipDrainFaults(base.HostCase):
++    def setUp(self):
++        self.clock=1_790_000_000.0
++        self.events=[]
++        self.steps=[]
++        self.sleeps=0
++        self.restart_ack=True
++        self.fail_new_start=False
++        self.fail_cancel=False
++        super().setUp()
++        self.bootstrap()
++        self.fake.backups_configured=True
++        self.ship()
++        self.old='0.45.0-ru-abc1234'
++        self.body=base.elf(b'new C2 server')
++        self.new=self.server_payload(version='0.45.1',revision='def5678',server=self.body)
++        self.new.update(drain=True,drain_timeout=30)
++        self.marker=Path(self.fake.p(rh.STATE+'/matches/drain'))
++        self.capacity=self.marker.parent/'capacity.json'
++        self.capacity.parent.mkdir(exist_ok=True,parents=True)
++        self.fake.extra_workers=[8100]
++        self.write_report(draining=False)
++        self.events.clear()
++        self.baseline_migrations=len(self.fake.migrations)
++        self.baseline_backups=len(self.fake.backup_runs)
++
++    def fresh(self):
++        return rh.Host(self.root,run=self.run_os,sleep=self.sleep,resolve=self.fake.resolve,
++                       fetch=self.fake.fetch,root_uid=os.getuid(),now=lambda:self.clock)
++
++    def operation(self):
++        if not hasattr(self,'marker') or not self.marker.exists():return None
++        entries=list(self.marker.iterdir())
++        return entries[0].name if len(entries)==1 else None
++
++    def write_report(self,draining=True,operation=None,occupied=None,updated_ms=None):
++        self.capacity.write_text(json.dumps({'version':1,'updated_ms':self.clock*1000 if updated_ms is None else updated_ms,
++          'occupied':len(self.fake.extra_workers) if occupied is None else occupied,'draining':draining,
++          'drain_operation_id':self.operation() if operation is None else operation}))
++
++    def sleep(self,seconds):
++        self.clock+=seconds
++        self.sleeps+=1
++        if self.steps:
++            step=self.steps.pop(0)
++            if 'workers' in step:self.fake.extra_workers=list(step['workers'])
++            self.write_report(**{k:v for k,v in step.items() if k!='workers'})
++        elif hasattr(self,'capacity') and self.restart_ack and self.operation():
++            self.write_report()
++
++    def run_os(self,args,check=True,**kwargs):
++        snapshot={'args':list(args),'workers':list(self.fake.extra_workers),'operation':self.operation(),'at':self.clock}
++        self.events.append(snapshot)
++        if self.fail_new_start and args==['systemctl','restart','omoba-lobby-ru']:
++            self.fail_new_start=False
++            if check:raise SystemExit('injected new lobby start failure')
++            return subprocess.CompletedProcess(args,1,'','injected failure')
++        result=self.fake(args,check=check,**kwargs)
++        if (hasattr(self,'capacity') and self.restart_ack and self.operation()
++            and args in (['systemctl','restart','omoba-lobby-ru'],['systemctl','start','omoba-lobby-ru'])):
++            self.clock+=0.001
++            self.write_report()
++        return result
++
++    def staged(self):
++        host=self.fresh();targets=host.stage(self.new)['upload_to']
++        for target in targets:
++            name=Path(target).name.removesuffix('.part')
++            Path(self.fake.p(target)).write_bytes({'omoba-server':self.body,'omoba-account-api':base.ACCOUNT_API}[name])
++        return host
++
++    def finish_roster(self):
++        self.steps=[{'workers':[8100],'occupied':1},{'workers':[8100],'occupied':0},{'workers':[],'occupied':0}]
++
++    def disruptive(self):
++        return [e for e in self.events if (e['args'][:2]==['systemctl','stop'] or 'migrate' in e['args'] or
++              (e['args'] and e['args'][0].endswith('/ru_backup.py') and 'backup' in e['args']))]
++
++    def assert_old_untouched(self):
++        self.assertEqual(os.readlink(self.fake.p(rh.CURRENT)),'releases/'+self.old)
++        self.assertTrue(self.fake.unit('omoba-lobby-ru')['active'])
++        self.assertEqual(len(self.fake.migrations),self.baseline_migrations)
++
++    def test_live_roster_survives_until_exact_ack_and_both_slot_and_pid_are_empty(self):
++        self.finish_roster();host=self.staged();result=host.activate_server(self.new)
++        self.assertEqual(result['status'],'DEPLOYED')
++        self.assertFalse(self.marker.exists())
++        self.assertEqual(len(self.fake.migrations),self.baseline_migrations+1)
++        for event in self.disruptive():
++            self.assertEqual(event['workers'],[],event)
++            self.assertIsNotNone(event['operation'],event)
++            self.assertGreaterEqual(event['at'],1_790_000_003,event)
++        self.assertTrue(host.server_answers(rh.RELEASES+'/'+self.new['release']))
++
++    def test_timeout_never_stops_services_or_backs_up_or_migrates_and_holds_admission(self):
++        self.restart_ack=False;host=self.staged()
++        with self.assertRaisesRegex(rh.Refused,'timed out'):host.activate_server(self.new)
++        self.assert_old_untouched();self.assertEqual(self.fake.extra_workers,[8100])
++        self.assertTrue(self.operation());self.assertEqual(self.disruptive(),[])
++        self.assertEqual(len(self.fake.backup_runs),self.baseline_backups)
++
++    def test_wrong_or_stale_ack_does_not_authorize_migration(self):
++        for report in ({'operation':'f'*32,'workers':[],'occupied':0},
++                       {'updated_ms':1,'workers':[],'occupied':0}):
++            with self.subTest(report=report):
++                self.steps=[report];self.restart_ack=False;host=self.staged()
++                with self.assertRaisesRegex(rh.Refused,'timed out'):host.activate_server(self.new)
++                self.assert_old_untouched();self.assertEqual(self.disruptive(),[])
++                host.cancel_drain(self.operation());self.fake.extra_workers=[8100];self.write_report(draining=False)
++
++    def test_backup_failure_keeps_old_services_and_owned_marker(self):
++        self.finish_roster();self.fake.fail_backup=True;host=self.staged()
++        with self.assertRaisesRegex(SystemExit,'pre-migration backup failed'):host.activate_server(self.new)
++        self.assert_old_untouched();self.assertTrue(self.operation())
++        self.assertFalse(any(e['args'][:2]==['systemctl','stop'] for e in self.events))
++
++    def test_migration_failure_keeps_old_services_and_owned_marker(self):
++        self.finish_roster();self.fake.fail_migrate=True;host=self.staged()
++        with self.assertRaises(SystemExit):host.activate_server(self.new)
++        self.assertEqual(os.readlink(self.fake.p(rh.CURRENT)),'releases/'+self.old)
++        self.assertTrue(self.fake.unit('omoba-lobby-ru')['active']);self.assertTrue(self.operation())
++        self.assertFalse(any(e['args'][:2]==['systemctl','stop'] for e in self.events))
++        self.assertFalse(self.fake.roles['omoba_owner'],'temporary migration login must close on failure')
++
++    def test_failed_new_start_rolls_back_and_keeps_admission_closed(self):
++        self.finish_roster();host=self.staged();self.fail_new_start=True
++        with self.assertRaisesRegex(SystemExit,'ROLLED_BACK'):host.activate_server(self.new)
++        self.assertEqual(os.readlink(self.fake.p(rh.CURRENT)),'releases/'+self.old)
++        self.assertTrue(self.operation());self.assertTrue(host.server_answers(rh.RELEASES+'/'+self.old))
++
++    def test_new_health_failure_rolls_back_and_keeps_admission_closed(self):
++        self.finish_roster();host=self.staged();answers=host.server_answers
++        host.server_answers=lambda directory:False if directory.endswith(self.new['release']) else answers(directory)
++        with self.assertRaisesRegex(SystemExit,'ROLLED_BACK'):host.activate_server(self.new)
++        self.assertTrue(self.operation());self.assertTrue(answers(rh.RELEASES+'/'+self.old))
++
++    def test_restart_needs_a_new_capacity_ack_even_when_old_timestamp_equals_now(self):
++        self.finish_roster();self.restart_ack=False;host=self.staged()
++        result=host.activate_server(self.new)
++        self.assertEqual(result['status'],'DEPLOYED_DRAIN_HELD')
++        self.assertTrue(self.operation())
++        record=json.loads(Path(self.fake.p(rh.HISTORY)).read_text().splitlines()[-1])
++        self.assertEqual(record['drain_operation_id'],self.operation())
++
++    def test_failed_cancel_is_durable_in_history_and_does_not_reopen_queue(self):
++        self.finish_roster();host=self.staged()
++        def fail_cancel(operation):raise OSError('injected marker unlink failure')
++        host.cancel_drain=fail_cancel
++        result=host.activate_server(self.new)
++        self.assertEqual(result['status'],'DEPLOYED_DRAIN_HELD');self.assertTrue(self.operation())
++        record=json.loads(Path(self.fake.p(rh.HISTORY)).read_text().splitlines()[-1])
++        self.assertEqual(record.get('drain_operation_id'),self.operation())
++        self.assertIn('unlink failure',record.get('maintenance',''))
++
++    def test_unexpected_worker_after_restart_keeps_admission_closed(self):
++        self.finish_roster();host=self.staged();run=host.run
++        def changed(args,**kwargs):
++            result=run(args,**kwargs)
++            if args==['systemctl','restart','omoba-lobby-ru']:
++                self.fake.extra_workers=[9100];self.write_report()
++            return result
++        host.run=changed
++        result=host.activate_server(self.new)
++        self.assertEqual(result['status'],'DEPLOYED_DRAIN_HELD')
++        self.assertTrue(self.operation());self.assertEqual(self.fake.extra_workers,[9100])
++
++    def test_parent_sync_failure_after_marker_removal_reports_resume_unconfirmed(self):
++        self.finish_roster();host=self.staged();cancel=host.cancel_drain;fsync=rh.os.fsync
++        def sync_after_remove(fd):
++            if not self.marker.exists():raise OSError('injected parent directory sync failure')
++            return fsync(fd)
++        def late_cancel(operation):
++            with mock.patch.object(rh.os,'fsync',side_effect=sync_after_remove):return cancel(operation)
++        host.cancel_drain=late_cancel
++        result=host.activate_server(self.new)
++        self.assertEqual(result['status'],'DEPLOYED_RESUME_UNCONFIRMED')
++        self.assertFalse(self.marker.exists());self.assertFalse(result['maintenance_marker']['active'])
++        record=json.loads(Path(self.fake.p(rh.HISTORY)).read_text().splitlines()[-1])
++        self.assertFalse(record['maintenance_marker']['active']);self.assertIn('directory sync failure',record['maintenance'])
++
++    def test_existing_operation_cannot_be_borrowed_by_another_ship(self):
++        host=self.staged();host.mutating=True;operation=host.begin_drain()
++        with self.assertRaisesRegex(rh.Refused,'already exists'):host.activate_server(self.new)
++        self.assertEqual(self.operation(),operation);self.assert_old_untouched();self.assertEqual(self.disruptive(),[])
++
++    def test_explicit_rollback_refuses_live_workers_then_preserves_existing_maintenance(self):
++        self.finish_roster();host=self.staged();host.activate_server(self.new)
++        self.fake.extra_workers=[8101];self.write_report(draining=False)
++        rollback=self.payload(kind='server',release=self.old)
++        migrations=len(self.fake.migrations)
++        with self.assertRaisesRegex(rh.Refused,'match workers are running'):host.rollback(rollback)
++        self.fake.extra_workers=[];host.mutating=True;operation=host.begin_drain();self.write_report()
++        result=host.rollback(rollback)
++        self.assertEqual(result['status'],'DEPLOYED');self.assertEqual(len(self.fake.migrations),migrations)
++        self.assertEqual(self.operation(),operation,'manual maintenance is not owned by rollback')
++        self.assertTrue(host.server_answers(rh.RELEASES+'/'+self.old))
++
++
++    def test_drain_rollback_waits_for_roster_and_never_runs_a_migration(self):
++        self.finish_roster();host=self.staged();host.activate_server(self.new)
++        self.fake.extra_workers=[8101];self.write_report(draining=False);self.finish_roster()
++        migrations=len(self.fake.migrations);backups=len(self.fake.backup_runs)
++        result=host.rollback(self.payload(kind='server',release=self.old,drain=True,drain_timeout=30))
++        self.assertEqual(result['status'],'DEPLOYED');self.assertEqual(result['mode'],'rollback')
++        self.assertFalse(self.marker.exists());self.assertTrue(host.server_answers(rh.RELEASES+'/'+self.old))
++        self.assertEqual(len(self.fake.migrations),migrations);self.assertEqual(len(self.fake.backup_runs),backups)
++
++    def test_history_write_failure_before_resume_keeps_admission_closed(self):
++        self.finish_roster();host=self.staged()
++        def fail_record(record):raise OSError('injected history disk error')
++        host._record=fail_record
++        with self.assertRaisesRegex(OSError,'history disk error'):host.activate_server(self.new)
++        self.assertTrue(self.operation());self.assertTrue(host.server_answers(rh.RELEASES+'/'+self.new['release']))
++
++    def test_read_only_preflight_does_not_create_marker_or_interrupt_workers(self):
++        host=self.staged();before=list(self.fake.calls)
++        result=host.ship_preflight(self.new)
++        self.assertTrue(result['ok']);self.assertFalse(self.marker.exists())
++        self.assertEqual(self.fake.extra_workers,[8100]);self.assertEqual(self.disruptive(),[])
++        self.assertFalse(any(c[:2] in (['systemctl','stop'],['systemctl','restart']) for c in self.fake.calls[len(before):]))
++
++
++class DrainCliTests(unittest.TestCase):
++    def setUp(self):
++        self.target={'alias':'fixture-ru','expected_ip':base.RU_IP,'dev_ip':None,'behind_nat':False}
++
++    def invoke(self,argv,reply):
++        with mock.patch.object(rh,'resolve_target',return_value=self.target),mock.patch.object(rh,'ssh_remote',side_effect=reply) as ssh,contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
++            result=rh.main(argv)
++            return result,ssh.call_args_list
++
++    def test_rollback_held_result_has_nonzero_exit_and_passes_drain_options(self):
++        result,calls=self.invoke(['rollback','--kind','server','--release','0.45.0-ru-abc1234','--drain','--drain-timeout','31','--apply'],
++            [json.dumps({'ok':True}),json.dumps({'status':'DEPLOYED_DRAIN_HELD'})])
++        self.assertEqual(result,2);self.assertEqual([c.args[1] for c in calls],['preflight','rollback'])
++        self.assertTrue(calls[-1].args[2]['drain']);self.assertEqual(calls[-1].args[2]['drain_timeout'],31)
++
++    def test_rollback_resume_unconfirmed_is_not_a_success_exit(self):
++        result,calls=self.invoke(['rollback','--kind','server','--release','0.45.0-ru-abc1234','--drain','--apply'],
++            [json.dumps({'ok':True}),json.dumps({'status':'DEPLOYED_RESUME_UNCONFIRMED'})])
++        self.assertEqual(result,2)
++
++    def test_rollback_check_is_read_only_and_forwards_drain_to_preflight(self):
++        result,calls=self.invoke(['rollback','--kind','server','--release','0.45.0-ru-abc1234','--drain','--check'],[json.dumps({'ok':True})])
++        self.assertEqual(result,0);self.assertEqual(len(calls),1);self.assertEqual(calls[0].args[1],'preflight')
++        self.assertTrue(calls[0].args[2]['drain'])
++
++    def test_cancel_check_only_inspects_and_never_sends_cancel(self):
++        result,calls=self.invoke(['drain','--action','cancel','--operation-id','a'*32,'--check'],[json.dumps({'marker':{}})])
++        self.assertEqual(result,0);self.assertEqual(len(calls),1)
++        self.assertEqual(calls[0].args[1],'drain');self.assertEqual(calls[0].args[2]['action'],'status')
++
++    def test_dry_run_never_contacts_host_and_portal_cannot_take_server_drain(self):
++        result,calls=self.invoke(['drain','--action','begin'],[])
++        self.assertEqual(result,0);self.assertEqual(calls,[])
++        with mock.patch.object(rh,'ssh_remote') as ssh,self.assertRaisesRegex(rh.Refused,'server rollback'):
++            rh.main(['rollback','--kind','portal','--release','abcdef0-12345678','--drain','--apply'])
++        ssh.assert_not_called()

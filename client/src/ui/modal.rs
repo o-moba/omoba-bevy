@@ -19,11 +19,15 @@ pub(crate) enum ModalId {
     Career,
     Shop,
     Supporter,
+    Sculpture,
     Scoreboard,
     /// The phone server-address overlay (`mobile_ui::ServerEntry`).
     ServerEntry,
     /// The controls guide while it is shown (`help_overlay::HelpOverlayShown`).
     Help,
+    /// The first-launch legal card until the documents are accepted
+    /// (`legal::LegalConsent`).
+    Legal,
     /// The boot splash until it has left (`frontend::boot::BootSplash`).
     Boot,
 }
@@ -38,6 +42,7 @@ impl ModalId {
         match self {
             ModalId::Shop => 45,
             ModalId::Scoreboard => 90,
+            ModalId::Sculpture => 95,
             ModalId::Pause => 100,
             // `SCREEN_Z + 50`: over the pause menu and the HUD modals.
             ModalId::Help => 110,
@@ -45,6 +50,9 @@ impl ModalId {
             ModalId::ServerEntry => 150,
             // `GlobalZIndex(1300)`: above every local z-index.
             ModalId::Supporter => 1300,
+            // `GlobalZIndex(2050)`: over every screen, modal and the
+            // controller legend (2000), under the boot splash.
+            ModalId::Legal => 2050,
             // `GlobalZIndex(2100)`: the splash covers every screen, every modal
             // and the controller legend (2000).
             ModalId::Boot => 2100,

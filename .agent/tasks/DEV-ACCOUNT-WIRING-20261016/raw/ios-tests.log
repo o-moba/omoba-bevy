@@ -1,0 +1,11 @@
+.......................................................
+----------------------------------------------------------------------
+Ran 55 tests in 3.248s
+
+OK
+Signed app and enrolled iPhone are ready. No installation was requested.
+Installed and launch command succeeded. Confirm rendering and controls on the phone.
+OMOBA Dev 0.44.0 (12): Rust executable, assets and matching dSYM staged.
+Omoba Beta 0.44.0 (12): Rust executable, assets and matching dSYM staged.
+Omoba Beta 0.44.0 (12): Rust executable, assets and matching dSYM staged.
+Omoba Beta 0.44.0 (12): Rust executable, assets and matching dSYM staged.

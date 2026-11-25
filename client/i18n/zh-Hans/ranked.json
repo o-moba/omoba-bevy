@@ -1,0 +1,17 @@
+{
+  "ranked.tier.bronze": "青铜",
+  "ranked.tier.silver": "白银",
+  "ranked.tier.gold": "黄金",
+  "ranked.tier.platinum": "铂金",
+  "ranked.tier.diamond": "钻石",
+  "ranked.tier.master": "大师",
+  "ranked.tier.unknown": "未知段位",
+  "ranked.current_tier": "段位：{tier}",
+  "ranked.placements": "定位赛 {played}/{total}",
+  "ranked.season.until": "第 {season} 赛季 · 截至 {until}",
+  "ranked.badge.participant": "赛季参与者",
+  "ranked.badge.earned": "第 {season} 赛季徽章 · {tier} · 分数 {rating}",
+  "ranked.placement_complete": "定位赛完成：{tier}",
+  "ranked.promoted": "晋升至{tier}",
+  "ranked.demoted": "段位降至{tier}"
+}

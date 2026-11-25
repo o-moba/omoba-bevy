@@ -7,6 +7,17 @@ pub const DRAFT_SELECTION_MS: u32 = 30_000;
 pub const COUNTDOWN_MS: u32 = 3_000;
 pub const LOADING_TIMEOUT_MS: u32 = 30_000;
 
+/// Whether another confirmed pick reserves this class for the selecting player.
+pub fn hero_pick_conflicts(
+    unique_classes_across_teams: bool,
+    own_team: Team,
+    class: HeroClass,
+    other_team: Team,
+    other_class: HeroClass,
+) -> bool {
+    class == other_class && (unique_classes_across_teams || own_team == other_team)
+}
+
 /// Intended lane/team duty, independent of the selected class's actual kit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +104,8 @@ pub struct DraftPlayer {
     pub sprite_character: Option<String>,
     pub role: Role,
     pub is_bot: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_persona: Option<String>,
     pub locked: bool,
     pub loaded: bool,
 }
@@ -101,6 +114,11 @@ pub struct DraftPlayer {
 /// Epoch and match identity come from the enclosing snapshot metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrematchSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_remaining_ms: Option<u32>,
+    /// A confirmed class is reserved for both teams in Ranked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unique_classes_across_teams: bool,
     pub generation: u64,
     pub phase: PrematchPhase,
     /// Server-owned phase deadline. Draft is zero while gathering the roster
@@ -115,6 +133,40 @@ pub struct PrematchSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ranked_class_scope_round_trips_without_changing_legacy_drafts() {
+        let legacy = r#"{"generation":1,"phase":"draft","remaining_ms":30000,"needed":10,"players":[],"last_request_id":0,"error":null}"#;
+        let mut snapshot: PrematchSnapshot = serde_json::from_str(legacy).unwrap();
+        assert!(!snapshot.unique_classes_across_teams);
+        assert_eq!(serde_json::to_string(&snapshot).unwrap(), legacy);
+        assert!(!hero_pick_conflicts(
+            false,
+            Team::Green,
+            HeroClass::Riftshot,
+            Team::Blue,
+            HeroClass::Riftshot
+        ));
+
+        snapshot.unique_classes_across_teams = true;
+        let encoded = serde_json::to_string(&snapshot).unwrap();
+        let decoded: PrematchSnapshot = serde_json::from_str(&encoded).unwrap();
+        assert!(hero_pick_conflicts(
+            decoded.unique_classes_across_teams,
+            Team::Green,
+            HeroClass::Riftshot,
+            Team::Blue,
+            HeroClass::Riftshot
+        ));
+        assert!(!hero_pick_conflicts(
+            decoded.unique_classes_across_teams,
+            Team::Green,
+            HeroClass::Riftshot,
+            Team::Blue,
+            HeroClass::Ranger
+        ));
+    }
+
     #[test]
     fn equipment_preserves_legacy_draft_shapes_and_nondefault_choices() {
         use crate::handheld::HandheldSelection;

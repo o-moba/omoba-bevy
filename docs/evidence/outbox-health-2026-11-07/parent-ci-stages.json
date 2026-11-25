@@ -1,0 +1,149 @@
+{
+  "status": "PASS",
+  "stages": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "log": "build.log",
+      "seconds": 109.68
+    },
+    {
+      "name": "build-ranked-fixture",
+      "status": "PASS",
+      "log": "build-ranked-fixture.log",
+      "seconds": 33.7
+    },
+    {
+      "name": "migrate",
+      "status": "PASS",
+      "log": "migrate.log",
+      "seconds": 0.03
+    },
+    {
+      "name": "admission-300",
+      "status": "PASS",
+      "log": "admission-300.log",
+      "seconds": 58.53
+    },
+    {
+      "name": "registration-api",
+      "status": "PASS",
+      "log": "registration-api.log",
+      "seconds": 13.15
+    },
+    {
+      "name": "registration-game",
+      "status": "PASS",
+      "log": "registration-game.log",
+      "seconds": 33.49
+    },
+    {
+      "name": "lifecycle",
+      "status": "PASS",
+      "log": "lifecycle.log",
+      "proof": "lifecycle/report.json",
+      "seconds": 115.79
+    },
+    {
+      "name": "mixed",
+      "status": "PASS",
+      "log": "mixed.log",
+      "proof": "mixed/report.json",
+      "seconds": 47.71
+    },
+    {
+      "name": "ready-check",
+      "status": "PASS",
+      "log": "ready-check.log",
+      "proof": "ready-check/report.json",
+      "seconds": 43.86
+    },
+    {
+      "name": "cross-lobby-ready",
+      "status": "PASS",
+      "log": "cross-lobby-ready.log",
+      "proof": "cross-lobby-ready/report.json",
+      "seconds": 39.3
+    },
+    {
+      "name": "legacy-penalty",
+      "status": "PASS",
+      "log": "legacy-penalty.log",
+      "proof": "legacy-penalty/report.json",
+      "seconds": 30.43
+    },
+    {
+      "name": "unique-draft",
+      "status": "PASS",
+      "log": "unique-draft.log",
+      "proof": "unique-draft/report.json",
+      "seconds": 34.69
+    },
+    {
+      "name": "party-leave",
+      "status": "PASS",
+      "log": "party-leave.log",
+      "proof": "party-leave/report.json",
+      "seconds": 37.1
+    },
+    {
+      "name": "party-disconnect",
+      "status": "PASS",
+      "log": "party-disconnect.log",
+      "proof": "party-disconnect/report.json",
+      "seconds": 89.16
+    },
+    {
+      "name": "ranked-early-crash",
+      "status": "PASS",
+      "log": "ranked-early-crash.log",
+      "proof": "ranked-early-crash/report.json",
+      "seconds": 139.58
+    },
+    {
+      "name": "termination",
+      "status": "PASS",
+      "log": "termination.log",
+      "proof": "termination/report.json",
+      "seconds": 20.36
+    },
+    {
+      "name": "remake",
+      "status": "PASS",
+      "log": "remake.log",
+      "proof": "remake/report.json",
+      "seconds": 115.62
+    },
+    {
+      "name": "surrender",
+      "status": "PASS",
+      "log": "surrender.log",
+      "proof": "surrender/report.json",
+      "seconds": 620.76
+    },
+    {
+      "name": "ranked-eligibility",
+      "status": "PASS",
+      "log": "ranked-eligibility.log",
+      "proof": "ranked-eligibility/report.json",
+      "seconds": 615.97
+    },
+    {
+      "name": "ranked-victory",
+      "status": "PASS",
+      "log": "ranked-victory.log",
+      "proof": "ranked-victory/report.json",
+      "seconds": 448.56
+    }
+  ],
+  "fixture_methods": [
+    "mail_ru",
+    "ok_ru",
+    "vkid"
+  ],
+  "scope": "loopback PostgreSQL; Account API provider/enrollment fixtures; real public gameplay",
+  "portal_browser_ui": false,
+  "real_provider_accounts": false,
+  "private_fixture_removed": true,
+  "seconds": 2647.49
+}

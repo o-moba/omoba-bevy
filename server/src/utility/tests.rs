@@ -213,6 +213,8 @@ fn dash_crosses_live_structures_and_old_transform_packets_cannot_undo_blink() {
     rt.handle_packet(
         addr,
         ClientPacket::Transform {
+            input_kind: Default::default(),
+            input_active: false,
             x: 0.0,
             y: PLAYER_GROUND_Y,
             z: 0.0,
@@ -225,6 +227,8 @@ fn dash_crosses_live_structures_and_old_transform_packets_cannot_undo_blink() {
     rt.handle_packet(
         addr,
         ClientPacket::Transform {
+            input_kind: Default::default(),
+            input_active: false,
             x: x - 0.1,
             y: PLAYER_GROUND_Y,
             z: 0.0,
@@ -379,7 +383,10 @@ fn signed_roster_dash_and_haste_dispatch_to_authority_and_replicate() {
         panic!("missing path challenge");
     };
     let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-        serde_json::from_slice(&reply).unwrap();
+        serde_json::from_slice(&reply).unwrap()
+    else {
+        panic!("a transport challenge is expected")
+    };
     let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
         server_epoch: rt.server_epoch,
         path_nonce: path_nonce.clone(),
@@ -415,7 +422,7 @@ fn signed_roster_dash_and_haste_dispatch_to_authority_and_replicate() {
         };
         command.signature = hex(&key.sign(&command.signing_bytes()).to_bytes());
         let bytes = serde_json::to_vec(&PublicClientDatagram::SignedCommand { command }).unwrap();
-        let Decision::Dispatch(packet) = gate.receive(
+        let Decision::DispatchSigned(packet, _) = gate.receive(
             addr,
             &bytes,
             rt.server_epoch,

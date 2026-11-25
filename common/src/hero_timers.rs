@@ -6,7 +6,8 @@
 //! tick's `now`. `normalize_hero_timers` is the one place that rewrites the
 //! instants from derived conditions (death, sandbox `no_cooldowns`).
 
-use std::time::{Duration, Instant};
+use shared::clock::Instant;
+use std::time::Duration;
 
 use shared::SkillSlot;
 

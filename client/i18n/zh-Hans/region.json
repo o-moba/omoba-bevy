@@ -1,0 +1,13 @@
+{
+  "region.title": "账户地区",
+  "region.ru": "RU",
+  "region.global": "Global",
+  "region.separate_accounts": "不同地区拥有独立的账户、好友和进度。服务器将自动选择。",
+  "region.ru.description": "位于 RU 的服务器。通过 VK ID、OK 或 Mail.ru 登录。",
+  "region.global.description": "Global 服务器和 omoba.io 账户。",
+  "region.error.save": "无法保存账户地区。请检查应用的设置存储权限后重试。",
+  "region.restart.title": "重新启动以切换账户",
+  "region.restart.body": "重新启动 OMOBA 后将打开另一个地区的账户。当前资料和进度保留在原地区。在手机上，请关闭应用后重新打开。",
+  "region.restart.button": "重新启动 OMOBA",
+  "region.cancel": "保留当前账户"
+}

@@ -1,9 +1,9 @@
 # Bot practice, match chat and reactions
 
 The standalone practice launcher starts a playable arena with one human and fills
-vacant seats with labelled bot heroes. The separate public lobby offers Quick bot
-fallback and Play with bots, saves approved human progression, and freezes its
-allocated roster. See [the public multiplayer guide](public-mvp.md). The behavior
+vacant seats with labelled bot heroes. The separate public lobby offers Casual
+PvP (bots after 30 s), Ranked (never bots) and vs Bots, saves approved human
+progression, and freezes its allocated roster. See [the public multiplayer guide](public-mvp.md). The behavior
 below describes standalone practice unless explicitly stated otherwise. Chat and picture reactions work in admitted matches and
 use a separate, bounded social stream.
 
@@ -17,7 +17,8 @@ make practice
 
 This builds the locked native sources, starts one practice server and client,
 and prints the session log directory. Choose a hero and Join. The default is
-5v5: one human and nine server-controlled heroes. Closing the client or pressing
+5v5 with one human and nine server-controlled heroes. The bots fill the open
+lane roles and prefer different classes across both teams. Closing the client or pressing
 Ctrl+C stops the processes owned by this launcher. To use another local port:
 
 ```sh
@@ -50,7 +51,13 @@ their independent 2D sprite kits. They use ordinary hero navigation, attacks and
 push lanes, engage nearby enemies and structures, retreat at low health, and
 can die and respawn. The controller uses the existing movement, targeting,
 damage, cooldown and mana rules. Bot actor IDs are marked explicitly and their
-internal addresses reject network commands. They do not send chat or reactions.
+internal addresses reject network commands. Standalone practice bots are silent.
+
+Publicly allocated roster bots have individual nicknames and bundled portraits.
+They can greet the match, acknowledge a teammate's hero kill and close out the
+match in Match chat. The server authors these lines from public events and sends
+them through the same bounded social stream. See the
+[low-population matchmaking plan](plans/ranked-bot-fill.md).
 
 In standalone practice, late humans receive their own player identity and safe
 spawn; the server removes
@@ -64,7 +71,8 @@ Bots spend earned gold on their class's recommended items whenever they stand
 in their base shop, rank every unlocked skill (ultimate first) and cast their
 whole hostile-target kit. Self skills are cast by need: a heal only below 28%
 health, the largest heal first, and a mana restore whenever the bar can hold all
-of it, whatever the health, and never at a full bar.
+of it, whatever the health, and never at a full bar. Cleric bots heal a wounded
+ally and reserve their group shield for threatened allies or themselves.
 
 ### Practice sandbox
 

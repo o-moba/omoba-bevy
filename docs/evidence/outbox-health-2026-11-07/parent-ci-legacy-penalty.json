@@ -1,0 +1,23 @@
+{
+  "source_head": "6f6a95444287795f557100447ea102550d79c867",
+  "protocol": 16,
+  "status": "PASS",
+  "proof": {
+    "status": "PASS",
+    "lobby_ports": [
+      45500,
+      45501
+    ],
+    "versionless_snapshots": 2,
+    "active_floor_strikes": 3,
+    "expired_floor_strikes": 2,
+    "new_decline_strikes": 3,
+    "expired_cooldown_not_rearmed": true,
+    "shared_refusals": true,
+    "source_snapshot_unchanged": true,
+    "restart_preserves_shared_penalties": true,
+    "career_unchanged": true,
+    "new_workers": 0,
+    "transport": "real UDP; signed account requests; separate lobby epochs/outboxes"
+  }
+}

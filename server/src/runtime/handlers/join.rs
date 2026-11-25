@@ -69,12 +69,19 @@ impl ServerRuntime {
             }
             // The ordinary admission gate checked this exact requested item.
             // Preserve round state but reconcile cosmetic equipment, otherwise
-            // choosing empty hands could silently restore a revoked old prop.
+            // choosing the class default could silently restore a revoked prop.
             player.hero.identity.handheld = handheld;
             player.join_error = None;
             self.restore_manual_control(addr);
             self.register_career_participant(addr);
             self.fill_practice_bots(now);
+            return ControlFlow::Break(());
+        }
+        // A practice round restart may have removed the retained seat that
+        // supplied the class during admission. A fresh seat uses this class.
+        if !handheld.compatible(hero_class) {
+            world.players.get_mut(&addr).unwrap().join_error =
+                Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
             return ControlFlow::Break(());
         }
         // Team resolution: `ClientChoice` (dev) honors the client's

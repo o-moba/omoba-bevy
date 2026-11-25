@@ -11,13 +11,9 @@ use crate::net::{
 use crate::sprite::PlayerVisualMode;
 use crate::targeting::BasicAttackState;
 use crate::team::CharacterChoice;
+use crate::ui::Button;
 use crate::world2d::render_xy_to_simulation_xz;
-use bevy::{
-    input::mouse::MouseButton,
-    math::{Dir3, primitives::InfinitePlane3d},
-    prelude::*,
-    window::PrimaryWindow,
-};
+use bevy::{input::mouse::MouseButton, math::Dir3, prelude::*, window::PrimaryWindow};
 use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
 
 use super::JUMP_DURATION;
@@ -245,6 +241,8 @@ pub(super) fn move_player_analog(
                 * hero_movement_multiplier(class, progression),
         ) * utility.map_or(1.0, |u| u.state.movement_multiplier())
             * crate::combat::standard::movement_factor(loadout);
+        // A root, a stun or the windup of the hero's own beam: no step and no turn. A stick
+        // still held when it ends moves the hero on.
         if speed <= 0.0 {
             continue;
         }

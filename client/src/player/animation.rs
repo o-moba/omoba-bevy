@@ -1,7 +1,8 @@
 use crate::combat::CombatStats;
-use crate::domain::{MovementTarget, Player};
+use crate::domain::Player;
 use crate::net::{
     GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, PlayerCosmeticAction, RemotePlayer,
+    RemotePlayerInterpolation,
 };
 use crate::skill_presentation::cast::SkillCastObserved;
 use crate::skill_presentation::stage::{EndKind, StageChange, StageEvent};
@@ -105,10 +106,9 @@ pub(super) struct CharacterAnimationSet {
     pub(super) motion_nodes: Vec<(String, AnimationNodeIndex)>,
 }
 
-/// Grace period before Run falls back to Idle. Remote players advance in
-/// snapshot-interpolation bursts with still frames in between; without this
-/// hysteresis the animation flaps Run<->Idle several times per second.
-const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
+/// Maximum grace for a remote player whose moving interpolation segment ran
+/// out of samples. Consecutive stationary poses take precedence over it.
+pub(crate) const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
 
 #[derive(Component)]
 pub(crate) struct PlayerAnimationBinding {
@@ -116,7 +116,7 @@ pub(crate) struct PlayerAnimationBinding {
     key: AvatarKey,
     pub(super) playback: HeroAnimationPlayback,
     last_owner_position: Vec3,
-    /// Seconds since the owner last visibly moved (drives the idle grace).
+    /// Seconds since the owner last moved horizontally, for remote sample gaps.
     seconds_since_movement: f32,
     sandbox_preview: Option<u64>,
     sandbox_paused: bool,
@@ -132,7 +132,7 @@ pub(crate) struct PlayerAnimationBinding {
 
 /// How long a windup started by an accepted cast is held while the telegraph of that cast
 /// is not replicated to this client. No telegraph of a skill that holds a pose lasts longer.
-pub(super) const UNSEEN_HOLD_SECS: f32 = 1.2;
+pub(crate) const UNSEEN_HOLD_SECS: f32 = 1.2;
 
 /// Evidence of the clip that carries a hero's pose.
 #[cfg(feature = "qa")]
@@ -389,9 +389,12 @@ pub(super) fn start_hero_animation(
     }
 }
 
+/// Seconds an outgoing clip takes to fade out under the clip that replaced it.
+pub(crate) const BLEND_SECS: f32 = 0.12;
+
 /// Fade outgoing clips without changing authoritative action timing or root movement.
 fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeIndex, delta: f32) {
-    let step = (delta / 0.12).clamp(0.0, 1.0);
+    let step = (delta / BLEND_SECS).clamp(0.0, 1.0);
     let mut remove = Vec::new();
     let mut outgoing = 0.0;
     for (node, active) in player.playing_animations_mut() {
@@ -413,7 +416,7 @@ fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeInde
     }
 }
 
-fn setup_player_animation_library(
+pub(super) fn setup_player_animation_library(
     mut library: ResMut<PlayerAnimationLibrary>,
     cosmetics: Option<Res<crate::combat_visuals::CombatVisualRegistry>>,
     catalog: Option<Res<PlayerModelCatalog>>,
@@ -578,13 +581,18 @@ fn setup_player_animation_library(
                         "Shared humanoid motion ready for {:?}: Run = Sprint_Loop (runtime retarget)",
                         key
                     );
+                    continue;
                 }
                 Err(error) => {
-                    library.sets.remove(&key);
-                    warn!("Humanoid motion unavailable for {:?}: {}", key, error);
+                    // A VRM-tagged model outside the runtime rig subset keeps the
+                    // legacy path: its embedded (rendition-baked) clips, as the
+                    // avatar preview and party stage already do.
+                    warn!(
+                        "Humanoid motion unavailable for {:?}: {}; using embedded clips",
+                        key, error
+                    );
                 }
             }
-            continue;
         }
 
         let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {
@@ -946,7 +954,6 @@ pub(super) fn sync_player_animation_state(
         ),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
-    local_movement_query: Query<(Option<&MovementTarget>, Option<&Jumping>), With<Player>>,
     player_state_query: Query<
         (
             &Transform,
@@ -954,6 +961,8 @@ pub(super) fn sync_player_animation_state(
             Option<&PlayerCosmeticAction>,
             Option<&crate::net::PlayerLoadout>,
             Option<&crate::net::NetworkHeroClass>,
+            Has<Player>,
+            Option<&RemotePlayerInterpolation>,
         ),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
@@ -1006,7 +1015,7 @@ pub(super) fn sync_player_animation_state(
         }
     }
     for (mut animation_player, mut binding, mut graph_handle) in &mut animation_query {
-        let Ok((owner_transform, stats, action, loadout, class)) =
+        let Ok((owner_transform, stats, action, loadout, class, local, interpolation)) =
             player_state_query.get(binding.owner)
         else {
             continue;
@@ -1051,6 +1060,9 @@ pub(super) fn sync_player_animation_state(
             crate::skill_presentation::own_windup_cue(registry, class, loadout, owner_id, effects)
         });
         let own_hold = own_cue.as_ref().is_some_and(|(_, cue)| cue.hold);
+        let own_effect = own_cue
+            .as_ref()
+            .and_then(|(id, _)| effects.iter().find(|effect| effect.id == *id));
         // What the body is asked for now: that telegraph while it is held, else the motion
         // of the latest accepted action.
         let plan = kit.and_then(|(registry, class, loadout)| {
@@ -1101,19 +1113,19 @@ pub(super) fn sync_player_animation_state(
         };
         let distance = owner_transform
             .translation
-            .distance(binding.last_owner_position);
+            .xz()
+            .distance(binding.last_owner_position.xz());
         let moved = distance / time.delta_secs().max(0.001) > 0.05;
         binding.last_owner_position = owner_transform.translation;
         if moved {
             binding.seconds_since_movement = 0.0;
+        } else if interpolation.is_some_and(RemotePlayerInterpolation::has_confirmed_stop) {
+            binding.seconds_since_movement = LOCOMOTION_IDLE_GRACE_SECS;
         } else {
             binding.seconds_since_movement += simulation_delta;
         }
-        let moved_recently = binding.seconds_since_movement < LOCOMOTION_IDLE_GRACE_SECS;
-        let moving_by_intent = local_movement_query
-            .get(binding.owner)
-            .map(|(target, jumping)| target.is_some() || jumping.is_some())
-            .unwrap_or(false);
+        let moving =
+            moved || (!local && binding.seconds_since_movement < LOCOMOTION_IDLE_GRACE_SECS);
         let preview = if snapshot.is_some() {
             sandbox
                 .as_ref()
@@ -1123,6 +1135,8 @@ pub(super) fn sync_player_animation_state(
             None
         };
         let ended_preview = preview.is_none() && binding.sandbox_preview.is_some();
+        // Seconds into its clip at which a held windup started in this frame enters.
+        let mut windup_entry = 0.0;
         if ended_preview {
             binding.playback = HeroAnimationPlayback::new(action.sequence);
         }
@@ -1189,7 +1203,7 @@ pub(super) fn sync_player_animation_state(
             }
             let mut restart = binding.playback.advance(
                 stats.is_alive(),
-                moving_by_intent || moved || moved_recently,
+                moving,
                 confirmed_action,
                 finished,
                 |state| set.available(state),
@@ -1198,6 +1212,7 @@ pub(super) fn sync_player_animation_state(
                 binding.skill_motion = None;
             }
             if live {
+                let seen = matches!(telegraph, Telegraph::Start(_));
                 let started = match telegraph {
                     Telegraph::Start(cue) => Some(Some(cue)),
                     Telegraph::Unchanged | Telegraph::Cancel if incoming && !own_hold => Some(plan),
@@ -1208,6 +1223,11 @@ pub(super) fn sync_player_animation_state(
                     if let Some(cue) = &cue {
                         binding.playback.state = set.motion(&cue.motion);
                         restart = true;
+                        // A warning first seen late is joined where it has got to.
+                        if seen {
+                            windup_entry =
+                                own_effect.map_or(0.0, |effect| cue.windup_entry_secs(effect));
+                        }
                     }
                     binding.skill_motion = cue;
                 }
@@ -1255,8 +1275,8 @@ pub(super) fn sync_player_animation_state(
                     active.repeat();
                 }
             }
-            // A clip the body was asked for by name enters where its row says and repeats
-            // when it is a loop.
+            // A clip the body was asked for by name enters where its row says, or where its
+            // late telegraph has got to, and repeats when it is a loop.
             if let Some((cue, active)) = binding
                 .playing_cue(set)
                 .zip(animation_player.animation_mut(node))
@@ -1270,9 +1290,9 @@ pub(super) fn sync_player_animation_state(
                     graphs.as_deref(),
                     clips.as_deref(),
                 )
-                .filter(|_| cue.start > 0.0)
+                .filter(|_| cue.start > 0.0 || windup_entry > 0.0)
                 {
-                    active.seek_to(cue.start * duration);
+                    active.seek_to((cue.start * duration).max(windup_entry).min(duration));
                 }
             }
         }
@@ -1293,7 +1313,14 @@ pub(super) fn sync_player_animation_state(
         let cue_node = set.node(binding.playback.state);
         let cue_rate = binding.playing_cue(set).map_or(1.0, |cue| cue.rate);
         for (node, active) in animation_player.playing_animations_mut() {
-            let rate = if *node == cue_node { cue_rate } else { 1.0 };
+            let rate = if *node == cue_node {
+                cue_rate
+            } else if binding.playback.state == HeroAnimationState::Idle && *node == set.run_node {
+                // Fade the last running pose into idle without taking more steps.
+                0.0
+            } else {
+                1.0
+            };
             active.set_speed(speed * rate);
             if paused || fallback_frozen {
                 active.pause();

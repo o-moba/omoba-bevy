@@ -6,7 +6,7 @@
   "hero.ranger.name": "游侠",
   "hero.ranger.tagline": "敏捷游击：快速射击，射程最远",
   "hero.cleric.name": "牧师",
-  "hero.cleric.tagline": "辅助：伤害一般，治疗强大",
+  "hero.cleric.tagline": "治疗受伤的队友并为队伍提供护盾",
   "hero.warden.name": "守林人",
   "hero.warden.tagline": "打野：快速清理野怪营地，额外获得森林金币",
   "hero.dawnweaver.name": "织晓者",
@@ -32,5 +32,5 @@
   "hero.frostguard.name": "霜卫",
   "hero.frostguard.tagline": "保护盟友并拦截来袭弹体",
   "hero.adventurer.name": "寻宝者",
-  "hero.adventurer.tagline": "短刀刺客：转身计使敌人转身，背后攻击更强"
+  "hero.adventurer.tagline": "短刀刺客：眩晕目标，背后攻击更强"
 }

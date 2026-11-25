@@ -25,7 +25,7 @@
   "account.wallet.status.connected": "Кошелек подключен · ваши аватары Ekza перечислены ниже стандартных",
   "account.wallet.unavailable": "Подключение кошелька недоступно: {error}",
   "account.source.default": "Встроенный",
-  "account.source.library": "Ваша библиотека",
+  "account.source.library": "Моя библиотека Ekza",
   "account.source.purchased": "Куплен",
   "account.source.community": "Бесплатно · Studio",
   "account.avatar.default": "Стандартный аватар"

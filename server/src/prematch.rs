@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use shared::handheld::HandheldSelection;
 #[cfg(test)]
 use shared::prematch::Role;
 use shared::prematch::{
@@ -14,12 +15,13 @@ use shared::wire::{ClientPacket, GameState};
 
 use crate::entities::ConnectedPlayer;
 use crate::formation::{joined_count, start_match_running};
-use crate::match_rules::{MatchRules, RosterPolicy};
+use crate::match_rules::RosterPolicy;
 use crate::passport_admission;
 use crate::runtime::ServerRuntime;
 use crate::session::reset_player_round;
 
 pub(crate) use common::prematch::DraftState;
+mod unique;
 
 #[derive(Default)]
 pub(super) struct PrematchRuntime {
@@ -27,6 +29,7 @@ pub(super) struct PrematchRuntime {
     roster: Vec<u64>,
     phase: Option<PrematchPhase>,
     deadline: Option<Instant>,
+    join_deadline_ms: Option<u64>,
     // Bind asynchronous ownership checks to the original admitted identity.
     pending: HashMap<SocketAddr, (u64, u64)>,
 }
@@ -35,6 +38,14 @@ impl ServerRuntime {
     #[cfg(test)]
     pub(crate) fn prematch_generation_for_test(&self) -> u64 {
         self.prematch.generation
+    }
+
+    fn all_drafters(&self, test: fn(&DraftState) -> bool) -> bool {
+        self.world
+            .players
+            .values()
+            .filter(|p| p.joined && !p.hero.identity.is_bot && p.draft.capable)
+            .all(|p| test(&p.draft))
     }
 
     pub(crate) fn prematch_required(&self) -> bool {
@@ -50,22 +61,32 @@ impl ServerRuntime {
     pub(crate) fn invalidate_prematch_roster(&mut self, now: Instant) {
         if self.match_started_at.is_none() && self.prematch.phase.is_some() {
             self.prematch.roster.clear();
-            self.reset_draft_generation(
-                Some("The roster changed. Review your team and lock in again."),
-                now,
-            );
+            self.reset_draft_generation(Some("roster_changed"), now);
         }
     }
 
     fn reset_draft_generation(&mut self, message: Option<&str>, now: Instant) {
+        let preserve = self.prematch.phase.is_some()
+            && self
+                .match_service
+                .worker()
+                .is_some_and(|w| !w.manifest.preference.rated());
+        let loading = preserve && self.prematch.phase == Some(PrematchPhase::Loading);
         self.invalidate_prematch_allocation(now);
         self.prematch.generation = self.prematch.generation.saturating_add(1);
-        self.prematch.phase = Some(PrematchPhase::Draft);
-        self.prematch.deadline = None;
+        self.prematch.phase = Some(if loading {
+            PrematchPhase::Loading
+        } else {
+            PrematchPhase::Draft
+        });
+        self.prematch.deadline =
+            loading.then_some(now + Duration::from_millis(LOADING_TIMEOUT_MS.into()));
         self.prematch.pending.clear();
         for player in self.world.players.values_mut().filter(|p| p.joined) {
-            player.draft.locked = false;
-            player.draft.loaded = false;
+            if !preserve {
+                player.draft.locked = false;
+                player.draft.loaded = false;
+            }
             player.draft.acknowledged_request_id = player.draft.request_id;
             player.draft.error = message.map(str::to_owned);
         }
@@ -80,6 +101,16 @@ impl ServerRuntime {
             self.prematch.pending.clear();
             return false;
         }
+        self.prematch.join_deadline_ms = self
+            .match_service
+            .worker()
+            .map(|w| w.manifest.join_deadline_ms);
+        if self.match_service.worker().is_some_and(|w| w.aborted) {
+            for player in self.world.players.values_mut().filter(|p| p.joined) {
+                player.draft.error = Some("allocation_cancelled_or_expired".into());
+            }
+            return true;
+        }
         let mut roster: Vec<_> = self
             .world
             .players
@@ -91,22 +122,12 @@ impl ServerRuntime {
         if roster != self.prematch.roster {
             let first = self.prematch.roster.is_empty();
             self.prematch.roster = roster;
-            self.reset_draft_generation(
-                (!first).then_some("The roster changed. Review your team and lock in again."),
-                now,
-            );
+            self.reset_draft_generation((!first).then_some("roster_changed"), now);
         }
         let ready = joined_count(&self.world.players);
         let needed = match self.rules.prematch_roster {
             RosterPolicy::Present => ready.max(1),
             RosterPolicy::Full => self.rules.roster_size(),
-        };
-        let all = |test: fn(&DraftState) -> bool| {
-            self.world
-                .players
-                .values()
-                .filter(|p| p.joined && !p.hero.identity.is_bot && p.draft.capable)
-                .all(|p| test(&p.draft))
         };
         match self.prematch.phase.unwrap_or(PrematchPhase::Draft) {
             PrematchPhase::Draft => {
@@ -130,18 +151,9 @@ impl ServerRuntime {
                     || self.world.players.iter().any(|(addr, p)| {
                         p.joined && p.draft.capable && self.passport_admissions.is_pending(*addr)
                     });
-                if !pending_admission && (all(|d| d.locked) || expired) {
-                    if expired {
-                        for player in self
-                            .world
-                            .players
-                            .values_mut()
-                            .filter(|p| p.joined && p.draft.capable && !p.hero.identity.is_bot)
-                        {
-                            // The live identity contains the last accepted
-                            // selection, including the admitted Join defaults.
-                            player.draft.locked = true;
-                        }
+                if !pending_admission && (self.all_drafters(|d| d.locked) || expired) {
+                    if !self.finalize_unique_draft(now) {
+                        return true;
                     }
                     self.prematch.phase = Some(PrematchPhase::Countdown);
                     self.prematch.deadline = Some(now + Duration::from_millis(COUNTDOWN_MS.into()));
@@ -163,14 +175,35 @@ impl ServerRuntime {
                 }
             }
             PrematchPhase::Loading => {
+                // A Casual replacement receives its unique canonical pick
+                // before the client can acknowledge the changed assets.
+                if !self.career_roster_is_frozen() && !self.finalize_unique_draft(now) {
+                    return true;
+                }
                 self.world.game_state = GameState::Forming { ready, needed };
-                let all_loaded = all(|d| d.loaded);
+                let all_loaded = self.all_drafters(|d| d.loaded);
                 if remaining_ms(self.prematch.deadline, now) == 0 {
-                    self.reset_draft_generation(Some(if all_loaded {
-                        "Match start took too long. Lock in again to retry, or leave."
+                    if self.match_service.worker().is_some() {
+                        if all_loaded {
+                            // Keep the locks while PostgreSQL acknowledges Start;
+                            // the allocation's join deadline still bounds the wait.
+                            self.prematch.deadline = Some(now + Duration::from_secs(5));
+                            for p in self.world.players.values_mut().filter(|p| p.joined) {
+                                p.draft.error = Some("durable_start_pending".into());
+                            }
+                        } else {
+                            self.expire_unloaded_players(now);
+                        }
                     } else {
-                        "Asset loading timed out. Retry your selection and lock in again, or leave."
-                    }), now);
+                        self.reset_draft_generation(
+                            Some(if all_loaded {
+                                "start_timeout"
+                            } else {
+                                "loading_timeout"
+                            }),
+                            now,
+                        );
+                    }
                 } else if all_loaded {
                     // No gameplay, income or spawns run until durable start ACK.
                     if self.begin_career_round(now) {
@@ -182,6 +215,47 @@ impl ServerRuntime {
             }
         }
         true
+    }
+
+    fn expire_unloaded_players(&mut self, now: Instant) {
+        let missing: Vec<_> = self
+            .world
+            .players
+            .iter()
+            .filter(|(_, p)| {
+                p.joined && !p.hero.identity.is_bot && p.draft.capable && !p.draft.loaded
+            })
+            .map(|(addr, _)| *addr)
+            .collect();
+        if self
+            .match_service
+            .worker()
+            .is_some_and(|w| w.manifest.preference.rated())
+        {
+            let sessions: Vec<_> = missing
+                .iter()
+                .filter_map(|addr| self.career.backend.authenticated_session(*addr))
+                .collect();
+            if let crate::match_service::MatchService::Worker(worker) = &mut self.match_service {
+                let _ = crate::match_allocation::atomic_json(
+                    &worker.directory.join("cancel.json"),
+                    &sessions,
+                );
+                worker.aborted = true;
+            }
+            self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
+            for p in self.world.players.values_mut().filter(|p| p.joined) {
+                p.draft.error = Some("allocation_cancelled_or_expired".into());
+            }
+        } else {
+            for addr in missing {
+                self.leave_match(addr, now);
+                if let Some(p) = self.world.players.get_mut(&addr) {
+                    p.join_error = Some(shared::protocol::JoinRejection::MatchFull);
+                }
+            }
+            self.fill_practice_bots(now);
+        }
     }
 
     fn draft_request_valid(&self, addr: SocketAddr, request: &PrematchRequest) -> bool {
@@ -201,7 +275,7 @@ impl ServerRuntime {
     pub(crate) fn handle_prematch(
         &mut self,
         addr: SocketAddr,
-        request: PrematchRequest,
+        mut request: PrematchRequest,
         now: Instant,
     ) {
         self.maintain_roster(now);
@@ -210,6 +284,7 @@ impl ServerRuntime {
         if !self.draft_request_valid(addr, &request) {
             return;
         }
+        let conflict = self.prematch_class_conflict(addr, &request.action);
         let player = self.world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
         if request.request_id == 0 || request.request_id <= player.draft.request_id {
@@ -219,6 +294,10 @@ impl ServerRuntime {
         player.draft.request_id = request.request_id;
         player.draft.acknowledged_request_id = request.request_id;
         player.draft.error = None;
+        if let Some(conflict) = conflict {
+            player.draft.error = Some(conflict.into());
+            return;
+        }
         let phase = self.prematch.phase;
         let allowed = match &request.action {
             PrematchAction::Select { .. } => {
@@ -232,7 +311,22 @@ impl ServerRuntime {
                 Some("This selection is frozen. Wait for the match or the next draft.".into());
             return;
         }
-        if let PrematchAction::Select { avatar, .. } = &request.action {
+        if let PrematchAction::Select {
+            avatar,
+            hero_class,
+            handheld,
+            ..
+        } = &mut request.action
+        {
+            if !handheld.compatible(*hero_class) {
+                player.draft.error = Some("Choose a weapon compatible with this class.".into());
+                return;
+            }
+            let effective =
+                omoba_passport::avatars::match_avatar_slug(*hero_class, avatar.as_deref());
+            if Some(effective) != avatar.as_deref() {
+                *avatar = Some(effective.to_owned());
+            }
             // Re-selecting the already admitted exact avatar (e.g. changing an
             // intended role) needs no second single-use ownership ticket.
             let same_avatar =
@@ -248,15 +342,23 @@ impl ServerRuntime {
             let packet = ClientPacket::Prematch {
                 request: request.clone(),
             };
-            match self.passport_admissions.begin_loadout(
+            let admission = self.passport_admissions.begin_loadout(
                 addr,
                 &packet,
                 session.as_deref(),
                 same_avatar,
-            ) {
+            );
+            if !matches!(admission, passport_admission::Admission::Pending) {
+                passport_admission::log_ekza_decision(
+                    Some(identity),
+                    &packet,
+                    matches!(admission, passport_admission::Admission::Free),
+                );
+            }
+            match admission {
                 passport_admission::Admission::Denied => {
                     player.draft.error = Some(
-                        "This avatar or weapon is unavailable. Refresh Studio and choose approved equipment.".into(),
+                        "This avatar or weapon is unavailable. Choose different equipment.".into(),
                     );
                     return;
                 }
@@ -314,7 +416,13 @@ impl ServerRuntime {
         if !self.draft_request_valid(addr, &request) {
             return;
         }
+        let conflict = self.prematch_class_conflict(addr, &request.action);
+        let combat_sandbox = self.sandbox_allowed();
         let player = self.world.players.get_mut(&addr).unwrap();
+        if let Some(conflict) = conflict {
+            player.draft.error = Some(conflict.into());
+            return;
+        }
         match request.action {
             PrematchAction::Select {
                 character,
@@ -335,23 +443,31 @@ impl ServerRuntime {
                     );
                     return;
                 }
-                let normalized = omoba_passport::avatars::normalize_avatar_slug(avatar.as_deref());
-                if avatar.is_some() && normalized.is_none() {
+                let effective =
+                    omoba_passport::avatars::match_avatar_slug(hero_class, avatar.as_deref());
+                let Some(normalized) =
+                    omoba_passport::avatars::normalize_avatar_slug(Some(effective))
+                else {
                     player.draft.error = Some(
                         "This avatar is no longer available. Choose another character.".into(),
                     );
                     return;
-                }
-                player.hero.identity.handheld = handheld;
+                };
+                player.hero.identity.handheld = if combat_sandbox || handheld.allowed_in_match() {
+                    handheld
+                } else {
+                    HandheldSelection::ClassDefault
+                };
                 player.hero.identity.character = character;
                 player.hero.identity.hero_class = hero_class;
-                player.hero.identity.avatar = normalized.map(str::to_owned);
+                player.hero.identity.avatar = Some(normalized.to_owned());
                 player.hero.identity.sprite_character = Some(
                     shared::normalize_sprite_character_id(sprite_character.as_deref()).to_owned(),
                 );
                 player.draft.role = role;
                 player.draft.loaded = false;
                 reset_player_round(player, &self.world.map_layout, now);
+                self.combat_host().refresh_practice_bot_duties(now);
             }
             PrematchAction::Lock { locked }
                 if self.prematch.phase == Some(PrematchPhase::Draft) =>
@@ -371,6 +487,59 @@ impl ServerRuntime {
         }
         self.tick_prematch(now);
     }
+    pub(crate) fn prematch_snapshot(
+        &self,
+        recipient: &ConnectedPlayer,
+        now: Instant,
+    ) -> Option<PrematchSnapshot> {
+        if !recipient.draft.capable || !recipient.joined {
+            return None;
+        }
+        let phase = self.prematch.phase?;
+        let unique_classes_across_teams = self.unique_classes_across_teams();
+        let players = &self.world.players;
+        let mut roster: Vec<_> = players
+            .values()
+            .filter(|p| p.joined)
+            .map(|p| DraftPlayer {
+                handheld: p.hero.identity.handheld.clone(),
+                player_id: p.hero.identity.id,
+                nickname: p.display_nickname(),
+                team: p.hero.identity.team,
+                character: p.hero.identity.character,
+                hero_class: p.hero.identity.hero_class,
+                avatar: p.hero.identity.avatar.clone(),
+                sprite_character: p.hero.identity.sprite_character.clone(),
+                role: p.draft.role,
+                is_bot: p.hero.identity.is_bot,
+                bot_persona: p.bot_persona.map(|persona| persona.slug().to_owned()),
+                locked: p.hero.identity.is_bot
+                    || p.draft.locked
+                    || (!unique_classes_across_teams && !p.draft.capable),
+                loaded: p.hero.identity.is_bot || !p.draft.capable || p.draft.loaded,
+            })
+            .collect();
+        roster.sort_by_key(|p| p.player_id);
+        Some(PrematchSnapshot {
+            join_remaining_ms: self.prematch.join_deadline_ms.map(|ms| {
+                ms.saturating_sub(crate::match_allocation::unix_ms())
+                    .min(u64::from(u32::MAX)) as u32
+            }),
+            unique_classes_across_teams,
+            generation: self.prematch.generation,
+            phase,
+            remaining_ms: remaining_ms(self.prematch.deadline, now),
+            needed: match self.rules.prematch_roster {
+                RosterPolicy::Present => {
+                    players.values().filter(|p| p.joined).count().max(1) as u32
+                }
+                RosterPolicy::Full => self.rules.roster_size(),
+            },
+            players: roster,
+            last_request_id: recipient.draft.acknowledged_request_id,
+            error: recipient.draft.error.clone(),
+        })
+    }
 }
 
 fn remaining_ms(deadline: Option<Instant>, now: Instant) -> u32 {
@@ -378,63 +547,6 @@ fn remaining_ms(deadline: Option<Instant>, now: Instant) -> u32 {
         d.saturating_duration_since(now)
             .as_millis()
             .min(u128::from(u32::MAX)) as u32
-    })
-}
-
-pub(super) fn snapshot(
-    runtime: &PrematchRuntime,
-    players: &HashMap<SocketAddr, ConnectedPlayer>,
-    recipient: &ConnectedPlayer,
-    rules: MatchRules,
-    now: Instant,
-) -> Option<PrematchSnapshot> {
-    if !recipient.draft.capable || !recipient.joined {
-        return None;
-    }
-    let phase = runtime.phase?;
-    let mut roster: Vec<_> = players
-        .values()
-        .filter(|p| p.joined)
-        .map(|p| DraftPlayer {
-            handheld: p.hero.identity.handheld.clone(),
-            player_id: p.hero.identity.id,
-            nickname: p.career_profile.as_ref().map_or_else(
-                || {
-                    format!(
-                        "{} {}",
-                        if p.hero.identity.is_bot {
-                            "Bot"
-                        } else {
-                            "Guest"
-                        },
-                        p.hero.identity.id
-                    )
-                },
-                |v| v.nickname.clone(),
-            ),
-            team: p.hero.identity.team,
-            character: p.hero.identity.character,
-            hero_class: p.hero.identity.hero_class,
-            avatar: p.hero.identity.avatar.clone(),
-            sprite_character: p.hero.identity.sprite_character.clone(),
-            role: p.draft.role,
-            is_bot: p.hero.identity.is_bot,
-            locked: p.hero.identity.is_bot || !p.draft.capable || p.draft.locked,
-            loaded: p.hero.identity.is_bot || !p.draft.capable || p.draft.loaded,
-        })
-        .collect();
-    roster.sort_by_key(|p| p.player_id);
-    Some(PrematchSnapshot {
-        generation: runtime.generation,
-        phase,
-        remaining_ms: remaining_ms(runtime.deadline, now),
-        needed: match rules.prematch_roster {
-            RosterPolicy::Present => players.values().filter(|p| p.joined).count().max(1) as u32,
-            RosterPolicy::Full => rules.roster_size(),
-        },
-        players: roster,
-        last_request_id: recipient.draft.acknowledged_request_id,
-        error: recipient.draft.error.clone(),
     })
 }
 

@@ -1,7 +1,8 @@
 //! HP-loss receipts and explicit trap activations are retained briefly for UDP loss.
+use shared::clock::Instant;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
 use shared::wire::{ProjectileState, TargetId};
@@ -114,6 +115,10 @@ pub struct HitSource {
     pub entity: CombatEntity,
     pub style: ProjectileStyle,
     pub action_slot: Option<u8>,
+    /// A beam's primary hit landed inside the full-damage core.
+    pub core_hit: bool,
+    /// This receipt is a Radiance mark detonation, not the triggering hit.
+    pub radiance_burst: bool,
 }
 
 impl HitSource {
@@ -122,6 +127,8 @@ impl HitSource {
             entity: CombatEntity { kind, id },
             style,
             action_slot: None,
+            core_hit: false,
+            radiance_burst: false,
         }
     }
 
@@ -133,6 +140,8 @@ impl HitSource {
             },
             style: state.style,
             action_slot: state.action_slot,
+            core_hit: false,
+            radiance_burst: false,
         }
     }
 
@@ -140,6 +149,8 @@ impl HitSource {
         event.source = self.entity;
         event.style = self.style;
         event.action_slot = self.action_slot;
+        event.core_hit = self.core_hit;
+        event.radiance_burst = self.radiance_burst;
         event
     }
 }
@@ -197,35 +208,6 @@ pub fn apply_player_damage_kind(
     now: Instant,
     kind: shared::loadout::DamageType,
 ) -> Option<CombatEvent> {
-    apply_player_damage_with_floor(players, target_id, damage, now, kind, 0.0)
-}
-
-/// Vital breaks use the ordinary immunity/shield/receipt path, with a hard
-/// survivable floor even when very large f32 HP cannot represent `hp - 1`.
-pub(crate) fn apply_player_nonlethal_damage(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    target_id: u64,
-    damage: f32,
-    now: Instant,
-) -> Option<CombatEvent> {
-    apply_player_damage_with_floor(
-        players,
-        target_id,
-        damage,
-        now,
-        shared::loadout::DamageType::True,
-        1.0,
-    )
-}
-
-fn apply_player_damage_with_floor(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    target_id: u64,
-    damage: f32,
-    now: Instant,
-    kind: shared::loadout::DamageType,
-    floor: f32,
-) -> Option<CombatEvent> {
     if !damage.is_finite() || damage <= 0.0 {
         return None;
     }
@@ -278,7 +260,7 @@ fn apply_player_damage_with_floor(
     player.hero.hp = if player.modifiers.infinite_hp {
         before
     } else {
-        (before - damage).max(floor.min(before))
+        (before - damage).max(0.0)
     };
     if player.hero.hp <= 0.0 && player.timers.respawn_at.is_none() {
         player.timers.respawn_at = Some(now + player.timers.respawn_delay);

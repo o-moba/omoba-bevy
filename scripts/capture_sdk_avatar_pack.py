@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import json
+from snapshot_payload import decode_snapshot_payload
 import os
 from pathlib import Path
 import socket
@@ -13,6 +14,9 @@ import catalog
 from capture_showcase import base_env, free_address, run_until_exit, sha256, source_identity, stop
 from capture_verdant import FRAME_HEADER
 from sdk_avatar_pack import start_catalog, write_json
+
+SDK_AVATAR_PROBE_CLASS = 'cinderforge'
+SDK_AVATAR_STOCK_WEAPON = 'forge-hammer'
 
 
 class Peer:
@@ -42,7 +46,7 @@ class Peer:
             data = b''.join(parts[i] for i in range(count))
             del self.pending[(epoch, tick)]
             assert len(data) == total
-        return json.loads(data)
+        return json.loads(decode_snapshot_payload(data))
 
     def join(self, slug, index, accepted=True):
         deadline, last_send = time.monotonic() + 15, 0
@@ -50,7 +54,7 @@ class Peer:
             while time.monotonic() < deadline:
                 if time.monotonic() - last_send > .5:
                     self.send(dict(type='hello', protocol_version=catalog.protocol_version()))
-                    self.send(dict(type='join', team='green', character='cube', hero_class='warrior',
+                    self.send(dict(type='join', team='green', character='cube', hero_class=SDK_AVATAR_PROBE_CLASS,
                                    avatar=slug, session_id=f'sdk-pack-{os.getpid()}-{index}'))
                     last_send = time.monotonic()
                 packet = self.packet()
@@ -58,7 +62,7 @@ class Peer:
                     continue
                 own = next((p for p in packet.get('players', []) if p['id'] == packet.get('your_id')), None)
                 if accepted and own and own.get('avatar') == slug:
-                    assert own['hero_class'] == 'warrior'
+                    assert own['hero_class'] == SDK_AVATAR_PROBE_CLASS
                     return dict(slug=slug, admitted=True, player_id=own['id'], tick=packet['snapshot_tick'])
                 if not accepted and packet.get('join_error') == 'avatar_not_authorized':
                     assert own is None
@@ -69,7 +73,7 @@ class Peer:
             self.sock.close()
 
 
-def verify_native(directory, entries, match_index, previews, weapon='forge-sword', remote_weapon=None,
+def verify_native(directory, entries, match_index, previews, weapon=SDK_AVATAR_STOCK_WEAPON, remote_weapon=None,
                   require_equipment_ui=False):
     summary = json.loads((directory / 'qa-summary.json').read_text())
     frames = summary['captures']

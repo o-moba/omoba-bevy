@@ -1,0 +1,121 @@
+{
+  "clients": 10,
+  "status": "PASS",
+  "soak_seconds": 30.0,
+  "elapsed_seconds": 46.36725650000153,
+  "all_running_after_seconds": 16.362680500024,
+  "input": {
+    "requested_hz": 20,
+    "successful_signed_transforms_per_second": {
+      "min": 20.025595002906073,
+      "p05": 20.025595002906073,
+      "p50": 20.025595002906073,
+      "p95": 20.025595002906073,
+      "max": 20.025595002906073
+    },
+    "cached_snapshot_transforms": {
+      "total": 726,
+      "min_per_peer": 70
+    },
+    "all_peers_within_2_5_percent": true,
+    "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+  },
+  "wire": {
+    "bytes_per_second_per_player": {
+      "p50": 66367.01319261926,
+      "p95": 66682.56802296809,
+      "p99": 66682.56802296809,
+      "max": 66682.56802296809
+    },
+    "accepted_snapshots_per_second_per_player": {
+      "p50": 17.800528891472066,
+      "p05": 17.800528891472066
+    },
+    "observed_broadcast_tick_span_per_second_per_player": {
+      "p50": 18.778209455587007,
+      "p05": 18.778209455587007
+    },
+    "accepted_fraction_of_observed_tick_span": {
+      "p50": 0.947935368043088,
+      "p05": 0.947935368043088
+    },
+    "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+  },
+  "server_load": {
+    "totals": {
+      "transport_commands": 7581,
+      "gameplay_transforms": 6502,
+      "sequence_gaps": 0,
+      "sequence_restarts": 0,
+      "snapshots": 5930
+    },
+    "all_endpoints_without_sequence_gaps": true,
+    "all_endpoints_without_sequence_restarts": true,
+    "broadcasts": 620,
+    "broadcast_gaps": {
+      "count": 619,
+      "total_us": 34798736,
+      "buckets": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        320,
+        299,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 56217.66720516963,
+      "p95_exclusive_upper_us": 75000,
+      "p99_exclusive_upper_us": 75000
+    },
+    "latest_transform_age_at_snapshot": {
+      "count": 5870,
+      "total_us": 114975997,
+      "buckets": [
+        1212,
+        433,
+        68,
+        1957,
+        1978,
+        160,
+        27,
+        17,
+        10,
+        8,
+        0,
+        0,
+        0
+      ],
+      "mean_us": 19587.052299829644,
+      "p95_exclusive_upper_us": 45000,
+      "p99_exclusive_upper_us": 75000
+    }
+  },
+  "aggregate_received_bytes_per_second": 662861.0169765803,
+  "aggregate_received_mbit_per_second": 5.302888135812642,
+  "server_sha256": "f8c6daad7fbd556f1b64769ce99240e127033c9c9b254345d6576ad2b747e2d8",
+  "bots_sha256": "5ee8d341de8c0d4e2b3f063d561f14408c33cf5623f66d73a2cb68a8dafc3234",
+  "source_sha256": {
+    "scripts/public_playing_capacity.py": "9e55c9132df7d4ee50de9915b3f6024a6f7423fff421f8d8905bb3186f4a6702",
+    "scripts/public_bots_rehearsal.py": "6aa99b8f6f4f40571e1857fa86c738dccb9ad000670980883e9fcc2d7b073cac",
+    "harness/src/bin/bots.rs": "e367bb20023abb170176dad664f9007916d5de14e7f574f745ebc46d98116f71",
+    "harness/src/bot.rs": "899a3e91bec6cffac76b277e4e981d45adf0131e6ba6f4a783824d91f61c0d97",
+    "harness/src/public_client.rs": "8cdd4848a51779f3ef57ec63b3ee6487fae653b2277e38f0e583a2ef4d1debf4",
+    "server/src/main.rs": "574fed414663eda587682a659b67ac7de8570f5936391a6b0041027466d739aa",
+    "server/src/load_metrics.rs": "2a0b2c214cfb93183bc342873dbdfa12d962a049a5e4995c40587a7b29d598b7",
+    "server/src/public_transport.rs": "e341b67159c160e444639e8f6f274cabb409b7c6f8ff330ff5df32d8b213fdaf",
+    "server/src/runtime/dispatch.rs": "e240458dedc5b2988865acfcfe9117a00c527ad03658b3ac4f627ffbe5e87077",
+    "server/src/runtime/mod.rs": "87a80bf51d4c25c166d774510088d272b582bf927a3d8f189081ff18cb257125",
+    "server/src/snapshot.rs": "c867c37bbf3fe9eddf2a6e49a548ba34124f7b22b844cd46dc2df634969f65b3",
+    "Cargo.lock": "7f9d507b2d24608ca9ee045a8e96fca981c3d7b163bd7ad705dc3aff34931b14",
+    "shared/src/lib.rs": "b428d4d87b6a6281fe526959e9d7162252108bb147d357659f074aaca0277ed4",
+    "shared/src/transport.rs": "4039272ce723e8ccc13b30abbc1f059fdaf721257e4187f2544d16b8d4f15cd7",
+    "shared/src/protocol.rs": "4fed0addc8cef8694d28b911af10f75983c475a6c788a41dff1c4479596df5a4"
+  }
+}

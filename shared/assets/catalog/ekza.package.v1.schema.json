@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ekza.io/schemas/gp/ekza.package.v1.json",
+  "title": "ekza.package.v1",
+  "description": "Ekza Game Protocol 1.0: the manifest of one package (monolithic or fragment). In glTF/VRM containers it is `asset.extras.ekza_package_v1`, covered by the file's SHA-256.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "kind", "contract", "target", "slots", "requires", "provenance"],
+  "properties": {
+    "schema": { "const": "ekza.package.v1" },
+    "schemaVersion": { "type": "string", "pattern": "^1\\.(0|[1-9][0-9]{0,3})$" },
+    "kind": { "enum": ["character", "animation-pack", "asset-pack", "accessory"] },
+    "contract": {
+      "type": "object", "additionalProperties": false, "required": ["schema", "game", "revision"],
+      "properties": {
+        "schema": { "const": "ekza.game-contract.v1" },
+        "game": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "revision": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" }
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false, "required": ["id", "requirementId"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,47}$" },
+        "requirementId": { "type": "string", "maxLength": 128, "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$" }
+      }
+    },
+    "slots": {
+      "type": "object", "minProperties": 1, "maxProperties": 512,
+      "propertyNames": { "type": "string", "maxLength": 96, "pattern": "^[a-z][a-z0-9_-]{0,47}(\\.[a-z0-9][a-z0-9_-]{0,47}){0,7}$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "object", "additionalProperties": false, "required": ["mode"],
+            "properties": { "mode": { "const": "default" } } },
+          { "type": "object", "additionalProperties": false, "required": ["mode", "animation", "markers"],
+            "properties": {
+              "mode": { "const": "custom" },
+              "animation": { "type": "integer", "minimum": 0, "maximum": 1023 },
+              "markers": {
+                "type": "object", "maxProperties": 8,
+                "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+                "additionalProperties": { "type": "number", "minimum": 0, "maximum": 600 }
+              }
+            } },
+          { "type": "object", "additionalProperties": false, "required": ["mode", "node", "anchors"],
+            "properties": {
+              "mode": { "const": "custom" },
+              "node": { "type": "integer", "minimum": 0, "maximum": 65535 },
+              "anchors": {
+                "type": "object", "maxProperties": 8,
+                "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+                "additionalProperties": {
+                  "type": "array", "minItems": 3, "maxItems": 3,
+                  "items": { "type": "number", "minimum": -100, "maximum": 100 }
+                }
+              }
+            } }
+        ]
+      }
+    },
+    "requires": {
+      "type": "array", "maxItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["kind", "sha256", "reason"],
+        "properties": {
+          "kind": { "enum": ["character", "animation-pack", "asset-pack", "accessory"] },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "reason": { "enum": ["sockets", "rig", "derived-from"] }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false, "required": ["tool", "toolVersion"],
+      "properties": {
+        "tool": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "toolVersion": { "type": "string", "minLength": 1, "maxLength": 32 }
+      }
+    }
+  }
+}

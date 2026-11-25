@@ -1,0 +1,37 @@
+{
+  "status": "not acceptance",
+  "attempts": [
+    {
+      "attempt": "worker-restore-v1",
+      "status": "FAIL",
+      "checks_before_failure": 4,
+      "error": "point did not reach the required terminal recovery state; pg_ctl=1: 2026-11-07 05:54:06.499 GMT [662] LOG:  starting PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit\n2026-11-07 05:54:06.500 GMT [662] LOG:  listening on Unix socket \"/tmp/pitr-runtime/native-point-socket/.s.PGSQL.6545\"\n2026-11-07 05:54:06.502 GMT [668] LOG:  database system was interrupted; last known up at 2026-11-07 05:53:14 GMT\n2026-11-07 05:54:06.590 GMT [668] LOG:  starting backup recovery with redo LSN 0/1100028, checkpoint LSN 0/1100080, on timeline ID 1\n2026-11-07 05:54:06.625 GMT [668] LOG:  restored log file \"000000010000000000000011\" from archive\n2026-11-07 05:54:06.628 GMT [668] LOG:  starting point-in-time recovery to \"omoba_fixture_earned\"\n2026-11-07 05:54:06.630 GMT [668] FATAL:  recovery aborted because of insufficient parameter settings\n2026-11-07 05:54:06.630 GMT [668] DETAIL:  max_connections = 20 is a lower setting than on the primary server, where its value was 80.\n2026-11-07 05:54:06.630 GMT [668] HINT:  You can restart the server after making the necessary configuration changes.\n2026-11-07 05:54:06.631 GMT [662] LOG:  startup process (PID 668) exited with exit code 1\n2026-11-07 05:54:06.631 GMT [662] LOG:  terminating any other active server processes\n2026-11-07 05:54:06.632 GMT [662] LOG:  shutting down due to startup process failure\n2026-11-07 05:54:06.632 GMT [662] LOG:  database system is shut down\n",
+      "scope": "Insufficient max_connections:20 restored versus80 source, before any native stage; same hardcode confirmed in original proposed helper.",
+      "cleanup_complete": true
+    },
+    {
+      "attempt": "worker-restore-v2",
+      "status": "FAIL",
+      "checks_before_failure": 20,
+      "error": "docker port failed(1): no public port '5432/tcp' published for omoba-mm-pitr-6585893141-primary\n",
+      "scope": "All20 raised-limit backup checks pass but internal Docker network prevents port publication; no native acceptance.",
+      "cleanup_complete": true
+    },
+    {
+      "attempt": "worker-restore-v3",
+      "status": "FAIL",
+      "checks_before_failure": 20,
+      "error": "'gameplay_started'",
+      "scope": "All20 backup checks and actual Running reached; fixture wrongly required an explicit true gameplay field, which canonical serialization omits; no physical/native acceptance.",
+      "cleanup_complete": true
+    },
+    {
+      "attempt": "worker-restore-pg16-v1",
+      "status": "FAIL",
+      "checks_before_failure": 20,
+      "error": "Immediate writable-primary assertion ran while the restored server still accepted read-only recovery connections",
+      "scope": "setup/readiness race; no completed native acceptance; replacement waits for actual promotion with deadline and preserves all assertions",
+      "cleanup_complete": true
+    }
+  ]
+}

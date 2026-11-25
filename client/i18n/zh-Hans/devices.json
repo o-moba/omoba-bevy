@@ -23,5 +23,17 @@
   "devices.error.preserve_key": "无法保留之前关联的设备密钥。",
   "devices.error.approve_first": "请先在玩家门户中批准此设备。",
   "devices.error.stopped": "设备请求已中断。可以安全重试。",
-  "devices.error.enrollment_missing": "缺少设备注册信息。"
+  "devices.error.enrollment_missing": "缺少设备注册信息。",
+  "devices.error.expired": "设备请求已过期。请发起新请求。",
+  "devices.error.completion": "设备确认与已批准的账号不匹配。请检查批准状态后重试。",
+  "devices.button.vk": "使用 VK ID 登录",
+  "devices.button.vk_link": "将 VK 关联到此资料",
+  "devices.vk.waiting": "请在浏览器中使用 VK、OK 或 Mail.ru 登录。此窗口会自动更新，请求五分钟内有效。",
+  "devices.vk.opened": "登录页面已在浏览器中打开。",
+  "devices.vk.open_manually": "请在浏览器中打开 {url} 进行登录。",
+  "devices.vk.link_prompt": "将 VK 登录“{name}”关联到此游戏资料（{profile}）？之后可在网站和其他设备上用 VK 登录。",
+  "devices.vk.linked": "VK 已关联到此资料。",
+  "devices.vk.same_account": "此设备已在使用该账号。",
+  "devices.vk.expired": "登录请求已过期。请再次点击“使用 VK ID 登录”。",
+  "devices.vk.this_profile": "此资料"
 }

@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use shared::combat::CombatEntityKind;
+use shared::handheld::{HandheldSelection, WeaponBinding};
 use shared::loadout::EquippedSkills;
 use shared::map::{Lane, Team};
 use shared::sandbox::*;
@@ -23,7 +24,7 @@ use crate::sim::cast::handle_cast_request;
 use crate::world::{
     build_configured_structures, spawn_minion_wave_for_team_lane, structure_collision_radius,
 };
-use crate::{bots, hero_stats, hero_timers};
+use crate::{hero_stats, hero_timers};
 
 const ENEMY_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 40001);
@@ -122,7 +123,7 @@ impl SandboxRuntime {
             p.hero.identity.avatar = c
                 .avatar
                 .clone()
-                .or_else(|| bots::bot_avatar(c.hero, 1).map(str::to_owned));
+                .or_else(|| Some(c.hero.default_avatar_slug().to_owned()));
             p.hero.identity.sprite_character = None;
         }
         if moved {
@@ -250,16 +251,21 @@ fn validate_position(position: [f32; 2]) -> Result<(), String> {
     }
     Ok(())
 }
+fn sandbox_weapon_binding(id: &str) -> Option<WeaponBinding> {
+    omoba_passport::weapons::catalog()
+        .items
+        .iter()
+        .find(|item| item.id == id)
+        .and_then(omoba_passport::weapons::Weapon::binding)
+}
 fn validate_actor(c: &ActorConfig) -> Result<(), String> {
     let equipped = EquippedSkills::resolve(c.hero, c.recipe.as_ref())
         .map_err(|error| format!("Invalid equipped skills: {error}"))?;
-    if let shared::handheld::HandheldSelection::Item(id) = &c.handheld {
-        if !omoba_passport::weapons::catalog()
-            .items
-            .iter()
-            .any(|item| &item.id == id)
-        {
-            return Err("Unknown handheld item; install its approved rendition first".into());
+    if let HandheldSelection::Item(id) = &c.handheld {
+        let binding = sandbox_weapon_binding(id)
+            .ok_or("Handheld item has no approved weapon binding in this sandbox")?;
+        if !binding.supports(c.hero) {
+            return Err("Choose a weapon compatible with this class".into());
         }
     }
     if c.avatar.as_ref().is_some_and(|a| {
@@ -332,6 +338,15 @@ impl ServerRuntime {
             {
                 let mut c = s.config.player.clone();
                 c.hero = p.hero.identity.hero_class;
+                c.handheld = match &p.hero.identity.handheld {
+                    HandheldSelection::Item(id)
+                        if !sandbox_weapon_binding(id)
+                            .is_some_and(|binding| binding.supports(c.hero)) =>
+                    {
+                        HandheldSelection::ClassDefault
+                    }
+                    handheld => handheld.clone(),
+                };
                 // Preserve the ordinary class selector's preset semantics.
                 // Only a retained authored kit needs an explicit recipe.
                 c.recipe = p
@@ -673,7 +688,7 @@ impl ServerRuntime {
                 Team::Blue,
                 default_character_choice(),
                 c.hero,
-                bots::bot_avatar(c.hero, 1),
+                Some(c.hero.default_avatar_slug()),
                 None,
                 &self.world.map_layout,
                 now,

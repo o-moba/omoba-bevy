@@ -1,0 +1,176 @@
+{
+  "scope": "P6 rendering evidence only; synthetic profiles/results/API/settings, not live accounts or physical devices",
+  "viewport": [
+    852,
+    393
+  ],
+  "portal_screenshots": "full-page or viewport as recorded; layout viewport852x393",
+  "native_market": "ru",
+  "images": [
+    {
+      "file": "native-ru-baseline-1.png",
+      "sha256": "f6eb09fc46f67f78a30b3b74d673fd79e778a278896bd1538a3cd1a803c343a9",
+      "bytes": 617144,
+      "language": "ru",
+      "surface": "native",
+      "check": "calibrated Gold Home",
+      "source": "56b86dec + opt-in QA WIP",
+      "binary_or_method": "51ba584e1b48c089102c34c1c1d5ccea5a9d3f2f313d109de6ff4ebca5dbf868",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-ru-baseline-2.png",
+      "sha256": "d24bf6dac3e44c6cd127fc73efa35c924f5093b84af7b7a362b64adc97ea018a",
+      "bytes": 594249,
+      "language": "ru",
+      "surface": "native",
+      "check": "Home0/20 despite100 lifetime",
+      "source": "56b86dec + opt-in QA WIP",
+      "binary_or_method": "51ba584e1b48c089102c34c1c1d5ccea5a9d3f2f313d109de6ff4ebca5dbf868",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-ru-baseline-3.png",
+      "sha256": "6f85fe5e5a06bb914e2ae0337a88126fc04a81869bafca61c09cfff4323dd2e7",
+      "bytes": 172812,
+      "language": "ru",
+      "surface": "native",
+      "check": "own profile, season2, retained season1 Platinum2300",
+      "source": "56b86dec + opt-in QA WIP",
+      "binary_or_method": "51ba584e1b48c089102c34c1c1d5ccea5a9d3f2f313d109de6ff4ebca5dbf868",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-ru-baseline-4.png",
+      "sha256": "54dbaf69590f521ad5790a0b30004233968c18f127a31b57aba5404e09bacc93",
+      "bytes": 137804,
+      "language": "ru",
+      "surface": "native",
+      "check": "friend placement badge",
+      "source": "56b86dec + opt-in QA WIP",
+      "binary_or_method": "51ba584e1b48c089102c34c1c1d5ccea5a9d3f2f313d109de6ff4ebca5dbf868",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-ru-baseline-5.png",
+      "sha256": "f1a1f4da123c807704d38c2f5e74de53ae0553400a9297dff014ebbf483d3a7c",
+      "bytes": 92738,
+      "language": "ru",
+      "surface": "native",
+      "check": "visited profile season/badge",
+      "source": "56b86dec + opt-in QA WIP",
+      "binary_or_method": "51ba584e1b48c089102c34c1c1d5ccea5a9d3f2f313d109de6ff4ebca5dbf868",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-ru-baseline-6.png",
+      "sha256": "245159f3ffe1cf73e28d51dc1635abd087bda6e27f117657bdc4d7736914b880",
+      "bytes": 535732,
+      "language": "ru",
+      "surface": "native",
+      "check": "scoped Gold promotion notice",
+      "source": "56b86dec + opt-in QA WIP",
+      "binary_or_method": "51ba584e1b48c089102c34c1c1d5ccea5a9d3f2f313d109de6ff4ebca5dbf868",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-ru-final-1.png",
+      "sha256": "7850d4cb6306d7a9b7f68da100f6e379ee10e8626ace2a5a5f044c9e82ec0dc9",
+      "bytes": 611842,
+      "language": "ru",
+      "surface": "native",
+      "check": "Ranked interseason label fits and is visibly disabled; Casual remains visibly available while online; current calibrated rating retained",
+      "source": "c8260b31e7fd70481942981a1ebc68d17b1c9ef6",
+      "binary_or_method": "366d088f72db1455fcab8d6a3071784f3be582d7ae8c4eb36f7ec966394a7d01",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-ru-final-2.png",
+      "sha256": "225e75b8333bf53d73427b57258b38859972f2b4fae1f1ffe58fbe12fd190545",
+      "bytes": 419311,
+      "language": "ru",
+      "surface": "native",
+      "check": "personal defeat despite winning team; 1478(-32),zero XP,saved progress; visible settled Silver demotion warning; all result controls readable",
+      "source": "c8260b31e7fd70481942981a1ebc68d17b1c9ef6",
+      "binary_or_method": "366d088f72db1455fcab8d6a3071784f3be582d7ae8c4eb36f7ec966394a7d01",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-en-profile-1.png",
+      "sha256": "641e8aba1cf55e471bf06be8274d5ed6abd980c4cdbe088997646abf0d5aa67b",
+      "bytes": 166338,
+      "language": "en",
+      "surface": "native",
+      "check": "current Gold badge; profile windows and historical Platinum2300 badge where present",
+      "source": "c8260b31e7fd70481942981a1ebc68d17b1c9ef6",
+      "binary_or_method": "366d088f72db1455fcab8d6a3071784f3be582d7ae8c4eb36f7ec966394a7d01",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-en-profile-2.png",
+      "sha256": "6d59ab16bf2eab0143c1f5992fc1e1bdfc217d9018aaa6919960891d86474832",
+      "bytes": 125122,
+      "language": "en",
+      "surface": "native",
+      "check": "current Gold badge; profile windows and historical Platinum2300 badge where present",
+      "source": "c8260b31e7fd70481942981a1ebc68d17b1c9ef6",
+      "binary_or_method": "366d088f72db1455fcab8d6a3071784f3be582d7ae8c4eb36f7ec966394a7d01",
+      "inspection": "PASS"
+    },
+    {
+      "file": "native-en-profile-3.png",
+      "sha256": "7f103b56cca9a9220758c8dbaaf112bef26fb74e450a72812b556ee04df2e871",
+      "bytes": 160204,
+      "language": "en",
+      "surface": "native",
+      "check": "current Gold badge; profile windows and historical Platinum2300 badge where present",
+      "source": "c8260b31e7fd70481942981a1ebc68d17b1c9ef6",
+      "binary_or_method": "366d088f72db1455fcab8d6a3071784f3be582d7ae8c4eb36f7ec966394a7d01",
+      "inspection": "PASS"
+    },
+    {
+      "file": "portal-ru-1.png",
+      "sha256": "2e8194916917f2d839400f306de69b3ea1b05777d07f5616fd7319de87738424",
+      "bytes": 230492,
+      "language": "ru",
+      "surface": "portal",
+      "check": "calibration.png",
+      "source": "ccee8fa8197722540f6b9983b89c7e1aaf21ebde",
+      "binary_or_method": "production Next + Chrome; fixture API",
+      "inspection": "PASS"
+    },
+    {
+      "file": "portal-ru-2.png",
+      "sha256": "fe65eaf74df155fb9cc333634af71c42898b47470b61e01730d3fa95dacf0eea",
+      "bytes": 228575,
+      "language": "ru",
+      "surface": "portal",
+      "check": "personal-penalty-demotion.png",
+      "source": "ccee8fa8197722540f6b9983b89c7e1aaf21ebde",
+      "binary_or_method": "production Next + Chrome; fixture API",
+      "inspection": "PASS"
+    },
+    {
+      "file": "portal-en-1.png",
+      "sha256": "95aa1e1e2197c2ed1f2b29a501809bafa8502e96979f20c9f10f6ed36f31330f",
+      "bytes": 408410,
+      "language": "en",
+      "surface": "portal",
+      "check": "reset-and-old-badge.png",
+      "source": "ccee8fa8197722540f6b9983b89c7e1aaf21ebde",
+      "binary_or_method": "production Next + Chrome; fixture API",
+      "inspection": "PASS"
+    },
+    {
+      "file": "portal-en-2.png",
+      "sha256": "b9bed5ac16e2b4956c5e41146332e79786e9ec18bf100b42a2b126a6af732117",
+      "bytes": 158696,
+      "language": "en",
+      "surface": "portal",
+      "check": "calibrated-ladder.png",
+      "source": "ccee8fa8197722540f6b9983b89c7e1aaf21ebde",
+      "binary_or_method": "production Next + Chrome; fixture API",
+      "inspection": "PASS"
+    }
+  ]
+}

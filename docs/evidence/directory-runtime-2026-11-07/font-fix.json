@@ -1,0 +1,20 @@
+{
+  "source": "/Users/wotori/git/ekza/omoba-ui/handoff/assets/_src/fonts-upstream/NotoSerifSC-SemiBold-full.ttf",
+  "source_sha256": "1bdc38a849e121975d4c69c6f7be2be6446d271f53d7ee7d70687f6c68a9bdec",
+  "generator": "handoff/tools/fonts.py subset settings; FontTools4.59.0; preserve old cmap plus current zh-Hans dictionaries/ASCII",
+  "old_sha256": "1b8ad052056ab0ddc0facd06dfe4829f6562d75747ea563cf6f50d35e1a24a07",
+  "new_sha256": "8634eaca5db69e67fb6d6ff85ebe817e9d39d176204a02ab916bb7304b241a07",
+  "before_bytes": 468260,
+  "after_bytes": 469104,
+  "added_codepoints": [
+    "U+517C 兼",
+    "U+7EF4 维"
+  ],
+  "missing_supported_characters": [],
+  "old_cmap_preserved": true,
+  "exact_rust_is_cjk_ranges_checked": true,
+  "missing_shipped_cjk_characters": [],
+  "production_rust_cmap_parser_check": "PASS: exact production parser over all shipped values and exact Rust is_cjk ranges",
+  "asset_budget_check": "PASS: sync_ui_assets.py --check without external handoff synchronization",
+  "font_upstream_workspace": "Read-only source font; unrelated dirty omoba-ui files were not modified or synchronized"
+}

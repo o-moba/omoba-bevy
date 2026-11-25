@@ -27,8 +27,7 @@ def main():
     manifest = json.loads((asset_root / "weapons/manifest.json").read_text())
     args.output.mkdir(parents=True, exist_ok=True)
     records = []
-    models = sorted({item["model"] for item in manifest["items"]}
-                    | {"weapons/wildspark-repeater.glb"})
+    models = sorted({item["model"] for item in manifest["items"]})
     for model_path in models:
         model = (asset_root / model_path).resolve()
         if not model.is_relative_to(asset_root) or model.suffix != ".glb":

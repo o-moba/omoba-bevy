@@ -1,0 +1,363 @@
+{
+  "status": "functional_flow_accepted_visual_defects_recorded_separately",
+  "requirement": "65: public Home and party launch skip HeroSelect and enter one Draft",
+  "scope": "real local public Casual admission against owned PostgreSQL55582, RU852x393 native production offscreen rendering; no synthetic MatchService/Party views, no maturity/VK fixture or friend DB seed; AI controls other human seats; no full-game/reward/RU-host/WAN/phone/FPS certification",
+  "paths": {
+    "solo": {
+      "transitions": [
+        {
+          "screen": "Home",
+          "seconds": 0.98,
+          "session": {
+            "connected": false,
+            "join_confirmed": false,
+            "match_mode": "",
+            "your_id": 0
+          }
+        },
+        {
+          "screen": "Searching",
+          "seconds": 2.94,
+          "session": {
+            "connected": true,
+            "join_confirmed": false,
+            "match_mode": "lobby",
+            "your_id": 1
+          }
+        },
+        {
+          "screen": "Draft",
+          "seconds": 13.38,
+          "session": {
+            "connected": true,
+            "join_confirmed": true,
+            "match_mode": "practice",
+            "your_id": 1
+          }
+        }
+      ],
+      "draft_entries": 1,
+      "allocation": {
+        "id": "1a5e4b4fa38bc07eb466640175dfbcc4",
+        "preference": "quick",
+        "human_seats": 10
+      },
+      "seconds": 13.7,
+      "native_binary_sha256": "afa5e8de8a87ff0212117f37687ed377cd5f4b3bf4feefa3ff2d67f20ce49f69",
+      "manual_inspection": "Home/play, search, real 15s accept panel and one Draft are visible; party formed by actual invite/accept; layout defects are separately open."
+    },
+    "party": {
+      "transitions": {
+        "leader": [
+          {
+            "screen": "Home",
+            "seconds": 1.96,
+            "session": {
+              "connected": true,
+              "join_confirmed": false,
+              "match_mode": "lobby",
+              "your_id": 1
+            }
+          },
+          {
+            "screen": "Lobby",
+            "seconds": 6.58,
+            "session": {
+              "connected": true,
+              "join_confirmed": false,
+              "match_mode": "lobby",
+              "your_id": 1
+            }
+          },
+          {
+            "screen": "Home",
+            "seconds": 26.09,
+            "session": {
+              "connected": true,
+              "join_confirmed": false,
+              "match_mode": "lobby",
+              "your_id": 1
+            }
+          },
+          {
+            "screen": "Searching",
+            "seconds": 27.98,
+            "session": {
+              "connected": true,
+              "join_confirmed": false,
+              "match_mode": "lobby",
+              "your_id": 1
+            }
+          },
+          {
+            "screen": "Draft",
+            "seconds": 36.03,
+            "session": {
+              "connected": true,
+              "join_confirmed": true,
+              "match_mode": "practice",
+              "your_id": 1
+            }
+          }
+        ],
+        "member": [
+          {
+            "screen": "Home",
+            "seconds": 3.4,
+            "session": {
+              "connected": false,
+              "join_confirmed": false,
+              "match_mode": "",
+              "your_id": 0
+            }
+          },
+          {
+            "screen": "Lobby",
+            "seconds": 20.69,
+            "session": {
+              "connected": true,
+              "join_confirmed": false,
+              "match_mode": "lobby",
+              "your_id": 2
+            }
+          },
+          {
+            "screen": "Home",
+            "seconds": 25.41,
+            "session": {
+              "connected": true,
+              "join_confirmed": false,
+              "match_mode": "lobby",
+              "your_id": 2
+            }
+          },
+          {
+            "screen": "Searching",
+            "seconds": 28.2,
+            "session": {
+              "connected": true,
+              "join_confirmed": false,
+              "match_mode": "lobby",
+              "your_id": 2
+            }
+          },
+          {
+            "screen": "Draft",
+            "seconds": 36.14,
+            "session": {
+              "connected": true,
+              "join_confirmed": true,
+              "match_mode": "practice",
+              "your_id": 2
+            }
+          }
+        ]
+      },
+      "draft_entries": {
+        "leader": 1,
+        "member": 1
+      },
+      "allocation": {
+        "id": "d7cd069f93ab76ee6f3560df015e28e1",
+        "preference": "quick",
+        "human_seats": 10,
+        "native_profiles_same_team": true
+      },
+      "seconds": 40.62,
+      "native_binary_sha256": "afa5e8de8a87ff0212117f37687ed377cd5f4b3bf4feefa3ff2d67f20ce49f69",
+      "manual_inspection": "Home/play, search, real 15s accept panel and one Draft are visible; party formed by actual invite/accept; layout defects are separately open."
+    }
+  },
+  "screenshots": [
+    {
+      "file": "solo-01-home.png",
+      "sha256": "7f04670cb0e1d44d7442f1f75aa719d292f11fe328573409d4be4f40754ea693",
+      "bytes": 594150,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "solo-02-searching.png",
+      "sha256": "3b42bc38bc7167c161b2e1b6f11cb6d9a29194dedaa5074de76cc0a65273ee95",
+      "bytes": 565871,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "solo-03-ready-check.png",
+      "sha256": "c357edae0afcf3d8dd106e2abd059254fe58a49c633e5c9630090cdcd60f608c",
+      "bytes": 506278,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "solo-04-draft.png",
+      "sha256": "d7d0d35828141f5a557bbe899527a06f6d265e2c95840e58cabd501fc9aa46b5",
+      "bytes": 118663,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "party-leader-01-party-formed.png",
+      "sha256": "0f948efc480b45a96a585a5ea9595ce86eebc0d567734050f6fd5d4ab033c258",
+      "bytes": 487668,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "party-leader-02-home-party.png",
+      "sha256": "bb76c797ea1806edece112e5a23bce0dba627049cef74beb215ba3702593200f",
+      "bytes": 583936,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "party-leader-03-searching.png",
+      "sha256": "7d4d3bbfc0a44a892c32ff8c787077f56c4b4ec4230e11d95beb788579d9cb5c",
+      "bytes": 535081,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "party-leader-04-ready-check.png",
+      "sha256": "0852ac00b77b52472bea2d6bdffb0d001f3bdce4d582f4e25bc0ae0cafe7539e",
+      "bytes": 506415,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "party-member-04-ready-check.png",
+      "sha256": "df651ea90b40883afa84497fd03de11708327bf7e3b0945bdeb4b89a356cb88d",
+      "bytes": 506433,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "party-leader-05-draft.png",
+      "sha256": "41023e7a1a8e60536031b6746c7f2025f8689881b5012970f62ef3a158472687",
+      "bytes": 140424,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    },
+    {
+      "file": "party-member-05-draft.png",
+      "sha256": "3fb6245a9a92da161eed30dbfb459ed6427319553b2259b7843873f97808d751",
+      "bytes": 140429,
+      "viewport": [
+        852,
+        393
+      ],
+      "scope": "functional journey image; see separately recorded layout defects"
+    }
+  ],
+  "known_visual_defects": [
+    {
+      "id": "UI-1",
+      "status": "open",
+      "source": "client/src/frontend/home.rs::spawn_home_identity",
+      "evidence": "party-leader-02-home-party.png",
+      "description": "A supported long authenticated nickname wraps to a second line and pushes the rating below the mobile identity chip."
+    },
+    {
+      "id": "UI-2",
+      "status": "open",
+      "source": "client/src/frontend/draft.rs::spawn_team_stage",
+      "evidence": "party-leader-05-draft.png",
+      "description": "Five-player mobile draft nameplates clip the start of long nicknames and overlap nearby labels; avatar assets of AI seats have not loaded in this frame. Flow acceptance does not certify this layout."
+    }
+  ],
+  "negative_attempt": "ignored .agent/ui-proof/p5-native-public-solo-v1: nonempty harness search gate and hidden-control inventory led to premature accept; rejected, no draft proof",
+  "server_binary_sha256": "2f3552530194c734f7f4e287bbde2d0501baeccdda3974af192e880e3fe4aba0",
+  "bots_binary_sha256": "071a8a0efc37a2e8eb486f972ee5a662bd2186e7c94936faf9dce49f89bcbfb0",
+  "ui_source_commit": "08104c7f",
+  "source_files": {
+    "client/src/frontend/mod.rs": {
+      "sha256": "1cef58effd974fe2bf068d1b4eb681cc063e020172e42918a98cebcec157f239",
+      "matches_ui_source_commit": true
+    },
+    "client/src/frontend/home.rs": {
+      "sha256": "3d5083c124f3617cdd44a150854322348fb5421e4ec2734eb448de784f839a22",
+      "matches_ui_source_commit": true
+    },
+    "client/src/frontend/lobby.rs": {
+      "sha256": "03156019853137f87d99847791aa389dd7abf6e5093fd82dd16916af0033a440",
+      "matches_ui_source_commit": true
+    },
+    "client/src/frontend/draft.rs": {
+      "sha256": "f754cf1ed17b18b35fdf6b91fac3f2af5463187c12e653fb34924df37bfa26c8",
+      "matches_ui_source_commit": true
+    },
+    "client/src/frontend/searching.rs": {
+      "sha256": "f34ae4c94897ac1453dce7a6a0a0895f749e370c903db05ea9d35063ec3e5c66",
+      "matches_ui_source_commit": true
+    },
+    "client/src/party.rs": {
+      "sha256": "76e10c44c5c72827b0bd2bdc7b8cc27b7d86024d7159a962794732832b444696",
+      "matches_ui_source_commit": true
+    },
+    "client/src/qa/creator_loop_qa.rs": {
+      "sha256": "18de95f632bdf9605d3fd23a4e449c0aba7c9dc4aa8f02a3587ddd1a43289083",
+      "matches_ui_source_commit": true
+    },
+    "client/src/qa/offscreen.rs": {
+      "sha256": "a3d2067f99c5e7136816626bfee872a6ae86f90783c08896d7b02af267197504",
+      "matches_ui_source_commit": true
+    }
+  },
+  "build": {
+    "source_parent": "bf35946518f77a1c597dd966f731e0b191f04fc6",
+    "working_diff_sha256": "8e0e43f1c9d899c867692eca3741bb7c2927fce1ffda3de2b4cbee7d6b1ff439",
+    "untracked": [],
+    "market": "ru",
+    "steps": [
+      {
+        "name": "clippy",
+        "exit": 0,
+        "seconds": 74.23,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-home-shell-build-v1-clippy.log"
+      },
+      {
+        "name": "build",
+        "exit": 0,
+        "seconds": 605.95,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-home-shell-build-v1-build.log"
+      }
+    ],
+    "minimum_root_gib": 28.512516021728516,
+    "binary": "/Users/wotori/git/ekza/omoba-bevy/target-b/debug/client",
+    "binary_sha256": "afa5e8de8a87ff0212117f37687ed377cd5f4b3bf4feefa3ff2d67f20ce49f69",
+    "binary_bytes": 226179080
+  }
+}

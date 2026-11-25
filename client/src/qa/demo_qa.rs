@@ -227,6 +227,7 @@ impl Plugin for DemoQaPlugin {
             keys: Vec::new(),
             click: None,
             cursor_before: None,
+            key_aim: None,
             touches: Vec::new(),
             drag: std::collections::VecDeque::new(),
             dragged_for: None,
@@ -285,6 +286,9 @@ struct DemoQa {
     last_action: Option<f64>,
     ability: usize,
     keys: Vec<KeyCode>,
+    /// Where the cursor points for the frame the scripted keys go down: a desktop cast
+    /// aims at the cursor.
+    key_aim: Option<Vec2>,
     click: Option<(Vec2, MouseButton)>,
     /// Synthetic focus: the window's cursor position before a scripted click.
     cursor_before: Option<Option<Vec2>>,
@@ -414,7 +418,14 @@ fn inject_keys_and_mouse(
             .resolution
             .set_physical_resolution(demo.width, demo.height);
     }
-    for key in std::mem::take(&mut demo.keys) {
+    let keys = std::mem::take(&mut demo.keys);
+    if let Some(position) = demo.key_aim.take().filter(|_| !keys.is_empty()) {
+        if demo.synthetic_focus && demo.cursor_before.is_none() {
+            demo.cursor_before = Some(window.physical_cursor_position());
+        }
+        window.set_cursor_position(Some(position));
+    }
+    for key in keys {
         keyboard.press(key);
     }
     if let Some((position, button)) = demo.click.take() {
@@ -1101,6 +1112,7 @@ fn fight_step(demo: &mut DemoQa, world: &World3d) {
             if let Some(slot) = world.ready_ability(demo.ability) {
                 demo.ability = slot + 1;
                 demo.keys.push(crate::input_bindings::SKILL_CAST_KEYS[slot]);
+                demo.key_aim = Some(on_screen);
             }
         }
         step if step % 8 == 0 => demo.click = Some((on_screen, MouseButton::Right)),

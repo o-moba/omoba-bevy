@@ -1,0 +1,68 @@
+{
+  "status": "PASS",
+  "scope": "targeted native trust/cache and anonymous transport, not runtime activation, live keys, routing, multi-host or pixels",
+  "source_parent": "e0bbf46f",
+  "tests": {
+    "native_crypto_cache": 9,
+    "actual_http_transport": 4,
+    "endpoint_guards": 9,
+    "postmatch": 18
+  },
+  "native_market": "global-default; explicit RU/production and dev/foreign authority fixtures",
+  "transport_market": "ru",
+  "strict_checks": "client lib/test-target and passport all-target clippy PASS",
+  "minimum_root_gib": 36.08233642578125,
+  "steps": {
+    "native": [
+      {
+        "name": "client-tests",
+        "exit": 0,
+        "seconds": 1941.09,
+        "stop_reason": null
+      },
+      {
+        "name": "client-clippy",
+        "exit": 0,
+        "seconds": 357.23,
+        "stop_reason": null
+      }
+    ],
+    "transport": [
+      {
+        "name": "transport-tests",
+        "exit": 0,
+        "seconds": 142.54,
+        "stop_reason": null
+      },
+      {
+        "name": "transport-clippy",
+        "exit": 0,
+        "seconds": 18.07,
+        "stop_reason": null
+      }
+    ],
+    "postmatch_and_endpoints": [
+      {
+        "name": "postmatch-tests",
+        "exit": 0,
+        "seconds": 794.87,
+        "stop_reason": null
+      },
+      {
+        "name": "endpoint-tests",
+        "exit": 0,
+        "seconds": 355.4,
+        "stop_reason": null
+      }
+    ]
+  },
+  "sources_sha256": {
+    "client/src/game_directory.rs": "e67a25b7b04aa64b3ef3760aadb06902398cb225b33b96cca8595bfe7cb7680c",
+    "client/src/game_directory/tests.rs": "7bbf11ed4fb29d5a2d9a2359ce1bf306a06bca88a3b5d046d1060e9cfe3103a7",
+    "client/src/session_config.rs": "79ca90e7b78067d7fc97d9ef53cd05a8df37beec6f933468cb227ded1e113bdd",
+    "client/src/lib.rs": "3928c359fa3daa239d27f9f370d2da7ab50e96f75e653125f7aee5f6dbff9ffa",
+    "passport/src/game_directory.rs": "2036463875329c5a30d25fe6a650d14107504e2a7cc110bc6ce05d33ce821bc1",
+    "passport/src/game_directory/tests.rs": "2a802346cac21b2f73b6ccb81a7e51f48c26a1ce8348011fc81f0884ea861048",
+    "passport/src/lib.rs": "263d296c9a021c0485d8e6e7782dbc0186de58363aa5141f385df83e624152d6"
+  }
+}

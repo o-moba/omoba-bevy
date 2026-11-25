@@ -1,0 +1,4 @@
+{
+  "case": "contract-dangling-slot-ref",
+  "document": "refused: reference"
+}

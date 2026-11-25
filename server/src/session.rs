@@ -26,7 +26,9 @@ impl ServerRuntime {
             .filter(|(addr, player)| {
                 !crate::bots::is_bot_address(**addr)
                     && !player.hero.identity.is_bot
-                    && now.saturating_duration_since(player.last_seen) > PLAYER_TIMEOUT
+                    && now.saturating_duration_since(
+                        self.session_recovery.network_seen(**addr, player.last_seen),
+                    ) > PLAYER_TIMEOUT
             })
             .map(|(addr, _)| *addr)
             .collect::<Vec<_>>();
@@ -125,6 +127,7 @@ impl ServerRuntime {
             let capable = player.draft.capable;
             player.draft = prematch::DraftState {
                 capable,
+                role: player.hero.identity.hero_class.primary_role(),
                 ..Default::default()
             };
         }

@@ -11,10 +11,12 @@
 //! `Confirm` writes [`SyntheticPress`] for the focused button, so activation
 //! goes through the same gate as a click or a tap. When the set of
 //! candidates changes (a modal opened, a page changed, a section hid) or a
-//! modal bumps [`GestureEpoch`], focus returns to the first button and the
-//! next confirm must be a fresh press. A focused button inside a
+//! modal bumps [`GestureEpoch`], focus normally returns to the first button and
+//! the next confirm must be a fresh press. A focused button inside a
 //! [`ScrollArea`] scrolls into view. The ring is drawn by
 //! [`super::widgets::paint_focus_ring`].
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use super::{GestureEpoch, Pressable, ScrollArea, SyntheticPress, modal::ModalGate};
@@ -69,6 +71,8 @@ pub(crate) enum FocusEntry {
     /// Never focused by the surface appearing; the first direction focuses
     /// it (a Cancel on a shared countdown: a stray confirm must not press it).
     Deferred,
+    /// Keeps focus while sibling sections change and this button remains eligible.
+    Preserve,
 }
 
 /// The focused kit button, if a focus driver is active.
@@ -136,12 +140,19 @@ impl UiFocus {
             self.focused = candidates
                 .iter()
                 .find(|c| entry(c.entity) == Some(FocusEntry::Preferred))
+                .map(|c| c.entity)
+                .or_else(|| {
+                    self.focused.filter(|&entity| {
+                        self.surface.contains(&entity)
+                            && entry(entity) == Some(FocusEntry::Preserve)
+                    })
+                })
                 .or_else(|| {
                     candidates
                         .iter()
                         .find(|c| entry(c.entity) != Some(FocusEntry::Deferred))
-                })
-                .map(|c| c.entity);
+                        .map(|c| c.entity)
+                });
             self.confirm_ready = false;
             return None;
         }
@@ -202,10 +213,7 @@ pub(crate) fn directional_neighbor(
 
 /// Physical-pixel rectangle of a node (unclipped).
 pub(crate) fn node_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
-    Rect::from_center_size(
-        transform.translation,
-        node.size() * transform.to_scale_angle_translation().0.abs(),
-    )
+    super::transform_rect_bounds(node.border_box(), transform.affine())
 }
 
 type Hierarchy<'a> = (
@@ -348,10 +356,7 @@ pub(crate) fn navigate_focus(
             }
             // Clipped out of sight is fine inside a scroll area (focus
             // scrolls it into view); anywhere else it is not a candidate.
-            let mut shown = rect;
-            if let Some(clip) = clip {
-                shown = shown.intersect(clip.clip);
-            }
+            let mut shown = super::clipped_ui_rect(rect, clip);
             if let Some(viewport) = viewport {
                 shown = shown.intersect(viewport);
             }
@@ -494,6 +499,34 @@ mod tests {
         assert_eq!(focus.focused(), Some(replaced[0].entity));
         focus.set_enabled(false);
         assert_eq!(focus.focused(), None, "no driver, no focus");
+    }
+
+    #[test]
+    fn changing_siblings_keeps_opted_in_focus_and_requires_a_fresh_confirm() {
+        let mut focus = UiFocus {
+            enabled: true,
+            ..default()
+        };
+        let back = candidate(1, Vec2::ZERO);
+        let class = candidate(2, Vec2::X * 40.0);
+        let skin = candidate(3, Vec2::X * 80.0);
+        let entry = |entity| (entity == class.entity).then_some(FocusEntry::Preserve);
+
+        focus.step_with(&[back, class], [], entry);
+        focus.step_with(&[back, class], [FocusNav::Right], entry);
+        assert_eq!(focus.focused(), Some(class.entity));
+        assert_eq!(
+            focus.step_with(&[back, class, skin], [FocusNav::Confirm], entry),
+            None
+        );
+        assert_eq!(focus.focused(), Some(class.entity));
+        focus.step_with(&[back, class, skin], [], entry);
+        assert_eq!(
+            focus.step_with(&[back, class, skin], [FocusNav::Confirm], entry),
+            Some(class.entity)
+        );
+        focus.step_with(&[back], [], entry);
+        assert_eq!(focus.focused(), Some(back.entity));
     }
 
     #[test]
@@ -687,9 +720,10 @@ mod tests {
         );
         app.world_mut()
             .entity_mut(low)
-            .insert(bevy::ui::CalculatedClip {
-                clip: Rect::new(0.0, 0.0, 300.0, 100.0),
-            });
+            .insert(bevy::ui::CalculatedClip::default().with_rect(
+                Rect::new(0.0, 0.0, 300.0, 100.0),
+                &UiGlobalTransform::from_translation(Vec2::ZERO),
+            ));
         app.update();
         assert_eq!(focused(&app), Some(top));
         nav(&mut app, FocusNav::Down);

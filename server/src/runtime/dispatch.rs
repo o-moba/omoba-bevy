@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 use shared::debug::DebugCommand;
+use shared::handheld::HandheldSelection;
 use shared::wire::ClientPacket;
 
 use crate::runtime::ServerRuntime;
@@ -21,9 +22,70 @@ pub(crate) const CLIENT_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 
 const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 
+fn receive_budget(lobby: bool) -> Duration {
+    Duration::from_millis(if lobby {
+        8
+    } else {
+        shared::public_transport::RECEIVE_BUDGET_MILLIS
+    })
+}
+
+#[test]
+fn only_the_lobby_gets_a_larger_bounded_receive_slice() {
+    assert_eq!(receive_budget(false), Duration::from_millis(2));
+    assert_eq!(receive_budget(true), Duration::from_millis(8));
+    assert_eq!(shared::public_transport::MAX_PACKETS_PER_TICK, 128);
+}
+
 impl ServerRuntime {
+    fn retained_join_player(&self, session: &str) -> Option<&crate::entities::ConnectedPlayer> {
+        self.world
+            .players
+            .values()
+            .find(|player| player.session_id.as_deref() == Some(session))
+            .or_else(|| {
+                self.world
+                    .disconnected_sessions
+                    .get(session)
+                    .map(|saved| &saved.player)
+            })
+    }
+
+    fn resolve_join_avatar(&self, packet: &mut ClientPacket) {
+        let ClientPacket::Join {
+            hero_class,
+            avatar,
+            session_id,
+            ..
+        } = packet
+        else {
+            return;
+        };
+        // The private Combat Test accepts explicit models for art and rig QA.
+        if self.sandbox_allowed() && avatar.is_some() {
+            return;
+        }
+        let class = normalize_session_id(session_id.clone())
+            .as_deref()
+            .and_then(|session| self.retained_join_player(session))
+            .filter(|player| player.joined)
+            .map_or(*hero_class, |player| player.hero.identity.hero_class);
+        let effective = omoba_passport::avatars::match_avatar_slug(class, avatar.as_deref());
+        if Some(effective) != avatar.as_deref() {
+            *avatar = Some(effective.to_owned());
+        }
+    }
+
     pub(crate) fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
+            passport_admission::log_ekza_decision(
+                self.world
+                    .players
+                    .get(&completion.addr)
+                    .map(|player| player.hero.identity.id),
+                &completion.packet,
+                completion.allowed,
+            );
             if let ClientPacket::Prematch { request } = completion.packet {
                 let now = self.clock.now();
                 self.complete_prematch_admission(completion.addr, request, completion.allowed, now);
@@ -50,10 +112,11 @@ impl ServerRuntime {
             }
         }
         let receive_started = self.clock.now();
+        // The lobby has no combat simulation; allow its signed search/heartbeat
+        // traffic a larger bounded slice without changing any worker's budget.
+        let receive_budget = receive_budget(self.match_service.is_lobby());
         for _ in 0..shared::public_transport::MAX_PACKETS_PER_TICK {
-            if self.clock.now().saturating_duration_since(receive_started)
-                >= Duration::from_millis(shared::public_transport::RECEIVE_BUDGET_MILLIS)
-            {
+            if self.clock.now().saturating_duration_since(receive_started) >= receive_budget {
                 break;
             }
             match self.transport.recv(&mut self.recv_buf) {
@@ -93,6 +156,11 @@ impl ServerRuntime {
                             public_transport::Decision::Dispatch(packet) => {
                                 self.handle_packet(addr, packet, now)
                             }
+                            public_transport::Decision::DispatchSigned(packet, sequence) => {
+                                self.load_metrics.signed_dispatch(addr, sequence);
+                                self.handle_packet(addr, packet, now);
+                                self.load_metrics.finish_dispatch();
+                            }
                             public_transport::Decision::Reply(bytes) => {
                                 let _ = self.transport.send_to(&bytes, addr);
                             }
@@ -120,7 +188,12 @@ impl ServerRuntime {
         }
     }
 
-    pub(crate) fn handle_packet(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
+    pub(crate) fn handle_packet(
+        &mut self,
+        addr: SocketAddr,
+        mut packet: ClientPacket,
+        now: Instant,
+    ) {
         // Internal bot actor addresses never accept network commands or identity claims.
         if bots::is_bot_address(addr) {
             return;
@@ -157,6 +230,7 @@ impl ServerRuntime {
                 .get(&addr)
                 .is_some_and(|player| player.joined)
         {
+            self.resolve_join_avatar(&mut packet);
             self.world.ensure_connected(addr, now);
             // A reconnect may restore an old paid loadout. A client must not
             // bypass ticket verification by requesting a free avatar while
@@ -170,17 +244,9 @@ impl ServerRuntime {
                 // Reclaim uses the normalized value too; whitespace must not
                 // make this authorization check inspect a different session.
                 let session = normalize_session_id(Some(session.clone()));
-                let retained = self
-                    .world
-                    .players
-                    .values()
-                    .find(|player| session.is_some() && player.session_id == session)
-                    .or_else(|| {
-                        session
-                            .as_ref()
-                            .and_then(|session| self.world.disconnected_sessions.get(session))
-                            .map(|saved| &saved.player)
-                    });
+                let retained = session
+                    .as_deref()
+                    .and_then(|session| self.retained_join_player(session));
                 if retained
                     .and_then(|player| player.hero.identity.avatar.as_deref())
                     .is_some_and(|slug| {
@@ -196,7 +262,18 @@ impl ServerRuntime {
                     return;
                 }
             }
-            match self.passport_admissions.begin(addr, &packet) {
+            let admission = self.passport_admissions.begin(addr, &packet);
+            if !matches!(admission, passport_admission::Admission::Pending) {
+                passport_admission::log_ekza_decision(
+                    self.world
+                        .players
+                        .get(&addr)
+                        .map(|player| player.hero.identity.id),
+                    &packet,
+                    matches!(admission, passport_admission::Admission::Free),
+                );
+            }
+            match admission {
                 passport_admission::Admission::Free => {}
                 passport_admission::Admission::Pending => return,
                 passport_admission::Admission::Denied => {
@@ -207,7 +284,9 @@ impl ServerRuntime {
                 }
             }
         }
-        self.handle_packet_authorized(addr, packet, now);
+        if self.human_network_activity(addr, &packet, now) {
+            self.handle_packet_authorized(addr, packet, now);
+        }
     }
 
     pub(crate) fn handle_packet_authorized(
@@ -219,6 +298,13 @@ impl ServerRuntime {
         // Expire retained seats and settle an empty worker before deciding
         // whether this join may reclaim its frozen roster identity.
         self.maintain_roster(now);
+        self.resolve_join_avatar(&mut packet);
+        if !self.sandbox_allowed()
+            && let ClientPacket::Join { handheld, .. } = &mut packet
+            && !handheld.allowed_in_match()
+        {
+            *handheld = HandheldSelection::ClassDefault;
+        }
         if matches!(packet, ClientPacket::Join { .. })
             && !self.authorize_allocated_join(addr, &packet)
         {
@@ -241,9 +327,28 @@ impl ServerRuntime {
         {
             return;
         }
-        if matches!(packet, ClientPacket::Join { .. }) {
+        if let ClientPacket::Join {
+            handheld,
+            hero_class,
+            session_id,
+            ..
+        } = &packet
+        {
             if !self.authorize_career_join(addr, &packet, now) {
                 return;
+            }
+            if matches!(handheld, HandheldSelection::Item(_)) && !self.world.players[&addr].joined {
+                // A retained seat keeps its server-owned class when the endpoint changes.
+                let class = normalize_session_id(session_id.clone())
+                    .as_deref()
+                    .and_then(|session| self.retained_join_player(session))
+                    .filter(|player| player.joined)
+                    .map_or(*hero_class, |player| player.hero.identity.hero_class);
+                if !handheld.compatible(class) {
+                    self.world.players.get_mut(&addr).unwrap().join_error =
+                        Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
+                    return;
+                }
             }
             if !self.prepare_practice_join(addr, &packet, now) {
                 return;
@@ -263,6 +368,24 @@ impl ServerRuntime {
         // the tail; then a paused sandbox swallows movement and combat; then
         // the per-variant handlers run on the (sandbox) simulation clock.
         let flow = match packet {
+            ClientPacket::MatchVote {
+                server_epoch,
+                match_id,
+                generation,
+                kind,
+                action,
+            } => {
+                self.handle_match_vote(
+                    addr,
+                    server_epoch,
+                    match_id,
+                    generation,
+                    kind,
+                    action,
+                    wall_now,
+                );
+                ControlFlow::Break(())
+            }
             ClientPacket::TakeoverVote {
                 server_epoch,
                 match_id,
@@ -315,15 +438,28 @@ impl ServerRuntime {
             | ClientPacket::Utility { .. }
             | ClientPacket::BasicAttack { .. }
             | ClientPacket::UpgradeSkill { .. }
-            | ClientPacket::BuyItem { .. }) => common::command::apply(
-                &mut self.world,
-                addr,
-                &packet,
-                self.server_epoch,
-                self.match_id,
-                now,
-            )
-            .expect("gameplay command"),
+            | ClientPacket::BuyItem { .. }) => {
+                let flow = common::command::apply(
+                    &mut self.world,
+                    addr,
+                    &packet,
+                    self.server_epoch,
+                    self.match_id,
+                    now,
+                )
+                .expect("gameplay command");
+                if matches!(packet, ClientPacket::Transform { .. })
+                    && let Some(player_id) = self
+                        .world
+                        .players
+                        .get(&addr)
+                        .map(|player| player.hero.identity.id)
+                {
+                    self.load_metrics
+                        .applied_transform(addr, player_id, wall_now);
+                }
+                flow
+            }
             ClientPacket::Join {
                 prematch,
                 team,

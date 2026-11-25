@@ -1,0 +1,46 @@
+{
+  "status": "REVIEW_DRAFT_NOT_APPLIED",
+  "source_parent": "67af072e6a894d7b350e1e2b4d59234295126af0",
+  "patch": "docs/plans/reviews/C2-DRAIN-2026-11-07.patch",
+  "patch_sha256": "8a1cb91226e61b5fdd843e1a21835f7c7bcd50d22b843fee002c331e40a78cb7",
+  "prerequisite": {
+    "patch": "docs/plans/reviews/C4-PITR-2026-11-07.patch",
+    "sha256": "000e4fba32e13475df1724db51eb7ca7ab3fbdf1da24b7309202505ada4efdea",
+    "status": "OWNER_APPROVAL_PENDING_UNAPPLIED"
+  },
+  "files": [
+    {
+      "path": "ops/vps/ru/ru_host.py",
+      "old_sha256": "ff4525deaeafddb4258abd34c80bf63335fa022a80aaeedd73efb26c4f6ca632",
+      "new_sha256": "d8295b034bfae90f8168f8f39cb5da648507e8eeb993e05600dc3f62ef8f3d15"
+    },
+    {
+      "path": "ops/vps/ru/DRAIN.md",
+      "old_sha256": null,
+      "new_sha256": "c366321966b900950462221a69826ee775c6241853104a6242381433ee25df6f"
+    },
+    {
+      "path": "scripts/test_ru_host_drain.py",
+      "old_sha256": null,
+      "new_sha256": "74a22a46b3726ede2bb97d8cde57066c5e943fe9e498f7a42758483501aca227"
+    }
+  ],
+  "checks": {
+    "new_drain_cases": 28,
+    "new_drain_status": "PASS",
+    "combined_c4_c2_tests": 184,
+    "passed": 183,
+    "skipped": 1,
+    "failed": 0,
+    "skip_reason": "Optional legacy PostgreSQL E2E environment is absent; separate C4 real PG16/18 integration proofs are retained.",
+    "syntax": "PASS",
+    "patch_check_after_c4": "PASS"
+  },
+  "scope": "Actual Host/controller/CLI methods with normal module imports, temporary filesystem and simulated OS commands. No SSH, real systemd, RU deployment/migration, independent storage, capacity, UI or WAN acceptance.",
+  "rejected_attempts": [
+    "Initial runner method collided with unittest.run; corrected before any case executed.",
+    "Initial ship fault suite:9 pass,2 failures; old timestamp equality and missing held-history record corrected.",
+    "Intermediate runs superseded by the final184-case combined result."
+  ],
+  "format_note": "The verbose28-case log preceded only removal of an extra EOF blank line; the final184-case combined run includes the exact saved test source."
+}

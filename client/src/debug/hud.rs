@@ -8,6 +8,7 @@
 //! [`ClientDebugAccess::toggles`] allows the toggles (step 11e). Without the
 //! env var the same toggles live on the pause menu's tools page.
 
+use crate::ui::Button;
 use bevy::prelude::*;
 use shared::debug::DebugCommand;
 

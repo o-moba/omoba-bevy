@@ -10,6 +10,10 @@
 //!
 //! Nothing here grants an entitlement. Wearing a store avatar still requires a
 //! passport ticket that the game server consumes.
+//!
+//! Definitions also carry the registry's attribution line, which the SDK keeps
+//! on each `StoreAvatar` and in the offline catalogue (see
+//! [`crate::attribution`]).
 
 use ekza_bevy_sdk::{
     cache::AssetCache,
@@ -334,6 +338,10 @@ fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
                 .unwrap_or_else(|| "See creator terms".into()),
             source_url: item.protected.support.rendition.url.clone(),
             author: item.author.clone(),
+            attribution: item
+                .attribution
+                .as_deref()
+                .and_then(crate::attribution::clean),
             thumbnail,
             passport: Some(item.protected.clone()),
             free: item.free,

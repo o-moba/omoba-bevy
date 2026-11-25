@@ -207,7 +207,8 @@ pub struct SnapshotApplied {
 /// Snapshot application as chained stages, each a member of
 /// `ClientNetPipeline::ApplySnapshot` (so every `.after(ApplySnapshot)`
 /// reader still sees the whole application), followed by the session-event
-/// flush. Used by the plugin and by the test apps that apply snapshots.
+/// flush. The stages are chained here for standalone test apps, while
+/// `configure_network_pipeline` attaches the stage sets to the parent set.
 pub(in crate::net) fn snapshot_apply_systems() -> ScheduleConfigs<ScheduleSystem> {
     (
         begin_snapshot_apply.in_set(SnapshotApply::Begin),
@@ -238,10 +239,9 @@ pub(in crate::net) fn snapshot_apply_systems() -> ScheduleConfigs<ScheduleSystem
         finish_snapshot_apply
             .run_if(snapshot_staged)
             .in_set(SnapshotApply::Finish),
-        flush_session_events,
+        flush_session_events.in_set(ClientNetPipeline::ApplySnapshot),
     )
         .chain()
-        .in_set(ClientNetPipeline::ApplySnapshot)
 }
 
 fn snapshot_staged(staged: Res<StagedSnapshot>) -> bool {
@@ -335,22 +335,29 @@ fn apply_snapshot_resources(
         // Compare first: every write marks `TeamSelection` changed and the
         // settings file is rewritten on each change, so an unchanged draft
         // row (sent up to 20 times a second) must not touch it.
+        let skin = own.avatar.as_deref().filter(|slug| {
+            *slug != own.hero_class.default_avatar_slug()
+                && crate::team::combat_avatar_available(own.hero_class, slug)
+        });
         let differs = team_selection.character != own.character
             || team_selection.hero_class != own.hero_class
-            || team_selection.avatar != own.avatar
+            || team_selection.avatar.as_deref() != skin
             || own
                 .sprite_character
                 .as_ref()
                 .is_some_and(|sprite| *sprite != team_selection.sprite_character);
         if differs {
             team_selection.character = own.character;
-            team_selection.hero_class = own.hero_class;
-            team_selection.avatar = own.avatar.clone();
+            team_selection.pick_class(own.hero_class);
+            team_selection.avatar = skin.map(str::to_owned);
             if let Some(sprite) = &own.sprite_character {
                 team_selection.sprite_character = sprite.clone();
             }
         }
         if let Some(join) = client_session.last_join.as_mut() {
+            // Draft snapshots describe the current match, including automatic
+            // replacements. Only acknowledged player input saves a preference.
+            join.handheld = crate::team::handheld_for_class(&own.handheld, own.hero_class);
             join.character = own.character;
             join.hero_class = own.hero_class;
             join.avatar = own.avatar.clone();
@@ -1855,10 +1862,19 @@ mod tests {
     /// (the settings file is rewritten on every change); a new pick does.
     #[test]
     fn repeated_draft_snapshot_leaves_team_selection_unchanged() {
+        use crate::net::session::CommittedJoin;
+        use shared::{HeroClass, handheld::HandheldSelection};
         let (mut app, incoming) = snapshot_app();
-        let draft = |tick: u64, hero_class: shared::HeroClass| {
+        let hammer = HandheldSelection::Item("forge-hammer".into());
+        app.world_mut().resource_mut::<ClientSession>().last_join = Some(CommittedJoin::for_test());
+        {
+            let mut selection = app.world_mut().resource_mut::<TeamSelection>();
+            selection.pick_class(HeroClass::Cinderforge);
+            selection.set_match_handheld(hammer.clone());
+        }
+        let draft = |tick: u64, hero_class: HeroClass, handheld: HandheldSelection, phase: &str| {
             let own = shared::prematch::DraftPlayer {
-                handheld: Default::default(),
+                handheld,
                 player_id: 1,
                 nickname: "me".into(),
                 team: shared::map::Team::Green,
@@ -1868,20 +1884,28 @@ mod tests {
                 sprite_character: Some("ronin".into()),
                 role: Default::default(),
                 is_bot: false,
+                bot_persona: None,
                 locked: false,
                 loaded: false,
             };
             let mut draft = serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
-            draft["prematch"] = json!({"generation": 1, "phase": "draft", "remaining_ms": 1000,
+            draft["prematch"] = json!({"generation": 1, "phase": phase, "remaining_ms": 1000,
                 "needed": 10, "last_request_id": 0, "error": null, "players": [own]});
             serde_json::from_value::<shared::wire::ServerPacket>(draft).unwrap()
         };
-        incoming.send(draft(1, shared::HeroClass::Mage)).unwrap();
+        incoming
+            .send(draft(
+                1,
+                HeroClass::Mage,
+                HandheldSelection::ClassDefault,
+                "draft",
+            ))
+            .unwrap();
         app.update();
         let first = app.world().resource_ref::<TeamSelection>().last_changed();
         assert_eq!(
             app.world().resource::<TeamSelection>().hero_class,
-            shared::HeroClass::Mage
+            HeroClass::Mage
         );
         assert_eq!(
             app.world().resource::<TeamSelection>().sprite_character,
@@ -1889,7 +1913,14 @@ mod tests {
         );
 
         for tick in 2..6 {
-            incoming.send(draft(tick, shared::HeroClass::Mage)).unwrap();
+            incoming
+                .send(draft(
+                    tick,
+                    HeroClass::Mage,
+                    HandheldSelection::ClassDefault,
+                    "draft",
+                ))
+                .unwrap();
             app.update();
         }
         assert_eq!(
@@ -1898,7 +1929,18 @@ mod tests {
             "identical draft rows leave the selection (and the settings file) alone"
         );
 
-        incoming.send(draft(6, shared::HeroClass::Warrior)).unwrap();
+        let committed = |app: &App| {
+            app.world()
+                .resource::<ClientSession>()
+                .last_join
+                .as_ref()
+                .unwrap()
+                .handheld
+                .clone()
+        };
+        incoming
+            .send(draft(6, HeroClass::Warrior, hammer.clone(), "draft"))
+            .unwrap();
         app.update();
         assert_ne!(
             app.world().resource_ref::<TeamSelection>().last_changed(),
@@ -1906,7 +1948,26 @@ mod tests {
         );
         assert_eq!(
             app.world().resource::<TeamSelection>().hero_class,
-            shared::HeroClass::Warrior
+            HeroClass::Warrior
+        );
+        assert_eq!(committed(&app), hammer);
+
+        incoming
+            .send(draft(
+                7,
+                HeroClass::Cinderforge,
+                HandheldSelection::ClassDefault,
+                "countdown",
+            ))
+            .unwrap();
+        app.update();
+        let team = app.world().resource::<TeamSelection>();
+        assert_eq!(team.hero_class, HeroClass::Cinderforge);
+        assert_eq!(committed(&app), HandheldSelection::ClassDefault);
+        assert_eq!(team.match_handheld_for(HeroClass::Cinderforge), hammer);
+        assert_eq!(
+            team.match_handheld_for(HeroClass::Warrior),
+            HandheldSelection::ClassDefault
         );
     }
 

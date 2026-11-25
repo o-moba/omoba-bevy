@@ -93,14 +93,14 @@ fn target_parses() {
     assert_eq!(count(|row| row.cast.is_some()), 68);
     assert_eq!(count(|row| row.body.is_some()), 26);
     assert_eq!(count(|row| row.impact.is_some()), 51);
-    assert_eq!(count(|row| row.windup.is_some()), 5);
+    assert_eq!(count(|row| row.windup.is_some()), 6);
     assert_eq!(count(|row| row.motion.fit_windup), 1);
     assert_eq!(count(|row| row.motion.recast.is_some()), 8);
     assert_eq!(
         rows.iter()
             .map(|(_, _, profile)| profile.aux.len())
             .sum::<usize>(),
-        6
+        7
     );
     let phases = |phase: MotionPhase| {
         rows.iter()
@@ -115,7 +115,7 @@ fn target_parses() {
             MotionPhase::Parry
         ]
         .map(phases),
-        [63, 2, 2, 1]
+        [62, 3, 2, 1]
     );
     let cast = |pick: fn(&CastAccent) -> bool| {
         rows.iter()
@@ -123,7 +123,7 @@ fn target_parses() {
             .count()
     };
     assert_eq!(cast(|cast| cast.movement.is_some()), 10);
-    assert_eq!(cast(|cast| cast.link.is_some()), 14);
+    assert_eq!(cast(|cast| cast.link.is_some()), 13);
     assert_eq!(cast(|cast| cast.area), 3);
     assert_eq!(cast(|cast| cast.recast.is_some()), 7);
     assert_eq!(cast(|cast| cast.recast == Some(AccentPattern::None)), 5);
@@ -136,7 +136,7 @@ fn target_parses() {
     assert_eq!(voices(|sound| sound.cast.is_some()), 68);
     assert_eq!(voices(|sound| sound.impact.is_some()), 51);
     assert_eq!(voices(|sound| sound.recast.is_some()), 8);
-    assert_eq!(voices(|sound| sound.release.is_some()), 5);
+    assert_eq!(voices(|sound| sound.release.is_some()), 6);
 
     // The thirteen thrown legacy abilities have a form, four profiles hug the ground as a
     // wave, and the two melee basics throw nothing.
@@ -478,10 +478,10 @@ fn findings_name_what_the_ratchet_counts() {
 }
 
 /// The clips a final row plays, as a release, a windup, a recast or a basic attack.
-/// `attack` and `pistol_aim` stay in the library without a user.
-const REQUIRED_MOTIONS: [&str; 48] = [
+/// `attack`, `pistol_aim` and `spell_prepare` (the plain spell enter that Dawn Ray's charge
+/// replaced) stay in the library without a user.
+const REQUIRED_MOTIONS: [&str; 49] = [
     "cast",
-    "spell_prepare",
     "spell_finish",
     "pistol_shoot",
     "punch",
@@ -528,6 +528,8 @@ const REQUIRED_MOTIONS: [&str; 48] = [
     "toss_underhand",
     "place_quick",
     "kneel_plant",
+    "spell_charge",
+    "ray_release",
 ];
 
 /// The vocabulary IDs the packaged rows draw, by pick list.
@@ -766,7 +768,7 @@ fn target_uses_every_required_vocabulary_id() {
         used.ids.keys()
     );
 
-    // The clips are the library minus the base states and the two without a user.
+    // The clips are the library minus the base states and the clips without a user.
     let library = SharedHumanoidMotion::embedded().unwrap();
     let spare: BTreeSet<&str> = library
         .clips
@@ -783,6 +785,7 @@ fn target_uses_every_required_vocabulary_id() {
             "idle",
             "pistol_aim",
             "run",
+            "spell_prepare",
             "walk"
         ])
     );
@@ -845,8 +848,8 @@ fn target_contact_rule_holds() {
             }
         }
     }
-    // 63 instant releases, 8 recast clips, 22 basic-attack clips.
-    assert_eq!(edges.len(), 93);
+    // 62 instant releases, 8 recast clips, 22 basic-attack clips.
+    assert_eq!(edges.len(), 92);
 
     let mut past_contact = Vec::new();
     for (user, clip, rate, start) in &edges {
@@ -956,7 +959,7 @@ fn authored_picks_agree_with_the_catalog() {
             "{id}: charge pattern"
         );
         assert!(
-            !category::self_heal(key)
+            !category::heals(key)
                 || (cast.pattern != AccentPattern::ShieldFlash
                     && cast.lead() != Some(ParticleShape::Kite)),
             "{id}: shield shape on a heal"

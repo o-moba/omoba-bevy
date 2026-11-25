@@ -317,6 +317,9 @@ fn prepare(
             window.resolution.set_physical_resolution(width, height);
         }
         if (9..=11).contains(&qa.stage) {
+            // Desktop casts aim only in a focused window, as for a player; a QA run in a
+            // background window must not lose its aim.
+            window.focused = true;
             window.set_cursor_position(Some(Vec2::new(850.0, 300.0)));
             let key = if qa.ux {
                 KeyCode::KeyR
@@ -698,7 +701,7 @@ fn observe(
                     1 => shared::handheld::HandheldSelection::Item("forge-hammer".into()),
                     2 => shared::handheld::HandheldSelection::Item(
                         std::env::var("OMOBA_HANDHELD_QA_IMPORT")
-                            .unwrap_or_else(|_| "dawn-scepter".into()),
+                            .unwrap_or_else(|_| "forge-sword".into()),
                     ),
                     _ => shared::handheld::HandheldSelection::Unequipped,
                 };
@@ -1091,7 +1094,7 @@ fn capture(commands: &mut Commands, qa: &mut Qa, index: usize, frame: serde_json
             "01-selection.png",
             "02-sword-attack.png",
             "03-hammer-attack.png",
-            "04-scepter-avatar-swap.png",
+            "04-weapon-avatar-swap.png",
             "05-empty-hands.png",
             "06-idle.png",
             "07-running.png",
@@ -2797,6 +2800,7 @@ fn hold_aim(
     let key = crate::input_bindings::SKILL_CAST_KEYS[usize::from(hold.slot)];
     if let Ok(mut window) = windows.single_mut() {
         run.cursor_before = Some(window.physical_cursor_position());
+        window.focused = true;
         window.set_cursor_position(Some(hold.cursor));
     }
     keyboard.press(key);

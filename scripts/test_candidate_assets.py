@@ -21,6 +21,7 @@ import unittest
 from unittest import mock
 
 import package_native
+import stage_avatars
 
 from validate_candidate_assets import POLICY, ROOT, validate
 
@@ -113,8 +114,7 @@ class CandidateAssetGateTests(unittest.TestCase):
         self.write("cosmetics/standard/rocket.glb", (self.assets / "cosmetics/standard/trap.glb").read_bytes())
         self.expect_failure("unreviewed skill model hash")
 
-    def replace_actor_json(self, mutate):
-        relative = "avatars/agnes.glb"
+    def replace_actor_json(self, mutate, relative="avatars/agnes.glb"):
         data = (self.assets / relative).read_bytes()
         old_json_length, chunk_type = struct.unpack_from("<II", data, 12)
         self.assertEqual(chunk_type, 0x4E4F534A)
@@ -141,6 +141,15 @@ class CandidateAssetGateTests(unittest.TestCase):
                 result = validate(asset_root)
                 self.assertEqual(result["status"], "PASS", result)
                 self.assertEqual(result["errors"], [])
+
+    def test_packaged_handheld_manifest_cannot_rebind_another_approved_model(self):
+        relative = "weapons/manifest.json"
+        manifest = json.loads((self.assets / relative).read_text())
+        items = {item["id"]: item for item in manifest["items"]}
+        hammer = items["forge-hammer"]
+        items["forge-sword"].update(model=hammer["model"], sha256=hammer["sha256"])
+        self.write_json(relative, manifest)
+        self.expect_failure("packaged handheld manifest differs from approved model bindings")
 
     def test_every_denied_binary_and_preview_fails_when_renamed(self):
         denied = self.denied_fixture()
@@ -189,6 +198,43 @@ class CandidateAssetGateTests(unittest.TestCase):
             gltf["extensions"]["VRM"]["meta"]["commercialUssageName"] = "Disallow"
         policy = self.replace_actor_json(restrict)
         self.expect_failure("embedded commercialUssageName must be Allow", policy)
+
+    def test_set01_original_author_is_checked_independently_of_the_model_hash(self):
+        def change_author(gltf):
+            gltf["extensions"]["VRMC_vrm"]["meta"]["authors"] = ["Other"]
+        policy = self.replace_actor_json(change_author, "avatars/set01-warrior.glb")
+        self.expect_failure("embedded Set 01 authors must be ['Wotori']", policy)
+
+    def test_legacy_restage_keeps_existing_set01_records_and_files(self):
+        original = self.assets / "avatars"
+        with tempfile.TemporaryDirectory(prefix="omoba-legacy-restage-") as tmp:
+            root = Path(tmp)
+            source = root / "source" / "agnes"
+            source.mkdir(parents=True)
+            shutil.copyfile(original / "agnes.glb", source / "model.vrm")
+            (source / "meta.json").write_text('{"license":"CC0","name":"Refreshed Agnes"}')
+            out = root / "existing"
+            out.mkdir()
+            shutil.copyfile(original / "manifest.json", out / "manifest.json")
+            rows = json.loads((out / "manifest.json").read_text())["avatars"]
+            set01 = [row for row in rows if row["collection"] == "OMOBA Set 01"]
+            self.assertEqual(len(set01), 17)
+            files = {name: (original / name).read_bytes() for row in set01
+                     for name in (row["slug"] + ".glb", row["thumbnail"])}
+            for name, data in files.items():
+                (out / name).write_bytes(data)
+
+            for destination, retained in ((out, set01), (root / "fresh", [])):
+                with self.subTest(destination=destination), \
+                        mock.patch.dict(stage_avatars.AVATAR_SETS, {"roster": ({"agnes": "agnes"}, out)}), \
+                        mock.patch("sys.argv", ["stage_avatars.py", "--collection-root", str(source.parent),
+                                                "--out", str(destination)]):
+                    self.assertEqual(stage_avatars.main(), 0)
+                refreshed = json.loads((destination / "manifest.json").read_text())["avatars"]
+                self.assertEqual(refreshed[0]["display_name"], "Refreshed Agnes")
+                self.assertEqual(refreshed[1:], retained)
+            for name, data in files.items():
+                self.assertEqual((out / name).read_bytes(), data)
 
     def test_external_actor_dependency_fails_even_with_an_updated_review_hash(self):
         def add_remote_texture(gltf):

@@ -1,0 +1,7 @@
+{
+  "capacity.line": "All arenas are busy · you are number {position} in line",
+  "capacity.line_eta": "All arenas are busy · you are number {position} in line · about {minutes} min",
+  "capacity.offline": "Play offline practice while you wait",
+  "capacity.offline_hint": "Offline practice leaves the queue. Search again when you finish.",
+  "capacity.server_full": "The server is full. Retrying…"
+}

@@ -40,7 +40,6 @@ fn fixture() -> (GameWorld, Instant, u64) {
         p.hero.yaw = shared::math::hero_yaw_towards(1.0, 0.0);
     }
     let victim = w.players[&addr(2)].hero.identity.id;
-    w.skill_runtime.dagger_chance.forced = Some(false);
     (w, now, victim)
 }
 fn attack(w: &mut GameWorld, slot: u8, request: u64, now: Instant) {
@@ -67,11 +66,13 @@ fn rear_cone_uses_victim_forward_and_rejects_side_front_overlap_and_nan() {
 }
 
 #[test]
-fn bluff_turns_stuns_and_blocks_transform_basic_cast_and_dash_without_escape() {
+fn bluff_stuns_without_turning_and_blocks_transform_basic_cast_and_dash() {
     let (mut w, now, victim) = fixture();
-    w.players.get_mut(&addr(2)).unwrap().hero.yaw = shared::math::hero_yaw_towards(-1.0, 0.0);
+    let front = shared::math::hero_yaw_towards(-1.0, 0.0);
+    w.players.get_mut(&addr(2)).unwrap().hero.yaw = front;
     attack(&mut w, 1, 1, now);
-    assert!(rear_hero(&w, [0.0, 0.0], target(victim)));
+    assert_eq!(w.players[&addr(2)].hero.yaw, front);
+    assert!(!rear_hero(&w, [0.0, 0.0], target(victim)));
     assert_eq!(w.players[&addr(1)].hero.mana, 480.0);
     let before = (
         w.players[&addr(2)].hero.x,
@@ -125,7 +126,7 @@ fn bluff_turns_stuns_and_blocks_transform_basic_cast_and_dash_without_escape() {
 }
 
 #[test]
-fn invalid_bluff_and_strikes_spend_no_resources_or_rng() {
+fn invalid_bluff_spends_no_resources_and_applies_no_control() {
     for condition in 0..8 {
         let (mut w, now, _) = fixture();
         let victim = w.players.get_mut(&addr(2)).unwrap();
@@ -146,8 +147,8 @@ fn invalid_bluff_and_strikes_spend_no_resources_or_rng() {
             "condition {condition}"
         );
         assert!(w.players[&addr(1)].timers.last_cast_at[1].is_none());
-        assert_eq!(w.skill_runtime.dagger_chance.counter, 0);
         assert!(w.players[&addr(2)].hero.skills.control.stun_until.is_none());
+        assert!(pending(&mut w).is_empty());
     }
 }
 
@@ -170,33 +171,50 @@ fn three_strikes_have_distinct_normal_and_rear_damage_with_rank_scaling() {
 }
 
 #[test]
-fn vital_break_is_accepted_rear_only_leaves_one_hp_without_kill_reward_or_respawn() {
+fn bluff_followup_backstab_rewards_only_the_existing_flank() {
+    for (forward_x, expected_damage) in [(-1.0, 24.0), (1.0, 60.0)] {
+        let (mut w, now, _) = fixture();
+        let facing = shared::math::hero_yaw_towards(forward_x, 0.0);
+        w.players.get_mut(&addr(2)).unwrap().hero.yaw = facing;
+        attack(&mut w, 1, 1, now);
+        assert_eq!(w.players[&addr(2)].hero.yaw, facing);
+        let at = now + duration(0.3);
+        assert_eq!(w.players[&addr(2)].hero.skills.control.movement(at), 0.0);
+        attack(&mut w, 2, 2, at);
+        assert_eq!(w.players[&addr(2)].hero.hp, 1000.0 - expected_damage);
+        let events = pending(&mut w);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].amount, expected_damage);
+        assert!(!events[0].near_lethal);
+    }
+}
+
+#[test]
+fn rear_backstab_has_one_ordinary_damage_receipt_and_rejects_replays() {
     let (mut w, now, victim) = fixture();
-    w.skill_runtime.dagger_chance.forced = Some(true);
     let gold = w.players[&addr(1)].economy.gold;
     attack(&mut w, 2, 11, now);
-    assert_eq!(w.players[&addr(2)].hero.hp, 1.0);
-    assert_eq!(w.skill_runtime.dagger_chance.counter, 1);
+    assert_eq!(w.players[&addr(2)].hero.hp, 940.0);
     let events = pending(&mut w);
-    assert_eq!(events.iter().filter(|e| e.near_lethal).count(), 1);
-    assert_eq!(events.iter().map(|e| e.amount).sum::<f32>(), 999.0);
-    assert!(events.iter().all(|e| !e.killed && e.target.id == victim));
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].target.id, victim);
+    assert_eq!(events[0].amount, 60.0);
+    assert!(!events[0].killed && !events[0].near_lethal);
     observe(&mut w, &events, now);
     assert_eq!(w.players[&addr(1)].economy.gold, gold);
     assert!(w.players[&addr(2)].timers.respawn_at.is_none());
     assert_eq!(w.players[&addr(2)].economy.death_streak, 0);
-    // Same or lower accepted request can never roll again, even after cooldown.
+    // Same or lower accepted request cannot hit again after the cooldown.
     attack(&mut w, 2, 11, now + duration(20.0));
     attack(&mut w, 2, 10, now + duration(20.0));
-    assert_eq!(w.skill_runtime.dagger_chance.counter, 1);
+    assert_eq!(w.players[&addr(2)].hero.hp, 940.0);
     assert!(pending(&mut w).is_empty());
 }
 
 #[test]
-fn shields_immunity_infinite_hp_and_nonrear_hits_never_roll() {
-    for condition in 0..5 {
+fn backstab_respects_shields_immunity_infinite_hp_and_ordinary_kills() {
+    for (condition, expected_hp) in [1000.0, 1000.0, 1000.0, 976.0, 0.0].into_iter().enumerate() {
         let (mut w, now, _) = fixture();
-        w.skill_runtime.dagger_chance.forced = Some(true);
         let victim = w.players.get_mut(&addr(2)).unwrap();
         match condition {
             0 => victim.hero.skills.shields.push(Shield {
@@ -211,14 +229,14 @@ fn shields_immunity_infinite_hp_and_nonrear_hits_never_roll() {
         }
         attack(&mut w, 2, 1, now);
         assert_eq!(
-            w.skill_runtime.dagger_chance.counter, 0,
-            "condition {condition}"
+            w.players[&addr(2)].hero.hp,
+            expected_hp,
+            "condition {condition}",
         );
         assert!(pending(&mut w).iter().all(|e| !e.near_lethal));
     }
-    // A partial shield must be paid in full by normal damage before HP qualifies.
+    // A partial shield absorbs part of the single damage event.
     let (mut w, now, _) = fixture();
-    w.skill_runtime.dagger_chance.forced = Some(true);
     w.players
         .get_mut(&addr(2))
         .unwrap()
@@ -231,14 +249,11 @@ fn shields_immunity_infinite_hp_and_nonrear_hits_never_roll() {
             expires: now + duration(2.0),
         });
     attack(&mut w, 2, 1, now);
-    assert_eq!(w.players[&addr(2)].hero.hp, 1.0);
-    assert!(
-        w.players[&addr(2)].hero.skills.shields.is_empty(),
-        "the second damage pass removes the fully consumed shield"
-    );
+    assert_eq!(w.players[&addr(2)].hero.hp, 960.0);
     let events = pending(&mut w);
-    assert_eq!(events.iter().map(|event| event.amount).sum::<f32>(), 999.0);
-    assert_eq!(events.iter().filter(|event| event.near_lethal).count(), 1);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].amount, 40.0);
+    assert!(!events[0].near_lethal);
 }
 
 #[test]
@@ -258,7 +273,7 @@ fn resource_cooldown_level_and_rejected_request_highwater_are_authoritative() {
     assert_eq!(w.players[&addr(1)].hero.mana, 482.0);
     attack(&mut w, 2, 3, now + duration(0.5));
     assert_eq!(w.players[&addr(1)].hero.mana, 482.0);
-    assert_eq!(w.skill_runtime.dagger_chance.counter, 1);
+    assert_eq!(pending(&mut w).len(), 1);
     let p = w.players.get_mut(&addr(1)).unwrap();
     p.modifiers.unlock_all = false;
     p.hero.progress.level = 1;
@@ -285,7 +300,6 @@ fn dagger_mastery_applies_ten_percent_to_rear_primary_basic_only() {
             now,
         );
         assert_eq!(events[0].amount, if rear { 22.0 } else { 20.0 });
-        assert_eq!(w.skill_runtime.dagger_chance.counter, 0);
     }
 }
 
@@ -316,24 +330,7 @@ fn mixed_core_recipe_and_host_packet_entry_execute_same_dagger_kit() {
 }
 
 #[test]
-fn nonlethal_damage_floor_does_not_execute_even_when_f32_cannot_represent_hp_minus_one() {
-    let (mut w, now, victim) = fixture();
-    let hp = 1.0e20;
-    w.players.get_mut(&addr(2)).unwrap().hero.hp = hp;
-    let event = crate::combat_feedback::apply_player_nonlethal_damage(
-        &mut w.players,
-        victim,
-        hp - 1.0,
-        now,
-    )
-    .unwrap();
-    assert_eq!(w.players[&addr(2)].hero.hp, 1.0);
-    assert!(!event.killed);
-    assert!(w.players[&addr(2)].timers.respawn_at.is_none());
-}
-
-#[test]
-fn nonhero_strike_hits_normally_but_bluff_and_vital_break_exclude_it() {
+fn nonhero_strike_hits_normally_but_bluff_excludes_it() {
     let (mut w, now, _) = fixture();
     w.players.remove(&addr(2));
     crate::world::spawn_minion_wave_for_team_lane(
@@ -349,13 +346,13 @@ fn nonhero_strike_hits_normally_but_bluff_and_vital_break_exclude_it() {
     minion.state.x = 2.0;
     minion.state.z = 0.0;
     minion.state.hp = 1000.0;
-    w.skill_runtime.dagger_chance.forced = Some(true);
     attack(&mut w, 1, 1, now);
     assert_eq!(w.players[&addr(1)].hero.mana, 500.0);
     attack(&mut w, 2, 2, now);
     assert_eq!(w.minions[&first].state.hp, 976.0);
-    assert_eq!(w.skill_runtime.dagger_chance.counter, 0);
-    assert!(pending(&mut w).iter().all(|e| !e.near_lethal));
+    let events = pending(&mut w);
+    assert_eq!(events.len(), 1);
+    assert!(!events[0].near_lethal);
 }
 
 #[test]
@@ -417,7 +414,7 @@ fn offline_practice_and_network_command_entry_produce_the_same_bluff_backstab_ou
         offline.world.players[&crate::offline::LOCAL_ADDR].hero.mana,
         online.players[&addr(1)].hero.mana
     );
-    assert_eq!(offline.world.skill_runtime.dagger_chance.counter, 1);
+    assert_eq!(offline.world.players[&addr(2)].hero.hp, 940.0);
 }
 
 #[test]

@@ -1,0 +1,14 @@
+[
+  {
+    "path": "live-party-draft",
+    "status": "FAIL",
+    "error": "Error: fresh full roster accepted after draft cancellation: timed out after 45000ms; inspect clients.json\n    at pumpUntil (file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:418:8)\n    at async partyDraftLifecycle (file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:621:2)\n    at async file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:1265:35",
+    "resolution": "Approved ready claims were retained after a never-started draft. Release now follows the exact pending draft-dodge SQL ACK; the unchanged journey passes in party-draft.json."
+  },
+  {
+    "path": "live-cross-lobby-ready-v1",
+    "status": "FAIL",
+    "error": "Error: both lobby rosters qualified before Search: timed out after 120000ms; inspect clients.json\n    at pumpUntil (file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:418:8)\n    at async crossLobbyReadyLifecycle (file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:679:2)\n    at async file:///Users/wotori/git/ekza/_workspace/worktrees/mm-game/scripts/test_public_mvp.mjs:1371:36",
+    "resolution": "The probe classified only its first lobby port as a lobby; B peers never ran qualification. The client now recognizes both lobby ports; unchanged product assertions pass in cross-lobby-ready.json."
+  }
+]

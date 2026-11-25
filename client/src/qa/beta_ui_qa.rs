@@ -1054,6 +1054,7 @@ fn capture(
         "MobileTowerAttack",
         "MobileDash",
         "MobileHaste",
+        "MobileRecall",
         "MobileRankMode",
         "PhoneMenuBar",
         "SocialEntry",
@@ -1248,6 +1249,46 @@ fn clears_playfield(panel: Rect, viewport: Vec2, phone: bool) -> bool {
     })
 }
 
+/// The compact controls intentionally use the bottom utility row. Protect the
+/// hero and the remaining passage above that row using the actual input layout;
+/// ordinary opaque HUD panels still use the stricter `clears_playfield` guard.
+fn compact_controls_clear_playfield(
+    panel: Rect,
+    mobile: &crate::mobile_controls::MobileControls,
+) -> bool {
+    let viewport = mobile.viewport;
+    let layout = mobile.layout();
+    let gutter = 16.0 * mobile.combat_scale();
+    let utility_hit = layout.auxiliary_radius.max(22.0);
+    let utility_top = layout
+        .utility_centers
+        .into_iter()
+        .chain([layout.recall_center])
+        .map(|center| center.y - utility_hit)
+        .fold(f32::INFINITY, f32::min);
+    let passage_min = Vec2::new(
+        layout.joystick_center.x + layout.joystick_radius * 1.3 + gutter,
+        viewport.y * 0.62,
+    );
+    let passage_max = Vec2::new(
+        layout.utility_centers[0].x - utility_hit - gutter,
+        utility_top - gutter,
+    )
+    .max(passage_min);
+    [
+        Rect::from_corners(
+            Vec2::new(0.35, 0.30) * viewport,
+            Vec2::new(0.53, 0.60) * viewport,
+        ),
+        Rect::from_corners(passage_min, passage_max),
+    ]
+    .into_iter()
+    .all(|region| {
+        let overlap = panel.intersect(region);
+        overlap.width() <= 0.5 || overlap.height() <= 0.5
+    })
+}
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
@@ -1313,7 +1354,7 @@ mod layout_tests {
     }
 
     #[test]
-    fn radial_controls_leave_hero_and_lower_center_passage_open() {
+    fn compact_controls_leave_hero_and_lower_center_passage_open() {
         for viewport in [
             Vec2::new(693.0, 320.0),
             Vec2::new(844.0, 390.0),
@@ -1334,22 +1375,46 @@ mod layout_tests {
                     layout
                         .utility_centers
                         .into_iter()
-                        .map(|center| (center, layout.auxiliary_radius)),
+                        .map(|center| (center, layout.auxiliary_radius.max(22.0))),
+                )
+                .chain(
+                    layout
+                        .category_centers
+                        .into_iter()
+                        .map(|center| (center, layout.category_radius)),
                 )
                 .chain([
+                    (layout.attack_center, layout.attack_radius),
+                    (layout.joystick_center, layout.joystick_radius * 1.3),
+                    (layout.recall_center, layout.auxiliary_radius.max(22.0)),
                     (layout.upgrade_center, layout.upgrade_radius),
                     (layout.cancel_center, layout.cancel_radius),
                 ])
             {
                 assert!(
-                    clears_playfield(
+                    compact_controls_clear_playfield(
                         Rect::from_center_size(center, Vec2::splat(radius * 2.0)),
-                        viewport,
-                        true
+                        &mobile,
                     ),
                     "control at {center:?} blocks {viewport:?}"
                 );
             }
+            assert!(!compact_controls_clear_playfield(
+                Rect::from_center_size(viewport * Vec2::new(0.44, 0.45), Vec2::splat(24.0)),
+                &mobile,
+            ));
+            assert!(!compact_controls_clear_playfield(
+                Rect::from_center_size(viewport * Vec2::new(0.4, 0.7), Vec2::splat(24.0)),
+                &mobile,
+            ));
+            // The control-specific exception must not weaken panel protection:
+            // the same Recall-sized rectangle is allowed only as a control.
+            let recall = Rect::from_center_size(
+                layout.recall_center,
+                Vec2::splat(layout.auxiliary_radius.max(22.0) * 2.0),
+            );
+            assert!(compact_controls_clear_playfield(recall, &mobile));
+            assert!(!clears_playfield(recall, viewport, true));
             assert!(!clears_playfield(
                 Rect::from_center_size(viewport * 0.5, Vec2::splat(40.0)),
                 viewport,
@@ -1364,5 +1429,26 @@ mod layout_tests {
                 true
             ));
         }
+    }
+
+    #[test]
+    fn compact_control_passage_follows_saved_group_adjustments() {
+        let mut mobile = crate::mobile_controls::MobileControls::default();
+        mobile.viewport = Vec2::new(844.0, 390.0);
+        let baseline = Rect::from_center_size(
+            mobile.layout().recall_center,
+            Vec2::splat(mobile.layout().auxiliary_radius.max(22.0) * 2.0),
+        );
+        mobile.hud_position.combat_offset = Vec2::new(0.0, -40.0);
+        let layout = mobile.layout();
+        let recall = Rect::from_center_size(
+            layout.recall_center,
+            Vec2::splat(layout.auxiliary_radius.max(22.0) * 2.0),
+        );
+        assert!(recall.center().y < baseline.center().y - 39.0);
+        assert!(compact_controls_clear_playfield(recall, &mobile));
+        let mut defaults = crate::mobile_controls::MobileControls::default();
+        defaults.viewport = mobile.viewport;
+        assert!(!compact_controls_clear_playfield(recall, &defaults));
     }
 }

@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "owned_failed_fixture_schemas_removed": [
+    "career_public_consent_5358498e7785de7f6965992a05151944",
+    "career_public_consent_5008b127d266a80c6c1bb554be1ee24b"
+  ],
+  "provenance": "two rejected health startup/reconnect attempts; exact new test nickname, one profile, zero matches/events; known logged v2 schema included; no other schemas modified"
+}

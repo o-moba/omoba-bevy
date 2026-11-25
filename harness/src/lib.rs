@@ -30,9 +30,14 @@
 
 pub mod bot;
 pub mod bot_ai;
+pub mod cadence;
+pub mod database;
 pub mod navigation;
 pub mod protocol;
+mod public_client;
+pub use public_client::PublicBotStatus;
 pub mod server;
+pub mod telemetry;
 
 pub use bot::Bot;
 pub use protocol::{
@@ -40,4 +45,4 @@ pub use protocol::{
     PlayerState, ServerPacket, SnapshotView, StructureKind, TargetId, TargetKind, Team,
     TeamBuffKind, TeamBuffState,
 };
-pub use server::{ServerProcess, longest_roster_avatar_slug, roster_avatar_slugs};
+pub use server::{ServerProcess, longest_class_default_loadout, roster_avatar_slugs};

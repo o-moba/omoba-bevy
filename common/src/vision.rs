@@ -1,5 +1,5 @@
 //! Server-owned sight; no client visibility claims participate in combat or replication.
-use std::time::Instant;
+use shared::clock::Instant;
 
 use shared::combat::{CombatEntity, CombatEntityKind};
 use shared::map::Team;
@@ -13,20 +13,37 @@ use crate::entities::ConnectedPlayer;
 use crate::game_world::GameWorld;
 
 pub fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
+    let mut result = Vec::new();
+    sources_into(team, world, &mut result);
+    result.sort_by(|a, b| {
+        a.position[0]
+            .total_cmp(&b.position[0])
+            .then_with(|| a.position[1].total_cmp(&b.position[1]))
+            .then_with(|| a.radius.total_cmp(&b.radius))
+    });
+    result
+}
+
+/// [`sources`] into a reused buffer, unsorted: every visibility test is a
+/// union over the sources, so order never changes a result. Once the buffer
+/// has grown to the world's size, refilling it allocates nothing.
+pub fn sources_into(team: Team, world: &GameWorld, result: &mut Vec<VisionSource>) {
     let GameWorld {
         players,
         minions,
         structures,
         ..
     } = world;
-    let mut result: Vec<_> = players
-        .values()
-        .filter(|p| p.joined && p.hero.hp > 0.0 && p.hero.identity.team == team)
-        .map(|p| VisionSource {
-            position: [p.hero.x, p.hero.z],
-            radius: HERO_SIGHT_RADIUS,
-        })
-        .collect();
+    result.clear();
+    result.extend(
+        players
+            .values()
+            .filter(|p| p.joined && p.hero.hp > 0.0 && p.hero.identity.team == team)
+            .map(|p| VisionSource {
+                position: [p.hero.x, p.hero.z],
+                radius: HERO_SIGHT_RADIUS,
+            }),
+    );
     result.extend(
         minions
             .values()
@@ -49,13 +66,6 @@ pub fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
             }),
     );
     result.extend(world.skill_runtime.rocket_sight(team));
-    result.sort_by(|a, b| {
-        a.position[0]
-            .total_cmp(&b.position[0])
-            .then_with(|| a.position[1].total_cmp(&b.position[1]))
-            .then_with(|| a.radius.total_cmp(&b.radius))
-    });
-    result
 }
 
 pub fn revealed(player: &ConnectedPlayer, now: Instant) -> bool {
@@ -104,6 +114,17 @@ pub fn player_visible(sight: &[VisionSource], player: &ConnectedPlayer, now: Ins
             ))
 }
 pub fn target_visible(team: Team, target: TargetId, world: &GameWorld, now: Instant) -> bool {
+    target_visible_with(&sources(team, world), team, target, world, now)
+}
+
+/// [`target_visible`] against `sight`, the current [`sources`] of `team`.
+pub fn target_visible_with(
+    sight: &[VisionSource],
+    team: Team,
+    target: TargetId,
+    world: &GameWorld,
+    now: Instant,
+) -> bool {
     let GameWorld {
         players,
         minions,
@@ -111,23 +132,22 @@ pub fn target_visible(team: Team, target: TargetId, world: &GameWorld, now: Inst
         neutrals,
         ..
     } = world;
-    let sight = sources(team, world);
     match target.kind {
         TargetKind::Player => players
             .values()
             .find(|p| p.hero.identity.id == target.id)
-            .is_some_and(|p| p.hero.identity.team == team || player_visible(&sight, p, now)),
+            .is_some_and(|p| p.hero.identity.team == team || player_visible(sight, p, now)),
         TargetKind::Minion => minions.get(&target.id).is_some_and(|p| {
             p.state.team == team
                 || world.skill_runtime.npc_revealed(target, team, now)
-                || point_visible(&sight, [p.state.x, p.state.z], false)
+                || point_visible(sight, [p.state.x, p.state.z], false)
         }),
         TargetKind::Structure => structures.get(&target.id).is_some_and(|p| {
-            p.state.team == team || point_visible(&sight, [p.state.x, p.state.z], false)
+            p.state.team == team || point_visible(sight, [p.state.x, p.state.z], false)
         }),
         TargetKind::Neutral => neutrals.get(&target.id).is_some_and(|p| {
             world.skill_runtime.npc_revealed(target, team, now)
-                || point_visible(&sight, [p.state.x, p.state.z], false)
+                || point_visible(sight, [p.state.x, p.state.z], false)
         }),
     }
 }

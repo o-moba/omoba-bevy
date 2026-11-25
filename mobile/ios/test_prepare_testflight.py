@@ -15,20 +15,30 @@ from test_build_device import UUID, dsym_fixture, macho, uuid_output
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_production_prebuilt_archive_is_blocked_before_signing_and_writes(self):
+        self.info['CFBundleIdentifier'] = 'space.ekza.omoba.beta'
+        (self.app/'Info.plist').write_bytes(plistlib.dumps(self.info))
+        for arguments in (self.args, self.args + ['--check']):
+            with patch.object(archive, 'output') as tool, \
+                 self.assertRaisesRegex(ValueError, 'cannot be prepared from a prebuilt app'):
+                archive.main(arguments)
+            tool.assert_not_called()
+            self.assertFalse(self.output.parent.exists())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.app = self.root / "OmobaBeta.app"
+        self.app = self.root / "OmobaDev.app"
         (self.app / "assets/legal").mkdir(parents=True)
         (self.app / "assets/legal/SOURCE-REVISION.json").write_text("{}")
-        self.info = {"CFBundleIdentifier": "space.ekza.omoba.beta", "CFBundleExecutable": "client",
+        self.info = {"CFBundleIdentifier": "space.ekza.omoba.dev", "CFBundleExecutable": "client",
                      "CFBundleShortVersionString": "0.20.0", "MinimumOSVersion": "15.0",
                      "ITSAppUsesNonExemptEncryption": False}
         (self.app / "Info.plist").write_bytes(plistlib.dumps(self.info))
         (self.app / "client").write_bytes(macho())
         self.dsym = dsym_fixture(self.root)
-        self.output = self.root / "new/OmobaBeta.xcarchive"
+        self.output = self.root / "new/OmobaDev.xcarchive"
         self.args = ["--app", str(self.app), "--output", str(self.output),
                      "--dsym", str(self.dsym),
                      "--build-number", "2", "--identity", "A" * 40]
@@ -105,6 +115,8 @@ class ArchiveTests(unittest.TestCase):
                 return uuid_output(command)
             if command[:2] == ["codesign", "--verify"]:
                 return b""
+            if command[:2] == ["codesign", "--display"]:
+                return plistlib.dumps({})
             if command[:2] == ["security", "find-identity"]:
                 return f'1) {identity} "Apple Development: Fixture"'.encode()
             if command[:2] == ["security", "cms"]:
@@ -138,7 +150,8 @@ class ArchiveTests(unittest.TestCase):
                    "ApplicationIdentifierPrefix": ["TESTTEAM"], "DeveloperCertificates": [cert],
                    "Entitlements": {"application-identifier": "TESTTEAM.*", "get-task-allow": True,
                                     "com.apple.developer.team-identifier": "TESTTEAM"}}
-        entitlements = dict(profile["Entitlements"], **{"application-identifier": "TESTTEAM.space.ekza.omoba.beta"})
+        profile['Entitlements']['com.apple.developer.associated-domains'] = ['applinks:ios.dev.omoba.io']
+        entitlements = dict(profile["Entitlements"], **{"application-identifier": "TESTTEAM.space.ekza.omoba.dev"})
         def tool(command):
             if command[:3] == ["xcrun", "dwarfdump", "--uuid"]:
                 return uuid_output(command)
@@ -153,19 +166,21 @@ class ArchiveTests(unittest.TestCase):
             if command == ["xcodebuild", "-version"]:
                 return b"Xcode 26.2\nBuild version 17C52\n"
             if command[:2] == ["xcrun", "actool"]:
+                self.assertEqual(command[command.index('--app-icon') + 1], 'AppIconDev')
                 Path(command[command.index("--output-partial-info-plist") + 1]).write_bytes(plistlib.dumps({}))
                 return b""
             self.fail(f"Unexpected tool: {command}")
         before = {p: p.read_bytes() for source in (self.app, self.dsym) for p in source.rglob("*") if p.is_file()}
         with patch.object(archive, "output", side_effect=tool), redirect_stdout(io.StringIO()):
             self.assertEqual(archive.main(self.args), 0)
-        retained = self.output / "dSYMs/OmobaBeta.app.dSYM"
+        retained = self.output / "dSYMs/OmobaDev.app.dSYM"
         self.assertTrue(retained.is_dir())
         self.assertFalse(retained.is_symlink())
         self.assertEqual((retained / "Contents/Resources/DWARF/client").read_bytes(),
                          (self.dsym / "Contents/Resources/DWARF/client").read_bytes())
         self.assertEqual(before, {p: p.read_bytes() for p in before})
-        packaged = plistlib.loads((self.output / "Products/Applications/OmobaBeta.app/Info.plist").read_bytes())
+        packaged = plistlib.loads((self.output / "Products/Applications/OmobaDev.app/Info.plist").read_bytes())
+        self.assertEqual(packaged['CFBundleIdentifier'], 'space.ekza.omoba.dev')
         self.assertIs(packaged["ITSAppUsesNonExemptEncryption"], False)
         report = json.loads((self.output / "preparation.json").read_text())
         self.assertEqual(report["debug_symbols"]["uuids"], {"arm64": UUID})

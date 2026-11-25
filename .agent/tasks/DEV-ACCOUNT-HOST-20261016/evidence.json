@@ -1,0 +1,42 @@
+{
+  "task_id": "DEV-ACCOUNT-HOST-20261016",
+  "overall_status": "PASS",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "status": "PASS",
+      "proof": [
+        "raw/tests.log",
+        "evidence.md"
+      ]
+    },
+    {
+      "id": "AC2",
+      "status": "PASS",
+      "proof": [
+        "raw/tests.log",
+        "evidence.md"
+      ]
+    },
+    {
+      "id": "AC3",
+      "status": "PASS",
+      "proof": [
+        "raw/tests.log",
+        "evidence.md"
+      ]
+    },
+    {
+      "id": "AC4",
+      "status": "PASS",
+      "proof": [
+        "raw/tests.log",
+        "evidence.md"
+      ]
+    }
+  ],
+  "verifier": "Independent merge_dev_registry_audit source review and 11-test rerun",
+  "known_gaps": [
+    "Live deployment and HTTP checks are recorded in the integrated DEV playtest report; this evidence covers source/tooling only."
+  ]
+}

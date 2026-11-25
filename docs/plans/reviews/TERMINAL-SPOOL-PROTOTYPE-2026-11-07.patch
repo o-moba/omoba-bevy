@@ -1,0 +1,85 @@
+diff --git a/scripts/test_public_mvp.mjs b/scripts/test_public_mvp.mjs
+--- a/scripts/test_public_mvp.mjs
++++ b/scripts/test_public_mvp.mjs
+@@ -168,6 +168,8 @@
+ // An isolated physical-backup runner owns the DB fault/replacement. The probe
+ // exchanges only correlated receipts, never runs a supplied command or SQL.
+ const databaseRestoreControl=opts['database-restore-control']?fs.realpathSync(opts['database-restore-control']):null;
++const terminalSpoolReplay='terminal-spool-replay' in opts;
++assert(!terminalSpoolReplay||databaseRestoreControl,'terminal spool replay requires the isolated database control');
+ if(databaseRestoreControl)assert(scenario==='recovery'&&clientsCount===1&&preference==='bot_practice'&&isolatedQueueDatabase(process.env.OMOBA_TEST_DATABASE_URL)&&databaseRestoreControl.startsWith(fs.realpathSync(root)+path.sep),'database restore requires the one-roster loopback recovery fixture and a control directory inside its output');
+ assert(process.env.OMOBA_TEST_DATABASE_URL, 'Use a disposable OMOBA_TEST_DATABASE_URL');
+ assert(process.env.HARNESS_SERVER_BIN, 'Build server and set HARNESS_SERVER_BIN');
+@@ -1266,6 +1268,64 @@
+  report.recovery={status:'PASS',reassignment_ms:reassignmentMs,same_port_reused:observers.every(c=>c.allocation.endpoint===allocation.endpoint),queue:original.preference,participants:originals.length,crashed_after_running_seconds:playingFor,early_before_first_checkpoint:early,result_id:before.result_id,server_epoch:before.server_epoch,outcome:saved.outcome,all_profiles_checked:true,all_histories_checked:true,no_elo_or_xp:true,elapsed_seconds:(performance.now()-crashedAt)/1000};
+  report.scenarios.push('full_roster_crash_recovers_played_history_without_elo_or_xp');
+ }
++async function physicalTerminalSpoolReplay(original) {
++ const allocation=original.allocation,epoch=original.epoch,progress=careerProgress(original),worker=ownedWorkerPid(original.port);
++ const status=allocationStatus(allocation.allocation_id);assert.equal(status?.phase,'running');assert(status.result_id);
++ const observer=new Client(7001,lobbyPort,original,{autoQueue:false,autoJoin:false,autoHandoff:false});all.push(observer);
++ await pumpUntil('terminal-spool observer authenticates before the SQL outage',()=>!!observer.auth);
++ const nonce=crypto.randomBytes(16).toString('hex');
++ fs.writeFileSync(path.join(databaseRestoreControl,'request.json'),wire({nonce,allocation_id:allocation.allocation_id,result_id:status.result_id,server_epoch:epoch}),{flag:'wx'});
++ await pumpUntil('owned database proxy is isolated after physical backup',()=>{
++  const file=path.join(databaseRestoreControl,'offline.json');if(!fs.existsSync(file))return false;
++  assert(fs.statSync(file).size<=4096);const receipt=JSON.parse(fs.readFileSync(file));
++  assert.equal(receipt.nonce,nonce);assert.equal(receipt.sql_offline,true);return true;
++ },180000);
++ const stoppedAt=performance.now();process.kill(worker,'SIGTERM');original.close();
++ const outbox=path.join(root,'matches',allocation.allocation_id,'outbox');
++ const file=path.join(outbox,status.result_id+'.json');let pending;
++ await pumpUntil('real SIGTERM leaves its durable terminal receipt while SQL is offline',()=>{
++  try{pending=parse(fs.readFileSync(file));}catch{return false;}
++  const log=fs.readFileSync(path.join(root,'matches',allocation.allocation_id,'worker.log'),'utf8');
++  let alive=true;try{process.kill(worker,0);}catch{alive=false;}
++  return !alive&&log.includes('SHUTDOWN_METRIC terminal_outbox=durable')&&pending.kind==='Settle';
++ },30000);
++ assert.equal(pending.result.result_id,status.result_id);assert.equal(pending.result.server_epoch,epoch);
++ assert.equal(pending.result.outcome,'interrupted');assert.equal(pending.result.rated,false);
++ const receiptSha=crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
++ fs.writeFileSync(path.join(databaseRestoreControl,'terminal-ready.json'),wire({nonce,result_id:status.result_id,receipt_sha256:receiptSha}),{flag:'wx'});
++ await pumpUntil('physical restore resumes delivery of the real terminal receipt',()=>{
++  const response=path.join(databaseRestoreControl,'response.json');if(!fs.existsSync(response))return false;
++  const r=JSON.parse(fs.readFileSync(response));assert.equal(r.nonce,nonce);assert.equal(r.status,'PASS');assert.equal(r.physical_restored,true);return true;
++ },180000);
++ let query=800,next=0,saved,sawRecovering=false;
++ await pumpUntil('terminal receipt saved and recovery worker retires',()=>{
++  const state=allocationStatus(allocation.allocation_id);if(state?.phase==='recovering')sawRecovering=true;
++  if(observer.lastDetail?.result_id===status.result_id)saved=observer.lastDetail;
++  return saved?.saved&&state?.phase==='failed'&&!fs.existsSync(file);
++ },300000,now=>{if(now>=next){next=now+2000;observer.account({action:'detail',request_id:++query,result_id:status.result_id});}});
++ assert(sawRecovering,'automatic recovery worker did not replay the terminal file');
++ assert.equal(saved.outcome,'interrupted');assert.equal(saved.server_epoch,epoch);assert.equal(saved.rated,false);
++ assert(saved.participants.every(p=>p.progression_xp_gained===0&&p.rating==null));
++ const request=++query;next=0;
++ await pumpUntil('terminal replay grants career credit exactly once',()=>observer.profileResponses.get(String(request))?.matches_played===progress.matches_played+1,15000,now=>{
++  if(now>=next){next=now+1000;observer.account({action:'profile',request_id:request,profile_id:progress.profile_id});}
++ });
++ const profile=observer.profileResponses.get(String(request));
++ for(const key of ['rating','rated_matches','progression_xp','wins','losses'])assert.equal(profile[key],progress[key]);
++ // Continue through a second read/retry window; deletion is an ACK, not proof
++ // that a stale receipt or retry can award the same game again.
++ await pumpFor(3000);const again=++query;next=0;
++ await pumpUntil('repeat authoritative read retains one career credit',()=>observer.profileResponses.has(String(again)),10000,now=>{
++  if(now>=next){next=now+1000;observer.account({action:'profile',request_id:again,profile_id:progress.profile_id});}
++ });
++ assert.equal(observer.profileResponses.get(String(again)).matches_played,progress.matches_played+1);
++ observer.queueId++;next=0;
++ await pumpUntil('new allocation only after terminal receipt is acknowledged',()=>observer.allocation&&observer.allocation.allocation_id!==allocation.allocation_id,20000,now=>{
++  if(now>=next){next=now+1000;observer.account({action:'find_match',request_id:observer.queueId,preference:'bot_practice'});}
++ });
++ report.terminal_spool_replay={status:'PASS',result_id:status.result_id,server_epoch:epoch,receipt_sha256:receiptSha,real_sigterm:true,sql_was_offline:true,durable_marker:true,automatic_recovery:true,receipt_acknowledged:!fs.existsSync(file),outcome:saved.outcome,one_played_credit:true,no_elo_or_xp:true,new_allocation:observer.allocation.allocation_id,elapsed_seconds:(performance.now()-stoppedAt)/1000};
++ report.scenarios.push('actual_terminal_spool_replays_once_after_physical_database_restore');
++}
+ async function physicalDatabaseRestore(original) {
+  const allocation=original.allocation,epoch=original.epoch,worker=ownedWorkerPid(original.port);
+  const nonce=crypto.randomBytes(16).toString('hex');
+@@ -1471,6 +1531,7 @@
+  if(scenario==='capacity-wait')await capacityWait();
+  if(scenario==='drain')await maintenanceDrain(all[0]);
+  if(scenario==='early-recovery'||(scenario==='recovery'&&preference!=='bot_practice'))await recoverRoster(all.filter(c=>c.stage==='running'),scenario==='early-recovery');
++ else if(terminalSpoolReplay)await physicalTerminalSpoolReplay(all[0]);
+  else if(scenario==='lobby-restart'||scenario==='recovery')await restartAndRecover(databaseRestoreControl?await physicalDatabaseRestore(all[0]):all[0],scenario==='recovery');
+  report.total_transforms_sent=all.reduce((n,c)=>n+c.transforms,0);
+  report.total_sent_datagrams=all.reduce((n,c)=>n+c.sentPackets,0);

@@ -199,6 +199,54 @@ fn shield_intercepts_front_once_reduces_later_and_ignores_rear() {
     );
     assert!(w.players[&addr(1)].hero.hp < before);
 }
+/// Two shots blocked by one wall in the same tick: the older projectile takes
+/// the free block, whatever order the `HashMap` holds them in.
+#[test]
+fn simultaneous_blocks_follow_projectile_creation_order() {
+    let hp: Vec<f32> = (0..16)
+        .map(|_| {
+            let (mut w, now, _) = fixture(HeroClass::Frostguard);
+            cast(&mut w, addr(1), 2, [10.0, 0.0], 1, now);
+            let owner = w.players[&addr(1)].hero.identity.id;
+            for (id, damage) in [(8_u64, 50.0), (7, 40.0)] {
+                w.projectiles.insert(
+                    id,
+                    crate::entities::Projectile {
+                        state: shared::wire::ProjectileState {
+                            source_kind: CombatEntityKind::Minion,
+                            style: ProjectileStyle::CasterBolt,
+                            action_slot: None,
+                            direction: [-1.0, 0.0, 0.0],
+                            id,
+                            owner_id: 900 + id,
+                            owner_team: Team::Blue,
+                            x: 1.6,
+                            y: crate::balance::PLAYER_GROUND_Y + 1.0,
+                            z: 0.0,
+                        },
+                        target: target(owner),
+                        velocity: crate::entities::Vec3f::new(-30.0, 0.0, 0.0),
+                        homing: true,
+                        guaranteed_hit: true,
+                        damage,
+                        radius: crate::balance::PROJECTILE_RADIUS,
+                        expires_at: now + Duration::from_secs(3),
+                    },
+                );
+            }
+            let at = now + duration(0.05);
+            crate::sim::projectiles::simulate_projectiles_filtered(
+                &mut w,
+                TickCtx { now: at, dt: 0.05 },
+                |_| true,
+            );
+            assert!(w.projectiles.is_empty(), "both shots reached the wall");
+            w.players[&addr(1)].hero.hp
+        })
+        .collect();
+    assert!(hp[0] < 1000.0, "the second block lets some damage through");
+    assert!(hp.iter().all(|h| *h == hp[0]), "{hp:?}");
+}
 #[test]
 fn northwall_publishes_its_interception_count() {
     let (mut w, now, _) = fixture(HeroClass::Frostguard);
@@ -1254,6 +1302,104 @@ fn blink_uses_legal_landing_and_advances_authoritative_movement_sequence() {
         [3.0, 2.0]
     );
     assert!(w.players[&addr(1)].hero.utility.dash_sequence > sequence);
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
+    assert!(w.skill_runtime.pending.is_empty());
+}
+
+#[test]
+fn rift_step_shoots_own_sealed_hero_from_the_landing_point() {
+    let (mut w, now, victim) = fixture(HeroClass::Riftshot);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 11.0;
+    cast(&mut w, addr(1), 1, [20.0, 0.0], 1, now);
+    assert!(advance(&mut w, now, 0.6).is_empty(), "W only marks");
+    add_player(&mut w, 3, HeroClass::Warrior, Team::Blue, [3.0, 3.0], now);
+    cast(&mut w, addr(1), 2, [3.0, 2.0], 2, now + duration(0.7));
+    let shooter = &w.players[&addr(1)].hero;
+    assert_eq!([shooter.x, shooter.z], [3.0, 2.0]);
+    assert_eq!(shooter.mana, 477.0, "E detonates W and refunds 20 mana");
+    assert_eq!(w.players[&addr(2)].hero.hp, 938.0);
+    assert_eq!(
+        w.players[&addr(3)].hero.hp,
+        1000.0,
+        "closer unmarked target"
+    );
+    assert_eq!(w.skill_runtime.pending.len(), 2, "shot and seal burst");
+    assert!(
+        w.skill_runtime
+            .pending
+            .iter()
+            .all(|e| e.target.id == victim)
+    );
+}
+
+#[test]
+fn rift_step_ignores_others_expired_out_of_range_and_hidden_seals() {
+    for case in ["other owner", "expired", "out of range", "hidden"] {
+        let (mut w, now, victim) = fixture(HeroClass::Riftshot);
+        let caster = if case == "other owner" {
+            add_player(&mut w, 3, HeroClass::Riftshot, Team::Green, [0.0, 0.0], now);
+            addr(3)
+        } else {
+            addr(1)
+        };
+        cast(&mut w, caster, 1, [20.0, 0.0], 1, now);
+        assert!(advance(&mut w, now, 0.4).is_empty());
+        if case == "out of range" {
+            w.players.get_mut(&addr(2)).unwrap().hero.x = 16.0;
+        }
+        if case == "hidden" {
+            let hero = &mut w.players.get_mut(&addr(2)).unwrap().hero;
+            hero.skills.loadout =
+                Some(shared::loadout::resolve(&CoreId::Veilstalker.preset()).unwrap());
+            hero.progress.level = 6;
+        }
+        let at = now + duration(if case == "expired" { 5.0 } else { 0.5 });
+        let landing = if case == "hidden" {
+            [-2.0, 0.0]
+        } else {
+            [3.0, 2.0]
+        };
+        cast(&mut w, addr(1), 2, landing, 2, at);
+        let shooter = &w.players[&addr(1)].hero;
+        assert_eq!([shooter.x, shooter.z], landing, "{case}");
+        assert_eq!(w.players[&addr(2)].hero.hp, 1000.0, "{case}");
+        assert!(w.skill_runtime.pending.is_empty(), "{case}");
+        assert_eq!(
+            crate::vision::target_visible(Team::Green, target(victim), &w, at),
+            case != "hidden",
+            "{case}"
+        );
+        let seal_owner = w.players[&caster].hero.identity.id;
+        let damage: f32 = strike(&mut w, seal_owner, victim, at)
+            .iter()
+            .map(|event| event.amount)
+            .sum();
+        assert_eq!(
+            damage,
+            if case == "expired" { 10.0 } else { 44.0 },
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn rift_step_leaves_a_sealed_enemy_tower_for_the_owner_to_attack() {
+    let (mut w, now, _) = fixture(HeroClass::Riftshot);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    w.players.get_mut(&addr(2)).unwrap().hero.z = 20.0;
+    let tower = add_tower(&mut w, Team::Blue, [10.0, 0.0]);
+    let hp = w.structures[&tower].state.hp;
+    cast(&mut w, addr(1), 1, [20.0, 0.0], 1, now);
+    assert!(advance(&mut w, now, 0.6).is_empty());
+    cast(&mut w, addr(1), 2, [3.0, 2.0], 2, now + duration(0.7));
+    let shooter = &w.players[&addr(1)].hero;
+    assert_eq!([shooter.x, shooter.z], [3.0, 2.0]);
+    assert_eq!(w.structures[&tower].state.hp, hp);
+    assert!(w.skill_runtime.pending.is_empty());
+    assert_eq!(
+        strike_tower(&mut w, owner, tower, now + duration(0.8)),
+        44.0
+    );
 }
 
 /// Every public standard slot must produce combat state, beyond paying a cost

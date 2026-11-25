@@ -1,0 +1,131 @@
+{
+  "status": "accepted",
+  "scope": "RU852x393 production native offscreen Home rendering and actual party epoch-change reaction with synthetic server views; no real restart/admission/physical-device proof",
+  "scene": "party-restart",
+  "manual_inspection": "Home menu and character are visible; restart/dissolved-party notice is readable; intended action and navigation remain visible",
+  "capture": {
+    "status": "captured_pending_visual_inspection",
+    "scene": "party-restart",
+    "language": "ru",
+    "region": "ru",
+    "viewport": [
+      852,
+      393
+    ],
+    "binary_sha256": "afa5e8de8a87ff0212117f37687ed377cd5f4b3bf4feefa3ff2d67f20ce49f69",
+    "head_at_capture": "bf35946518f77a1c597dd966f731e0b191f04fc6",
+    "tracked_diff_sha256": "8e0e43f1c9d899c867692eca3741bb7c2927fce1ffda3de2b4cbee7d6b1ff439",
+    "source_hashes": {
+      "client/src/lib.rs": "24d7ec59fe68ee1153cbf44630bf0cb886f822b7354ecd9e32d48b819f6b1a5f",
+      "client/src/qa/mod.rs": "c630fd60edd77f2ba97cdadc90f0c81657b38c1681a114b261291effd0e5ebf2",
+      "client/src/qa/offscreen.rs": "a3d2067f99c5e7136816626bfee872a6ae86f90783c08896d7b02af267197504",
+      "client/src/qa/fair_play_qa.rs": "80a5cc379ce424d3a9f8194a0adcc169b103784c67676283f2404a0d991c8f70",
+      "client/src/qa/result_qa.rs": "1ab50f42695ded4c3015ac118dab9b150ce97b5c290d4e97d4a168d4d0f5366e",
+      "client/src/qa/creator_loop_qa.rs": "18de95f632bdf9605d3fd23a4e449c0aba7c9dc4aa8f02a3587ddd1a43289083",
+      "client/src/net/session.rs": "a3937e7fa17dec8b9f2385499a3c1db7a767685ab5e95bc80c226dee2d90685d",
+      "client/src/pause_menu/match_votes.rs": "104a12aeccd5b481872b2aaa489d8911b26f2c58899411b07e5e2608712cc13e",
+      "client/src/world.rs": "24613bd3c250fef5d67d4aa8971bf59f9289a74815a3579594227c98dabf4bcb",
+      "client/src/platform.rs": "2934dd6113615624ffe8a3259a643998d471e3e5625b94a0cc687ab36a4fdd37"
+    },
+    "runner_sha256": "21c83da51f082205788a9203c130ba5431f9a0db01fa10e74875c39ba51ed503",
+    "screen_locked_at_launch": true,
+    "scope": "production offscreen renderer and real UI-kit actions; synthetic RU session/views/settings; no live match/account, desktop/window, physical phone or keep-awake/haptic proof",
+    "build_source_parent": "bf35946518f77a1c597dd966f731e0b191f04fc6",
+    "source_binary_link": "caller-provided build; paths alone do not prove matching sources",
+    "summary": {
+      "color_pixels": true,
+      "controls": [],
+      "expected_visible_text": "Соединение с лобби восстановлено, группа распущена.",
+      "locale": "ru",
+      "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+      "physical_device": false,
+      "real_admission_or_gameplay": false,
+      "render_surface": "offscreen image with virtual window metrics",
+      "scene": "PartyRestart",
+      "screen": "Home",
+      "status": "passed",
+      "synthetic_state": true,
+      "viewport": [
+        852,
+        393
+      ]
+    },
+    "screenshot": {
+      "file": "fair-play.png",
+      "sha256": "e2a956ba52ca5dc9a95897572d43e8fc4777cbdcd326bb15436439e43a5c0cde",
+      "bytes": 593647
+    },
+    "seconds": 7.91,
+    "guide_actions_submitted": false
+  },
+  "native_summary": {
+    "color_pixels": true,
+    "controls": [],
+    "expected_visible_text": "Соединение с лобби восстановлено, группа распущена.",
+    "locale": "ru",
+    "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+    "physical_device": false,
+    "real_admission_or_gameplay": false,
+    "render_surface": "offscreen image with virtual window metrics",
+    "scene": "PartyRestart",
+    "screen": "Home",
+    "status": "passed",
+    "synthetic_state": true,
+    "viewport": [
+      852,
+      393
+    ]
+  },
+  "build": {
+    "source_parent": "bf35946518f77a1c597dd966f731e0b191f04fc6",
+    "working_diff_sha256": "8e0e43f1c9d899c867692eca3741bb7c2927fce1ffda3de2b4cbee7d6b1ff439",
+    "untracked": [],
+    "market": "ru",
+    "steps": [
+      {
+        "name": "clippy",
+        "exit": 0,
+        "seconds": 74.23,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-home-shell-build-v1-clippy.log"
+      },
+      {
+        "name": "build",
+        "exit": 0,
+        "seconds": 605.95,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-home-shell-build-v1-build.log"
+      }
+    ],
+    "minimum_root_gib": 28.512516021728516,
+    "binary": "/Users/wotori/git/ekza/omoba-bevy/target-b/debug/client",
+    "binary_sha256": "afa5e8de8a87ff0212117f37687ed377cd5f4b3bf4feefa3ff2d67f20ce49f69",
+    "binary_bytes": 226179080
+  },
+  "regression": {
+    "source_parent": "bf35946518f77a1c597dd966f731e0b191f04fc6",
+    "working_diff_sha256": "8e0e43f1c9d899c867692eca3741bb7c2927fce1ffda3de2b4cbee7d6b1ff439",
+    "untracked": [],
+    "market": "global-default",
+    "steps": [
+      {
+        "name": "offscreen-tests",
+        "exit": 0,
+        "seconds": 792.84,
+        "stop_reason": null,
+        "log": "/Users/wotori/git/ekza/_workspace/worktrees/mm-game/.agent/tasks/RANKED-LAUNCH-READINESS-20261105/p5-home-shell-v1-offscreen-tests.log"
+      }
+    ],
+    "minimum_root_gib": 28.083858489990234
+  },
+  "png": {
+    "file": "native-offscreen-party-restart-home.png",
+    "sha256": "e2a956ba52ca5dc9a95897572d43e8fc4777cbdcd326bb15436439e43a5c0cde",
+    "bytes": 593647
+  },
+  "additional_source_hashes": {
+    "client/src/frontend/mod.rs": "1cef58effd974fe2bf068d1b4eb681cc063e020172e42918a98cebcec157f239",
+    "client/src/frontend/home.rs": "3d5083c124f3617cdd44a150854322348fb5421e4ec2734eb448de784f839a22"
+  },
+  "negative_evidence": "offscreen-home-rejected.json remains a rejected older attempt"
+}

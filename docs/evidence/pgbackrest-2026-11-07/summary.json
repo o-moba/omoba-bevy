@@ -1,0 +1,102 @@
+{
+  "status": "PASS",
+  "run_id": "260dc8e7e0",
+  "checks": [
+    "actual career10/portal11 physical backup encrypted and stored through strict-host-key SFTP",
+    "named-point recovery returns exact post-base rating1024/history1",
+    "latest archive recovery returns exact post-base rating1048/history2",
+    "missing post-base encrypted WAL refuses target recovery instead of returning stale data",
+    "corrupt encrypted post-base WAL refuses target recovery",
+    "wrong SFTP host pin refuses repository access",
+    "unreachable SFTP archive fails health rather than certifying freshness"
+  ],
+  "scope": "Disposable two-container encrypted SFTP/PG18 recovery only; not real off-host/RU deployment, production RPO, physical UI or played-game evidence",
+  "source_parent": "ca32bce5561592cbb7d7c89887116b6be43a7c42",
+  "fixture": "Direct SQL synthetic rating/history receipts with actual career/portal migrations",
+  "wal_segment_mib": 1,
+  "image_id": "sha256:780106e9698ae8eff05315399e67e5f0f32aa2e7cf7e0dbe7190961ab1c91af9",
+  "postgres": "postgres (PostgreSQL) 18.6",
+  "pgbackrest": "pgBackRest 2.58.0",
+  "schema": {
+    "career": 10,
+    "portal": 11
+  },
+  "system_identifier": "7705170363881074730",
+  "base_snapshot": {
+    "rating": 1000,
+    "rated_matches": 20,
+    "matches_played": 20,
+    "history": 0
+  },
+  "backup_labels": [
+    "20261106-211619F"
+  ],
+  "repository_cipher": "aes-256-cbc",
+  "target_lsn": "0/1126BE0",
+  "post_base_segment": "000000010000000000000011",
+  "point": {
+    "expected": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1
+    },
+    "actual": {
+      "rating": 1024,
+      "rated_matches": 21,
+      "matches_played": 21,
+      "history": 1
+    }
+  },
+  "latest": {
+    "expected": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2
+    },
+    "actual": {
+      "rating": 1048,
+      "rated_matches": 22,
+      "matches_played": 22,
+      "history": 2
+    }
+  },
+  "wrong_sftp_pin": {
+    "exit_code": 0,
+    "status_codes": [
+      99
+    ],
+    "rejected": true
+  },
+  "owned_containers_network_removed": true,
+  "rehearsal_script_sha256": "263f495b9b788f9858921f5749ca54c177efd0a5a37c33f8220c6e8371475a75",
+  "dockerfile_sha256": "5c9e471d61f555e111a9548bbf053708a6463deedd5efd006b5bfcd25ffa4073",
+  "logs_sha256": {
+    "corrupt.log": "d66d057166ca08b8a421eabbebcdd0c5decf9fc564571350f46d4e79440972f9",
+    "missing.log": "9e35bbb6d8189ef006e5e9d58d32c45594ea1001e0cf461e9e3ed3c45e63cbfb",
+    "latest.log": "8d17763adc6952bd2e3715b32b6ad63952cbfcccb13e3564ef16dd59f2c7c98c",
+    "point.log": "0bcf2d23f8ba9a63e75f9ed20142fd46cabeafd49879b63e0aef205ecc7d1126"
+  },
+  "rejected_attempts": [
+    {
+      "attempt": "v1",
+      "reason": "SFTP hash option missing; no accepted check"
+    },
+    {
+      "attempt": "v2",
+      "reason": "target-action invalid for default latest restore; incomplete run rejected"
+    },
+    {
+      "attempt": "v3",
+      "reason": "Earlier6-case checkpoint superseded by structured wrong-pin status checking, cipher assertion, corrupt-WAL case and verified cleanup"
+    }
+  ],
+  "installed_host_kit_modified": false,
+  "repository_native_checksums_not_gpg_signatures": true,
+  "retained_development_image": {
+    "tag": "omoba-mm-pitr-rehearsal:20261107",
+    "bytes": 143067965,
+    "reason": "Reuse for pending C4 kit integration tests; no real keys or player data baked in"
+  }
+}

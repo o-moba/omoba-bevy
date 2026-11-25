@@ -72,6 +72,7 @@ pub(crate) fn spawn_team_stage(
     prematch: &PrematchSnapshot,
     your_id: u64,
     stage: Option<&PartyStage>,
+    assets: &AssetServer,
     width: f32,
     height: f32,
     loading: bool,
@@ -181,14 +182,29 @@ pub(crate) fn spawn_team_stage(
                                 Name::new(format!("PrematchStagePlayer-{}", player.player_id)),
                             ))
                             .with_children(|plate| {
+                                if let Some(path) = shared::bot_personas::portrait_asset_path(
+                                    player.is_bot,
+                                    player.bot_persona.as_deref(),
+                                ) {
+                                    let size = if compact { 24.0 } else { 32.0 };
+                                    plate.spawn((
+                                        ImageNode::new(assets.load(path)),
+                                        Node {
+                                            width: Val::Px(size),
+                                            height: Val::Px(size),
+                                            flex_shrink: 0.0,
+                                            ..default()
+                                        },
+                                        Pickable::IGNORE,
+                                        Name::new("PrematchBotPortrait"),
+                                    ));
+                                }
                                 let identity = if mine {
                                     format!("{}{}", player.nickname, tr("draft.roster.you"))
-                                } else if player.is_bot {
-                                    format!("{}{}", player.nickname, tr("draft.roster.bot"))
                                 } else {
                                     player.nickname.clone()
                                 };
-                                for (text, ink, size) in [
+                                for (line, (text, ink, size)) in [
                                     (
                                         identity.as_str(),
                                         theme::IVORY,
@@ -205,7 +221,9 @@ pub(crate) fn spawn_team_stage(
                                         if compact { 10.0 } else { 12.0 },
                                     ),
                                     (
-                                        if loading {
+                                        if player.is_bot {
+                                            tr("draft.roster.bot_label")
+                                        } else if loading {
                                             if player.loaded {
                                                 tr("draft.roster.ready")
                                             } else {
@@ -216,18 +234,50 @@ pub(crate) fn spawn_team_stage(
                                         } else {
                                             tr("draft.roster.picking")
                                         },
-                                        if player.locked {
+                                        if player.locked && !player.is_bot {
                                             theme::JADE
                                         } else {
                                             theme::MUTED
                                         },
                                         if compact { 9.0 } else { 10.0 },
                                     ),
-                                ] {
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                {
+                                    let size: f32 = size;
+                                    // Menu typography raises phone labels to its
+                                    // readable minimum. Budget at that actual
+                                    // size, not the smaller design size, so a
+                                    // centred line never loses its beginning.
+                                    let measured_size = if compact {
+                                        size.max(theme::metric::PHONE_LABEL_MIN)
+                                    } else {
+                                        size
+                                    };
+                                    let fitted = super::super::lobby::plate_name(
+                                        text,
+                                        plate_width,
+                                        measured_size,
+                                    );
                                     plate.spawn((
-                                        widgets::label(text, size, ink),
+                                        widgets::label(fitted, size, ink),
                                         TextLayout::justify(Justify::Center)
                                             .with_linebreak(LineBreak::NoWrap),
+                                        Node {
+                                            // A content-sized node shrinks together with
+                                            // the elided text and eventually leaves only
+                                            // an ellipsis. Keep the plate's full width
+                                            // stable for the actual-glyph fitter.
+                                            width: Val::Percent(100.0),
+                                            min_width: Val::Px(0.0),
+                                            ..default()
+                                        },
+                                        widgets::FittedLabel,
+                                        Name::new(format!(
+                                            "PrematchStageText-{}-{line}",
+                                            player.player_id
+                                        )),
                                         Pickable::IGNORE,
                                     ));
                                 }
@@ -261,11 +311,14 @@ mod tests {
                 sprite_character: None,
                 role: Role::Jungle,
                 is_bot: false,
+                bot_persona: None,
                 locked: id % 2 == 0,
                 loaded: false,
             })
             .collect();
         let mut prematch = PrematchSnapshot {
+            join_remaining_ms: None,
+            unique_classes_across_teams: false,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 30_000,

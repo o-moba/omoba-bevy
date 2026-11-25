@@ -18,6 +18,8 @@
 
 use std::{
     net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -47,11 +49,25 @@ struct CliArgs {
     count: usize,
     server: SocketAddr,
     telemetry: bool,
+    public: bool,
+    exit_after_result: bool,
+    ranked_eligibility_probe: bool,
+    rush_objectives: bool,
+    search_gate: Option<PathBuf>,
+    preference: shared::match_service::MatchPreference,
+    input_hz: Option<u32>,
 }
 
 fn parse_args() -> CliArgs {
     let mut count = 9usize;
     let mut telemetry = false;
+    let mut public = false;
+    let mut exit_after_result = false;
+    let mut ranked_eligibility_probe = false;
+    let mut rush_objectives = false;
+    let mut search_gate = None;
+    let mut input_hz = None;
+    let mut preference = shared::match_service::MatchPreference::Ranked;
     let mut server: SocketAddr = "127.0.0.1:4000".parse().expect("default addr parses");
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -81,8 +97,47 @@ fn parse_args() -> CliArgs {
                     });
             }
             "--telemetry" => telemetry = true,
+            "--input-hz" => {
+                input_hz = Some(
+                    args.next()
+                        .unwrap_or_default()
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|hz| (1..=60).contains(hz))
+                        .unwrap_or_else(|| {
+                            eprintln!("--input-hz requires an integer1..60");
+                            std::process::exit(2);
+                        }),
+                );
+            }
+            "--public" => public = true,
+            "--exit-after-result" => exit_after_result = true,
+            "--ranked-eligibility-probe" => ranked_eligibility_probe = true,
+            "--rush-objectives" => rush_objectives = true,
+            "--search-gate" => {
+                let value = args.next().filter(|s| !s.is_empty()).unwrap_or_else(|| {
+                    eprintln!("--search-gate requires a file path");
+                    std::process::exit(2);
+                });
+                search_gate = Some(PathBuf::from(value));
+            }
+            "--preference" => {
+                preference = match args.next().as_deref() {
+                    Some("humans_only") => shared::match_service::MatchPreference::Ranked,
+                    Some("quick") => shared::match_service::MatchPreference::Casual,
+                    Some("bot_practice") => shared::match_service::MatchPreference::BotPractice,
+                    _ => {
+                        eprintln!(
+                            "Invalid --preference: expected humans_only, quick or bot_practice"
+                        );
+                        std::process::exit(2);
+                    }
+                };
+            }
             "--help" | "-h" => {
-                println!("Usage: bots [--count 1..10] [--server IP:PORT] [--telemetry]");
+                println!(
+                    "Usage: bots [--count 1..10] [--server IP:PORT] [--telemetry] [--public] [--input-hz 1..60] [--exit-after-result] [--rush-objectives] [--search-gate FILE] [--preference humans_only|quick|bot_practice]"
+                );
                 std::process::exit(0);
             }
             other => {
@@ -91,10 +146,45 @@ fn parse_args() -> CliArgs {
             }
         }
     }
+    if exit_after_result && !public {
+        eprintln!("--exit-after-result requires --public");
+        std::process::exit(2);
+    }
+    if search_gate.is_some() && !(public && server.ip().is_loopback()) {
+        eprintln!("--search-gate requires public loopback admission");
+        std::process::exit(2);
+    }
+    if input_hz.is_some() && !(public && server.ip().is_loopback()) {
+        eprintln!("--input-hz requires public loopback admission");
+        std::process::exit(2);
+    }
+    if rush_objectives && !server.ip().is_loopback() {
+        eprintln!("--rush-objectives is a loopback rehearsal option");
+        std::process::exit(2);
+    }
+    if ranked_eligibility_probe
+        && !(public
+            && exit_after_result
+            && count == 1
+            && server.ip().is_loopback()
+            && preference == shared::match_service::MatchPreference::BotPractice)
+    {
+        eprintln!(
+            "eligibility probe requires one public loopback vs-Bots client with --exit-after-result"
+        );
+        std::process::exit(2);
+    }
     CliArgs {
         count,
         server,
         telemetry,
+        public,
+        exit_after_result,
+        ranked_eligibility_probe,
+        rush_objectives,
+        search_gate,
+        preference,
+        input_hz,
     }
 }
 
@@ -119,6 +209,9 @@ struct BotRunner {
     last_snapshot_at: Option<Instant>,
     last_shop_at: Instant,
     pending_purchase: Option<(shared::shop::ItemId, u64)>,
+    last_snapshot: Option<Arc<shared::wire::ServerPacket>>,
+    cached_input_transforms: u64,
+    navigation_work: harness::cadence::TimingHistogram,
 }
 
 fn main() {
@@ -130,15 +223,30 @@ fn main() {
 
     let mut runners: Vec<BotRunner> = Vec::with_capacity(args.count);
     for index in 0..args.count {
-        let bot = Bot::connect_framed(args.server);
         let team = if index % 2 == 0 {
             Team::Blue
         } else {
             Team::Green
         };
         let class = class_for_bot(index);
-        let avatar = AVATARS[index % AVATARS.len()];
-        bot.join_with_loadout(team, Character::Ipfs, class, avatar);
+        let avatar = if args.public {
+            None
+        } else {
+            AVATARS[index % AVATARS.len()]
+        };
+        let bot = if args.public {
+            Bot::connect_public(args.server, args.preference, class, format!("Fill-{index}"))
+        } else {
+            let bot = Bot::connect_framed(args.server);
+            bot.join_with_loadout(team, Character::Ipfs, class, avatar);
+            bot
+        };
+        if args.ranked_eligibility_probe {
+            bot.enable_ranked_eligibility_probe(args.server);
+        }
+        if args.search_gate.is_some() {
+            bot.set_public_search_enabled(false);
+        }
         println!(
             "bot#{index}: join sent ({:?}, lane {:?}, avatar {})",
             class,
@@ -163,6 +271,9 @@ fn main() {
             last_snapshot_at: None,
             last_shop_at: Instant::now() - UPGRADE_INTERVAL,
             pending_purchase: None,
+            last_snapshot: None,
+            cached_input_transforms: 0,
+            navigation_work: Default::default(),
         });
     }
 
@@ -185,24 +296,94 @@ fn main() {
 
     let mut last_telemetry = Instant::now() - Duration::from_secs(1);
     let mut last_phase = String::new();
+    let mut last_auth_telemetry = Instant::now() - Duration::from_secs(1);
+    let mut search_gate_open = args.search_gate.is_none();
+    let tick_interval = args
+        .input_hz
+        .map(|hz| Duration::from_secs_f64(1.0 / f64::from(hz)))
+        .unwrap_or(TICK_INTERVAL);
+    let mut next_tick = Instant::now();
+    let mut loop_work = harness::cadence::TimingHistogram::default();
+    let mut receive_work = harness::cadence::TimingHistogram::default();
+    let mut session_work = harness::cadence::TimingHistogram::default();
+    let mut telemetry_prepare_work = harness::cadence::TimingHistogram::default();
+    let mut telemetry_format_write_work = harness::cadence::TimingHistogram::default();
+    let mut wake_lateness = harness::cadence::TimingHistogram::default();
+    let mut overrun_rebases = 0_u64;
     loop {
+        let iteration_started = Instant::now();
+        if args.input_hz.is_some() {
+            wake_lateness.record(iteration_started.saturating_duration_since(next_tick));
+        }
+        if !search_gate_open
+            && args.search_gate.as_ref().is_some_and(|path| {
+                std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() == 0)
+            })
+        {
+            for runner in &runners {
+                runner.bot.set_public_search_enabled(true);
+            }
+            search_gate_open = true;
+        }
         let mut observed = None;
         let elapsed = started.elapsed().as_secs_f32();
         for (index, runner) in runners.iter_mut().enumerate() {
-            // One call per tick: `recv_snapshot` blocks briefly for a
-            // snapshot, then drains the buffered backlog internally and
-            // returns the newest one. (Do NOT loop over it: with snapshots
-            // arriving every 50 ms it would never return None, starving the
-            // ping/move side until the server times the bot out.)
-            let snapshot = runner
-                .bot
-                .recv_snapshot(Instant::now() + Duration::from_millis(20));
+            // The fixed-cadence mode only drains buffered input. Legacy callers
+            // get one blocking receive per tick; repeatedly waiting for world
+            // updates would starve this peer's own signed commands.
+            let poll_started = Instant::now();
+            let fresh = if args.input_hz.is_some() {
+                runner.bot.poll_snapshot()
+            } else {
+                runner
+                    .bot
+                    .recv_snapshot(Instant::now() + Duration::from_millis(20))
+            };
+            if args.input_hz.is_some() {
+                receive_work.record(poll_started.elapsed());
+            }
+            let session_started = Instant::now();
             runner.bot.ping();
+            if args.input_hz.is_some() {
+                session_work.record(session_started.elapsed());
+            }
+
+            let fresh_snapshot = fresh.is_some();
+            let snapshot = if let Some(snapshot) = fresh {
+                runner.last_snapshot_at = Some(Instant::now());
+                let snapshot = Arc::new(snapshot);
+                if args.input_hz.is_some() {
+                    runner.last_snapshot = Some(snapshot.clone());
+                }
+                Some(snapshot)
+            } else if args.input_hz.is_some()
+                && runner.bot.public_running()
+                && runner
+                    .last_snapshot_at
+                    .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+                && runner.last_snapshot.as_ref().is_some_and(|s| {
+                    runner.bot.snapshot_meta() == Some(s.meta())
+                        && matches!(s.game_state(), GameState::Running)
+                })
+            {
+                runner.last_snapshot.clone()
+            } else {
+                None
+            };
 
             let Some(snapshot) = snapshot else {
+                if args.public && index == 0 && last_status.elapsed() >= STATUS_INTERVAL {
+                    last_status = Instant::now();
+                    println!(
+                        "PUBLIC_BOT {}",
+                        serde_json::to_string(&runner.bot.public_status())
+                            .expect("public status serializes")
+                    );
+                }
                 // UDP joins can be lost while the server is still starting:
                 // resend until the bot sees itself in a snapshot.
-                if runner.my_id.is_none()
+                if !args.public
+                    && runner.my_id.is_none()
                     && runner.last_join_sent.elapsed() > Duration::from_secs(1)
                 {
                     let (team, class, avatar) = loadouts[index];
@@ -214,7 +395,6 @@ fn main() {
                 continue;
             };
 
-            runner.last_snapshot_at = Some(Instant::now());
             if index == 0 {
                 observed = Some(snapshot.clone());
             }
@@ -236,7 +416,9 @@ fn main() {
             if let Some(me) = &me {
                 runner.my_id = Some(my_id);
                 runner.my_team = Some(me.team);
-                runner.position = Some((me.x, me.z));
+                if fresh_snapshot || runner.position.is_none() {
+                    runner.position = Some((me.x, me.z));
+                }
 
                 // Death / respawn tracking: on revival, rejoin the lane from
                 // the nearest waypoint (the server teleported us to base).
@@ -253,7 +435,7 @@ fn main() {
             } else {
                 runner.my_id = None;
                 runner.position = None;
-                if runner.last_join_sent.elapsed() > Duration::from_secs(1) {
+                if !args.public && runner.last_join_sent.elapsed() > Duration::from_secs(1) {
                     let (team, class, avatar) = loadouts[index];
                     runner
                         .bot
@@ -333,7 +515,35 @@ fn main() {
                         brain
                     });
                     let view = WorldView::from_snapshot(&snapshot, my_id, team);
-                    let decision = brain.decide(x, z, &view);
+                    let mut decision = brain.decide(x, z, &view);
+                    // An explicit loopback victory rehearsal can focus objectives
+                    // instead of waiting for the lane AI's midgame rally. All
+                    // movement, range, cooldown and damage remain authoritative.
+                    if args.rush_objectives
+                        && let Some(objective) = view
+                            .structures
+                            .iter()
+                            .filter(|s| !view.protected_structures.contains(&s.id))
+                            .min_by(|a, b| {
+                                let distance =
+                                    |p: &harness::bot_ai::EnemyRef| (p.x - x).hypot(p.z - z);
+                                distance(a).total_cmp(&distance(b))
+                            })
+                    {
+                        let dx = x - objective.x;
+                        let dz = z - objective.z;
+                        let distance = dx.hypot(dz);
+                        decision.move_target = (distance > 6.0).then(|| {
+                            (
+                                objective.x + dx / distance * 6.0,
+                                objective.z + dz / distance * 6.0,
+                            )
+                        });
+                        decision.cast = Some(harness::TargetId {
+                            kind: objective.kind,
+                            id: objective.id,
+                        });
+                    }
                     let structures: Vec<_> = snapshot
                         .structures()
                         .iter()
@@ -347,19 +557,43 @@ fn main() {
                             },
                         })
                         .collect();
-                    if let Some(target) = decision.move_target.and_then(|target| {
-                        runner
-                            .navigation
-                            .next([x, z], [target.0, target.1], &structures)
-                    }) {
-                        let (nx, nz, yaw) = step_toward(
-                            (x, z),
-                            (target[0], target[1]),
-                            TICK_INTERVAL.as_secs_f32() * me.item_bonuses.move_speed_multiplier,
-                        );
-                        runner.bot.send_transform(nx, 0.5, nz, yaw);
-                        runner.position = Some((nx, nz));
+                    let transform = decision
+                        .move_target
+                        .and_then(|target| {
+                            let started = Instant::now();
+                            let next =
+                                runner
+                                    .navigation
+                                    .next([x, z], [target.0, target.1], &structures);
+                            if args.input_hz.is_some() {
+                                runner.navigation_work.record(started.elapsed());
+                            }
+                            next
+                        })
+                        .map(|target| {
+                            step_toward(
+                                (x, z),
+                                (target[0], target[1]),
+                                tick_interval.as_secs_f32() * me.item_bonuses.move_speed_multiplier,
+                            )
+                        })
+                        .unwrap_or((x, z, me.yaw));
+                    // This fresh alive controller deliberately holds movement/
+                    // aim even while waiting for minion support or a route.
+                    // Send the normal active-input packet like the native
+                    // client's held control; Ping alone is not gameplay input.
+                    let sent = runner.bot.try_send_transform_with_activity(
+                        transform.0,
+                        0.5,
+                        transform.1,
+                        transform.2,
+                        true,
+                    );
+                    if !fresh_snapshot && sent {
+                        runner.cached_input_transforms =
+                            runner.cached_input_transforms.saturating_add(1);
                     }
+                    runner.position = Some((transform.0, transform.1));
                     if let Some(slot) = choose_self_sustain(me, &runner.last_cast_at, now) {
                         runner.bot.cast_slot(harness::TargetId::player(my_id), slot);
                         runner.last_cast_at[slot as usize] = Some(now);
@@ -374,6 +608,19 @@ fn main() {
                 GameState::Running => {
                     // Dead: wait for the server-side respawn.
                     runner.navigation.clear();
+                    if args.input_hz.is_some() {
+                        let sent = runner.bot.try_send_transform_with_activity(
+                            x,
+                            0.5,
+                            z,
+                            me.as_ref().unwrap().yaw,
+                            false,
+                        );
+                        if !fresh_snapshot && sent {
+                            runner.cached_input_transforms =
+                                runner.cached_input_transforms.saturating_add(1);
+                        }
+                    }
                 }
                 GameState::Victory { .. } => {
                     // Server auto-rematches; brains restart from the base.
@@ -401,11 +648,12 @@ fn main() {
                 GameState::Victory { .. } => "victory",
             };
             if last_telemetry.elapsed() >= Duration::from_secs(1) || phase != last_phase {
+                let telemetry_started = Instant::now();
                 last_telemetry = Instant::now();
                 last_phase = phase.to_owned();
                 let players: Vec<_> = snapshot.players().iter().map(|p| serde_json::json!({
                     "id":p.id, "team":format!("{:?}",p.team), "class":p.hero_class,
-                    "level":p.level, "xp":p.xp, "gold":p.gold, "ranks":p.ranks,
+                    "is_bot":p.is_bot, "level":p.level, "xp":p.xp, "gold":p.gold, "ranks":p.ranks,
                     "inventory":p.inventory, "item_bonuses":p.item_bonuses, "shop_available":p.shop_available, "last_purchase":p.last_purchase,
                     "hp":p.hp, "max_hp":p.max_hp, "mana":p.mana, "max_mana":p.max_mana,
                     "x":p.x,"z":p.z,"action_sequence":p.action_sequence,"action_slot":p.action_slot
@@ -414,20 +662,99 @@ fn main() {
                     "id":s.id,"team":format!("{:?}",s.team),"hp":s.hp,"protected":s.protected
                 })).collect();
                 let peers: Vec<_> = runners.iter().map(|r| serde_json::json!({
-                    "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis())
+                    "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis()),
+                    "transport":r.bot.transport_stats(),
+                    "cached_input_transforms":r.cached_input_transforms,
+                    "navigation_work":r.navigation_work,
+                    "snapshot_meta":r.bot.snapshot_meta(),
+                    "public":r.bot.public_status().map(|s|serde_json::json!({"phase":s.phase,"profile_id":s.profile_id,"allocation":s.allocation,"error":s.error,"ranked_denied_counts":s.ranked_denied_counts,"ranked_accepted_count":s.ranked_accepted_count,"stale_career_packets":s.stale_career_packets,"authority_resets":s.authority_resets,"sent_transforms":s.sent_transforms,"sent_gameplay_commands":s.sent_gameplay_commands,"transform_gaps":s.transform_gaps,"command_work":s.command_work}))
                 })).collect();
-                println!(
-                    "BOT_SAMPLE {}",
-                    serde_json::json!({
-                        "elapsed_secs":started.elapsed().as_secs_f64(),"meta":snapshot.meta(),
-                        "phase":phase,"state":format!("{:?}",snapshot.game_state()),
-                        "players":players,"structures":structures,"peers":peers,
-                        "minions":snapshot.minions().len(),"buffs":snapshot.team_buffs().len(),
-                        "join_error":format!("{:?}",snapshot.join_error())
-                    })
-                );
+                let sample = serde_json::json!({
+                    "elapsed_secs":started.elapsed().as_secs_f64(),"meta":snapshot.meta(),
+                    "input_hz_requested":args.input_hz,
+                    "producer_timing": {"loop_work":loop_work, "receive_work":receive_work,
+                        "session_work":session_work,
+                        "telemetry_prepare_work":telemetry_prepare_work,
+                        "telemetry_format_write_work":telemetry_format_write_work,
+                        "wake_lateness":wake_lateness,"overrun_rebases":overrun_rebases,
+                        "bucket_upper_us":harness::cadence::TIMING_BUCKET_UPPER_US},
+                    "phase":phase,"state":format!("{:?}",snapshot.game_state()),
+                    "players":players,"structures":structures,"peers":peers,
+                    "minions":snapshot.minions().len(),"buffs":snapshot.team_buffs().len(),
+                    "join_error":format!("{:?}",snapshot.join_error())
+                });
+                telemetry_prepare_work.record(telemetry_started.elapsed());
+                let output_started = Instant::now();
+                harness::telemetry::write_sample(&mut std::io::stdout().lock(), &sample)
+                    .expect("write bot telemetry");
+                telemetry_format_write_work.record(output_started.elapsed());
             }
         }
-        std::thread::sleep(TICK_INTERVAL);
+        if args.telemetry
+            && args.public
+            && !search_gate_open
+            && last_auth_telemetry.elapsed() >= Duration::from_secs(1)
+        {
+            last_auth_telemetry = Instant::now();
+            let peers: Vec<_> = runners
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "public": r.bot.public_status().map(|s| serde_json::json!({
+                            "phase": s.phase, "profile_id": s.profile_id,
+                            "auth_age_ms": s.auth_age_ms, "error": s.error,
+                            "allocation": s.allocation,
+                        }))
+                    })
+                })
+                .collect();
+            println!(
+                "BOT_AUTH {}",
+                serde_json::json!({
+                    "elapsed_secs": started.elapsed().as_secs_f64(), "peers": peers,
+                })
+            );
+        }
+        if args.exit_after_result {
+            let statuses: Vec<_> = runners
+                .iter()
+                .filter_map(|r| r.bot.public_status())
+                .collect();
+            if statuses.len() == args.count
+                && statuses.iter().all(|s| {
+                    let (Some(result), Some(profile), Some(initial), Some(history)) =
+                        (&s.result, &s.profile, &s.initial_profile, &s.history)
+                    else {
+                        return false;
+                    };
+                    result.saved
+                        && (!args.ranked_eligibility_probe
+                            || (s.ranked_denied_counts == [0, 9]
+                                && s.ranked_accepted_count == Some(10)))
+                        && result.outcome == shared::career::MatchOutcome::Completed
+                        && profile.matches_played == initial.matches_played + 1
+                        && history.iter().any(|r| r.result_id == result.result_id)
+                })
+            {
+                println!(
+                    "BOT_RESULT {}",
+                    serde_json::to_string(&statuses).expect("saved results serialize")
+                );
+                return;
+            }
+        }
+        if args.input_hz.is_some() {
+            loop_work.record(iteration_started.elapsed());
+            next_tick += tick_interval;
+            let now = Instant::now();
+            if next_tick > now {
+                std::thread::sleep(next_tick - now);
+            } else if now.duration_since(next_tick) >= tick_interval {
+                overrun_rebases = overrun_rebases.saturating_add(1);
+                next_tick = now;
+            }
+        } else {
+            std::thread::sleep(TICK_INTERVAL);
+        }
     }
 }

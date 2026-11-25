@@ -1,0 +1,17 @@
+{
+  "ranked.tier.bronze": "Bronze",
+  "ranked.tier.silver": "Silver",
+  "ranked.tier.gold": "Gold",
+  "ranked.tier.platinum": "Platinum",
+  "ranked.tier.diamond": "Diamond",
+  "ranked.tier.master": "Master",
+  "ranked.tier.unknown": "Unrecognized tier",
+  "ranked.current_tier": "Rank: {tier}",
+  "ranked.placements": "Placement {played}/{total}",
+  "ranked.season.until": "Season {season} · until {until}",
+  "ranked.badge.participant": "Season participant",
+  "ranked.badge.earned": "Season {season} badge · {tier} · rating {rating}",
+  "ranked.placement_complete": "Placements complete: {tier}",
+  "ranked.promoted": "Promoted to {tier}",
+  "ranked.demoted": "Rank changed to {tier}"
+}

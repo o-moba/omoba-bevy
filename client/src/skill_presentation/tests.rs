@@ -122,6 +122,51 @@ fn effect(skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
 }
 
 #[test]
+fn last_spark_warning_holds_the_aim_pose_until_the_rocket_launches() {
+    let registry = profiles();
+    let class = shared::HeroClass::Wildspark;
+    let state = LoadoutState {
+        recipe: Some(shared::loadout::CoreId::Wildspark.preset()),
+        ..default()
+    };
+    let profile = registry.profile(SkillId::WildRocket).unwrap();
+    let mut effect = effect(SkillId::WildRocket, EffectVisualKind::BeamWarning);
+    let tail = category::tail_secs(SkillId::WildRocket).unwrap();
+    effect.remaining_secs = tail + 0.2;
+    let cue = |effect: &SkillEffectState| {
+        own_windup_cue(
+            &registry,
+            class,
+            Some(&state),
+            7,
+            std::slice::from_ref(effect),
+        )
+    };
+    let (_, warning) = cue(&effect).unwrap();
+    assert!(warning.hold);
+    assert_eq!(Some(&warning.motion), profile.windup.as_ref());
+
+    let telegraph = effect.clone();
+    effect.kind = EffectVisualKind::Rocket;
+    effect.remaining_secs = tail;
+    let rule = category::stage_rule(SkillId::WildRocket, effect.kind);
+    assert_eq!(
+        stage::transitions(rule, &telegraph, &effect),
+        [stage::Transition::KindFlipped]
+    );
+    assert!(stage::transitions(rule, &effect, &effect).is_empty());
+    let (_, release) = cue(&effect).unwrap();
+    assert!(!release.hold);
+    assert_eq!(release.motion, profile.release);
+
+    effect.remaining_secs -= 0.5;
+    assert!(
+        cue(&effect).is_none(),
+        "a late sighting does not replay the release"
+    );
+}
+
+#[test]
 fn hidden_or_other_caster_warning_does_not_drive_this_hero() {
     let state = LoadoutState {
         recipe: Some(shared::loadout::CoreId::Dawnweaver.preset()),
@@ -443,19 +488,25 @@ fn a_windup_is_a_loop_or_fitted_to_its_telegraph() {
         }
         held += 1;
     }
-    assert_eq!(held, 5);
-    // Dawn Ray: a half-second clip under a 0.8 s warning.
+    assert_eq!(held, 6);
+    // Dawn Ray: a charge authored for its 0.8 s warning plays at its own speed and forms its
+    // raised two-hand pose (the contact) at least 0.1 s before the ray fires.
     let ray = target.profile(SkillId::DawnRay).unwrap();
-    assert_eq!(
-        MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate,
-        0.625
-    );
-    // A row that does not ask for the fit plays its windup as the clip is.
-    let unfitted = SkillPresentation::target_with(|config| {
-        config["skills"]["dawn_ray"]["motion"]["fit_windup"] = false.into();
-    });
-    let ray = unfitted.profile(SkillId::DawnRay).unwrap();
-    assert_eq!(MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate, 1.0);
+    let charge = MotionCue::windup(ray, SkillId::DawnRay).unwrap();
+    assert_eq!((charge.motion.as_str(), charge.rate), ("spell_charge", 1.0));
+    let telegraph = category::telegraph_secs(SkillId::DawnRay).unwrap();
+    let contact = library.contact(&charge.motion).unwrap() / charge.rate;
+    assert!(contact <= telegraph - 0.1, "contact at {contact} s");
+    // A row that does not ask for the fit plays its windup as the clip is: the half-second
+    // enter clip is slowed to 0.625 only when it is fitted.
+    for (fit, rate) in [(true, 0.625), (false, 1.0)] {
+        let edited = SkillPresentation::target_with(|config| {
+            config["skills"]["dawn_ray"]["windup"] = "spell_prepare".into();
+            config["skills"]["dawn_ray"]["motion"]["fit_windup"] = fit.into();
+        });
+        let ray = edited.profile(SkillId::DawnRay).unwrap();
+        assert_eq!(MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate, rate);
+    }
     // Any clip can be fitted, and the fit is clamped to the rates a row may author: a
     // 0.17 s pose is not stretched to a fifth of its speed, nor a 1.5 s swing rushed past
     // twice its speed.
@@ -1426,7 +1477,7 @@ fn budget_from_data() {
             recasts: 7,
             areas: 3,
             moves: 10,
-            links: 14,
+            links: 13,
             impacts: 51 + 18,
             expires: 12,
         }
@@ -1747,13 +1798,13 @@ fn target_bodies_fit_the_part_and_material_budgets() {
             bodies_seen += 1;
         }
     }
-    assert_eq!(bodies_seen, 33);
+    assert_eq!(bodies_seen, 34);
     // Only skills on a long cooldown spend more than twelve parts.
     assert_eq!(
         long_cooldown,
         [
-            ("dawn_ray", 16),
-            ("dawn_ray", 16),
+            ("dawn_ray", 18),
+            ("dawn_ray", 18),
             ("iron_boundary", 16),
             ("orbital_collapse", 13),
             ("winter_divide", 15)

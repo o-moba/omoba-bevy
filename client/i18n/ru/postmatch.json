@@ -15,5 +15,8 @@
   "postmatch.button.play_again": "Сыграть ещё раз",
   "postmatch.button.back_to_menu": "В меню",
   "postmatch.gold_earned": "Золото",
-  "postmatch.total": "Всего"
+  "postmatch.total": "Всего",
+  "postmatch.summary.remade": "Ранний ремейк · Обычные награды за матч не начислены",
+  "postmatch.summary.surrender": "Матч завершён сдачей команды · {minutes} мин",
+  "postmatch.outcome.remade": "Ремейк"
 }

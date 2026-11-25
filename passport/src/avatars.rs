@@ -6,8 +6,9 @@
 //! startup and call [`init_avatar_roster`]; [`load_roster`] itself is a pure
 //! function over candidate paths and a reader.
 
-use ekza_bevy_sdk::passport::{ProtectedAvatar, protected_slug};
+use ekza_bevy_sdk::passport::{ProtectedAvatar, is_protected_slug, protected_slug};
 use serde::{Deserialize, Serialize};
+use shared::HeroClass;
 use std::{
     fmt, io,
     path::{Path, PathBuf},
@@ -17,8 +18,8 @@ use std::{
 /// Operator override of the live avatar manifest.
 pub const AVATAR_MANIFEST_ENV: &str = "OMOBA_AVATAR_MANIFEST";
 
-/// One shipped avatar. All roster avatars are CC0 VRM models staged as GLB
-/// under `client/assets/avatars/<slug>.glb` with retargeted animation clips.
+/// One roster avatar. Bundled entries stage GLB under `client/assets/avatars/`.
+/// Humanoid models can use embedded clips or the shared runtime motion library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AvatarDefinition {
     pub slug: String,
@@ -28,6 +29,10 @@ pub struct AvatarDefinition {
     pub source_url: String,
     #[serde(default)]
     pub author: Option<String>,
+    /// The registry's attribution line for an Ekza store avatar, shown with
+    /// the licence (see [`crate::attribution`]). Display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<String>,
     /// Thumbnail file name relative to `client/assets/avatars/`, if shipped.
     #[serde(default)]
     pub thumbnail: Option<String>,
@@ -46,15 +51,13 @@ struct AvatarManifest {
     avatars: Vec<AvatarDefinition>,
 }
 
-/// The committed roster manifest, embedded at compile time as the fallback
-/// when no manifest file is found on disk.
+/// The committed roster supplies class-default entries and the full fallback
+/// roster when no manifest file is found on disk.
 const AVATAR_MANIFEST_JSON: &str = include_str!("../../client/assets/avatars/manifest.json");
 
 /// Where the live roster manifest is looked up. Tools like `arena-sync`
-/// append avatars to the file on disk, so the file (not the embedded copy) is
-/// the source of truth when present. Client and server must see the same file
-/// or joins with runtime-added avatars will be rejected by the server's slug
-/// validation. There is no lookup relative to the working directory.
+/// append avatars to the file on disk. Client and server must see the same file
+/// for runtime-added avatars. The packaged class defaults are always included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RosterSource {
     /// `OMOBA_AVATAR_MANIFEST`, tried first.
@@ -157,21 +160,26 @@ fn parse_manifest(
         .collect())
 }
 
-/// Load the roster: the first readable and parseable candidate wins, the
-/// embedded manifest is the fallback. Entries that break the store-avatar rule
-/// are skipped with a warning. Pure apart from `read`.
+/// The first readable and parseable candidate supplies the optional roster.
+/// Class defaults always use their bundled definitions. Entries that break the
+/// store-avatar rule are skipped with a warning. Pure apart from `read`.
 pub fn load_roster(
     candidates: &[PathBuf],
     read: impl Fn(&Path) -> io::Result<String>,
 ) -> LoadedRoster {
     let mut warnings = Vec::new();
+    let embedded = parse_manifest(AVATAR_MANIFEST_JSON, &RosterOrigin::Embedded, &mut warnings)
+        .expect("embedded avatar manifest must parse");
+    let is_class_default = |avatar: &AvatarDefinition| is_class_default_slug(&avatar.slug);
     for candidate in candidates {
         let Ok(raw) = read(candidate) else {
             continue;
         };
         let origin = RosterOrigin::File(candidate.clone());
         match parse_manifest(&raw, &origin, &mut warnings) {
-            Ok(avatars) => {
+            Ok(mut avatars) => {
+                avatars.retain(|avatar| !is_class_default(avatar));
+                avatars.extend(embedded.into_iter().filter(is_class_default));
                 return LoadedRoster {
                     avatars,
                     origin,
@@ -184,12 +192,9 @@ pub fn load_roster(
             )),
         }
     }
-    let origin = RosterOrigin::Embedded;
-    let avatars = parse_manifest(AVATAR_MANIFEST_JSON, &origin, &mut warnings)
-        .expect("embedded avatar manifest must parse");
     LoadedRoster {
-        avatars,
-        origin,
+        avatars: embedded,
+        origin: RosterOrigin::Embedded,
         warnings,
     }
 }
@@ -280,6 +285,21 @@ pub fn normalize_avatar_slug(raw: Option<&str>) -> Option<&'static str> {
     avatar_definition(slug).map(|avatar| avatar.slug.as_str())
 }
 
+pub fn is_class_default_slug(slug: &str) -> bool {
+    HeroClass::ALL
+        .into_iter()
+        .any(|class| class.default_avatar_slug() == slug)
+}
+
+/// Resolve a combat appearance before catalogue and ownership checks. Hosted
+/// skins still need normal admission. A bundled look belongs to its own class.
+pub fn match_avatar_slug(class: HeroClass, requested: Option<&str>) -> &str {
+    requested
+        .map(str::trim)
+        .filter(|slug| is_protected_slug(slug))
+        .unwrap_or(class.default_avatar_slug())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +336,7 @@ mod tests {
             license: "See creator terms".into(),
             source_url: "https://example.test/store.glb".into(),
             author: None,
+            attribution: None,
             thumbnail: None,
             passport,
             free: false,
@@ -346,14 +367,43 @@ mod tests {
     }
 
     #[test]
-    fn approved_release_roster_retains_fifteen_heroes_and_removed_selections_fall_back() {
+    fn approved_release_roster_contains_legacy_avatars_and_class_defaults() {
         let shipped: AvatarManifest = serde_json::from_str(AVATAR_MANIFEST_JSON).unwrap();
-        assert_eq!(shipped.avatars.len(), 15);
+        assert_eq!(shipped.avatars.len(), 15 + HeroClass::ALL.len());
+        for class in HeroClass::ALL {
+            let slug = class.default_avatar_slug();
+            let model_id = if class == HeroClass::Cleric {
+                "healer"
+            } else {
+                class.id()
+            };
+            assert_eq!(slug, format!("set01-{model_id}"));
+            assert!(shipped.avatars.iter().any(|avatar| avatar.slug == slug));
+            assert_eq!(normalize_avatar_slug(Some(slug)), Some(slug));
+        }
         for removed in ["el-bueno", "slime-green", "slime-blue", "wendigo-hollow"] {
             assert!(shipped.avatars.iter().all(|avatar| avatar.slug != removed));
             assert_eq!(normalize_avatar_slug(Some(removed)), None);
             assert_eq!(normalize_avatar_slug(Some(&format!(" {removed} "))), None);
             assert!(avatar_definition(removed).is_none());
+        }
+    }
+
+    #[test]
+    fn combat_appearance_falls_back_to_the_class_and_preserves_hosted_requests_for_admission() {
+        let hosted = protected_slug(&protected('4', 'a'));
+        for class in HeroClass::ALL {
+            let default = class.default_avatar_slug();
+            assert_eq!(match_avatar_slug(class, None), default);
+            assert_eq!(match_avatar_slug(class, Some("agnes")), default);
+            assert_eq!(match_avatar_slug(class, Some("ekza-invalid")), default);
+            assert_eq!(match_avatar_slug(class, Some(&hosted)), hosted);
+            for other in HeroClass::ALL {
+                assert_eq!(
+                    match_avatar_slug(class, Some(other.default_avatar_slug())),
+                    default
+                );
+            }
         }
     }
 
@@ -439,7 +489,10 @@ mod tests {
                 PathBuf::from("/package/assets/avatars/manifest.json"),
             ]
         );
-        let packaged = manifest(&[definition("packaged".into(), None)]);
+        let packaged = manifest(&[
+            definition("packaged".into(), None),
+            definition("set01-warrior".into(), None),
+        ]);
         let files = HashMap::from([
             (
                 PathBuf::from("/operator/roster.json"),
@@ -462,13 +515,18 @@ mod tests {
             loaded.origin,
             RosterOrigin::File("/package/assets/avatars/manifest.json".into())
         );
-        assert_eq!(loaded.avatars.len(), 1);
+        assert_eq!(loaded.avatars.len(), 1 + HeroClass::ALL.len());
         assert_eq!(loaded.avatars[0].slug, "packaged");
+        assert_eq!(loaded.avatars[1].slug, "set01-warrior");
+        assert_eq!(loaded.avatars[1].author.as_deref(), Some("Wotori"));
         assert_eq!(loaded.warnings.len(), 1);
         assert!(loaded.warnings[0].contains("/operator/roster.json"));
         assert_eq!(
             loaded.summary(),
-            "Avatar roster: 1 avatars from /package/assets/avatars/manifest.json"
+            format!(
+                "Avatar roster: {} avatars from /package/assets/avatars/manifest.json",
+                1 + HeroClass::ALL.len()
+            )
         );
         // No file at all: the embedded committed manifest, no warnings.
         let embedded = load_roster(
@@ -480,11 +538,14 @@ mod tests {
             read,
         );
         assert_eq!(embedded.origin, RosterOrigin::Embedded);
-        assert_eq!(embedded.avatars.len(), 15);
+        assert_eq!(embedded.avatars.len(), 15 + HeroClass::ALL.len());
         assert!(embedded.warnings.is_empty());
         assert_eq!(
             embedded.summary(),
-            "Avatar roster: 15 avatars from embedded manifest"
+            format!(
+                "Avatar roster: {} avatars from embedded manifest",
+                15 + HeroClass::ALL.len()
+            )
         );
     }
 
@@ -512,13 +573,15 @@ mod tests {
         let raw = manifest(&entries);
         let loaded = load_roster(std::slice::from_ref(&path), |_| Ok(raw.clone()));
         assert_eq!(loaded.origin, RosterOrigin::File(path));
+        let slugs: Vec<_> = loaded
+            .avatars
+            .iter()
+            .map(|avatar| avatar.slug.as_str())
+            .collect();
+        assert_eq!(&slugs[..2], ["free-hero", valid_slug.as_str()]);
         assert_eq!(
-            loaded
-                .avatars
-                .iter()
-                .map(|avatar| avatar.slug.as_str())
-                .collect::<Vec<_>>(),
-            ["free-hero", valid_slug.as_str()]
+            &slugs[2..],
+            HeroClass::ALL.map(HeroClass::default_avatar_slug)
         );
         assert_eq!(loaded.warnings.len(), 4, "{:?}", loaded.warnings);
         assert!(

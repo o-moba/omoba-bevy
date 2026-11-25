@@ -15,12 +15,35 @@ use bevy::{
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
     window::PrimaryWindow,
 };
+use shared::{HeroClass, handheld::HandheldSelection};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
 
 pub(crate) struct SdkPackQaPlugin;
+const STOCK_TEST_WEAPON: &str = "forge-hammer";
+
+fn sdk_qa_class(weapon: &str) -> Option<HeroClass> {
+    let handheld = HandheldSelection::Item(weapon.to_owned());
+    let class = HeroClass::Cinderforge;
+    handheld.compatible(class).then_some(class)
+}
+
+#[cfg(test)]
+#[test]
+fn sdk_avatar_smoke_uses_admitted_stock_and_hosted_props() {
+    assert_eq!(
+        sdk_qa_class(STOCK_TEST_WEAPON),
+        Some(HeroClass::Cinderforge)
+    );
+    assert_eq!(
+        sdk_qa_class(shared::handheld::REVIEWED_FORGE_HAMMER),
+        Some(HeroClass::Cinderforge)
+    );
+    assert_eq!(sdk_qa_class("forge-sword"), None);
+}
+
 #[derive(serde::Deserialize)]
 struct Pack {
     items: Vec<Item>,
@@ -38,6 +61,9 @@ struct Qa {
     stage: u8,
     frames: u32,
     match_index: usize,
+    hero_class: HeroClass,
+    weapon: String,
+    test_weapon_through_collection: bool,
     started: Instant,
     readback: bool,
     captures: Vec<serde_json::Value>,
@@ -72,6 +98,12 @@ impl Plugin for SdkPackQaPlugin {
         } else {
             0
         };
+        let requested_weapon = std::env::var("OMOBA_SDK_PACK_QA_WEAPON").ok();
+        let test_weapon_through_collection = requested_weapon.is_some();
+        let weapon = requested_weapon.unwrap_or_else(|| STOCK_TEST_WEAPON.to_owned());
+        let hero_class = sdk_qa_class(&weapon).unwrap_or_else(|| {
+            panic!("SDK avatar smoke needs a class that can wear other avatars and use '{weapon}'")
+        });
         app.insert_resource(Qa {
             directory,
             items: pack.items,
@@ -79,6 +111,9 @@ impl Plugin for SdkPackQaPlugin {
             stage,
             frames: 0,
             match_index,
+            hero_class,
+            weapon,
+            test_weapon_through_collection,
             started: Instant::now(),
             readback: false,
             captures: vec![],
@@ -137,7 +172,7 @@ fn prepare(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut buttons: super::TestIdPresses,
     preview: Res<AvatarPreview>,
-    selection: Res<TeamSelection>,
+    mut selection: ResMut<TeamSelection>,
     help: Res<crate::help_overlay::HelpOverlayVisible>,
     mut camera: ResMut<crate::camera::CameraState>,
     mut settings: ResMut<crate::camera::CameraSettings>,
@@ -151,14 +186,19 @@ fn prepare(
     }
     qa.frames += 1;
     if qa.stage < 10 {
-        // Bevy 0.18 re-enters identical states with set(), resetting the preview.
-        next.as_mut().set_if_neq(AppScreen::Collection);
+        // Avoid re-entering the current state and resetting the preview.
+        next.as_mut().set_if_different(AppScreen::Collection);
     }
     if qa.stage == 0 {
-        let weapon = std::env::var("OMOBA_SDK_PACK_QA_WEAPON").ok();
-        let equipment_ready = weapon.as_ref().is_none_or(|id| {
-            selection.handheld == shared::handheld::HandheldSelection::Item(id.clone())
-        });
+        if selection.hero_class != qa.hero_class {
+            selection.pick_class(qa.hero_class);
+        }
+        let weapon = qa
+            .test_weapon_through_collection
+            .then_some(qa.weapon.as_str());
+        let equipment_ready = weapon.is_none_or(
+            |id| matches!(&selection.handheld, HandheldSelection::Item(value) if value == id),
+        );
         if equipment_ready && preview.slug.as_deref() == Some(&qa.items[qa.index].slug) {
             qa.collection_step = if weapon.is_some() { 3 } else { 0 };
             qa.stage = 1;
@@ -405,22 +445,21 @@ fn observe(
             {
                 return;
             }
-            if let Ok(id) = std::env::var("OMOBA_SDK_PACK_QA_WEAPON") {
-                if omoba_passport::weapon_store::model_state(&id)
+            if qa.test_weapon_through_collection
+                && omoba_passport::weapon_store::model_state(&qa.weapon)
                     != omoba_passport::store::ModelState::Ready
-                {
-                    return;
-                }
-                selection.handheld = shared::handheld::HandheldSelection::Item(id);
+            {
+                return;
             }
-            selection.hero_class = shared::HeroClass::Warrior;
+            selection.hero_class = qa.hero_class;
+            selection.handheld = HandheldSelection::Item(qa.weapon.clone());
             selection.avatar = Some(slug.clone());
             selection.character = CharacterChoice::Cube;
             outgoing.write(NetworkCommand::Join {
                 handheld: selection.handheld.clone(),
                 team: Team::Green,
                 character: CharacterChoice::Cube,
-                hero_class: shared::HeroClass::Warrior,
+                hero_class: qa.hero_class,
                 avatar: Some(slug),
                 sprite_character: None,
             });
@@ -441,13 +480,10 @@ fn observe(
             {
                 return;
             }
-            if !held.iter().any(|(w, _, _, scene)| {
-                w.owner == entity
-                    && w.id
-                        == std::env::var("OMOBA_SDK_PACK_QA_WEAPON")
-                            .unwrap_or_else(|_| "forge-sword".into())
-                    && loaded(scene)
-            }) {
+            if !held
+                .iter()
+                .any(|(w, _, _, scene)| w.owner == entity && w.id == qa.weapon && loaded(scene))
+            {
                 return;
             }
             qa.start = Some(pose.translation);

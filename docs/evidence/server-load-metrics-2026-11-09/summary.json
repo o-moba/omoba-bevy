@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "source_parent": "c97225e5f0910090b0790a6d316cd4b7684ecc6e",
+  "files": {
+    "live-v2--instrumented-10--report.json.gz": {
+      "source_path": ".agent/codex-ranked-readiness/load-server-metrics/live-v2/instrumented-10/report.json",
+      "raw_bytes": 129934,
+      "raw_sha256": "f268a0deb71676c6a2e3ba6f0ee01670473a69f94f12292191782d62cf915d1c",
+      "gzip_sha256": "b8fc995e7571a8343cf0fdc266c1c962d15753f6e4a50dd4f05cfafd61ab62c8"
+    },
+    "live-v2--instrumented-10--load-metrics.json.gz": {
+      "source_path": "live-v2/instrumented-10/load-metrics.json",
+      "raw_bytes": 96830,
+      "raw_sha256": "98b02974713c9cf7844f5837a3d03790b23b286ed1d6dc5771f1512b29284d3c",
+      "gzip_sha256": "7dadeacd6d3b54b1d423f3851d79a542baa3a0de6d42dc6a0135e84ece48250b"
+    },
+    "live-v2--instrumented-1000--report.json.gz": {
+      "source_path": ".agent/codex-ranked-readiness/load-server-metrics/live-v2/instrumented-1000/report.json",
+      "raw_bytes": 11677131,
+      "raw_sha256": "f5746f64203e78a68102e8d3d700ae98abc7a1b0d221c119e12ca799ff662ad2",
+      "gzip_sha256": "7ef18d0d26c94391cf3c663b7a39e12b305bf09d07b2195104e2fad2716412c8"
+    },
+    "live-v2--instrumented-1000--load-metrics.json.gz": {
+      "source_path": "live-v2/instrumented-1000/load-metrics.json",
+      "raw_bytes": 39909432,
+      "raw_sha256": "488391b46b37f3407e7664c2da4a7a2cb9d2c4583fd56b88f77f577174051522",
+      "gzip_sha256": "827a4f2e744ded7c66628398e47f7666b7d976eba911781221648836a7377473"
+    },
+    "live-v2--isolated-summary.json.gz": {
+      "source_path": ".agent/codex-ranked-readiness/load-server-metrics/live-v2/isolated-summary.json",
+      "raw_bytes": 28285,
+      "raw_sha256": "f83724604540befbe2c0196529899bebfa69d12ce7122876ff00851bff3aa4b0",
+      "gzip_sha256": "496c6ee1ad7277fecb8fa2f04b8e5710fa87f908f5bd5dbf94dd193eb67bcf78"
+    },
+    "build.json.gz": {
+      "source_path": ".agent/codex-ranked-readiness/load-server-metrics/build.json",
+      "raw_bytes": 37361,
+      "raw_sha256": "fda6bf7ecdf6fa92be93ff9a53bf9c7c1c98ce5d6976165469a0ad3c11d203a5",
+      "gzip_sha256": "6c80176b1573de2a16a285c2b106cf5a92e0beb58e7208289cd70473fdcb65b3"
+    },
+    "full-server-tests.log.gz": {
+      "source_path": ".agent/codex-ranked-readiness/load-server-metrics/full-server-tests.log",
+      "raw_bytes": 57607,
+      "raw_sha256": "84a06caa64fc5d7c94e27d0cac20a0fc61688fd14c2883c1b2cb8f097107fc95",
+      "gzip_sha256": "49a065f58d24d0b4b6f2bc5ab15f1ef92ffb4c722a0bf1c8fc15fa4d5b92b586"
+    },
+    "python-tests.log.gz": {
+      "source_path": ".agent/codex-ranked-readiness/load-server-metrics/python-tests.log",
+      "raw_bytes": 111,
+      "raw_sha256": "c3030e758a54e1d8b6d7e2fd5113b0115a5965ed0647060860940b92e97d4709",
+      "gzip_sha256": "1bbc47117ff787b4411e912d1ebacf1286466c237174d071fbb880a18a34e420"
+    },
+    "bots-build.json.gz": {
+      "source_path": ".agent/codex-ranked-readiness/load-input20/build.json",
+      "raw_bytes": 36888,
+      "raw_sha256": "894c85d3243f60bba2372f6296a4ccea29b7ece631f3ad071bbe52af90be2143",
+      "gzip_sha256": "97b95bbe7203c61a356fb976ab99ee00d79410693d84853a293a8218f1a55d69"
+    }
+  }
+}

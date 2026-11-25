@@ -57,7 +57,7 @@ The local selection's collection and embedded metadata declare CC0; copy the act
 Start with EYEWizard to exercise the whole live path before repeating it for the batch.
 
 1. Open `/studio?view=new`. Enter the original name, description, usage license and attribution.
-2. Upload that entry's original `model.vrm`, not its locally generated GLB. Source limit is 50 MiB.
+2. Upload that entry's original `model.vrm`, not its locally generated GLB. Source limit is 50 MiB. VRM 0.x and VRM 1.0 (`VRMC_vrm`) sources both build an Omoba rendition; a VRM 1.0 rendition is turned to face -Z like VRM 0.x (see [humanoid motion](humanoid-motion.md#studiosdk-contract)).
 3. Optionally upload a real PNG cover, at most 5 MiB and 4096×4096. Many R3 files named `thumbnail.png` actually contain JPEG bytes: convert them to PNG or omit the cover; renaming is insufficient.
 4. Choose **Upload & submit**. Wait for processing and inspect failures instead of treating upload success as publication.
 5. A curator opens **Review queue**, inspects the exact revision, then chooses **Approve & publish**.

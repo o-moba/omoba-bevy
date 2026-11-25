@@ -6,8 +6,15 @@ pub(crate) struct SupporterStoreKitPlugin;
 impl Plugin for SupporterStoreKitPlugin {
     fn build(&self, _app: &mut App) {
         #[cfg(target_os = "ios")]
-        _app.init_resource::<ios::Bridge>()
-            .add_systems(Update, ios::tick);
+        _app.init_resource::<ios::Bridge>().add_systems(
+            Update,
+            ios::tick
+                .run_if(crate::legal::bound_and_accepted)
+                .run_if(|| {
+                    crate::account_region::payment_providers()
+                        .contains(&shared::market::PaymentProvider::Apple)
+                }),
+        );
     }
 }
 
@@ -267,5 +274,6 @@ mod ios {
                 bridge.retry_at = Instant::now() + Duration::from_secs(60);
             }
         }
+        platform.pending_receipts = !bridge.receipts.is_empty();
     }
 }

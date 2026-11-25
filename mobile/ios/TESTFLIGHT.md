@@ -1,5 +1,17 @@
 # TestFlight from the primary checkout
 
+**Daily development:** use **Omoba Dev** and the [Russian operating guide](../../docs/dev-quickstart.md#как-не-перепутать-dev-и-prod).
+Production Archive (including unsigned verification) now requires clean source,
+an exact stable `vMAJOR.MINOR.PATCH` tag, a commit reachable from the local
+`origin/main`, and either `main` or detached HEAD. Fetch refs before a deliberate
+release. This local accident guard is not independent release approval and is
+absent from older checkouts until the change is integrated there. Normal dev
+archives and production Run builds are not gated by this source convention.
+The legacy `prepare_testflight.py` path described historically below now refuses
+the production Bundle ID, including `--check`: an existing binary cannot inherit
+the current checkout's source eligibility. Rebuild production through the guarded
+Xcode scheme. Prebuilt dev app packaging remains supported with its DEV icon.
+
 TestFlight installs the app over the internet. It does not require a USB cable,
 wireless Xcode pairing, a registered device UDID, or Developer Mode on the tester's
 phone. The distributor needs an active Apple Developer Program membership and
@@ -13,7 +25,13 @@ From the repository root:
 open mobile/ios/Omoba.xcodeproj
 ```
 
-The project and shared **Omoba** scheme are versioned. The previous September
+The project and shared **Omoba** and **Omoba Dev** schemes are versioned.
+Select **Omoba Dev** to work with the test contour. It uses `Debug Dev` for Run,
+`Release Dev` for Archive, bundle ID `space.ekza.omoba.dev`, product `OmobaDev.app`,
+the DEV icon and `lobby.dev.omoba.io:4100`. It ignores a stale local contour or
+server setting. **Omoba** remains the production app. Both install side by side.
+See [the dev quickstart](../../docs/dev-quickstart.md) for the Apple setup and
+first test session. The production steps below apply to the Omoba scheme. The previous September
 workflow opened a prepared `.xcarchive` in Organizer; historical archives under
 `builds/testflight-*` are not source projects and do not rebuild the latest game.
 
@@ -40,9 +58,15 @@ Use the ignored `mobile/ios/Omoba.local.xcconfig` for local settings, for exampl
 ```xcconfig
 DEVELOPMENT_TEAM = YOUR_EXISTING_TEAM_ID
 CURRENT_PROJECT_VERSION = 12
-// Optional reachable game server; omit to choose through SERVER in the game.
+// Optional reachable game server compiled in (production has no in-game server choice).
 OMOBA_GAME_SERVER = 192.168.1.10:4000
 ```
+
+The scheme selects `OMOBA_CONTOUR`; do not set it in the local file.
+`OMOBA_GAME_SERVER` in this file applies to the Omoba scheme only. Omoba Dev
+starts with the Dev profile; use its in-game Connection panel for Local or Custom.
+`scripts/release.py build ios` selects the matching scheme and sets contour and
+server explicitly (from `--contour` and `--server`), then checks the archived bundle ID.
 
 Selecting a team in Xcode can write it into `project.pbxproj`; move that personal
 setting into the ignored local configuration before committing source. Do not
@@ -51,11 +75,13 @@ The helper searches Rust in `~/.cargo/bin`, including when Xcode is opened from
 Finder. Rust's `aarch64-apple-ios` target and the selected Xcode iPhoneOS SDK are
 required; `python3 mobile/ios/build_device.py --check` verifies the prerequisites.
 
-Both Xcode configurations initially use the existing optimized Cargo `dev` profile
+The Xcode configurations initially use the existing optimized Cargo `dev` profile
 (workspace code opt-level 1, dependencies 3) and retained debug symbols. Set
 `OMOBA_CARGO_PROFILE = release` locally for Rust release optimization; the first
-build uses a separate cache and can take longer. Cargo cache defaults to
-`target/iphone-cargo`; `OMOBA_CARGO_TARGET_DIR` can override it. Xcode Clean does
+build compiles a separate profile and can take longer. Cargo uses the primary
+checkout's `target`, including when Xcode opens a linked worktree. Set
+`OMOBA_CARGO_TARGET_DIR` (or `CARGO_TARGET_DIR`) to the approved shared cache B
+when needed; never create a per-worktree Rust cache. Xcode Clean does
 not remove retained packages in `builds/` or that reusable Cargo cache.
 
 The local verification command intentionally does **not** sign or upload:
@@ -176,12 +202,22 @@ blanket tracking/encryption declaration is inserted. Re-audit the manifest when
 the app or SDKs change, and investigate Apple validation feedback rather than
 adding unrelated API reasons to silence warnings.
 
+## OMOBA Dev (internal TestFlight)
+
+The dev contour is a separate app, `space.ekza.omoba.dev` ("OMOBA Dev", DEV-ribbon
+icon, dev connection profiles), with its own App Store Connect record for internal
+testers only. It installs beside Omoba Beta. Build and upload with
+`python3 scripts/release.py build ios --contour dev --upload` (or `OMOBA_CONTOUR = dev`
+in `Omoba.local.xcconfig` for an Xcode Run). One-time setup: the owner checklist in
+[docs/connection-profiles.md](../../docs/connection-profiles.md#owner-checklist-once).
+
 ## Playing after installation
 
 TestFlight distributes the **client**, not a game server. For the existing home
 kit, start `builds/iphone-home-2026-09-16/1-Start-server.command` on the Mac, put
 Mac and iPhone on a network that allows them to communicate, and enter the printed
-LAN `IP:4000` using **SERVER → CONNECT**. Xcode Wi-Fi pairing is not required for
+LAN `IP:4000` with the OMOBA Dev app (**Connection → Custom → Use**, then reopen
+the app; the production app only plays on its compiled lobby). Xcode Wi-Fi pairing is not required for
 this game connection. If LAN communication also fails, a reachable hosted game
 server is required. No public 24/7 server deployment is claimed by this workflow.
 

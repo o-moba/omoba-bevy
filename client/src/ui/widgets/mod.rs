@@ -15,6 +15,7 @@
 //! `crate::i18n::Localized` key, which the widget spawns filled in the active
 //! language and which follows later language changes.
 // i18n-strict
+use crate::ui::Button;
 use bevy::prelude::*;
 
 use super::{
@@ -659,13 +660,10 @@ pub(crate) fn paint_focus_ring(
         .and_then(|focus| focus.focused())
         .and_then(|entity| buttons.get(entity).ok())
         .and_then(|(node, transform, clip, offset)| {
-            let mut rect = super::focus::node_rect(node, transform);
-            if let Some(clip) = clip {
-                rect = rect.intersect(clip.clip);
-            }
+            let rect = super::clipped_ui_rect(super::focus::node_rect(node, transform), clip);
             let scale = node.inverse_scale_factor();
             let offset = offset.map_or(border::FOCUS_OFFSET, |offset| offset.0);
-            let corner = node.border_radius().top_left * scale;
+            let corner = node.border_radius().top_left.x * scale;
             (!rect.is_empty() && rect.min.is_finite() && rect.max.is_finite()).then(|| {
                 (
                     Rect::from_corners(rect.min * scale, rect.max * scale),
@@ -755,7 +753,7 @@ pub(crate) fn paint_preview_rings(
         }
         let offset = offset.map_or(border::FOCUS_OFFSET, |offset| offset.0);
         // The control's own corner (pills stay round); `radius.md` otherwise.
-        let corner = match node.border_radius.top_left {
+        let corner = match node.border_radius.top_left.x {
             Val::Px(corner) if corner > 0.0 => corner,
             _ => radius::MD,
         };

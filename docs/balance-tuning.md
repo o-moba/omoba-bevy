@@ -237,6 +237,11 @@ kits, base HP, growth caps and basic attacks in
 `shared/assets/catalog/items.json`; the shared progression curve in
 `shared/src/hero_balance.rs`.
 
+Bot behaviour levels are measured separately, with full bot-only 5v5 rounds
+rather than duels: the difficulty simulator `common/tests/bot_difficulty_sim.rs`
+(docs/plans/bot-personas.md, S3). Re-run it after a balance change that moves
+fights or tower pushes, because its calibrated level knobs assume today's kits.
+
 ## Five classes and the Warden (0.23.0-rc.6)
 
 The Warden fills the Jungle duty. Its duel strength sits deliberately just below
@@ -256,9 +261,22 @@ classes:
 All 75 rows per level keep the design bounds: level-one minimum 6.12s and median
 9.51s, level-ten minimum 2.38s.
 
-Jungle economy per clear of one team's three camps (40s respawn): any class
-earns 115 gold and 190 XP; the Warden earns 161 gold and 238 XP and kills each
-camp about 26% faster. One lane wave pays 54 gold and 270 XP per minute, so the
-forest is now the Warden's best income without making it a better lane for
-other classes. Boss rewards are flat for everyone; the Warden only hits bosses
-15% harder. These numbers are beta tuning, not measured human win rates.
+In the original three-camp route (40s respawn), ordinary rewards totalled
+115 gold and 190 XP. The Warden earned 161 gold and 238 XP and cleared those
+camps about 26% faster in that probe.
+
+With launch tuning, the Warden deals +35% damage to ordinary camps and earns
++40% gold per camp. Every class receives the same camp XP. The original route
+would now give the Warden 190 XP. The Warden deals +15% damage to bosses, whose
+rewards remain standard across classes. Compare first clear time, health after
+the clear, level and gold before the first gank in actual matches.
+
+The launch opening probe runs the Warden and Stormfist from each base on the
+same three nearby camps. It reports time, health, resource, level, XP, and camp
+gold at each clear under ordinary bot combat and progression. The pass checks
+cover survival, completion, and camp rewards. Lane waves, enemy players, camp
+respawns, and passive gold are excluded from this controlled opening.
+
+```sh
+cargo test -p common --lib launch_jungle_opening -- --nocapture
+```

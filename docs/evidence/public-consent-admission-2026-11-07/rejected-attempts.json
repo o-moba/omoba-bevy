@@ -1,0 +1,28 @@
+{
+  "owned_failed_schema": "career_public_consent_5b229bcbd5e679c93a417be77d17a890",
+  "verified_resilience_matches": 1,
+  "reason": "partial-restore fixture must remove participant rows before match because the FK is restrictive; transaction rollback preserved both guards",
+  "remaining": 0,
+  "shared_append_only_fixture_rows": "retained; attempted cleanup was refused atomically by the existing guard; subsequent new cases use disposable schemas",
+  "second_owned_schema": {
+    "name": "career_public_consent_bc3703269d1faa53c44302fb3bae609c",
+    "reason": "active-profile FK also belongs to the partial-restore fixture",
+    "remaining": 0
+  },
+  "parallel_initial_whole_run": {
+    "passed": 557,
+    "failed": 2,
+    "scope": "superseded intermediate source; concurrent store-all and Clippy/native link load",
+    "failures": [
+      "new fixture attempted deleting linked immutable profile/match data; cases moved to isolated disposable schemas",
+      "existing full-reply heartbeat assertion observed2.987542 seconds remaining at12s (required>60); no heartbeat threshold relaxed"
+    ],
+    "follow_up": "unchanged heartbeat target PASS12.47s; complete server tests rerun with test-threads=1 as scripts/postgres_tests.py uses; host/SQL-load cadence remains an acceptance concern"
+  },
+  "current_acceptance": {
+    "targeted_public_worker_cases": "3 PASS; Start/Checkpoint/terminal preserve matching-restore authority",
+    "all_current_server_cases": "559 PASS0fail0ignored; test-threads1 matching existing full PG runner",
+    "heartbeat_target": "unchanged standalone target PASS12.47s; current complete serial suite also PASS",
+    "test_schema_isolation": "all new public worker cases own a separate generated schema, dropped after use; partial-restore trigger toggles occur only inside that schema and transaction"
+  }
+}

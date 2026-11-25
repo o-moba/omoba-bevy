@@ -1,0 +1,14 @@
+{
+  "name": "Jade Fortune",
+  "assetKind": "map_prop",
+  "profile": "map-prop-glb-v1",
+  "license": "CC-BY-4.0",
+  "credit": "Jade Fortune \u2014 original sculpture by OMOBA contributors",
+  "generator": "scripts/build_lucky_cat.py",
+  "sha256": "59a381abaf0de850486451651d7550b248a5e8d9e48810c572c45814ac4fd75d",
+  "sizeBytes": 305788,
+  "animation": "Wave",
+  "durationSeconds": 2,
+  "coordinates": "Y up, +Z front, metres; foot at Y=0",
+  "externalResources": false
+}

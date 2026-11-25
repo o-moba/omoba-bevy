@@ -1,13 +1,19 @@
 //! Shared pre-match choices. The server owns accepted selections and lock state.
 //!
 //! Text comes from the `draft` dictionary (hero, role and avatar names through
-//! `i18n::data`); the render key includes the locale generation. Server-authored
-//! draft errors stay English.
+//! `i18n::data`); the render key includes the locale generation. A server
+//! prematch error that is a stable code (`roster_changed`) shows its
+//! `draft.error.<code>` text; server-authored sentences stay English.
 // i18n-strict
+use crate::ui::Button;
 use bevy::{prelude::*, window::PrimaryWindow};
+use omoba_passport::weapon_store;
 use shared::{
     HeroClass,
-    prematch::{DraftPlayer, PrematchAction, PrematchPhase, PrematchRequest, Role},
+    prematch::{
+        DraftPlayer, PrematchAction, PrematchPhase, PrematchRequest, PrematchSnapshot, Role,
+        hero_pick_conflicts,
+    },
 };
 
 use super::{AppScreen, widgets};
@@ -16,11 +22,11 @@ pub(super) mod stage;
 use crate::{
     i18n::{Locale, data, tr, trf},
     net::{ClientSession, GameStateSnapshot, NetworkCommand, SessionUiCommand},
-    passport::{AvatarCatalogueSource, TicketPoll},
+    passport::TicketPoll,
     persistence::ClientSessionId,
     team::{AvatarThumbnails, CharacterChoice},
     ui::{
-        Activated, TestId, UiAction, UiActionAppExt, UiSet,
+        Activated, Pressable, TestId, UiAction, UiActionAppExt, UiSet,
         action::UiActionT,
         theme::{self, ButtonKind},
         widgets::ButtonStyle,
@@ -90,20 +96,51 @@ struct Choice {
 impl Choice {
     /// Proposes the kit's duty unless the player already chose a different
     /// role on purpose.
-    fn pick_class(&mut self, class: HeroClass) {
+    fn pick_class(&mut self, class: HeroClass, handheld: shared::handheld::HandheldSelection) {
         if self.role == self.hero_class.primary_role() {
             self.role = class.primary_role();
         }
+        if self.hero_class != class {
+            self.avatar = Some(class.default_avatar_slug().to_owned());
+            self.handheld = handheld;
+        }
         self.hero_class = class;
+    }
+
+    fn matches_select(&self, action: &PrematchAction) -> bool {
+        let PrematchAction::Select {
+            handheld,
+            character,
+            hero_class,
+            avatar,
+            sprite_character,
+            role,
+            ..
+        } = action
+        else {
+            return false;
+        };
+        self.handheld == *handheld
+            && self.character == *character
+            && self.hero_class == *hero_class
+            && self.avatar == *avatar
+            && self.sprite_character == *sprite_character
+            && self.role == *role
     }
 }
 impl From<&DraftPlayer> for Choice {
     fn from(player: &DraftPlayer) -> Self {
         Self {
-            handheld: player.handheld.clone(),
+            handheld: crate::team::handheld_for_class(&player.handheld, player.hero_class),
             character: player.character,
             hero_class: player.hero_class,
-            avatar: player.avatar.clone(),
+            avatar: Some(
+                omoba_passport::avatars::match_avatar_slug(
+                    player.hero_class,
+                    player.avatar.as_deref(),
+                )
+                .to_owned(),
+            ),
             sprite_character: player.sprite_character.clone(),
             role: player.role,
         }
@@ -168,7 +205,6 @@ fn sync_draft(
     game: Res<GameStateSnapshot>,
     mut state: ResMut<DraftClient>,
     mut selection: Option<ResMut<crate::team::TeamSelection>>,
-    mut session: Option<ResMut<ClientSession>>,
 ) {
     let Some(draft) = &game.prematch else {
         state.reset();
@@ -176,33 +212,46 @@ fn sync_draft(
     };
     let namespace = (game.meta.server_epoch, game.meta.match_id, draft.generation);
     let local = draft.players.iter().find(|p| p.player_id == game.your_id);
-    if let Some(local) = local {
-        if let Some(selection) = selection.as_mut() {
-            if selection.handheld != local.handheld {
-                selection.handheld = local.handheld.clone();
-            }
-        }
-        if let Some(session) = session.as_mut() {
-            session.remember_handheld(&local.handheld);
-        }
-    }
     if state.namespace != Some(namespace) {
         state.reset();
         state.namespace = Some(namespace);
         state.next_request_id = draft.last_request_id;
         state.choice = local.map(Choice::from);
-        state.notice = draft.error.clone();
+        state.notice = draft.error.as_deref().map(error_text);
     }
-    let acknowledged = state
+    if let Some(pending) = state
         .pending
-        .as_ref()
-        .is_some_and(|pending| draft.last_request_id >= pending.request.request_id);
-    if acknowledged {
-        state.pending = None;
+        .take_if(|pending| draft.last_request_id >= pending.request.request_id)
+    {
+        let submitted = &pending.request.action;
+        let matches_choice = state
+            .choice
+            .as_ref()
+            .is_some_and(|choice| choice.matches_select(submitted));
         if let Some(error) = &draft.error {
-            state.choice = local.map(Choice::from);
+            if matches_choice || !matches!(submitted, PrematchAction::Select { .. }) {
+                state.choice = local.map(Choice::from);
+            }
             state.desired_lock = None;
-            state.notice = Some(error.clone());
+            state.notice = Some(error_text(error));
+        } else {
+            // Save the player's confirmed weapon, even if the draft advanced to
+            // countdown. Automatic match loadouts do not change the preference.
+            if let PrematchAction::Select {
+                hero_class,
+                handheld,
+                ..
+            } = submitted
+                && local.is_some_and(|p| p.hero_class == *hero_class && p.handheld == *handheld)
+                && let Some(selection) = &mut selection
+                && selection.hero_class == *hero_class
+                && selection.effective_handheld() != *handheld
+            {
+                selection.set_match_handheld(handheld.clone());
+            }
+            if matches_choice {
+                state.choice = local.map(Choice::from);
+            }
         }
     }
     state.next_request_id = state.next_request_id.max(draft.last_request_id);
@@ -226,13 +275,12 @@ enum DraftAction {
     Handheld(shared::handheld::HandheldSelection),
     Lock,
     Leave,
-    Refresh,
-    Connect,
 }
 
 fn draft_actions(
     mut activated: MessageReader<Activated<DraftAction>>,
     game: Res<GameStateSnapshot>,
+    selection: Option<Res<crate::team::TeamSelection>>,
     mut state: ResMut<DraftClient>,
     mut session: MessageWriter<SessionUiCommand>,
 ) {
@@ -255,13 +303,17 @@ fn draft_actions(
                 state.reset();
                 session.write(SessionUiCommand::LeaveMatch);
             }
-            DraftAction::Refresh => {
-                crate::passport::refresh_avatar_catalogue();
-                omoba_passport::weapon_store::refresh(true);
-            }
-            DraftAction::Connect => crate::passport::connect_account(),
             DraftAction::Picker(tab) => state.picker_tab = *tab,
             DraftAction::Lock if draft.phase == PrematchPhase::Draft => {
+                let class = state
+                    .choice
+                    .as_ref()
+                    .map_or(local.hero_class, |c| c.hero_class);
+                if !local.locked && class_pick_taken(draft, game.your_id, class) {
+                    state.notice = Some(class_taken_notice(draft).into());
+                    state.desired_lock = None;
+                    continue;
+                }
                 state.notice = None;
                 state.desired_lock = Some(!local.locked);
             }
@@ -269,10 +321,12 @@ fn draft_actions(
                 state.notice = Some(tr("draft.notice.unlock_first").into());
             }
             DraftAction::Avatar(slug) => {
-                if omoba_passport::avatars::avatar_definition(slug)
-                    .is_none_or(|avatar| !crate::passport::can_select(avatar))
-                {
-                    state.notice = Some(tr("draft.notice.avatar_unavailable").into());
+                let class = state
+                    .choice
+                    .as_ref()
+                    .map_or(local.hero_class, |choice| choice.hero_class);
+                if !crate::team::combat_avatar_available(class, slug) {
+                    state.notice = Some(tr("draft.notice.avatar_incompatible").into());
                     continue;
                 }
                 if let Some(choice) = &mut state.choice {
@@ -281,22 +335,34 @@ fn draft_actions(
                 state.notice = None;
             }
             DraftAction::Class(class) => {
+                if class_pick_taken(draft, game.your_id, *class) {
+                    state.notice = Some(class_taken_notice(draft).into());
+                    continue;
+                }
                 if let Some(choice) = &mut state.choice {
-                    choice.pick_class(*class);
+                    let handheld = selection
+                        .as_ref()
+                        .map(|selection| selection.match_handheld_for(*class))
+                        .unwrap_or_default();
+                    choice.pick_class(*class, handheld);
                 }
                 state.notice = None;
             }
             DraftAction::Handheld(value) => {
+                let choice = state.choice.get_or_insert_with(|| Choice::from(local));
+                if !value.allowed_in_match() || !value.compatible(choice.hero_class) {
+                    state.notice = Some(tr("draft.notice.weapon_incompatible").into());
+                    continue;
+                }
                 if let shared::handheld::HandheldSelection::Item(id) = value {
-                    if !omoba_passport::weapon_store::eligible(id) {
+                    if !weapon_store::eligible(id) {
+                        state.notice = Some(tr("collection.weapon_not_available").into());
                         continue;
                     }
-                    omoba_passport::weapon_store::model_state(id);
+                    weapon_store::model_state(id);
                 }
-                state
-                    .choice
-                    .get_or_insert_with(|| Choice::from(local))
-                    .handheld = value.clone();
+                choice.handheld = value.clone();
+                state.notice = None;
             }
             DraftAction::Role(role) => {
                 if let Some(choice) = &mut state.choice {
@@ -341,6 +407,14 @@ fn send_requests(
         Some(PrematchAction::Loaded)
     } else if draft.phase == PrematchPhase::Draft {
         let desired = state.choice.clone();
+        if !local.locked
+            && desired
+                .as_ref()
+                .is_some_and(|c| class_pick_taken(draft, game.your_id, c.hero_class))
+        {
+            state.desired_lock = None;
+            return;
+        }
         if !local.locked
             && desired
                 .as_ref()
@@ -391,6 +465,45 @@ fn send_requests(
     }
 }
 
+/// A server prematch error as the footer shows it: a stable code
+/// (`roster_changed`, `loading_timeout`, `start_timeout`) in the player's
+/// language when the `draft` dictionary has it, otherwise the text as sent.
+pub(super) fn error_text(error: &str) -> String {
+    let code = !error.is_empty()
+        && error
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_');
+    code.then(|| crate::i18n::lookup(&format!("draft.error.{error}")))
+        .flatten()
+        .map_or_else(|| error.to_owned(), str::to_owned)
+}
+
+fn class_pick_taken(draft: &PrematchSnapshot, local_id: u64, class: HeroClass) -> bool {
+    let Some(local) = draft.players.iter().find(|p| p.player_id == local_id) else {
+        return false;
+    };
+    draft.players.iter().any(|p| {
+        p.player_id != local_id
+            && !p.is_bot
+            && p.locked
+            && hero_pick_conflicts(
+                draft.unique_classes_across_teams,
+                local.team,
+                class,
+                p.team,
+                p.hero_class,
+            )
+    })
+}
+
+fn class_taken_notice(draft: &PrematchSnapshot) -> &'static str {
+    tr(if draft.unique_classes_across_teams {
+        "draft.error.hero_taken_ranked"
+    } else {
+        "draft.error.hero_taken"
+    })
+}
+
 pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> String {
     let Some(local) = players.iter().find(|p| p.player_id == local_id) else {
         return String::new();
@@ -398,12 +511,15 @@ pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> Str
     let team: Vec<_> = players.iter().filter(|p| p.team == local.team).collect();
     let duplicate = local.avatar.as_ref().is_some_and(|avatar| {
         team.iter()
-            .any(|p| p.player_id != local_id && p.avatar.as_ref() == Some(avatar))
+            .any(|p| !p.is_bot && p.player_id != local_id && p.avatar.as_ref() == Some(avatar))
     });
     if duplicate {
         return tr("draft.warning.same_avatar").into();
     }
-    let same_role = team.iter().filter(|p| p.role == local.role).count();
+    let same_role = team
+        .iter()
+        .filter(|p| !p.is_bot && p.role == local.role)
+        .count();
     if same_role > 1 {
         return trf(
             "draft.warning.same_role",
@@ -447,7 +563,7 @@ pub(super) fn action_button<T: UiActionT>(
     width: f32,
     primary: bool,
     selected: bool,
-) {
+) -> Entity {
     let style = if selected {
         ButtonStyle {
             kind: ButtonKind::Tile,
@@ -488,7 +604,8 @@ pub(super) fn action_button<T: UiActionT>(
         ))
         .with_children(|button| {
             button.spawn(widgets::label(label, 13.0, theme::IVORY));
-        });
+        })
+        .id()
 }
 
 pub(super) fn avatar_name(slug: Option<&str>) -> String {
@@ -500,6 +617,7 @@ pub(super) fn roster_row(
     player: &DraftPlayer,
     your_id: u64,
     thumbnails: &AvatarThumbnails,
+    assets: &AssetServer,
     loading: bool,
     compact: bool,
 ) {
@@ -526,13 +644,21 @@ pub(super) fn roster_row(
             Name::new(format!("DraftPlayer-{}", player.player_id)),
         ))
         .with_children(|row| {
-            if let Some(image) = player
-                .avatar
-                .as_ref()
-                .and_then(|slug| thumbnails.0.get(slug))
-            {
+            let portrait = shared::bot_personas::portrait_asset_path(
+                player.is_bot,
+                player.bot_persona.as_deref(),
+            )
+            .map(|path| assets.load(path))
+            .or_else(|| {
+                player
+                    .avatar
+                    .as_ref()
+                    .and_then(|slug| thumbnails.0.get(slug))
+                    .cloned()
+            });
+            if let Some(image) = portrait {
                 row.spawn((
-                    ImageNode::new(image.clone()),
+                    ImageNode::new(image),
                     Node {
                         width: Val::Px(40.0),
                         height: Val::Px(40.0),
@@ -613,6 +739,7 @@ fn render_draft(
     scroll: Res<DraftScrollMemory>,
     locale: Option<Res<Locale>>,
     mut party_stage: Option<ResMut<super::party_stage::PartyStage>>,
+    flow: Option<Res<crate::match_service::MatchServiceClient>>,
     mut last: Local<String>,
 ) {
     let Ok(window) = windows.single() else {
@@ -621,6 +748,13 @@ fn render_draft(
     let Some(draft) = &game.prematch else {
         return;
     };
+    // The public lobby's queue and Rated/Unrated badge (LR-08).
+    let badge = flow
+        .as_deref()
+        .and_then(crate::match_service::MatchServiceClient::match_badge);
+    // Account and catalogue updates flow into the picker after sign-in.
+    crate::passport::poll_account();
+    crate::passport::poll_wallet();
     if let Some(stage) = party_stage.as_mut() {
         let mut preview_roster = draft.clone();
         if let (Some(choice), Some(local)) = (
@@ -637,6 +771,8 @@ fn render_draft(
         stage::sync_members(stage, &preview_roster, game.your_id);
     }
     let catalogue = crate::passport::avatar_catalogue();
+    let studio_available =
+        crate::account_region::features().ekza && crate::passport::avatar_library_signed_in();
     // A ticking server clock must not tear down an active picker/drag.
     let mut render_snapshot = draft.clone();
     render_snapshot.remaining_ms = 0;
@@ -651,9 +787,10 @@ fn render_draft(
         window.width()
     );
     let key = format!(
-        "{key}:{:?}:{}:{}:{}",
+        "{key}:{:?}:{}:{}:{}:{}:{badge:?}",
         state.picker_tab,
         omoba_passport::weapon_store::snapshot().0,
+        studio_available,
         window.height(),
         locale.as_ref().map_or(0, |locale| locale.generation())
     );
@@ -678,11 +815,19 @@ fn render_draft(
     let picker_width = available - roster_width - 12.0;
     let local = draft.players.iter().find(|p| p.player_id == game.your_id);
     let choice = state.choice.as_ref();
+    let class = choice
+        .map(|choice| choice.hero_class)
+        .or_else(|| local.map(|local| local.hero_class))
+        .unwrap_or_default();
     let locked = local.is_some_and(|p| p.locked);
-    let message = state
-        .notice
-        .clone()
-        .unwrap_or_else(|| composition_warning(&draft.players, game.your_id));
+    let lock_unavailable = !locked && class_pick_taken(draft, game.your_id, class);
+    let message = state.notice.clone().unwrap_or_else(|| {
+        if lock_unavailable {
+            class_taken_notice(draft).into()
+        } else {
+            composition_warning(&draft.players, game.your_id)
+        }
+    });
     commands
         .spawn((
             Node {
@@ -730,7 +875,15 @@ fn render_draft(
                             if compact { 20.0 } else { 28.0 },
                         ));
                         title.spawn((
-                            widgets::label(tr("draft.subtitle"), 12.0, theme::MUTED),
+                            widgets::label(
+                                tr(if draft.unique_classes_across_teams {
+                                    "draft.subtitle.ranked"
+                                } else {
+                                    "draft.subtitle"
+                                }),
+                                12.0,
+                                theme::MUTED,
+                            ),
                             TextLayout::justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
                         ));
                     });
@@ -747,15 +900,31 @@ fn render_draft(
                     TextLayout::justify(Justify::Center).with_linebreak(LineBreak::NoWrap),
                     Name::new("DraftSelectionClock"),
                 ));
-                action_button(
-                    header,
-                    tr("common.cancel"),
-                    DraftAction::Leave,
-                    "DraftCancel",
-                    86.0,
-                    false,
-                    false,
-                );
+                header
+                    .spawn(Node {
+                        column_gap: Val::Px(12.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|end| {
+                        if let Some(badge) = &badge {
+                            end.spawn((
+                                widgets::label(badge, 13.0, theme::GOLD),
+                                TextLayout::justify(Justify::Right)
+                                    .with_linebreak(LineBreak::NoWrap),
+                                Name::new("DraftQueueBadge"),
+                            ));
+                        }
+                        action_button(
+                            end,
+                            tr("common.cancel"),
+                            DraftAction::Leave,
+                            "DraftCancel",
+                            86.0,
+                            false,
+                            false,
+                        );
+                    });
             });
             root.spawn(Node {
                 flex_grow: 1.0,
@@ -776,6 +945,7 @@ fn render_draft(
                         draft,
                         game.your_id,
                         party_stage.as_deref(),
+                        &assets,
                         roster_width,
                         (window.height() - if compact { 136.0 } else { 152.0 }).max(180.0),
                         false,
@@ -822,8 +992,19 @@ fn render_draft(
                                 }
                             });
                     }
-                    if !compact || state.picker_tab == PickerTab::Weapons {
-                        picker.spawn(widgets::label(tr("collection.weapons"), 12.0, theme::MUTED));
+                    if let Some(class) = choice
+                        .map(|choice| choice.hero_class)
+                        .or_else(|| local.map(|player| player.hero_class))
+                        && (!compact || state.picker_tab == PickerTab::Weapons)
+                    {
+                        use super::collection::HandheldGroup;
+                        let choices = super::collection::handheld_choices(class);
+                        let hero_name = data::hero_name(class);
+                        picker.spawn(widgets::label(
+                            &trf("draft.weapons_for", &[("hero", &hero_name)]),
+                            12.0,
+                            theme::MUTED,
+                        ));
                         if let Some(status) = choice
                             .and_then(|choice| super::collection::handheld_status(&choice.handheld))
                         {
@@ -832,29 +1013,76 @@ fn render_draft(
                                 Name::new("DraftWeaponStatus"),
                             ));
                         }
-                        picker
-                            .spawn(Node {
-                                flex_wrap: FlexWrap::Wrap,
-                                column_gap: Val::Px(4.0),
-                                row_gap: Val::Px(4.0),
-                                max_height: Val::Px(84.0),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            })
-                            .with_children(|row| {
-                                for (value, name, id) in super::collection::handheld_choices() {
-                                    let selected = choice.is_some_and(|c| c.handheld == value);
-                                    action_button(
-                                        row,
-                                        &name,
-                                        DraftAction::Handheld(value),
-                                        &format!("Draft-{id}"), // i18n-allow: stable ECS/test identity, never displayed
-                                        (picker_width - 8.0) / 3.0,
-                                        false,
-                                        selected,
-                                    );
-                                }
-                            });
+                        // Author, licence and attribution of the chosen Ekza
+                        // item. The attribution keeps at most two lines so the
+                        // weapon rows stay in view; Collection shows it whole.
+                        let chosen = choice
+                            .and_then(|c| choices.iter().find(|item| item.value == c.handheld));
+                        if let Some(credit) = chosen.and_then(|item| item.credit.as_deref()) {
+                            picker.spawn((
+                                widgets::label(credit, 11.0, theme::MUTED),
+                                Name::new("DraftWeaponCredit"),
+                            ));
+                        }
+                        if let Some(attribution) =
+                            chosen.and_then(|item| item.attribution.as_deref())
+                        {
+                            picker.spawn((
+                                widgets::label(attribution, 10.5, theme::MUTED),
+                                Node {
+                                    max_height: Val::Px(28.0),
+                                    overflow: Overflow::clip(),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                Name::new("DraftWeaponAttribution"),
+                            ));
+                        }
+                        let owned = studio_available
+                            && choices.iter().any(|c| c.group == HandheldGroup::Library);
+                        if owned {
+                            picker.spawn((
+                                widgets::label(tr("collection.weapons_library"), 12.0, theme::GOLD),
+                                Name::new("DraftWeaponLibraryHeading"),
+                            ));
+                        }
+                        // "My Ekza library" on its own row, then everything else.
+                        for library in [true, false] {
+                            if library && !owned {
+                                continue;
+                            }
+                            picker
+                                .spawn(Node {
+                                    flex_wrap: FlexWrap::Wrap,
+                                    column_gap: Val::Px(4.0),
+                                    row_gap: Val::Px(4.0),
+                                    max_height: Val::Px(84.0),
+                                    overflow: Overflow::scroll_y(),
+                                    // A scroll container has no content
+                                    // minimum: in the overflowing desktop
+                                    // picker it would shrink to nothing.
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    for item in choices
+                                        .iter()
+                                        .filter(|c| (c.group == HandheldGroup::Library) == library)
+                                    {
+                                        let selected =
+                                            choice.is_some_and(|c| c.handheld == item.value);
+                                        action_button(
+                                            row,
+                                            &item.name,
+                                            DraftAction::Handheld(item.value.clone()),
+                                            &format!("Draft-{}", item.id), // i18n-allow: stable ECS/test identity, never displayed
+                                            (picker_width - 8.0) / 3.0,
+                                            false,
+                                            selected,
+                                        );
+                                    }
+                                });
+                        }
                     }
                     if !compact || state.picker_tab == PickerTab::Classes {
                         picker
@@ -866,15 +1094,30 @@ fn render_draft(
                             })
                             .with_children(|classes| {
                                 for class in HeroClass::ALL {
-                                    action_button(
+                                    let taken = class_pick_taken(draft, game.your_id, class);
+                                    let label = if taken {
+                                        trf(
+                                            "draft.class_taken",
+                                            &[("hero", &data::hero_name(class))],
+                                        )
+                                    } else {
+                                        data::hero_name(class).to_owned()
+                                    };
+                                    let button = action_button(
                                         classes,
-                                        data::hero_name(class),
+                                        &label,
                                         DraftAction::Class(class),
                                         &format!("DraftClass-{}", class.id()),
                                         (picker_width - 12.0) / 4.0,
                                         false,
                                         choice.is_some_and(|c| c.hero_class == class),
                                     );
+                                    if taken {
+                                        classes.commands().entity(button).insert(Pressable {
+                                            disabled: true,
+                                            ..default()
+                                        });
+                                    }
                                 }
                             });
                         picker
@@ -914,7 +1157,24 @@ fn render_draft(
                                 Name::new("DraftAvatarCatalogue"),
                             ))
                             .with_children(|avatars| {
-                                for defaults in [true, false] {
+                                for &defaults in
+                                    super::collection::avatar_sections(studio_available)
+                                {
+                                    let mut entries = catalogue
+                                        .entries
+                                        .iter()
+                                        .filter(|entry| {
+                                            (entry.avatar.slug == class.default_avatar_slug())
+                                                == defaults
+                                                && crate::team::combat_avatar_available(
+                                                    class,
+                                                    &entry.avatar.slug,
+                                                )
+                                        })
+                                        .peekable();
+                                    if entries.peek().is_none() {
+                                        continue;
+                                    }
                                     avatars.spawn((
                                         widgets::label(
                                             if defaults {
@@ -931,45 +1191,6 @@ fn render_draft(
                                             "DraftStudioHeading"
                                         }),
                                     ));
-                                    if !defaults {
-                                        avatars.spawn((
-                                            widgets::label(
-                                                crate::i18n::data::catalogue_status(
-                                                    &catalogue.status,
-                                                ),
-                                                12.0,
-                                                theme::MUTED,
-                                            ),
-                                            Name::new("DraftStudioStatus"),
-                                        ));
-                                        avatars
-                                            .spawn(Node {
-                                                column_gap: Val::Px(6.0),
-                                                ..default()
-                                            })
-                                            .with_children(|actions| {
-                                                action_button(
-                                                    actions,
-                                                    tr("draft.button.refresh"),
-                                                    DraftAction::Refresh,
-                                                    "DraftStudioRefresh",
-                                                    86.0,
-                                                    false,
-                                                    false,
-                                                );
-                                                if !crate::passport::account_connected() {
-                                                    action_button(
-                                                        actions,
-                                                        tr("draft.button.connect_ekza"),
-                                                        DraftAction::Connect,
-                                                        "DraftStudioConnect",
-                                                        116.0,
-                                                        false,
-                                                        false,
-                                                    );
-                                                }
-                                            });
-                                    }
                                     avatars
                                         .spawn(Node {
                                             flex_wrap: FlexWrap::Wrap,
@@ -978,10 +1199,7 @@ fn render_draft(
                                             ..default()
                                         })
                                         .with_children(|tiles| {
-                                            for entry in catalogue.entries.iter().filter(|e| {
-                                                (e.source == AvatarCatalogueSource::Default)
-                                                    == defaults
-                                            }) {
+                                            for entry in entries {
                                                 let selected = choice.is_some_and(|c| {
                                                     c.avatar.as_deref() == Some(&entry.avatar.slug)
                                                 });
@@ -1082,7 +1300,7 @@ fn render_draft(
                     },
                     Name::new("DraftNotice"),
                 ));
-                action_button(
+                let button = action_button(
                     footer,
                     if state.pending.is_some() {
                         tr("draft.button.syncing")
@@ -1097,6 +1315,12 @@ fn render_draft(
                     !locked,
                     false,
                 );
+                if lock_unavailable {
+                    footer.commands().entity(button).insert(Pressable {
+                        disabled: true,
+                        ..default()
+                    });
+                }
             });
         });
 }
@@ -1112,7 +1336,15 @@ fn update_selection_clock(
         return;
     };
     let value = if draft.remaining_ms == 0 {
-        tr("draft.timer.gathering").to_owned()
+        draft.join_remaining_ms.map_or_else(
+            || tr("draft.timer.gathering").to_owned(),
+            |ms| {
+                trf(
+                    "draft.timer.join_remaining",
+                    &[("seconds", &ms.div_ceil(1000))],
+                )
+            },
+        )
     } else {
         trf(
             "draft.timer.remaining",
@@ -1268,6 +1500,8 @@ mod tests {
         game.meta.server_epoch = 10;
         game.meta.match_id = 3;
         game.prematch = Some(shared::prematch::PrematchSnapshot {
+            unique_classes_across_teams: false,
+            join_remaining_ms: None,
             generation: 4,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,
@@ -1285,6 +1519,7 @@ mod tests {
                 sprite_character: None,
                 role: Role::Mid,
                 is_bot: false,
+                bot_persona: None,
                 locked: false,
                 loaded: false,
             }],
@@ -1336,10 +1571,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select() {
+    /// The draft screen laid out by Bevy's UI in a `width`x`height` window.
+    fn draft_ui_app(profile: crate::platform::UiProfile, width: f32, height: f32) -> (App, Entity) {
         use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
-        use bevy::input::touch::{TouchInput, TouchPhase};
         let mut app = request_app();
         app.add_plugins((
             MinimalPlugins,
@@ -1358,7 +1592,7 @@ mod tests {
         .init_resource::<Assets<TextureAtlasLayout>>()
         .init_resource::<DraftScrollMemory>()
         .init_resource::<AvatarThumbnails>()
-        .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+        .insert_resource(crate::ui::UiPlatform(profile))
         .init_resource::<crate::ui::GestureEpoch>()
         .init_resource::<SentRequests>()
         .add_message::<SessionUiCommand>()
@@ -1386,14 +1620,14 @@ mod tests {
             ..default()
         };
         window.resolution.set_scale_factor_override(Some(1.0));
-        window.resolution.set(852.0, 393.0);
+        window.resolution.set(width, height);
         let window = app.world_mut().spawn((window, PrimaryWindow)).id();
         app.world_mut().spawn((
             Camera2d,
             Camera {
                 computed: ComputedCameraValues {
                     target_info: Some(RenderTargetInfo {
-                        physical_size: UVec2::new(852, 393),
+                        physical_size: UVec2::new(width as u32, height as u32),
                         scale_factor: 1.0,
                     }),
                     ..default()
@@ -1406,6 +1640,20 @@ mod tests {
         for _ in 0..5 {
             app.update();
         }
+        (app, window)
+    }
+
+    #[test]
+    fn phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select() {
+        use bevy::input::touch::{TouchInput, TouchPhase};
+        let (mut app, window) = draft_ui_app(crate::platform::UiProfile::Mobile, 852.0, 393.0);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.generation += 1;
+            draft.players[0].hero_class = HeroClass::Warden;
+        }
+        app.update();
         let tap = |app: &mut App, id: &str| {
             let button = crate::ui::test_id::harness::find(app.world_mut(), id).unwrap();
             let node = app.world().get::<ComputedNode>(button).unwrap();
@@ -1458,7 +1706,12 @@ mod tests {
         );
         assert!(crate::ui::test_id::harness::find(app.world_mut(), "DraftClass-mage").is_some());
         tap(&mut app, "DraftTabAvatars");
-        let slug = crate::passport::default_avatars()[0].slug.clone();
+        let slug = crate::passport::default_avatars()
+            .into_iter()
+            .find(|avatar| crate::team::combat_avatar_available(HeroClass::Warden, &avatar.slug))
+            .unwrap()
+            .slug
+            .clone();
         tap(&mut app, &format!("DraftAvatar-{slug}"));
         assert_eq!(
             app.world()
@@ -1470,19 +1723,39 @@ mod tests {
                 .as_deref(),
             Some(slug.as_str())
         );
-        let sent = &app.world().resource::<SentRequests>().0;
+        assert!(app.world().resource::<SentRequests>().0.is_empty());
+    }
+
+    /// At 1280x720 the picker overflows and scrolls. The weapon rows are
+    /// scroll containers themselves, so without `flex_shrink: 0` they were
+    /// squeezed to no height and no weapon could be picked in the draft.
+    #[test]
+    fn desktop_weapon_rows_keep_their_height_at_1280x720() {
+        let (mut app, _) = draft_ui_app(crate::platform::UiProfile::Desktop, 1280.0, 720.0);
         assert!(
-            sent.iter().any(|request| matches!(
-                &request.action,
-                PrematchAction::Select { avatar: Some(avatar), .. } if avatar == &slug
-            )),
-            "no Select request for {slug} among the {} requests sent",
-            sent.len()
+            crate::ui::test_id::harness::find(app.world_mut(), "Draft-Handheld-empty").is_none()
         );
+        for id in ["Draft-Handheld-default", "Draft-Handheld-forge-sword"] {
+            let button = crate::ui::test_id::harness::find(app.world_mut(), id)
+                .unwrap_or_else(|| panic!("{id} missing"));
+            let node = app.world().get::<ComputedNode>(button).unwrap();
+            let transform = app.world().get::<UiGlobalTransform>(button).unwrap();
+            let rect = crate::ui::gesture::logical_ui_rect(
+                node,
+                transform,
+                app.world().get::<bevy::ui::CalculatedClip>(button),
+                1.0,
+            );
+            assert!(
+                rect.width() >= 40.0 && rect.height() >= 24.0,
+                "{id} squeezed to {rect:?}"
+            );
+            assert!(rect.min.y >= 0.0 && rect.max.y <= 720.0, "{id} at {rect:?}");
+        }
     }
 
     #[test]
-    fn avatar_picker_changes_an_available_avatar_before_lock_and_is_guarded_after_lock() {
+    fn avatar_picker_keeps_the_class_default_and_is_guarded_after_lock() {
         let mut app = request_app();
         app.add_message::<Activated<DraftAction>>()
             .add_message::<SessionUiCommand>()
@@ -1490,9 +1763,16 @@ mod tests {
                 Update,
                 draft_actions.after(sync_draft).before(send_requests),
             );
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.generation += 1;
+            draft.players[0].hero_class = HeroClass::Warden;
+        }
+        app.update();
         let slug = crate::passport::default_avatars()
             .into_iter()
-            .find(|avatar| crate::passport::can_select(avatar))
+            .find(|avatar| crate::team::combat_avatar_available(HeroClass::Warden, &avatar.slug))
             .unwrap()
             .slug
             .clone();
@@ -1501,11 +1781,7 @@ mod tests {
             source: Entity::PLACEHOLDER,
         });
         app.update();
-        let requests = drain_requests(&mut app);
-        assert_eq!(requests.len(), 1);
-        assert!(
-            matches!(&requests[0].action, PrematchAction::Select { avatar: Some(avatar), .. } if avatar == &slug)
-        );
+        assert!(drain_requests(&mut app).is_empty());
         assert_eq!(
             app.world()
                 .resource::<DraftClient>()
@@ -1521,7 +1797,6 @@ mod tests {
             let draft = game.prematch.as_mut().unwrap();
             draft.players[0].avatar = Some(slug.clone());
             draft.players[0].locked = true;
-            draft.last_request_id = requests[0].request_id;
         }
         app.update();
         app.world_mut().write_message(Activated {
@@ -1556,13 +1831,285 @@ mod tests {
             sprite_character: None,
             role: Role::Mid,
         };
-        choice.pick_class(HeroClass::Warden);
+        choice.pick_class(HeroClass::Warden, Default::default());
         assert_eq!(choice.role, Role::Jungle);
         choice.role = Role::Support;
-        choice.pick_class(HeroClass::Warrior);
+        choice.pick_class(HeroClass::Warrior, Default::default());
         assert_eq!(
             (choice.hero_class, choice.role),
             (HeroClass::Warrior, Role::Support)
+        );
+    }
+
+    #[test]
+    fn draft_switches_class_appearance_before_ack_and_keeps_newer_input() {
+        let mut app = request_app();
+        app.add_message::<Activated<DraftAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(
+                Update,
+                draft_actions.after(sync_draft).before(send_requests),
+            );
+
+        let submit = |app: &mut App, class| {
+            app.world_mut().write_message(Activated {
+                action: DraftAction::Class(class),
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            let state = app.world().resource::<DraftClient>();
+            let choice = state.choice.as_ref().unwrap();
+            assert_eq!(choice.hero_class, class);
+            assert_eq!(choice.avatar.as_deref(), Some(class.default_avatar_slug()));
+            drain_requests(app)
+        };
+        let accept = |app: &mut App, request: &PrematchRequest, expected| {
+            let PrematchAction::Select {
+                hero_class,
+                avatar,
+                role,
+                ..
+            } = &request.action
+            else {
+                panic!("expected class selection")
+            };
+            assert_eq!(*hero_class, expected);
+            assert_eq!(avatar.as_deref(), Some(hero_class.default_avatar_slug()));
+            {
+                let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+                let draft = game.prematch.as_mut().unwrap();
+                draft.last_request_id = request.request_id;
+                draft.players[0].hero_class = *hero_class;
+                draft.players[0].avatar = avatar.clone();
+                draft.players[0].role = *role;
+            }
+            app.update();
+            drain_requests(app)
+        };
+
+        let mage = submit(&mut app, HeroClass::Mage);
+        assert_eq!(mage.len(), 1);
+        assert!(submit(&mut app, HeroClass::Ranger).is_empty());
+        let ranger = accept(&mut app, &mage[0], HeroClass::Mage);
+        assert_eq!(ranger.len(), 1);
+        assert!(accept(&mut app, &ranger[0], HeroClass::Ranger).is_empty());
+        let state = app.world().resource::<DraftClient>();
+        assert!(state.pending.is_none());
+        assert_eq!(
+            state.choice.as_ref().unwrap().avatar.as_deref(),
+            Some(HeroClass::Ranger.default_avatar_slug())
+        );
+    }
+
+    #[test]
+    fn ranked_rejection_of_an_older_pick_keeps_the_newer_free_pick() {
+        let mut app = request_app();
+        app.add_message::<Activated<DraftAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(
+                Update,
+                draft_actions.after(sync_draft).before(send_requests),
+            );
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.unique_classes_across_teams = true;
+            draft.players.push(DraftPlayer {
+                player_id: 8,
+                hero_class: HeroClass::Mage,
+                team: shared::map::Team::Blue,
+                ..draft.players[0].clone()
+            });
+        }
+        let pick = |app: &mut App, class| {
+            app.world_mut().write_message(Activated {
+                action: DraftAction::Class(class),
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            drain_requests(app)
+        };
+        let mage = pick(&mut app, HeroClass::Mage);
+        assert_eq!(mage.len(), 1);
+        assert!(pick(&mut app, HeroClass::Ranger).is_empty());
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.last_request_id = mage[0].request_id;
+            draft.error = Some("hero_taken_ranked".into());
+            draft.players[1].locked = true;
+        }
+        app.update();
+        assert!(matches!(
+            drain_requests(&mut app).as_slice(),
+            [PrematchRequest {
+                action: PrematchAction::Select {
+                    hero_class: HeroClass::Ranger,
+                    ..
+                },
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn countdown_ack_saves_only_a_weapon_confirmed_by_the_server() {
+        use shared::handheld::HandheldSelection;
+        let sword = HandheldSelection::Item("forge-sword".into());
+        for confirmed in [HandheldSelection::ClassDefault, sword.clone()] {
+            let mut app = request_app();
+            app.insert_resource(crate::team::TeamSelection {
+                hero_class: HeroClass::Warrior,
+                ..default()
+            });
+            app.world_mut()
+                .resource_mut::<DraftClient>()
+                .choice
+                .as_mut()
+                .unwrap()
+                .handheld = sword.clone();
+            app.update();
+            let requests = drain_requests(&mut app);
+            assert_eq!(requests.len(), 1);
+            {
+                let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+                let draft = game.prematch.as_mut().unwrap();
+                draft.last_request_id = requests[0].request_id;
+                draft.players[0].handheld = confirmed.clone();
+                draft.phase = PrematchPhase::Countdown;
+            }
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<crate::team::TeamSelection>()
+                    .effective_handheld(),
+                confirmed
+            );
+        }
+    }
+
+    /// A prematch reset code shows its text in the player's language; a
+    /// server-authored sentence stays as sent.
+    #[test]
+    fn server_error_codes_are_localized_and_sentences_stay() {
+        if crate::i18n::testing::isolated(
+            "frontend::draft::tests::server_error_codes_are_localized_and_sentences_stay",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        assert_eq!(
+            error_text("roster_changed"),
+            "The roster changed. Check your team and lock in again."
+        );
+        assert_eq!(error_text("Selection unavailable"), "Selection unavailable");
+        assert_eq!(error_text("unknown_code"), "unknown_code");
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        assert_eq!(
+            error_text("loading_timeout"),
+            "Не все игроки загрузились вовремя. Подтвердите выбор снова или выйдите."
+        );
+        assert_eq!(
+            error_text("start_timeout"),
+            "Старт матча занял слишком долго. Подтвердите выбор снова или выйдите."
+        );
+        // The footer shows the code's text once the server answers with it.
+        let mut app = request_app();
+        app.world_mut()
+            .resource_mut::<DraftClient>()
+            .choice
+            .as_mut()
+            .unwrap()
+            .hero_class = HeroClass::Mage;
+        app.update();
+        let sent = drain_requests(&mut app);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.last_request_id = sent[0].request_id;
+            draft.error = Some("roster_changed".into());
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<DraftClient>().notice.as_deref(),
+            Some("Состав изменился. Проверьте команду и подтвердите выбор снова.")
+        );
+    }
+
+    #[test]
+    fn draft_class_change_clears_an_incompatible_weapon_and_ignores_stale_presses() {
+        use shared::handheld::HandheldSelection;
+        let mut app = request_app();
+        app.add_message::<Activated<DraftAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(
+                Update,
+                draft_actions.after(sync_draft).before(send_requests),
+            );
+        let sword = HandheldSelection::Item("forge-sword".into());
+        for action in [
+            DraftAction::Handheld(sword.clone()),
+            DraftAction::Class(HeroClass::Wildspark),
+            DraftAction::Handheld(HandheldSelection::Unequipped),
+        ] {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
+        let requests = drain_requests(&mut app);
+        assert!(matches!(
+            requests.as_slice(),
+            [PrematchRequest {
+                action: PrematchAction::Select {
+                    hero_class: HeroClass::Wildspark,
+                    handheld: HandheldSelection::ClassDefault,
+                    ..
+                },
+                ..
+            }]
+        ));
+        app.world_mut().write_message(Activated {
+            action: DraftAction::Handheld(sword),
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(drain_requests(&mut app).is_empty());
+        let state = app.world().resource::<DraftClient>();
+        assert_eq!(
+            state.choice.as_ref().unwrap().handheld,
+            HandheldSelection::ClassDefault
+        );
+        assert_eq!(
+            state.notice.as_deref(),
+            Some(tr("draft.notice.weapon_incompatible"))
+        );
+
+        app.init_resource::<crate::team::TeamSelection>();
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.generation += 1;
+            draft.players[0].hero_class = HeroClass::Wildspark;
+            draft.players[0].handheld = HandheldSelection::Item("wild-repeater".into());
+        }
+        app.update();
+        assert!(drain_requests(&mut app).is_empty());
+        let state = app.world().resource::<DraftClient>();
+        assert_eq!(
+            state.choice.as_ref().unwrap().handheld,
+            HandheldSelection::ClassDefault
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::team::TeamSelection>()
+                .handheld,
+            HandheldSelection::ClassDefault
         );
     }
 
@@ -1689,7 +2236,7 @@ mod tests {
         assert!(state.pending.is_none() && state.namespace.is_none() && !state.wants_loaded);
     }
     #[test]
-    fn composition_warnings_are_advisory_and_do_not_impose_class_uniqueness() {
+    fn avatar_and_role_warnings_remain_advisory_for_unlocked_picks() {
         let player = |id| DraftPlayer {
             handheld: Default::default(),
             player_id: id,
@@ -1701,10 +2248,14 @@ mod tests {
             sprite_character: None,
             role: Role::Jungle,
             is_bot: false,
+            bot_persona: None,
             locked: false,
             loaded: false,
         };
         let mut players = vec![player(1), player(2)];
+        players[1].is_bot = true;
+        assert!(composition_warning(&players, 1).contains("class determines"));
+        players[1].is_bot = false;
         assert!(composition_warning(&players, 1).contains("same avatar"));
         players[1].avatar = Some("another".into());
         assert!(composition_warning(&players, 1).contains("Jungle"));
@@ -1714,6 +2265,28 @@ mod tests {
 
     /// The draft is a render-key screen: a language change redraws it in the
     /// new language, while its TestIds keep their English ids.
+    #[test]
+    fn signed_out_draft_shows_the_class_avatar_without_account_controls() {
+        let (mut app, _) = draft_ui_app(crate::platform::UiProfile::Desktop, 1280.0, 720.0);
+        let avatar = format!("DraftAvatar-{}", HeroClass::Warrior.default_avatar_slug());
+        assert!(crate::ui::test_id::harness::find(app.world_mut(), &avatar).is_some());
+        let world = app.world_mut();
+        let mut keys = world.query::<crate::ui::test_id::NodeKey>();
+        for hidden in [
+            "DraftStudioHeading",
+            "DraftStudioStatus",
+            "DraftStudioRefresh",
+            "DraftStudioConnect",
+            "DraftWeaponLibraryHeading",
+            "DraftWeaponsConnect",
+        ] {
+            assert!(
+                !keys.iter(world).any(|key| key.as_str() == hidden),
+                "{hidden}"
+            );
+        }
+    }
+
     #[test]
     fn a_language_change_redraws_the_draft_and_keeps_its_ids() {
         if crate::i18n::testing::isolated(
@@ -1727,6 +2300,8 @@ mod tests {
             ..default()
         };
         game.prematch = Some(shared::prematch::PrematchSnapshot {
+            unique_classes_across_teams: false,
+            join_remaining_ms: None,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,
@@ -1744,6 +2319,7 @@ mod tests {
                 sprite_character: None,
                 role: Role::Mid,
                 is_bot: false,
+                bot_persona: None,
                 locked: false,
                 loaded: false,
             }],
@@ -1760,6 +2336,20 @@ mod tests {
         .init_resource::<DraftScrollMemory>()
         .init_resource::<AvatarThumbnails>()
         .add_systems(Update, render_draft);
+        // A Ranked allocation from the public lobby: the header names it
+        // with its rating badge (LR-08).
+        let mut flow = crate::match_service::MatchServiceClient::default();
+        flow.allocation = Some(shared::match_service::MatchAllocation {
+            allocation_id: "a".repeat(32),
+            endpoint: "127.0.0.1:41000".into(),
+            preference: shared::match_service::MatchPreference::Ranked,
+            team: shared::map::Team::Green,
+            human_count: 10,
+            bot_count: 0,
+            rated: true,
+            join_deadline_ms: 0,
+        });
+        app.insert_resource(flow);
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         app.update();
         let label = |app: &mut App, id: &str| {
@@ -1782,6 +2372,7 @@ mod tests {
                 .iter()
                 .any(|text| text == "Assemble your team")
         );
+        assert!(texts(&mut app).iter().any(|text| text == "Ranked · Rated"));
         let plate_texts = |app: &mut App| -> Vec<String> {
             let plate = app
                 .world_mut()
@@ -1814,12 +2405,154 @@ mod tests {
         );
         let shown = texts(&mut app);
         assert!(shown.iter().any(|text| text == "组建你的队伍"), "{shown:?}");
+        assert!(
+            shown.iter().any(|text| text == "排位赛 · 计入排位"),
+            "{shown:?}"
+        );
         let plate = plate_texts(&mut app);
         assert!(plate[0].starts_with("Local"), "{plate:?}");
         assert_eq!(plate[1], "战士");
         assert_eq!(plate[2], "中路");
         assert!(!plate.iter().any(|text| text == "Warrior" || text == "Mid"));
         assert!(!shown.iter().any(|text| text == "Assemble your team"));
+    }
+
+    #[test]
+    fn teammate_lock_disables_tiles_and_lock_and_rechecks_a_stale_press() {
+        use crate::ui::test_id::harness;
+        let (mut app, _) = draft_ui_app(crate::platform::UiProfile::Mobile, 852.0, 393.0);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let players = &mut game.prematch.as_mut().unwrap().players;
+            let mut teammate = players[0].clone();
+            teammate.player_id = 8;
+            teammate.nickname = "Teammate".into();
+            teammate.locked = true;
+            players.push(teammate);
+        }
+        app.world_mut().resource_mut::<DraftClient>().picker_tab = PickerTab::Classes;
+        app.update();
+        for id in ["DraftClass-warrior", "DraftLock"] {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            assert!(
+                app.world().get::<Pressable>(button).unwrap().disabled,
+                "{id}"
+            );
+        }
+        // An action queued before the latest roster arrived must be checked again.
+        for action in [DraftAction::Class(HeroClass::Warrior), DraftAction::Lock] {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
+        let state = app.world().resource::<DraftClient>();
+        assert_eq!(state.desired_lock, None);
+        assert_eq!(
+            state.choice.as_ref().unwrap().hero_class,
+            HeroClass::Warrior
+        );
+        assert_eq!(state.notice.as_deref(), Some(tr("draft.error.hero_taken")));
+        assert!(app.world().resource::<SentRequests>().0.is_empty());
+        // A bot or opposing mirror does not reserve a human's class.
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            game.prematch.as_mut().unwrap().players[1].is_bot = true;
+        }
+        app.update();
+        for id in ["DraftClass-warrior", "DraftLock"] {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            assert!(
+                !app.world().get::<Pressable>(button).unwrap().disabled,
+                "{id}"
+            );
+        }
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let player = &mut game.prematch.as_mut().unwrap().players[1];
+            player.is_bot = false;
+            player.team = shared::map::Team::Blue;
+        }
+        app.update();
+        assert!(!class_pick_taken(
+            app.world()
+                .resource::<GameStateSnapshot>()
+                .prematch
+                .as_ref()
+                .unwrap(),
+            7,
+            HeroClass::Warrior
+        ));
+    }
+
+    #[test]
+    fn ranked_opponent_lock_disables_class_and_rechecks_stale_input() {
+        use crate::ui::test_id::harness;
+        let (mut app, _) = draft_ui_app(crate::platform::UiProfile::Desktop, 1280.0, 720.0);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let players = &mut game.prematch.as_mut().unwrap().players;
+            let mut opponent = players[0].clone();
+            opponent.player_id = 8;
+            opponent.team = shared::map::Team::Blue;
+            opponent.locked = true;
+            players.push(opponent);
+        }
+        app.update();
+        let disabled = |app: &mut App, id| {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            app.world()
+                .get::<Pressable>(button)
+                .is_some_and(|press| press.disabled)
+        };
+        assert!(!disabled(&mut app, "DraftClass-warrior"));
+        assert!(!disabled(&mut app, "DraftLock"));
+
+        // The same roster becomes globally unique when the policy arrives.
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .prematch
+            .as_mut()
+            .unwrap()
+            .unique_classes_across_teams = true;
+        app.world_mut().resource_mut::<DraftClient>().desired_lock = Some(true);
+        app.update();
+        assert!(disabled(&mut app, "DraftClass-warrior"));
+        assert!(disabled(&mut app, "DraftLock"));
+        assert!(!disabled(&mut app, "DraftClass-mage"));
+        assert_eq!(app.world().resource::<DraftClient>().desired_lock, None);
+        {
+            let world = app.world_mut();
+            let mut texts = world.query::<&Text>();
+            for label in ["draft.subtitle.ranked", "draft.error.hero_taken_ranked"] {
+                assert!(texts.iter(world).any(|text| text.0 == tr(label)));
+            }
+        }
+
+        for action in [DraftAction::Class(HeroClass::Warrior), DraftAction::Lock] {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<DraftClient>().notice.as_deref(),
+            Some(tr("draft.error.hero_taken_ranked"))
+        );
+        assert!(app.world().resource::<SentRequests>().0.is_empty());
+
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .prematch
+            .as_mut()
+            .unwrap()
+            .players[1]
+            .locked = false;
+        app.update();
+        assert!(!disabled(&mut app, "DraftClass-warrior"));
+        assert!(!disabled(&mut app, "DraftLock"));
     }
 
     #[test]

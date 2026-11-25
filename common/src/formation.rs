@@ -1,9 +1,9 @@
 //! The Lobby -> Forming -> Starting -> Running formation state machine.
 //! The mode-dependent decision (`StartPolicy`) comes from `MatchRules`.
 
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::map::Team;
 use shared::wire::GameState;

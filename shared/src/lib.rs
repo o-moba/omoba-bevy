@@ -7,21 +7,28 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+pub mod bot_personas;
+pub mod bot_profile;
 pub mod career;
 pub mod catalog;
+pub mod clock;
 pub mod combat;
 pub mod compatibility;
 pub mod debug;
 pub mod device_account;
 pub mod forest_pickups;
+pub mod game_directory;
 pub mod handheld;
 pub mod hero_balance;
 pub mod jungle;
 pub mod live_score;
 pub mod loadout;
 pub mod map;
+pub mod market;
 pub mod match_service;
+pub mod match_vote;
 pub mod math;
+pub mod moderation;
 pub mod navigation;
 pub mod party;
 pub mod practice;
@@ -29,9 +36,12 @@ pub mod prematch;
 pub mod progression;
 pub mod protocol;
 pub mod public_transport;
+pub mod ranked;
+pub mod region;
 pub mod sandbox;
 pub mod shop;
 pub mod social;
+pub mod sponsorship;
 pub mod supporter;
 pub mod transport;
 pub mod utility;
@@ -155,6 +165,22 @@ pub struct AbilityDefinition {
     pub projectile_damage: Option<f32>,
     pub self_heal: Option<f32>,
     pub self_mana_restore: Option<f32>,
+    pub ally_effect: Option<AllyEffect>,
+}
+
+/// Caster-centred support effects executed from the existing self-cast input.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AllyEffect {
+    HealLowest {
+        radius: f32,
+        amount: f32,
+    },
+    ShieldNearby {
+        radius: f32,
+        amount: f32,
+        duration_secs: f32,
+    },
 }
 
 /// Maximum investable rank shared by every ability definition.
@@ -249,6 +275,29 @@ impl HeroClass {
 
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|class| class.id() == id)
+    }
+
+    /// The bundled Set 01 appearance for this class.
+    pub const fn default_avatar_slug(self) -> &'static str {
+        match self {
+            Self::Warrior => "set01-warrior",
+            Self::Mage => "set01-mage",
+            Self::Ranger => "set01-ranger",
+            Self::Cleric => "set01-healer",
+            Self::Warden => "set01-warden",
+            Self::Dawnweaver => "set01-dawnweaver",
+            Self::Wildspark => "set01-wildspark",
+            Self::Cinderforge => "set01-cinderforge",
+            Self::Edgeweaver => "set01-edgeweaver",
+            Self::Stormfist => "set01-stormfist",
+            Self::Veilstalker => "set01-veilstalker",
+            Self::Emberveil => "set01-emberveil",
+            Self::Orbitwright => "set01-orbitwright",
+            Self::Riftshot => "set01-riftshot",
+            Self::Chainkeeper => "set01-chainkeeper",
+            Self::Frostguard => "set01-frostguard",
+            Self::Adventurer => "set01-adventurer",
+        }
     }
 
     pub fn display_name(self) -> &'static str {
@@ -410,6 +459,7 @@ mod tests {
                     def.projectile_damage.is_some(),
                     def.self_heal.is_some(),
                     def.self_mana_restore.is_some(),
+                    def.ally_effect.is_some(),
                 ];
                 if !class.is_standard() {
                     assert_eq!(effects.iter().filter(|&&x| x).count(), 1, "{}", def.id);
@@ -488,8 +538,10 @@ mod tests {
         assert!(scaled_cast_range(def, 3) > scaled_cast_range(def, 1));
         let heal = ability_for_class_slot(HeroClass::Cleric, SkillSlot::W);
         assert_eq!(scaled_cast_range(heal, 3), 0.0);
-        let scaled_heal = heal.self_heal.unwrap() * rank_effect_scale(3);
-        assert!(scaled_heal > heal.self_heal.unwrap());
+        let Some(AllyEffect::HealLowest { amount, .. }) = heal.ally_effect else {
+            panic!("Renew must heal an ally");
+        };
+        assert!(amount * rank_effect_scale(3) > amount);
     }
 
     #[test]

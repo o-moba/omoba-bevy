@@ -7,11 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A00000000000000000000024 /* OmobaAppDelegate.xib in Resources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000A /* OmobaAppDelegate.xib */; };
 		A00000000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000006 /* Assets.xcassets */; };
 		A00000000000000000000023 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000007 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A0000000000000000000000A /* OmobaAppDelegate.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = OmobaAppDelegate.xib; sourceTree = "<group>"; };
 		A00000000000000000000005 /* OmobaBeta.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OmobaBeta.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000007 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -23,6 +25,7 @@
 		A00000000000000000000003 = {
 			isa = PBXGroup;
 			children = (
+				A0000000000000000000000A /* OmobaAppDelegate.xib */,
 				A00000000000000000000006 /* Assets.xcassets */,
 				A00000000000000000000007 /* PrivacyInfo.xcprivacy */,
 				A00000000000000000000008 /* xcode_build.py */,
@@ -70,6 +73,9 @@
 					A00000000000000000000002 = {
 						CreatedOnToolsVersion = 26.0;
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.AssociatedDomains = { enabled = 1; };
+						};
 					};
 				};
 			};
@@ -98,6 +104,7 @@
 			files = (
 				A00000000000000000000022 /* Assets.xcassets in Resources */,
 				A00000000000000000000023 /* PrivacyInfo.xcprivacy in Resources */,
+				A00000000000000000000024 /* OmobaAppDelegate.xib in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -195,11 +202,82 @@
 			};
 			name = Release;
 		};
+		A00000000000000000000034 /* Debug Dev */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+			};
+			name = "Debug Dev";
+		};
+		A00000000000000000000035 /* Release Dev */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+			};
+			name = "Release Dev";
+		};
 		A00000000000000000000032 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A00000000000000000000009 /* Omoba.xcconfig */;
 			buildSettings = {
 				CLANG_ENABLE_OBJC_WEAK = YES;
+				OMOBA_CONTOUR = prod;
 			};
 			name = Debug;
 		};
@@ -208,8 +286,31 @@
 			baseConfigurationReference = A00000000000000000000009 /* Omoba.xcconfig */;
 			buildSettings = {
 				CLANG_ENABLE_OBJC_WEAK = YES;
+				OMOBA_CONTOUR = prod;
 			};
 			name = Release;
+		};
+		A00000000000000000000036 /* Debug Dev */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A00000000000000000000009 /* Omoba.xcconfig */;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				OMOBA_CONTOUR = dev;
+				OMOBA_GAME_SERVER = "";
+				PRODUCT_NAME = OmobaDev;
+			};
+			name = "Debug Dev";
+		};
+		A00000000000000000000037 /* Release Dev */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A00000000000000000000009 /* Omoba.xcconfig */;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				OMOBA_CONTOUR = dev;
+				OMOBA_GAME_SERVER = "";
+				PRODUCT_NAME = OmobaDev;
+			};
+			name = "Release Dev";
 		};
 /* End XCBuildConfiguration section */
 
@@ -219,6 +320,8 @@
 			buildConfigurations = (
 				A00000000000000000000030 /* Debug */,
 				A00000000000000000000031 /* Release */,
+				A00000000000000000000034 /* Debug Dev */,
+				A00000000000000000000035 /* Release Dev */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -228,6 +331,8 @@
 			buildConfigurations = (
 				A00000000000000000000032 /* Debug */,
 				A00000000000000000000033 /* Release */,
+				A00000000000000000000036 /* Debug Dev */,
+				A00000000000000000000037 /* Release Dev */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

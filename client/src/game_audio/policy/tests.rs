@@ -226,7 +226,9 @@ fn every_authoritative_style_selects_its_palette_cue() {
 fn invalid_damage_and_far_away_hits_are_consumed_without_late_replay() {
     let mut cursor = EventCursor::default();
     cursor.accept((1, 1), &GameState::Running, Some(local()), &[]);
+    // Another hero's hit far away. The local hero's own hits are heard wherever they land.
     let mut hit = event(1, ProjectileStyle::Arrow);
+    hit.source.id = 9;
     hit.x = 100.0;
     assert!(
         cursor
@@ -685,6 +687,7 @@ fn confirmed_enemy_attacks_sound_without_hp_receipts_and_never_replay() {
 
 // Voices from the rows of the skill registry.
 
+use crate::skill_presentation::stage::OwnerSeen;
 use shared::loadout::{EffectVisualKind, SkillEffectState, SkillId};
 
 const ENEMY: u64 = 8;
@@ -762,6 +765,24 @@ fn voiced(
             heroes,
             casts,
             stages,
+            telegraphs: &[],
+        },
+        &mut candidates,
+    );
+    candidates
+}
+
+/// The voices of telegraphs that appeared, heard by the local hero at the origin.
+fn telegraphed(registry: &SkillPresentation, telegraphs: &[TelegraphSeen]) -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    voice_rows(
+        &Heard {
+            registry,
+            listener: local(),
+            heroes: &[],
+            casts: &[],
+            stages: &[],
+            telegraphs,
         },
         &mut candidates,
     );
@@ -831,11 +852,34 @@ fn a_resolved_receipt_replaces_the_style_cue_and_an_unresolved_one_keeps_it() {
     );
     assert!(close(basic[0].gain, 0.55));
     assert_eq!(row_of(&basic[0]), Some((Moment::Impact, "warrior")));
-    // The voice is heard as far away as the receipt is, at the gain of its row.
-    let mut far = dealt(3, me, Some(BASIC));
+    // Another hero's hit is heard as far away as its receipt is, at the gain of its row.
+    let ally = [heard_hero(9, HeroClass::Warrior, bash)];
+    let mut far = dealt(3, 9, Some(BASIC));
     far.x = 21.0;
-    let far = voiced(&registry, &warrior, &[], &[], receipts(&[far]));
-    assert!(close(far[0].gain, 0.25 * 0.55));
+    let heard = voiced(
+        &registry,
+        &ally,
+        &[],
+        &[],
+        receipts(std::slice::from_ref(&far)),
+    );
+    assert_eq!(row_of(&heard[0]), Some((Moment::Impact, "warrior")));
+    assert!(close(heard[0].gain, 0.25 * 0.55));
+    // The local hero's own hit is confirmed in full however far it landed, even beyond
+    // earshot.
+    far.source.id = me;
+    for x in [21.0, 40.0] {
+        far.x = x;
+        let own = voiced(
+            &registry,
+            &warrior,
+            &[],
+            &[],
+            receipts(std::slice::from_ref(&far)),
+        );
+        assert_eq!(row_of(&own[0]), Some((Moment::Impact, "warrior")), "{x}");
+        assert!(close(own[0].gain, 0.55), "{x}");
+    }
 
     // Whatever no row answers for keeps the cue of the wire style, untouched.
     let kept = |registry: &SkillPresentation, heroes: &[HeroHeard], receipt: CombatEvent| {
@@ -1013,7 +1057,7 @@ fn non_local_casts_play_one_note() {
         assert_eq!(row_of(&hit[0]), Some((Moment::Impact, "longshot")));
         assert_eq!(hit[0].notes.iter().flatten().count(), notes, "{source}");
     }
-    // A later note is heard as far away as the first one.
+    // The local hero's own hit far away is heard in full, its later note with it.
     let mut far = dealt(2, local().id, Some(longshot));
     far.x = 21.0;
     let hit = voiced(
@@ -1023,13 +1067,13 @@ fn non_local_casts_play_one_note() {
         &[],
         receipts(&[far]),
     );
-    assert!(close(hit[0].gain, 0.25));
+    assert!(close(hit[0].gain, 1.0));
     assert_eq!(
         hit[0].notes[0],
         Some(Note {
             delay_secs: 0.08,
             step: 20,
-            gain: 0.25 * 0.5
+            gain: 0.5
         })
     );
     for (own, notes) in [(true, 2), (false, 0)] {
@@ -1038,14 +1082,14 @@ fn non_local_casts_play_one_note() {
             &[],
             &[],
             &[stage(
-                SkillId::DawnRay,
-                EffectVisualKind::Beam,
+                SkillId::HorizonWave,
+                EffectVisualKind::Bolt,
                 StageChange::Transition(Transition::KindFlipped),
                 Some(own),
             )],
             Vec::new(),
         );
-        assert_eq!(row_of(&fired[0]), Some((Moment::Release, "dawn_ray")));
+        assert_eq!(row_of(&fired[0]), Some((Moment::Release, "horizon_wave")));
         assert_eq!(fired[0].notes.iter().flatten().count(), notes, "{own}");
     }
 }
@@ -1095,7 +1139,8 @@ fn the_68_target_cast_voices_are_distinct() {
             "dagger_bluff"
         )]
     );
-    // A skill voice is built from the six general samples and that one.
+    // A cast voice is built from the six general samples, that one and the charge of the
+    // Horizon Ray, which belongs to `dawn_ray` alone.
     assert!(voices.iter().all(|(variant, _)| matches!(
         variant.cue,
         AudioCue::Melee
@@ -1105,7 +1150,16 @@ fn the_68_target_cast_voices_are_distinct() {
             | AudioCue::Caster
             | AudioCue::Tower
             | AudioCue::Bluff
+            | AudioCue::RadiantCharge
     )));
+    assert_eq!(
+        voices
+            .iter()
+            .filter(|(variant, _)| variant.cue == AudioCue::RadiantCharge)
+            .map(|(_, row)| *row)
+            .collect::<Vec<_>>(),
+        ["dawn_ray"]
+    );
     // A registry without the rows adds no voice to the cues of the wire styles.
     let empty = SkillPresentation::default();
     for class in HeroClass::ALL {
@@ -1155,7 +1209,7 @@ fn a_cast_takes_the_voice_of_its_row_for_that_edge() {
     assert_eq!(row_of(&recast[0]), Some((Moment::Recast, "dawn_field")));
     assert_eq!(
         recast[0].variant(),
-        played(AudioCue::Holy, 0.8, AudioSlice::Body)
+        played(AudioCue::RadiantBeam, 0.85, AudioSlice::Body)
     );
     assert_eq!(
         recast[0].origin,
@@ -1218,8 +1272,22 @@ fn stage(
     change: StageChange,
     owner: Option<bool>,
 ) -> StageEvent {
+    let (effect, owner) = owned(skill, kind, owner);
     StageEvent {
-        effect: SkillEffectState {
+        effect,
+        change,
+        owner,
+    }
+}
+
+/// An effect of `skill` at the listener and its owner, as `stage` describes them.
+fn owned(
+    skill: SkillId,
+    kind: EffectVisualKind,
+    owner: Option<bool>,
+) -> (SkillEffectState, Option<OwnerSeen>) {
+    (
+        SkillEffectState {
             id: 31,
             owner_id: match owner {
                 Some(true) => local().id,
@@ -1236,8 +1304,7 @@ fn stage(
             armed: false,
             consumed_segments: 0,
         },
-        change,
-        owner: owner.map(|local| crate::skill_presentation::stage::OwnerSeen {
+        owner.map(|local| OwnerSeen {
             visible: true,
             alive: true,
             parrying: Some(false),
@@ -1245,7 +1312,7 @@ fn stage(
             slot: Some(3),
             local,
         }),
-    }
+    )
 }
 
 #[test]
@@ -1255,7 +1322,8 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
     let released = StageChange::Ended(EndKind::Released);
     let fired = |event: StageEvent| voiced(&registry, &[], &[], &[event], Vec::new());
 
-    // A warning that became its beam.
+    // A warning that became its beam: the ray fires in a sample of its own, one note
+    // that already holds the thump, the bells and the air.
     let ray = fired(stage(
         SkillId::DawnRay,
         EffectVisualKind::Beam,
@@ -1263,10 +1331,7 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
         Some(true),
     ));
     assert_eq!(ray.len(), 1);
-    assert_eq!(
-        ray[0].variant(),
-        played(AudioCue::Holy, 0.7, AudioSlice::Full)
-    );
+    assert_eq!(ray[0].variant(), Variant::from(AudioCue::RadiantBeam));
     assert!(close(ray[0].gain, 1.0));
     assert_eq!(
         ray[0].origin,
@@ -1277,11 +1342,7 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
             id: 31
         }
     );
-    // Its two later notes: one with the first note, one 40 ms on.
-    assert_eq!(
-        ray[0].notes.map(|note| note.unwrap().delay_secs),
-        [0.0, 0.04]
-    );
+    assert_eq!(ray[0].notes, [None; MAX_NOTES]);
     // A warning that became the travelling wave, and a fuse that burned down.
     let wave = fired(stage(
         SkillId::HorizonWave,
@@ -1342,16 +1403,150 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
     );
     assert!(voiced(&SkillPresentation::default(), &[], &[], &[ray], Vec::new()).is_empty());
 
-    // The beam of a hero the client does not see sounds where it was received: by the
-    // distance to the effect, with the first note alone.
+    // The beam of a hero the client does not see sounds where it was received: from the
+    // point of its lane nearest the listener, with the first note alone. A lane that passes
+    // 21 units away is heard at the gain of 21 units although both of its ends are out of
+    // earshot; one that leads away is heard from its start.
     let mut unseen = stage(SkillId::DawnRay, EffectVisualKind::Beam, flipped, None);
-    unseen.effect.position = [0.0, 21.0];
-    let heard = fired(unseen.clone());
-    assert!(close(heard[0].gain, 0.25));
-    assert_eq!(heard[0].notes, [None; MAX_NOTES]);
-    assert!(matches!(heard[0].origin, Origin::Row { actor: 0, .. }));
-    unseen.effect.position = [0.0, 36.0];
-    assert!(fired(unseen).is_empty());
+    for (position, end, gain) in [
+        ([-30.0, 21.0], [30.0, 21.0], 0.25),
+        ([30.0, 21.0], [-30.0, 21.0], 0.25),
+        ([0.0, 21.0], [0.0, 66.0], 0.25),
+        ([0.0, -66.0], [0.0, -21.0], 0.25),
+        ([-30.0, 0.0], [30.0, 0.0], 1.0),
+        ([-30.0, 36.0], [30.0, 36.0], 0.0),
+        ([0.0, 36.0], [0.0, 81.0], 0.0),
+    ] {
+        unseen.effect.position = position;
+        unseen.effect.end = end;
+        let heard = fired(unseen.clone());
+        if gain == 0.0 {
+            assert!(heard.is_empty(), "{position:?}");
+            continue;
+        }
+        assert!(
+            close(heard[0].gain, gain),
+            "{position:?}: {}",
+            heard[0].gain
+        );
+        assert_eq!(heard[0].notes, [None; MAX_NOTES]);
+        assert!(matches!(heard[0].origin, Origin::Row { actor: 0, .. }));
+    }
+    // An effect that is no lane is heard from its position, whatever its `end` says.
+    let mut wave = stage(SkillId::HorizonWave, EffectVisualKind::Bolt, flipped, None);
+    wave.effect.position = [0.0, 21.0];
+    wave.effect.end = [0.0, 0.0];
+    assert!(close(fired(wave)[0].gain, 0.25));
+}
+
+/// The first sight of a fresh warning of `skill`, lying from `position` to `end`. `owner`
+/// is as in `stage`.
+fn warning(
+    skill: SkillId,
+    position: [f32; 2],
+    end: [f32; 2],
+    owner: Option<bool>,
+) -> TelegraphSeen {
+    let (effect, owner) = owned(skill, EffectVisualKind::BeamWarning, owner);
+    TelegraphSeen {
+        effect: SkillEffectState {
+            position,
+            end,
+            remaining_secs: 0.9,
+            ..effect
+        },
+        owner,
+    }
+}
+
+#[test]
+fn a_fresh_telegraph_is_heard_from_its_lane_by_everyone_who_sees_it() {
+    let registry = target();
+    // The warning of a Horizon Ray: the tail of the charge, from 0.20 s, swells for the
+    // 0.8 s windup. It is heard from the point of the lane nearest the listener.
+    let ray = telegraphed(
+        &registry,
+        &[warning(
+            SkillId::DawnRay,
+            [-30.0, 21.0],
+            [30.0, 21.0],
+            Some(false),
+        )],
+    );
+    assert_eq!(ray.len(), 1);
+    assert_eq!(
+        ray[0].variant(),
+        played(AudioCue::RadiantCharge, 1.0, AudioSlice::Tail)
+    );
+    assert!(close(ray[0].gain, 0.25 * 0.9));
+    assert_eq!(
+        ray[0].origin,
+        Origin::Row {
+            moment: Moment::Telegraph,
+            row: "dawn_ray",
+            actor: ENEMY,
+            id: 31
+        }
+    );
+    // A hero the client does not see warns the same; the warning names no actor.
+    let unseen = telegraphed(
+        &registry,
+        &[warning(SkillId::DawnRay, [0.0, 21.0], [0.0, 66.0], None)],
+    );
+    assert_eq!(unseen[0].variant(), ray[0].variant());
+    assert!(close(unseen[0].gain, 0.25 * 0.9));
+    assert!(matches!(unseen[0].origin, Origin::Row { actor: 0, .. }));
+    // The local hero's own warning is heard in full; nobody's has later notes.
+    let own = telegraphed(
+        &registry,
+        &[warning(
+            SkillId::DawnRay,
+            [30.0, 30.0],
+            [60.0, 60.0],
+            Some(true),
+        )],
+    );
+    assert!(close(own[0].gain, 0.9));
+    assert_eq!(own[0].admission().notes, 1);
+    // A lane wholly out of earshot is not heard.
+    assert!(
+        telegraphed(
+            &registry,
+            &[warning(SkillId::DawnRay, [-30.0, 36.0], [30.0, 36.0], None)]
+        )
+        .is_empty()
+    );
+    // Only a row with a telegraph voice has one: the wave of Riftshot and Furnace Breath
+    // warn in silence, and so does every skill of a registry without the rows.
+    for skill in [SkillId::HorizonWave, SkillId::FurnaceBreath] {
+        assert!(
+            telegraphed(&registry, &[warning(skill, [0.0, 0.0], [4.0, 0.0], None)]).is_empty(),
+            "{}",
+            skill.id()
+        );
+    }
+    assert!(
+        telegraphed(
+            &SkillPresentation::default(),
+            &[warning(SkillId::DawnRay, [0.0, 0.0], [4.0, 0.0], None)]
+        )
+        .is_empty()
+    );
+    // The cast edge of the same ray is the ignition: the first 0.12 s of the same sample,
+    // which the warning skips, heard where the hero stands.
+    let ray_slot = slot_of(HeroClass::Dawnweaver, "dawn_ray");
+    let cast = voiced(
+        &registry,
+        &[],
+        &[observed(ENEMY, HeroClass::Dawnweaver, ray_slot, 4)],
+        &[],
+        Vec::new(),
+    );
+    assert_eq!(
+        cast[0].variant(),
+        played(AudioCue::RadiantCharge, 1.0, AudioSlice::Tick)
+    );
+    assert_eq!(cast[0].admission().notes, 1);
 }
 
 /// A repeater has a voice for each of its two rounds. The hit sounds as the round its
@@ -1646,11 +1841,13 @@ fn a_voice_is_a_sample_a_speed_and_a_slice_detuned_by_three_percent_at_most() {
         (AudioBase::Caster, AudioCue::Caster),
         (AudioBase::Tower, AudioCue::Tower),
         (AudioBase::Bluff, AudioCue::Bluff),
+        (AudioBase::RadiantCharge, AudioCue::RadiantCharge),
+        (AudioBase::RadiantBeam, AudioCue::RadiantBeam),
     ] {
         assert_eq!(AudioCue::for_base(base), cue);
         assert_eq!(base.id(), cue.id());
     }
-    assert_eq!(AudioBase::ALL.len(), 7);
+    assert_eq!(AudioBase::ALL.len(), 9);
 
     // The detune follows from the id alone, stays within 3 % and varies from id to id.
     let mut factors: Vec<f32> = (0..2000).map(detune).collect();
@@ -1722,4 +1919,200 @@ fn one_rocket_explosion_is_heard_across_victims_even_when_the_first_hit_is_shiel
             .1,
         AudioCue::for_style(ProjectileStyle::Rocket)
     ));
+}
+
+#[test]
+fn a_radiance_burst_and_a_core_hit_have_voices_of_their_own_once_a_frame() {
+    let registry = target();
+    let me = local().id;
+    let ray = slot_of(HeroClass::Dawnweaver, "dawn_ray");
+    let dawnweaver = [heard_hero(me, HeroClass::Dawnweaver, ray)];
+    // The ray bursts a mark and hits inside its core. The burst comes first and names the
+    // same action as the hit that set it off.
+    let burst = CombatEvent {
+        radiance_burst: true,
+        ..dealt(1, me, Some(ray))
+    };
+    let core = CombatEvent {
+        core_hit: true,
+        ..dealt(2, me, Some(ray))
+    };
+    let styled = receipts(&[burst.clone(), core.clone()]);
+    assert!(
+        !styled
+            .iter()
+            .any(|candidate| matches!(candidate.origin, Origin::Receipt { id: 1, .. })),
+        "a burst is no second hit"
+    );
+    let cues = voiced(&registry, &dawnweaver, &[], &[], styled);
+    assert_eq!(cues.len(), 3);
+    let impacts: Vec<_> = cues
+        .iter()
+        .filter(|candidate| row_of(candidate) == Some((Moment::Impact, "dawn_ray")))
+        .collect();
+    assert_eq!(impacts.len(), 1);
+    assert!(matches!(impacts[0].origin, Origin::Row { id: 2, .. }));
+    for cue in [AudioCue::RadianceBurst, AudioCue::RadiantCore] {
+        let voices: Vec<_> = cues
+            .iter()
+            .filter(|candidate| candidate.cue == cue)
+            .collect();
+        assert_eq!(voices.len(), 1, "{cue:?}");
+        assert_eq!(voices[0].variant(), Variant::from(cue));
+        assert_eq!(voices[0].origin, Origin::Other);
+        // The local hero's own burst and core hit are heard in full however far away.
+        assert!(close(voices[0].gain, 1.0), "{cue:?}");
+    }
+    let far = |receipt: &CombatEvent| CombatEvent {
+        x: 40.0,
+        ..receipt.clone()
+    };
+    let cues = receipts(&[far(&burst), far(&core)]);
+    assert!(has(&cues, AudioCue::RadianceBurst) && has(&cues, AudioCue::RadiantCore));
+
+    // Several marks and core hits of another hero in one frame are one burst and one core
+    // note, as loud as the loudest of them, heard by distance.
+    let other = |id: u64, x: f32, burst: bool| CombatEvent {
+        x,
+        radiance_burst: burst,
+        core_hit: !burst,
+        ..dealt(id, 9, Some(ray))
+    };
+    let teamfight = receipts(&[
+        other(1, 30.0, true),
+        other(2, 21.0, true),
+        other(3, 33.0, true),
+        other(4, 30.0, false),
+        other(5, 21.0, false),
+    ]);
+    for cue in [AudioCue::RadianceBurst, AudioCue::RadiantCore] {
+        let voices: Vec<_> = teamfight
+            .iter()
+            .filter(|candidate| candidate.cue == cue)
+            .collect();
+        assert_eq!(voices.len(), 1, "{cue:?}");
+        assert!(close(voices[0].gain, 0.25), "{cue:?}");
+    }
+    // Beyond earshot neither is heard, unless the local hero is the victim.
+    let distant = [other(1, 40.0, true), other(2, 40.0, false)];
+    let cues = receipts(&distant);
+    assert!(!has(&cues, AudioCue::RadianceBurst) && !has(&cues, AudioCue::RadiantCore));
+    let on_me = distant.map(|receipt| CombatEvent {
+        target: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: me,
+        },
+        ..receipt
+    });
+    let cues = receipts(&on_me);
+    for cue in [
+        AudioCue::RadianceBurst,
+        AudioCue::RadiantCore,
+        AudioCue::Hit,
+    ] {
+        assert!(
+            cues.iter()
+                .any(|candidate| candidate.cue == cue && close(candidate.gain, 1.0)),
+            "{cue:?}"
+        );
+    }
+    // A burst or a core hit a shield absorbed whole is not heard; a hit outside the core
+    // has no core note.
+    let absorbed = [burst.clone(), core.clone()].map(|receipt| CombatEvent {
+        amount: 0.0,
+        ..receipt
+    });
+    assert!(receipts(&absorbed).is_empty());
+    let edge = receipts(&[dealt(2, me, Some(ray))]);
+    assert!(!has(&edge, AudioCue::RadiantCore) && !has(&edge, AudioCue::RadianceBurst));
+
+    // Both add to a hit that has a voice already: they are admitted after every other
+    // voice of the frame, the release of the ray included.
+    for cue in [AudioCue::RadianceBurst, AudioCue::RadiantCore] {
+        assert!(
+            AudioCue::ALL
+                .into_iter()
+                .filter(|other| !matches!(other, AudioCue::RadianceBurst | AudioCue::RadiantCore))
+                .all(|other| other.priority() < cue.priority())
+        );
+    }
+}
+
+/// Every voice of every row is a variant of its own (sample, speed step and slice), at every
+/// moment: cast, telegraph, recast, release, impact and the basic attacks. Two rows that
+/// share one silence each other through its cooldown, and a listener cannot tell them apart.
+#[test]
+fn every_voice_of_every_row_is_a_variant_of_its_own() {
+    // Shares between rows of other heroes that predate this check; each belongs to the pass
+    // of its own heroes. The list may only shrink.
+    const PRE_EXISTING: [[&str; 2]; 12] = [
+        ["nightfall.cast", "pyroblast.impact"],
+        ["shadow_lash.cast", "thorn_volley.impact"],
+        ["shadow_lash.impact", "thorn_volley.cast"],
+        ["arc_bolt.impact", "frost_lance.cast"],
+        ["winter_divide.cast", "winter_divide.impact"],
+        ["shield_bash.cast", "veilstalker.basic"],
+        ["dagger_lethal_blow.cast", "mirror_guard.impact"],
+        ["dagger_lethal_blow.impact", "fourfold_duel.cast"],
+        ["dagger_backstab.impact", "edgeweaver.basic"],
+        ["adventurer.basic", "dagger_deadly_blow.impact"],
+        ["mountain_echo.recast", "primal_maul.impact"],
+        ["chainkeeper.basic", "iron_hook.recast"],
+    ];
+    let registry = target();
+    let mut voices: BTreeMap<Variant, Vec<String>> = BTreeMap::new();
+    let mut add = |cue: &SoundCue, name: String| {
+        let variant = Candidate::voiced(cue, 1.0, false, Origin::Other).variant();
+        voices.entry(variant).or_default().push(name);
+    };
+    for (id, profile) in registry.rows() {
+        let sound = profile.sound.as_ref().unwrap();
+        for (moment, cue) in [
+            ("cast", &sound.cast),
+            ("telegraph", &sound.telegraph),
+            ("recast", &sound.recast),
+            ("release", &sound.release),
+            ("impact", &sound.impact),
+        ] {
+            if let Some(cue) = cue {
+                add(cue, format!("{id}.{moment}"));
+            }
+        }
+    }
+    for class in HeroClass::ALL {
+        let basic = registry.basic(class).unwrap();
+        add(
+            basic.sound.as_ref().unwrap(),
+            format!("{}.basic", class.id()),
+        );
+        if let Some(cue) = basic
+            .rockets
+            .as_ref()
+            .and_then(|rockets| rockets.sound.as_ref())
+        {
+            add(cue, format!("{}.rockets", class.id()));
+        }
+    }
+    assert!(voices.values().map(Vec::len).sum::<usize>() > 150);
+    let mut shared: Vec<Vec<String>> = voices
+        .into_values()
+        .filter(|rows| rows.len() > 1)
+        .map(|mut rows| {
+            rows.sort();
+            rows
+        })
+        .collect();
+    shared.sort();
+    let mut known: Vec<Vec<String>> = PRE_EXISTING
+        .iter()
+        .map(|pair| {
+            let mut rows: Vec<String> = pair.iter().map(|row| row.to_string()).collect();
+            rows.sort();
+            rows
+        })
+        .collect();
+    known.sort();
+    assert_eq!(shared, known);
+    // In particular no voice of the Dawnweaver is shared.
+    assert!(shared.iter().flatten().all(|row| !row.starts_with("dawn")));
 }

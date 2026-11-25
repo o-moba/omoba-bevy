@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "qualification_setup_seconds": 5.834491973,
+  "fixture_setup_before_search": true,
+  "window_secs": 15,
+  "accepted_before_timeout": 9,
+  "worker_count_before_unanimity": 0,
+  "fifo_age_preserved": true,
+  "late_accept_rejected": true,
+  "replacement_allocation": "fa04fbcb662cac425796efa42fbd705d"
+}

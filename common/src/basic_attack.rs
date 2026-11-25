@@ -1,8 +1,8 @@
 //! Individual server-authorized basic strikes. Clients own repeat/chase intent;
 //! the server owns target legality, range, timing, equipment and damage.
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, ProjectileStyle};
 use shared::map::Team;
@@ -112,6 +112,15 @@ pub fn handle_basic_attack_request(
             .is_some_and(|(_, until)| until > now)
         || attacker.hero.skills.advanced.immune(now)
     {
+        return;
+    }
+    if attacker.hero.skills.cast_locked(now)
+        && attacker.hero.skills.loadout.as_ref().is_some_and(|kit| {
+            kit.skills().get(attacker.hero.last_action.slot as usize)
+                == Some(&shared::loadout::SkillId::WildRocket)
+        })
+    {
+        // Keep the launcher committed to its aimed shot until the windup ends.
         return;
     }
     let (range, mode_damage, _, mana_cost, splash) = crate::skills::attack_modifiers(attacker);

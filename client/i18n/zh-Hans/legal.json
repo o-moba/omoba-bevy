@@ -1,0 +1,18 @@
+{
+  "legal.card.title": "开始游戏前",
+  "legal.card.body": "请阅读并接受用户条款和隐私说明，才能开始游戏。",
+  "legal.card.version": "文件版本：{version}",
+  "legal.card.language": "语言",
+  "legal.card.accept": "我接受用户条款和隐私说明",
+  "legal.card.continue": "继续",
+  "legal.link.terms": "用户条款",
+  "legal.link.privacy": "隐私说明",
+  "legal.link.source": "源代码",
+  "legal.link.community_vk": "VK 社区",
+  "legal.link.community_telegram": "Telegram 社区",
+  "legal.link.failed": "无法打开浏览器。地址：{url}",
+  "legal.about.title": "关于游戏",
+  "legal.about.build": "版本：{build}",
+  "legal.about.age": "分级",
+  "legal.about.support": "客服：{email}"
+}

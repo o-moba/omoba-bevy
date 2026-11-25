@@ -1,0 +1,17 @@
+{
+  "head": "6f6a95444287795f557100447ea102550d79c867",
+  "run_id": 42327346048,
+  "conclusion": "success",
+  "jobs": 7,
+  "artifact_id": 13557149866,
+  "bytes": 511200,
+  "sha256": "57dc40585995808fc0972a8a8442ab2c448e4a3e6c031f8461e9fbe84d1cc732",
+  "zip_entries": 206,
+  "uncompressed_bytes": 10552848,
+  "crc": "PASS",
+  "safe_entry_paths": "PASS",
+  "stages": 20,
+  "fixture_removed": true,
+  "private_key_path_present": false,
+  "scope": "Historical parent source, loopback CI; does not certify current source, real providers, WAN or RU capacity."
+}

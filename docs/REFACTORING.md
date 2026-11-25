@@ -128,7 +128,7 @@ items, not authorization for production infrastructure or dependency changes.
 - [ ] Publish the next coordinated protocol-10 / standard-kits-5 / compact-v2 client/server release after its release checks. Local 0.42.0 changes are not deployed. [Quality iteration](progress/2026-10-05-playtest-quality.md).
 - [ ] Exercise real iPhone backgrounding, app restart, reconnect and Home escape, including continued bot play during absence. The signed local test advances a manual clock; it is not a multi-minute device soak test.
 - [ ] Measure requested cap, actual app cadence and native display cadence on iPhone 16 Pro; verify the FPS visibility toggle. Desktop screenshots are not 120 Hz certification.
-- [ ] Play full matches to tune 500g bounties, the rare 1-HP dagger effect, tower count and respawn curve. The current economy model gives roughly three farming minutes per full bounty; actual match duration/win rates remain unmeasured.
+- [ ] Play full matches to tune 500g bounties, positional dagger counterplay, tower count and respawn curve. The current economy model gives roughly three farming minutes per full bounty. Actual match duration and win rates require measurement.
 - [ ] Reproduce the separately observed remote interpolation cadence change before changing it: eight samples with a 100ms delay may be insufficient around 120-to-60 Hz input cadence. This is not proven as the reported local-hero reversal symptom, which has its own fixed touch-response regression.
 
 ## Product priority — creator loop before class workshop (2026-10-05)

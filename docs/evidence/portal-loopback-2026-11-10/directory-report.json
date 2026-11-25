@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "portal_commit": "ff8f50165bdce761425e27369d6fff7d8fd250ea",
+  "game_code_commit": "5cd10d83f4b1016060830b58f5b763e19e3f96ea",
+  "scope": "RU loopback real Account API/PostgreSQL and production Next, publicly known fixture key; no client routing, live signing key, host or deployment",
+  "checks": [
+    "real Rust publisher to production Next preserves exact signed bytes with no browser account headers or cookies",
+    "native offline verifier accepts the document delivered through the portal and preserves closed admission policy",
+    "anonymous HEAD",
+    "mutation method rejected",
+    "request cannot choose a foreign account region",
+    "corrupted publication unavailable, never reflected or treated as an empty directory",
+    "atomic new signed publication visible without restarting API or portal"
+  ],
+  "unexpected_requests": [],
+  "private_fixture_removed": true,
+  "api_binary_sha256": "b44e44ade776d698724be72753aa2a7abe1c3afe8ee82f0ef8ead31fcaa3c323",
+  "signer_binary_sha256": "dea4d28fa44674a1140e4b716364ec399f17b7c2027d84ee21e8340682e6797d"
+}

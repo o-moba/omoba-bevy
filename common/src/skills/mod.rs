@@ -1,8 +1,9 @@
 //! Bounded, authoritative execution of resolved skill definitions.
 //! Presets choose IDs; this module dispatches reusable effects, never hero classes.
+use shared::clock::Instant;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
 use shared::loadout::{
@@ -123,6 +124,8 @@ pub struct HeroSkills {
     pub stacks_until: Option<Instant>,
     pub momentum_until: Option<Instant>,
     pub recovery_until: Option<Instant>,
+    /// A beam caster stands still until the warned ray fires from where it was cast.
+    pub cast_lock_until: Option<Instant>,
     pub marked_until: Option<Instant>,
     // The effect ID identifies the exact zone; a stale recast cannot hit a replacement.
     zones: [Option<(u64, Instant, SkillId)>; 4],
@@ -147,11 +150,18 @@ impl HeroSkills {
         self.stacks_until = None;
         self.momentum_until = None;
         self.recovery_until = None;
+        self.cast_lock_until = None;
         self.marked_until = None;
         self.zones = [None; 4];
         self.mode = WeaponMode::Repeater;
     }
+    pub fn cast_locked(&self, now: Instant) -> bool {
+        remaining(self.cast_lock_until, now) > 0.0
+    }
     pub fn movement(&self, now: Instant) -> f32 {
+        if self.cast_locked(now) {
+            return 0.0;
+        }
         self.control.movement(now)
             * if remaining(self.advanced.speed_until, now) > 0.0 {
                 1.3
@@ -381,7 +391,6 @@ struct Mark {
 }
 #[derive(Default)]
 pub struct SkillWorld {
-    dagger_chance: dagger::Chance,
     effects: BTreeMap<u64, ActiveEffect>,
     advanced: advanced::WorldState,
     next_id: u64,
@@ -406,6 +415,7 @@ impl SkillWorld {
             .values()
             .filter(move |effect| {
                 effect.team == team
+                    && effect.fired
                     && matches!(skill(effect.skill).effect, SkillEffect::ImpactRocket { .. })
             })
             .map(|effect| shared::vision::VisionSource {
@@ -538,6 +548,72 @@ fn hits(cs: &[Candidate], a: [f32; 2], b: [f32; 2], r: f32) -> Vec<Candidate> {
     });
     v.into_iter().map(|(_, c)| c).collect()
 }
+/// Distance from `p` to the segment `a`-`b`: the metric of the capsule test above.
+fn segment_distance(a: [f32; 2], b: [f32; 2], p: [f32; 2]) -> f32 {
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let length = d[0] * d[0] + d[1] * d[1];
+    let t = if length > 0.000001 {
+        (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    distance(p, add(a, d, t))
+}
+fn owner_alive(w: &GameWorld, owner: u64) -> bool {
+    w.players
+        .values()
+        .any(|p| p.joined && p.hero.identity.id == owner && p.hero.hp > 0.0)
+}
+/// Resolves a warned beam once. Each hostile's damage eases from the full core to
+/// the catalog edge multiplier by its centre's distance from the axis; Radiance
+/// detonation and the re-applied mark keep their stored value.
+fn fire_beam(
+    w: &mut GameWorld,
+    e: &mut ActiveEffect,
+    cs: &[Candidate],
+    now: Instant,
+) -> Vec<CombatEvent> {
+    let def = skill(e.skill);
+    let SkillEffect::Beam {
+        width,
+        damage,
+        core_width,
+        edge_damage_multiplier,
+    } = def.effect
+    else {
+        return Vec::new();
+    };
+    e.fired = true;
+    let mut out = Vec::new();
+    for c in hits(cs, e.origin, e.end, width)
+        .into_iter()
+        .filter(|c| hostile(c, e.team))
+    {
+        let lateral = segment_distance(e.origin, e.end, c.pos);
+        let multiplier = shared::loadout::beam_damage_multiplier(
+            lateral,
+            width,
+            c.radius,
+            core_width,
+            edge_damage_multiplier,
+        );
+        let mut src = source(e.owner, e.slot);
+        src.core_hit = lateral <= core_width;
+        out.extend(apply_hit(
+            w,
+            c.target,
+            damage * e.scale * multiplier,
+            def.damage_type,
+            src,
+            e.team,
+            false,
+            true,
+            true,
+            now,
+        ));
+    }
+    out
+}
 fn source(owner: u64, slot: u8) -> HitSource {
     let mut s = HitSource::new(CombatEntityKind::Player, owner, ProjectileStyle::Arcane);
     s.action_slot = Some(slot);
@@ -654,7 +730,11 @@ pub fn apply_hit(
                 target,
                 m.amount,
                 DamageType::Magic,
-                src,
+                HitSource {
+                    core_hit: false,
+                    radiance_burst: true,
+                    ..src
+                },
                 team,
                 now,
             ));
@@ -707,7 +787,11 @@ pub fn apply_hit(
     }
     events.extend(primary);
     if src.entity.kind == CombatEntityKind::Player && amount > 0.0 {
-        events.extend(advanced::on_hit(w, c, amount, src, team, basic, now));
+        let plain = HitSource {
+            core_hit: false,
+            ..src
+        };
+        events.extend(advanced::on_hit(w, c, amount, plain, team, basic, now));
     }
     if mark
         && radiance
@@ -732,7 +816,10 @@ pub fn apply_hit(
                         p.hero.progress.level,
                     )
                     * hero_stats::combat_bonuses(p).damage_multiplier
-            });
+            })
+            // The stored burst is skill damage too: the team buff applies like it
+            // does to the hit that placed the mark.
+            * w.team_buffs.damage_multiplier(team, now);
         w.skill_runtime.marks.insert(
             (key(target), src.entity.id),
             Mark {
@@ -808,7 +895,14 @@ fn control(
     );
 }
 
-fn shield(w: &mut GameWorld, target: u64, owner: u64, amount: f32, secs: f32, now: Instant) {
+pub(crate) fn shield(
+    w: &mut GameWorld,
+    target: u64,
+    owner: u64,
+    amount: f32,
+    secs: f32,
+    now: Instant,
+) {
     if let Some(p) = w
         .players
         .values_mut()
@@ -972,6 +1066,12 @@ pub fn cast(
     p.timers.last_cast_at[slot as usize] = Some(now);
     p.hero.skills.recovery_until =
         Some(now + duration(d.windup_secs.max(if is_toggle { 0.0 } else { 0.15 })));
+    if matches!(
+        d.effect,
+        SkillEffect::Beam { .. } | SkillEffect::ImpactRocket { .. }
+    ) {
+        p.hero.skills.cast_lock_until = Some(now + duration(d.windup_secs));
+    }
     crate::sim::cast::record_player_action(p, SkillSlot::from_index(slot).unwrap());
     if !is_toggle {
         crate::sim::cast::face_player_action(p, dir[0], dir[1]);
@@ -1006,20 +1106,17 @@ pub fn cast(
         let mut armed = d.windup_secs;
         match d.effect {
             SkillEffect::LinearProjectile { speed, .. } => lifetime = range / speed + 0.2,
-            SkillEffect::ImpactRocket {
-                speed,
-                launch_speed,
-                acceleration,
-                ..
-            } => {
-                lifetime = rocket_time(range, launch_speed, speed, acceleration) + 0.2;
+            SkillEffect::ImpactRocket { .. } => {
+                lifetime = d.windup_secs + d.rocket_flight_lifetime().unwrap();
             }
             SkillEffect::ReturningShield { speed, .. } => lifetime = range / speed * 2.0 + 3.0,
             SkillEffect::RecastZone { duration_secs, .. } => {
                 pos = end;
                 lifetime = duration_secs;
             }
-            SkillEffect::Beam { .. } => lifetime = d.windup_secs + 0.15,
+            SkillEffect::Beam { .. } => {
+                lifetime = d.windup_secs + shared::loadout::BEAM_LINGER_SECS;
+            }
             SkillEffect::TrapLine {
                 spacing,
                 arm_secs,
@@ -1075,6 +1172,28 @@ pub fn cast(
         w.skill_runtime.effects.insert(e.id, e);
     }
 }
+/// Centre of the live field `slot` placed, exactly while [`cast`] would detonate
+/// it instead of placing a new one. Bots read it to hold the field for a victim.
+pub(crate) fn live_zone(
+    w: &GameWorld,
+    p: &ConnectedPlayer,
+    slot: u8,
+    now: Instant,
+) -> Option<[f32; 2]> {
+    let id = *p
+        .hero
+        .skills
+        .loadout
+        .as_ref()?
+        .skills()
+        .get(usize::from(slot))?;
+    let (zone, expires, _) = (*p.hero.skills.zones.get(usize::from(slot))?)?;
+    w.skill_runtime
+        .effects
+        .get(&zone)
+        .filter(|e| now < expires && e.owner == p.hero.identity.id && e.skill == id)
+        .map(|e| e.pos)
+}
 fn detonate(w: &mut GameWorld, e: &ActiveEffect, now: Instant) -> Vec<CombatEvent> {
     let SkillEffect::RecastZone { radius, damage, .. } = skill(e.skill).effect else {
         return Vec::new();
@@ -1111,17 +1230,6 @@ fn detonate(w: &mut GameWorld, e: &ActiveEffect, now: Instant) -> Vec<CombatEven
 
 /// Time to a distance under constant acceleration followed by a speed cap.
 /// Integrating the ramp analytically makes travel independent of tick subdivision.
-fn rocket_time(distance: f32, launch: f32, speed: f32, acceleration: f32) -> f32 {
-    let ramp_time = (speed - launch) / acceleration;
-    let ramp_distance = (launch + speed) * ramp_time * 0.5;
-    if distance <= ramp_distance {
-        // Rationalized quadratic root avoids cancellation near the muzzle.
-        2.0 * distance / ((launch * launch + 2.0 * acceleration * distance).sqrt() + launch)
-    } else {
-        ramp_time + (distance - ramp_distance) / speed
-    }
-}
-
 fn rocket_step(traveled: f32, dt: f32, launch: f32, speed: f32, acceleration: f32) -> f32 {
     let current = (launch * launch + 2.0 * acceleration * traveled)
         .sqrt()
@@ -1148,6 +1256,17 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
         let def = skill(e.skill);
         let cs = candidates(w);
         let mut keep = now < e.expires;
+        if !keep
+            && matches!(def.effect, SkillEffect::Beam { .. })
+            && !e.fired
+            && owner_alive(w, e.owner)
+        {
+            // One late tick can step over the whole linger window. A due beam still
+            // fires once, and lingers a full tail so a snapshot can show the release.
+            out.extend(fire_beam(w, &mut e, &cs, now));
+            e.expires = now + duration(shared::loadout::BEAM_LINGER_SECS);
+            keep = true;
+        }
         if !keep {
             if matches!(def.effect, SkillEffect::RecastZone { .. }) {
                 out.extend(detonate(w, &e, now));
@@ -1182,7 +1301,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                         source(e.owner, e.slot),
                         e.team,
                         false,
-                        true,
+                        factor > 0.0,
                         false,
                         now,
                     ));
@@ -1292,34 +1411,14 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                     control(w, c, e.id, e.team, 0.0, slow_multiplier, 0.12, 0.0, now);
                 }
             }
-            SkillEffect::Beam { width, damage } => {
-                if !e.fired
-                    && !w
-                        .players
-                        .values()
-                        .any(|p| p.joined && p.hero.identity.id == e.owner && p.hero.hp > 0.0)
-                {
+            SkillEffect::Beam { .. } => {
+                // Death before the ray fires cancels it (the effect is not
+                // re-inserted); a fired beam lingers for its replicated tail.
+                if !e.fired && !owner_alive(w, e.owner) {
                     continue;
                 }
                 if now >= e.armed_at && !e.fired {
-                    for c in hits(&cs, e.origin, e.end, width)
-                        .into_iter()
-                        .filter(|c| hostile(c, e.team))
-                    {
-                        out.extend(apply_hit(
-                            w,
-                            c.target,
-                            damage * e.scale,
-                            def.damage_type,
-                            source(e.owner, e.slot),
-                            e.team,
-                            false,
-                            true,
-                            true,
-                            now,
-                        ));
-                    }
-                    e.fired = true;
+                    out.extend(fire_beam(w, &mut e, &cs, now));
                 }
             }
             SkillEffect::TrapLine {
@@ -1412,7 +1511,16 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                 max_distance,
                 missing_health_ratio,
             } => {
-                let travel = rocket_step(e.traveled, t.dt, launch_speed, speed, acceleration)
+                if !e.fired && !owner_alive(w, e.owner) {
+                    continue;
+                }
+                if now < e.armed_at {
+                    w.skill_runtime.effects.insert(id, e);
+                    continue;
+                }
+                e.fired = true;
+                let flight_dt = t.dt.min(now.duration_since(e.armed_at).as_secs_f32());
+                let travel = rocket_step(e.traveled, flight_dt, launch_speed, speed, acceleration)
                     .min(distance(e.pos, e.end));
                 let to = add(e.pos, e.direction, travel);
                 if let Some((holder, factor)) =
@@ -1429,7 +1537,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                         source(e.owner, e.slot),
                         e.team,
                         false,
-                        true,
+                        factor > 0.0,
                         false,
                         now,
                     ));
@@ -1448,8 +1556,12 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                     for victim in cs.into_iter().filter(|c| {
                         hostile(c, e.team) && distance(c.pos, e.pos) <= blast_radius + c.radius
                     }) {
-                        let amount = damage * e.scale * factor
-                            + (victim.max_hp - victim.hp).max(0.0) * missing_health_ratio;
+                        let missing_health_damage = if victim.target == c.target {
+                            (victim.max_hp - victim.hp).max(0.0) * missing_health_ratio
+                        } else {
+                            0.0
+                        };
+                        let amount = damage * e.scale * factor + missing_health_damage;
                         let mut receipts = apply_hit(
                             w,
                             victim.target,
@@ -1560,7 +1672,14 @@ pub fn effects(w: &GameWorld, now: Instant) -> Vec<SkillEffectState> {
                     width,
                 ),
                 SkillEffect::TrapLine { radius, .. } => (EffectVisualKind::Trap, radius),
-                SkillEffect::ImpactRocket { radius, .. } => (EffectVisualKind::Rocket, radius),
+                SkillEffect::ImpactRocket { radius, .. } => (
+                    if e.fired {
+                        EffectVisualKind::Rocket
+                    } else {
+                        EffectVisualKind::BeamWarning
+                    },
+                    radius,
+                ),
                 _ => (EffectVisualKind::Bolt, 0.0),
             };
             SkillEffectState {

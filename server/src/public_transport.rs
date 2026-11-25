@@ -10,18 +10,25 @@ use shared::public_transport::{
 };
 use shared::wire::ClientPacket;
 
+use crate::admission::{Budget, Limits, SourceIp};
 use crate::bots;
 
-const MAX_ENDPOINTS: usize = 512;
+/// Endpoint records one process keeps (the lobby's player ceiling together
+/// with `career_backend::MAX_CLIENTS`); a new source beyond it is answered
+/// `server_full`.
+pub(crate) const MAX_ENDPOINTS: usize = 2048;
 const CHALLENGE_TTL: Duration = Duration::from_secs(5);
 const VALIDATED_TTL: Duration = Duration::from_secs(30);
 const MAX_ENDPOINT_PACKETS_PER_SECOND: u32 = 120;
-const MAX_PROBES_PER_SECOND: u32 = 64;
+/// Expired records are swept this often; the record of the sending address is
+/// checked exactly on every datagram, so expiry itself is never late.
+const SWEEP_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(crate) enum Decision {
     Drop,
     Reply(Vec<u8>),
     Dispatch(ClientPacket),
+    DispatchSigned(ClientPacket, u64),
 }
 struct Endpoint {
     client_nonce: String,
@@ -35,42 +42,122 @@ struct Endpoint {
     auth_nonce: Option<String>,
     sequence: u64,
 }
+impl Endpoint {
+    fn expired(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.touched)
+            >= if self.validated {
+                VALIDATED_TTL
+            } else {
+                CHALLENGE_TTL
+            }
+    }
+}
 
+/// Return-path admission. Probes and compatibility replies each have their
+/// own per-second budget: per IP and per network first, then global with a
+/// reserve for new sources (LR-16), so one source, even a spoofed one, cannot
+/// lock everyone else out. One IP holds at most `endpoints_per_ip` endpoints;
+/// `per_ip` counts them so a probe costs no pass over the table.
 #[derive(Default)]
 pub(crate) struct PublicTransport {
     endpoints: HashMap<SocketAddr, Endpoint>,
-    probe_window: Option<Instant>,
-    probes: u32,
-    compatibility_window: Option<Instant>,
-    compatibility_probes: u32,
+    per_ip: HashMap<SourceIp, usize>,
+    last_sweep: Option<Instant>,
+    limits: Limits,
+    probes: Budget,
+    compatibility: Budget,
 }
 impl PublicTransport {
+    pub(crate) fn new(limits: Limits) -> Self {
+        Self {
+            limits,
+            ..Self::default()
+        }
+    }
+
+    fn insert(&mut self, addr: SocketAddr, endpoint: Endpoint) {
+        if self.endpoints.insert(addr, endpoint).is_none() {
+            *self.per_ip.entry(SourceIp::of(addr)).or_default() += 1;
+        }
+    }
+
+    fn remove(&mut self, addr: SocketAddr) {
+        if self.endpoints.remove(&addr).is_some() {
+            Self::uncount(&mut self.per_ip, addr);
+        }
+    }
+
+    fn uncount(per_ip: &mut HashMap<SourceIp, usize>, addr: SocketAddr) {
+        let ip = SourceIp::of(addr);
+        if let Some(count) = per_ip.get_mut(&ip) {
+            *count -= 1;
+            if *count == 0 {
+                per_ip.remove(&ip);
+            }
+        }
+    }
+
+    /// Drops every expired record: at most every [`SWEEP_INTERVAL`] per
+    /// datagram, or now when `force` (the table looks full).
+    fn sweep(&mut self, now: Instant, force: bool) {
+        if !force
+            && self
+                .last_sweep
+                .is_some_and(|at| now.saturating_duration_since(at) < SWEEP_INTERVAL)
+        {
+            return;
+        }
+        self.last_sweep = Some(now);
+        let per_ip = &mut self.per_ip;
+        self.endpoints.retain(|addr, endpoint| {
+            let keep = !endpoint.expired(now);
+            if !keep {
+                Self::uncount(per_ip, *addr);
+            }
+            keep
+        });
+    }
+
+    /// Whether the table holds [`MAX_ENDPOINTS`] live records, after a sweep
+    /// when it looks that way.
+    fn full(&mut self, now: Instant) -> bool {
+        if self.endpoints.len() >= MAX_ENDPOINTS {
+            self.sweep(now, true);
+        }
+        self.endpoints.len() >= MAX_ENDPOINTS
+    }
+
+    /// The non-amplifying `server_full` answer to a probe of `bytes`: never
+    /// more bytes than the probe, within the probe budget it already took.
+    fn server_full(client_nonce: String, bytes: &[u8]) -> Decision {
+        let reply = serde_json::to_vec(&PublicServerDatagram::ServerFull { client_nonce })
+            .expect("server full serializes");
+        if reply.len() <= bytes.len() {
+            Decision::Reply(reply)
+        } else {
+            Decision::Drop
+        }
+    }
+
     /// Independent of public admission: works for lobby, worker and standalone.
-    /// No per-source allocation, at most 64 non-amplifying replies per second.
+    /// No per-source allocation beyond the one-second budget; non-amplifying.
     pub(crate) fn compatibility_reply(
         &mut self,
         addr: SocketAddr,
         bytes: &[u8],
         now: Instant,
     ) -> Option<Vec<u8>> {
-        if bots::is_bot_address(addr) {
-            return None;
-        }
-        if self
-            .compatibility_window
-            .is_none_or(|at| now.saturating_duration_since(at) >= Duration::from_secs(1))
+        if bots::is_bot_address(addr) || !self.compatibility.allows(addr, &self.limits.budget, now)
         {
-            self.compatibility_window = Some(now);
-            self.compatibility_probes = 0;
-        }
-        if self.compatibility_probes >= MAX_PROBES_PER_SECOND {
             return None;
         }
-        let reply = shared::compatibility::response(
+        // LR-14: the report names the oldest admitted release and the update page.
+        let reply = shared::compatibility::response_with_update(
             bytes,
             &shared::compatibility::ReleaseContract::current(),
+            Some(&shared::compatibility::UpdateNotice::current()),
         )?;
-        self.compatibility_probes += 1;
+        self.compatibility.admit(addr, &self.limits.budget, now);
         Some(reply)
     }
 
@@ -93,14 +180,10 @@ impl PublicTransport {
         if bytes.len() > MAX_PUBLIC_DATAGRAM_BYTES || bots::is_bot_address(addr) {
             return Decision::Drop;
         }
-        self.endpoints.retain(|_, endpoint| {
-            now.saturating_duration_since(endpoint.touched)
-                < if endpoint.validated {
-                    VALIDATED_TTL
-                } else {
-                    CHALLENGE_TTL
-                }
-        });
+        self.sweep(now, false);
+        if self.endpoints.get(&addr).is_some_and(|e| e.expired(now)) {
+            self.remove(addr);
+        }
         let Ok(packet) = serde_json::from_slice::<PublicClientDatagram>(bytes) else {
             return Decision::Drop;
         };
@@ -116,26 +199,25 @@ impl PublicTransport {
             {
                 return Decision::Drop;
             }
-            if self
-                .probe_window
-                .is_none_or(|at| now.saturating_duration_since(at) >= Duration::from_secs(1))
-            {
-                self.probe_window = Some(now);
-                self.probes = 0;
-            }
-            if self.probes >= MAX_PROBES_PER_SECOND {
+            if !self.probes.admit(addr, &self.limits.budget, now) {
                 return Decision::Drop;
             }
-            self.probes += 1;
             if !self.endpoints.contains_key(&addr) {
-                if self.endpoints.len() >= MAX_ENDPOINTS {
-                    return Decision::Drop;
+                // Say so instead of leaving the player to time out (LR-09):
+                // the table is full, or this IP holds its `endpoints_per_ip`
+                // (a carrier NAT at its share). The client shows "server
+                // full" and keeps trying at its usual pace.
+                if self.full(now)
+                    || self.per_ip.get(&SourceIp::of(addr)).copied().unwrap_or(0)
+                        >= self.limits.endpoints_per_ip
+                {
+                    return Self::server_full(client_nonce, bytes);
                 }
                 let mut nonce = [0; 32];
                 if getrandom::fill(&mut nonce).is_err() {
                     return Decision::Drop;
                 }
-                self.endpoints.insert(
+                self.insert(
                     addr,
                     Endpoint {
                         client_nonce: client_nonce.clone(),
@@ -269,7 +351,7 @@ impl PublicTransport {
                 endpoint.auth_nonce = Some(principal.session_nonce);
                 endpoint.sequence = command.sequence;
                 endpoint.touched = now;
-                Decision::Dispatch(packet)
+                Decision::DispatchSigned(packet, command.sequence)
             }
             PublicClientDatagram::TransportProbe { .. } => unreachable!(),
         }
@@ -285,8 +367,13 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use shared::public_transport::{PROBE_PADDING_BYTES, SignedCommand};
+    /// A distinct source per `port`: its own IP in its own /24, so the
+    /// per-source limits never mix two test endpoints.
     fn address(port: u16) -> SocketAddr {
-        SocketAddr::from(([127, 0, 0, 1], port))
+        SocketAddr::from(([10, (port >> 8) as u8, port as u8, 1], port))
+    }
+    fn budget() -> crate::admission::BudgetLimits {
+        Limits::default().budget
     }
     fn encode(packet: PublicClientDatagram) -> Vec<u8> {
         serde_json::to_vec(&packet).unwrap()
@@ -305,7 +392,10 @@ mod tests {
         };
         assert!(reply.len() <= bytes.len());
         let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-            serde_json::from_slice(&reply).unwrap();
+            serde_json::from_slice(&reply).unwrap()
+        else {
+            panic!("a transport challenge is expected")
+        };
         let proof = encode(PublicClientDatagram::TransportProof {
             server_epoch: 7,
             path_nonce: path_nonce.clone(),
@@ -324,18 +414,25 @@ mod tests {
         let request = probe.request();
         let now = Instant::now();
         let mut gate = PublicTransport::default();
-        for _ in 0..MAX_PROBES_PER_SECOND {
-            let reply = gate.compatibility_reply(address(1), &request, now).unwrap();
+        for index in 1..=budget().global as u16 {
+            let reply = gate
+                .compatibility_reply(address(index), &request, now)
+                .unwrap();
             assert!(reply.len() <= request.len());
             assert_eq!(probe.accept(&reply), Some(client.clone()));
+            // LR-14: the report names the oldest admitted release (this server's).
+            assert_eq!(
+                probe.accept_report(&reply).unwrap().update,
+                Some(shared::compatibility::UpdateNotice::current())
+            );
             assert!(gate.endpoints.is_empty());
         }
         assert!(
-            gate.compatibility_reply(address(2), &request, now)
+            gate.compatibility_reply(address(1000), &request, now)
                 .is_none()
         );
         assert!(
-            gate.compatibility_reply(address(2), &request, now + Duration::from_secs(1))
+            gate.compatibility_reply(address(1000), &request, now + Duration::from_secs(1))
                 .is_some()
         );
         assert!(!gate.validated(address(1), now));
@@ -433,7 +530,7 @@ mod tests {
         ));
         assert!(matches!(
             gate.receive(addr, &bytes, 7, 2, false, Some(principal.clone()), now),
-            Decision::Dispatch(ClientPacket::Leave)
+            Decision::DispatchSigned(ClientPacket::Leave, 1)
         ));
         assert!(matches!(
             gate.receive(addr, &bytes, 7, 2, false, Some(principal), now),
@@ -448,7 +545,7 @@ mod tests {
         for index in 1..1000 {
             let _ = gate.receive(address(index), &bytes, 7, 2, false, None, now);
         }
-        assert_eq!(gate.endpoints.len(), MAX_PROBES_PER_SECOND as usize);
+        assert_eq!(gate.endpoints.len(), budget().global as usize);
         let _ = gate.receive(
             address(2000),
             &bytes,
@@ -479,6 +576,136 @@ mod tests {
             ));
         }
         assert!(!gate.validated(address(2001), now + CHALLENGE_TTL + VALIDATED_TTL));
+    }
+    /// LR-09: at the endpoint ceiling a new source's probe is answered
+    /// "server full" (its own nonce, never more bytes than it sent) instead
+    /// of silence; no endpoint is created, and a freed place admits it.
+    #[test]
+    fn a_probe_at_the_endpoint_ceiling_gets_server_full() {
+        let mut gate = PublicTransport::default();
+        let now = Instant::now();
+        for index in 0..MAX_ENDPOINTS as u16 {
+            gate.insert(
+                address(index),
+                Endpoint {
+                    client_nonce: "b".repeat(32),
+                    path_nonce: "c".repeat(64),
+                    created: now,
+                    touched: now,
+                    validated: true,
+                    last_probe: now,
+                    rate_started: now,
+                    packets: 0,
+                    auth_nonce: None,
+                    sequence: 0,
+                },
+            );
+        }
+        let bytes = probe();
+        let newcomer = address(4000);
+        let Decision::Reply(reply) = gate.receive(newcomer, &bytes, 7, 2, true, None, now) else {
+            panic!("a full server answers the probe")
+        };
+        assert!(reply.len() <= bytes.len());
+        assert_eq!(
+            serde_json::from_slice::<PublicServerDatagram>(&reply).unwrap(),
+            PublicServerDatagram::ServerFull {
+                client_nonce: "a".repeat(32)
+            }
+        );
+        assert_eq!(gate.endpoints.len(), MAX_ENDPOINTS);
+        assert!(!gate.endpoints.contains_key(&newcomer));
+        // A known endpoint still gets its challenge.
+        let known = encode(PublicClientDatagram::TransportProbe {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+            client_nonce: "b".repeat(32),
+            padding: "0".repeat(PROBE_PADDING_BYTES),
+        });
+        let later = now + Duration::from_secs(1);
+        let Decision::Reply(reply) = gate.receive(address(1), &known, 7, 2, true, None, later)
+        else {
+            panic!("a known endpoint is challenged")
+        };
+        assert!(matches!(
+            serde_json::from_slice(&reply).unwrap(),
+            PublicServerDatagram::TransportChallenge { .. }
+        ));
+        // A place frees: the newcomer is challenged.
+        gate.remove(address(2));
+        validate(&mut gate, newcomer, later + Duration::from_secs(1));
+        assert_eq!(gate.per_ip.values().sum::<usize>(), gate.endpoints.len());
+    }
+
+    /// Beyond `endpoints_per_ip`, a new source of that IP (a carrier NAT at
+    /// its share) is answered `server_full` like at the ceiling: its own
+    /// nonce, never more bytes than the probe, no record; a neighbour IP is
+    /// unaffected and an expired record of the IP frees its place.
+    #[test]
+    fn a_probe_beyond_the_per_ip_limit_gets_server_full() {
+        let limit = Limits::default().endpoints_per_ip;
+        let mut gate = PublicTransport::default();
+        let mut now = Instant::now();
+        let ip = [203, 0, 113, 9];
+        for port in 0..limit as u16 {
+            now += Duration::from_millis(400);
+            validate(&mut gate, SocketAddr::from((ip, 50000 + port)), now);
+        }
+        assert_eq!(gate.per_ip[&SourceIp::of(SocketAddr::from((ip, 1)))], limit);
+        let bytes = probe();
+        let extra = SocketAddr::from((ip, 60000));
+        now += Duration::from_millis(400);
+        let Decision::Reply(reply) = gate.receive(extra, &bytes, 7, 2, true, None, now) else {
+            panic!("an IP at its limit is told the server is full")
+        };
+        assert!(reply.len() <= bytes.len());
+        assert_eq!(
+            serde_json::from_slice::<PublicServerDatagram>(&reply).unwrap(),
+            PublicServerDatagram::ServerFull {
+                client_nonce: "a".repeat(32)
+            }
+        );
+        assert!(!gate.endpoints.contains_key(&extra));
+        assert_eq!(gate.endpoints.len(), limit);
+        validate(&mut gate, SocketAddr::from(([203, 0, 113, 10], 50000)), now);
+        // One record of the IP expires: the extra source gets in; the count follows.
+        let later = now + VALIDATED_TTL;
+        validate(&mut gate, extra, later);
+        assert_eq!(gate.per_ip[&SourceIp::of(extra)], 1);
+        assert_eq!(gate.per_ip.values().sum::<usize>(), gate.endpoints.len());
+    }
+
+    /// The sweep of expired records runs at most every 250 ms, but the record
+    /// of the sending address is checked exactly: a re-probe with a new nonce
+    /// right at expiry is challenged, not blocked by the stale record.
+    #[test]
+    fn expiry_is_exact_between_sweeps() {
+        let mut gate = PublicTransport::default();
+        let now = Instant::now();
+        let addr = address(1);
+        validate(&mut gate, addr, now);
+        // A sweep 100 ms before expiry keeps the record.
+        let almost = now + VALIDATED_TTL - Duration::from_millis(100);
+        let _ = gate.receive(address(2), &probe(), 7, 2, false, None, almost);
+        assert_eq!(gate.last_sweep, Some(almost));
+        assert!(gate.endpoints.contains_key(&addr));
+        // At expiry no sweep is due, yet the address's record is gone and a
+        // probe with a fresh nonce is challenged at once.
+        let expiry = now + VALIDATED_TTL;
+        assert!(!gate.validated(addr, expiry));
+        let fresh = encode(PublicClientDatagram::TransportProbe {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+            client_nonce: "f".repeat(32),
+            padding: "0".repeat(PROBE_PADDING_BYTES),
+        });
+        let Decision::Reply(reply) = gate.receive(addr, &fresh, 7, 2, false, None, expiry) else {
+            panic!("an expired record does not block a fresh probe")
+        };
+        assert!(matches!(
+            serde_json::from_slice(&reply).unwrap(),
+            PublicServerDatagram::TransportChallenge { .. }
+        ));
+        assert_eq!(gate.last_sweep, Some(almost));
+        assert_eq!(gate.per_ip.values().sum::<usize>(), gate.endpoints.len());
     }
     #[test]
     fn expired_mobile_path_requires_new_proof_and_rejects_old_signed_packets() {
@@ -529,7 +756,82 @@ mod tests {
                 Some(principal.clone()),
                 resume
             ),
-            Decision::Dispatch(ClientPacket::Ping)
+            Decision::DispatchSigned(ClientPacket::Ping, _)
         ));
+    }
+
+    /// LR-16: 1000 probes per second from one address, compatibility probes
+    /// included, never stop a second address from being admitted and answered.
+    #[test]
+    fn a_flooding_source_cannot_lock_out_a_second_source() {
+        use shared::compatibility::{CompatibilityProbe, ReleaseContract};
+        let compatibility = CompatibilityProbe::new(ReleaseContract::current(), "cd".repeat(16));
+        let request = compatibility.request();
+        let mut gate = PublicTransport::default();
+        let start = Instant::now();
+        let flood = SocketAddr::from(([198, 51, 100, 7], 40000));
+        let second = SocketAddr::from(([203, 0, 113, 9], 50000));
+        let mut answered = 0;
+        for index in 0..1000_u64 {
+            let at = start + Duration::from_millis(index);
+            // Every probe from its own port, as a spoofer would send them.
+            let from = SocketAddr::new(flood.ip(), 1024 + index as u16);
+            let _ = gate.receive(from, &probe(), 7, 2, false, None, at);
+            answered += usize::from(gate.compatibility_reply(from, &request, at).is_some());
+            if index == 500 {
+                assert!(
+                    gate.compatibility_reply(second, &request, at)
+                        .is_some_and(|reply| compatibility.accept(&reply).is_some()),
+                    "the second address gets a compatibility reply"
+                );
+                validate(&mut gate, second, at);
+                assert!(gate.validated(second, at));
+            }
+        }
+        assert!(answered <= budget().per_ip as usize, "{answered}");
+        let flooding = gate
+            .endpoints
+            .keys()
+            .filter(|addr| addr.ip() == flood.ip())
+            .count();
+        assert!(flooding <= Limits::default().endpoints_per_ip, "{flooding}");
+    }
+
+    /// LR-16: one IP holds at most `endpoints_per_ip` endpoints; another IP,
+    /// even in the same network, is not affected.
+    #[test]
+    fn one_ip_holds_at_most_n_endpoints() {
+        let limit = Limits::default().endpoints_per_ip;
+        let mut gate = PublicTransport::default();
+        let mut now = Instant::now();
+        let (mut validated, mut refused) = (0, 0);
+        for port in 0..20_u16 {
+            // Spread over seconds so only the endpoint limit applies.
+            now += Duration::from_millis(400);
+            let addr = SocketAddr::from(([203, 0, 113, 9], 50000 + port));
+            let Decision::Reply(reply) = gate.receive(addr, &probe(), 7, 2, false, None, now)
+            else {
+                panic!("every probe is answered")
+            };
+            match serde_json::from_slice(&reply).unwrap() {
+                PublicServerDatagram::TransportChallenge { path_nonce, .. } => {
+                    let proof = encode(PublicClientDatagram::TransportProof {
+                        server_epoch: 7,
+                        path_nonce,
+                    });
+                    let _ = gate.receive(addr, &proof, 7, 2, false, None, now);
+                    validated += usize::from(gate.validated(addr, now));
+                }
+                PublicServerDatagram::ServerFull { .. } => refused += 1,
+            }
+        }
+        assert_eq!(validated, limit);
+        assert_eq!(refused, 20 - limit);
+        let neighbour = SocketAddr::from(([203, 0, 113, 10], 50000));
+        validate(&mut gate, neighbour, now);
+        // An expired endpoint frees its place.
+        let later = now + VALIDATED_TTL;
+        let returning = SocketAddr::from(([203, 0, 113, 9], 60000));
+        validate(&mut gate, returning, later);
     }
 }

@@ -23,5 +23,17 @@
   "devices.error.preserve_key": "Cannot preserve the previously linked device key.",
   "devices.error.approve_first": "Approve this device on the portal first.",
   "devices.error.stopped": "Device request stopped. Retry safely.",
-  "devices.error.enrollment_missing": "Enrollment missing."
+  "devices.error.enrollment_missing": "Enrollment missing.",
+  "devices.error.expired": "The device request expired. Start a new request.",
+  "devices.error.completion": "The device confirmation did not match the approved account. Check approval and try again.",
+  "devices.button.vk": "Sign in with VK ID",
+  "devices.button.vk_link": "Link VK to this profile",
+  "devices.vk.waiting": "Sign in with VK, OK or Mail.ru in your browser. This window updates by itself; the request expires in five minutes.",
+  "devices.vk.opened": "The sign-in page is open in your browser.",
+  "devices.vk.open_manually": "Open {url} in a browser to sign in.",
+  "devices.vk.link_prompt": "Link the VK sign-in «{name}» to this game profile ({profile})? Afterwards VK signs you in on the website and on your other devices.",
+  "devices.vk.linked": "VK is linked to this profile.",
+  "devices.vk.same_account": "This device already plays as this account.",
+  "devices.vk.expired": "The sign-in request expired. Press «Sign in with VK ID» again.",
+  "devices.vk.this_profile": "this profile"
 }

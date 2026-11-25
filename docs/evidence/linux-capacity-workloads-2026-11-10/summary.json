@@ -1,0 +1,462 @@
+{
+  "source_parent": "73651bc6281aa5eac03d0094b3061f6cee1cadf8",
+  "release_run": 42657406745,
+  "release_platforms": {
+    "macos": "success",
+    "windows": "success",
+    "linux": "success",
+    "android": "success"
+  },
+  "binary_sha256": {
+    "server_sha256": "ecb7648e761f62d31d2c523d2076dd0cff64bbbedaf21853856d1d38e4a6f5ca",
+    "bots_sha256": "8c528c587c23910b00fa82bd181e2b030cbaa15fe2207831c10ac818de1a7695",
+    "helper_sha256": "67d257c2e9a96eb7f27f01e1805f4bb4f14e1848f11250bad647ba6dfa2a0373"
+  },
+  "server_cgroup_wrapper_sha256": "dace56eab1356ac5e34b7fb3a14cfae6f50fef35646916ca308072ff0cdfb604",
+  "native_source_tar_gz_sha256": "7c8f720bf955d8f60b5b392e9224b7070679508190bfb0da060f32b21d7b0cbe",
+  "scope": "three exact-Release instrumented native loopback workload runs on shared 2-vCPU dev VPS; not WAN, production, RU-host, uplink or SLA acceptance",
+  "cases": {
+    "bots-10": {
+      "workload": "bots",
+      "clients": 10,
+      "generator_shards": 1,
+      "arenas": 10,
+      "server_bots": 90,
+      "seconds": 30.0,
+      "status": "PASS",
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 19.99674931361917,
+          "p05": 19.99674931361917,
+          "p50": 19.99674931361917,
+          "p95": 19.99674931361917,
+          "max": 19.99674931361917
+        },
+        "cached_snapshot_transforms": {
+          "total": 229,
+          "min_per_peer": 16
+        },
+        "all_peers_within_2_5_percent": true,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 76290.39279003126,
+          "p95": 81162.96770401092,
+          "p99": 81162.96770401092,
+          "max": 81162.96770401092
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 19.424451774340504,
+          "p05": 19.357122652072427
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 20.400724047227637,
+          "p05": 20.3670594860936
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9521452145214522,
+          "p05": 0.9504132231404959
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 8074,
+          "gameplay_transforms": 6927,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 6852
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 7090,
+        "broadcast_gaps": {
+          "count": 7080,
+          "total_us": 366188098,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            6649,
+            411,
+            10,
+            5,
+            3,
+            2,
+            0,
+            0
+          ],
+          "mean_us": 51721.48276836158,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 6792,
+          "total_us": 150624350,
+          "buckets": [
+            1377,
+            16,
+            187,
+            2450,
+            2592,
+            78,
+            30,
+            12,
+            9,
+            17,
+            24,
+            0,
+            0
+          ],
+          "mean_us": 22176.729976442875,
+          "p95_exclusive_upper_us": 45000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      },
+      "resources": {
+        "samples": 15,
+        "observed_seconds": 28.47582541196607,
+        "server": {
+          "cpu_percent_mean_of_intervals": 49.26572858124765,
+          "rss_mib_peak": 474.4609375,
+          "processes_peak": 11
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 14.063237253667166,
+          "rss_mib_peak": 7.28515625,
+          "processes_peak": 1
+        }
+      },
+      "ranked_qualification": {
+        "required": false,
+        "status": "not used",
+        "shards": [],
+        "helper_sha256": null
+      }
+    },
+    "ranked-10": {
+      "workload": "ranked",
+      "clients": 10,
+      "generator_shards": 1,
+      "arenas": 1,
+      "server_bots": 0,
+      "seconds": 30.0,
+      "status": "PASS",
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 19.999085128145857,
+          "p05": 19.999085128145857,
+          "p50": 19.999085128145857,
+          "p95": 19.999085128145857,
+          "max": 19.999085128145857
+        },
+        "cached_snapshot_transforms": {
+          "total": 197,
+          "min_per_peer": 16
+        },
+        "all_peers_within_2_5_percent": true,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 92531.9768751824,
+          "p95": 92973.61487857907,
+          "p99": 92973.61487857907,
+          "max": 92973.61487857907
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 19.49149413504571,
+          "p05": 19.49149413504571
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 20.472836721705995,
+          "p05": 20.472836721705995
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9520661157024793,
+          "p05": 0.9520661157024793
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 7869,
+          "gameplay_transforms": 6761,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 6723
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 700,
+        "broadcast_gaps": {
+          "count": 699,
+          "total_us": 35841043,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            669,
+            30,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "mean_us": 51274.73962804006,
+          "p95_exclusive_upper_us": 55000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 6670,
+          "total_us": 160059318,
+          "buckets": [
+            623,
+            232,
+            805,
+            1811,
+            3082,
+            38,
+            12,
+            34,
+            10,
+            20,
+            3,
+            0,
+            0
+          ],
+          "mean_us": 23996.899250374812,
+          "p95_exclusive_upper_us": 45000,
+          "p99_exclusive_upper_us": 100000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      },
+      "resources": {
+        "samples": 15,
+        "observed_seconds": 28.357673543971032,
+        "server": {
+          "cpu_percent_mean_of_intervals": 14.11564830855743,
+          "rss_mib_peak": 84.25,
+          "processes_peak": 2
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 10.58702243787121,
+          "rss_mib_peak": 7.34375,
+          "processes_peak": 1
+        }
+      },
+      "ranked_qualification": {
+        "required": true,
+        "status": "seeded",
+        "shards": [
+          0
+        ],
+        "helper_sha256": "67d257c2e9a96eb7f27f01e1805f4bb4f14e1848f11250bad647ba6dfa2a0373",
+        "target": 10,
+        "profile_count": 10,
+        "result": {
+          "method": "synthetic_public_casual_store_receipts",
+          "profiles": 10,
+          "real_games_played": 0,
+          "receipts_created": 100,
+          "target": 10
+        }
+      }
+    },
+    "mixed-30": {
+      "workload": "mixed",
+      "clients": 30,
+      "generator_shards": 3,
+      "arenas": 12,
+      "server_bots": 90,
+      "seconds": 30.0,
+      "status": "PASS",
+      "input": {
+        "requested_hz": 20,
+        "successful_signed_transforms_per_second": {
+          "min": 19.994120068798313,
+          "p05": 19.994120068798313,
+          "p50": 19.997557246512653,
+          "p95": 19.998506737003403,
+          "max": 19.998506737003403
+        },
+        "cached_snapshot_transforms": {
+          "total": 1023,
+          "min_per_peer": 28
+        },
+        "all_peers_within_2_5_percent": true,
+        "scope": "successful signed UDP sends at producer; no per-command server ACK, send-gap or input-to-snapshot latency qualification"
+      },
+      "wire": {
+        "bytes_per_second_per_player": {
+          "p50": 75478.70830186388,
+          "p95": 91670.94028268426,
+          "p99": 91792.30705930799,
+          "max": 91792.30705930799
+        },
+        "accepted_snapshots_per_second_per_player": {
+          "p50": 19.058979574862303,
+          "p05": 19.020380455058135
+        },
+        "observed_broadcast_tick_span_per_second_per_player": {
+          "p50": 20.06561582001348,
+          "p05": 20.026578055922986
+        },
+        "accepted_fraction_of_observed_tick_span": {
+          "p50": 0.9498381877022654,
+          "p05": 0.9497568881685575
+        },
+        "scope": "received wire including account traffic; ordered per-peer producer tick span, not independent send timestamps or latency; native driver drains all buffered snapshots"
+      },
+      "server_load": {
+        "status": "measured",
+        "totals": {
+          "transport_commands": 24126,
+          "gameplay_transforms": 20671,
+          "sequence_gaps": 0,
+          "sequence_restarts": 0,
+          "snapshots": 20437
+        },
+        "all_endpoints_without_sequence_gaps": true,
+        "all_endpoints_without_sequence_restarts": true,
+        "bucket_upper_us": [
+          1000,
+          5000,
+          10000,
+          25000,
+          45000,
+          55000,
+          75000,
+          100000,
+          150000,
+          250000,
+          500000,
+          1000000
+        ],
+        "broadcasts": 8537,
+        "broadcast_gaps": {
+          "count": 8525,
+          "total_us": 448565537,
+          "buckets": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            7490,
+            1002,
+            20,
+            3,
+            7,
+            3,
+            0,
+            0
+          ],
+          "mean_us": 52617.65829912024,
+          "p95_exclusive_upper_us": 75000,
+          "p99_exclusive_upper_us": 75000
+        },
+        "latest_transform_age_at_snapshot": {
+          "count": 20291,
+          "total_us": 508605600,
+          "buckets": [
+            3063,
+            667,
+            1274,
+            6447,
+            7840,
+            328,
+            192,
+            142,
+            121,
+            112,
+            100,
+            5,
+            0
+          ],
+          "mean_us": 25065.575871075845,
+          "p95_exclusive_upper_us": 45000,
+          "p99_exclusive_upper_us": 250000
+        },
+        "scope": "final cumulative verified signed application dispatch and ordinary gameplay Transform handler entry; snapshot age of the latest transform after complete kernel sends; actual world-broadcast intervals; not per-command ACK latency, coordinate-change proof, packet delivery, WAN or SLA",
+        "quantile_scope": "mean and exclusive histogram upper bounds only; overflow has no finite upper bound; cumulative process lifetime, not soak-only subtraction",
+        "instrumentation_scope": "opt-in per-second JSON stderr reports add measurement overhead; this is an instrumented loopback run"
+      },
+      "resources": {
+        "samples": 15,
+        "observed_seconds": 28.680234296014532,
+        "server": {
+          "cpu_percent_mean_of_intervals": 59.31687185484107,
+          "rss_mib_peak": 549.640625,
+          "processes_peak": 13
+        },
+        "generator": {
+          "cpu_percent_mean_of_intervals": 31.4161865135087,
+          "rss_mib_peak": 21.89453125,
+          "processes_peak": 3
+        }
+      },
+      "ranked_qualification": {
+        "required": true,
+        "status": "seeded",
+        "shards": [
+          1
+        ],
+        "helper_sha256": "67d257c2e9a96eb7f27f01e1805f4bb4f14e1848f11250bad647ba6dfa2a0373",
+        "target": 10,
+        "profile_count": 10,
+        "result": {
+          "method": "synthetic_public_casual_store_receipts",
+          "profiles": 10,
+          "real_games_played": 0,
+          "receipts_created": 100,
+          "target": 10
+        }
+      }
+    }
+  }
+}

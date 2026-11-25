@@ -1,0 +1,248 @@
+{
+  "source_commit": "f2214c6691b666b1f295686dd41fa171fa8e319a",
+  "binary_sha256": "69dc09cc105f7116a04982e0eadeeac01f725b1f4aa7351ebefd58d6b8abbe80",
+  "build_source_parent": "ffcaf6bc2cc4e383fe8101610040015a5f79407e",
+  "build_working_diff_sha256": "7cf8cdb8b178b7a0dd20b50943befc753da5d43f32d3bf90bab1f99c01bf6985",
+  "source_binding": "All4 changed compiled client files match pushed f2214c66; other compiled sources match the parent. Documentation changed independently.",
+  "language": "ru",
+  "market": "ru",
+  "viewport": [
+    852,
+    393
+  ],
+  "scope": "Native production rendering of labelled synthetic state, no real admission/gameplay/account/physical phone claim; C5 remains open pending modal-crash fix and result pixels.",
+  "entries": [
+    {
+      "file": "native-taken.png",
+      "source_capture": ".agent/codex-ranked-readiness/native-fair-play-ru-v1/taken/fair-play.png",
+      "sha256": "50f1c3d87bd3815821daae54ecb002fb9c84a3e1a2cae416b38602b205b61536",
+      "bytes": 177343,
+      "checked": "Warrior Taken label visibly muted; actual disabled90x44 class control; available132x44 lock-in; scoped class feedback only, not all roster-model loading",
+      "inspection": "PASS",
+      "automatic_summary": {
+        "color_pixels": true,
+        "controls": [
+          {
+            "disabled": true,
+            "fits": true,
+            "id": "DraftClass-warrior",
+            "min": [
+              446.0,
+              113.0
+            ],
+            "size": [
+              90.0,
+              44.0
+            ]
+          },
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "DraftLock",
+            "min": [
+              688.0,
+              329.0
+            ],
+            "size": [
+              132.0,
+              44.0
+            ]
+          }
+        ],
+        "expected_visible_text": "Воин · Занят",
+        "locale": "ru",
+        "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+        "physical_device": false,
+        "real_admission_or_gameplay": false,
+        "scene": "Taken",
+        "screen": "Draft",
+        "status": "passed",
+        "synthetic_state": true,
+        "viewport": [
+          852,
+          393
+        ]
+      },
+      "beginner_tips": "default"
+    },
+    {
+      "file": "native-search-restarted.png",
+      "source_capture": ".agent/codex-ranked-readiness/native-fair-play-ru-v1/search-restart/fair-play.png",
+      "sha256": "7842d17b87ad79d9c2ab437f5c48e0abb24a119ba834de8d6ed1629828764e2e",
+      "bytes": 578383,
+      "checked": "Full Searching panel and settled global restored-lobby/restarted-search warning readable",
+      "inspection": "PASS",
+      "automatic_summary": {
+        "color_pixels": true,
+        "controls": [],
+        "expected_visible_text": "Соединение с лобби восстановлено. Поиск начат заново.",
+        "locale": "ru",
+        "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+        "physical_device": false,
+        "real_admission_or_gameplay": false,
+        "scene": "SearchRestart",
+        "screen": "Searching",
+        "status": "passed",
+        "synthetic_state": true,
+        "viewport": [
+          852,
+          393
+        ]
+      },
+      "beginner_tips": "default"
+    },
+    {
+      "file": "native-remake-menu.png",
+      "source_capture": ".agent/codex-ranked-readiness/native-fair-play-ru-v3/remake-menu/fair-play.png",
+      "sha256": "f37df277d75dd6912b517d716f66a8806fdde53e4c133a0bf1792cb45945a5cd",
+      "bytes": 160262,
+      "checked": "Remake entry and510s unavailable-surrender explanation visible in the real pause menu",
+      "inspection": "PASS",
+      "automatic_summary": {
+        "color_pixels": true,
+        "controls": [
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "MatchVoteRemake",
+            "min": [
+              226.0,
+              71.0
+            ],
+            "size": [
+              400.0,
+              44.0
+            ]
+          }
+        ],
+        "expected_visible_text": "Ремейк матча",
+        "locale": "ru",
+        "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+        "physical_device": false,
+        "real_admission_or_gameplay": false,
+        "scene": "RemakeMenu",
+        "screen": "InMatch",
+        "status": "passed",
+        "synthetic_state": true,
+        "viewport": [
+          852,
+          393
+        ]
+      },
+      "beginner_tips": "disabled in owned fixture preferences"
+    },
+    {
+      "file": "native-remake-vote.png",
+      "source_capture": ".agent/codex-ranked-readiness/native-fair-play-ru-v3/remake-prompt/fair-play.png",
+      "sha256": "76a0465d20e41b052f1e25a7b0b6494b14dbe29cf8e75cae07e5f76a44fe968b",
+      "bytes": 374169,
+      "checked": "Remake vote kind/initiator1-of-3/27s and both44px controls readable",
+      "inspection": "PASS",
+      "automatic_summary": {
+        "color_pixels": true,
+        "controls": [
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "MatchVotePromptYes",
+            "min": [
+              284.0,
+              147.0
+            ],
+            "size": [
+              284.0,
+              44.0
+            ]
+          },
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "MatchVotePromptNo",
+            "min": [
+              284.0,
+              197.0
+            ],
+            "size": [
+              284.0,
+              44.0
+            ]
+          }
+        ],
+        "expected_visible_text": "Против",
+        "locale": "ru",
+        "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+        "physical_device": false,
+        "real_admission_or_gameplay": false,
+        "scene": "RemakePrompt",
+        "screen": "InMatch",
+        "status": "passed",
+        "synthetic_state": true,
+        "viewport": [
+          852,
+          393
+        ]
+      },
+      "beginner_tips": "disabled in owned fixture preferences"
+    },
+    {
+      "file": "native-surrender-vote.png",
+      "source_capture": ".agent/codex-ranked-readiness/native-fair-play-ru-v3/surrender-prompt/fair-play.png",
+      "sha256": "098a663d052b5a5ca5b412a5ba98cabea81e33818d0db7620866c6f86f51fac1",
+      "bytes": 373481,
+      "checked": "Surrender vote kind/initiator1-of-4/27s and both44px controls readable",
+      "inspection": "PASS",
+      "automatic_summary": {
+        "color_pixels": true,
+        "controls": [
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "MatchVotePromptYes",
+            "min": [
+              284.0,
+              147.0
+            ],
+            "size": [
+              284.0,
+              44.0
+            ]
+          },
+          {
+            "disabled": false,
+            "fits": true,
+            "id": "MatchVotePromptNo",
+            "min": [
+              284.0,
+              197.0
+            ],
+            "size": [
+              284.0,
+              44.0
+            ]
+          }
+        ],
+        "expected_visible_text": "Против",
+        "locale": "ru",
+        "method": "production renderer, real UI-kit class-tab press and party epoch-change reaction; other server views are fixtures",
+        "physical_device": false,
+        "real_admission_or_gameplay": false,
+        "scene": "SurrenderPrompt",
+        "screen": "InMatch",
+        "status": "passed",
+        "synthetic_state": true,
+        "viewport": [
+          852,
+          393
+        ]
+      },
+      "beginner_tips": "disabled in owned fixture preferences"
+    }
+  ],
+  "rejected": [
+    "v1/remake-menu: guide obscures the vote menu despite automatic success",
+    "v1/party-restart: warning visible but Home contents missing; not accepted as the complete Home case",
+    "v1/remake-prompt: Entity despawned panic then outer180s timeout",
+    "v2/remake-prompt: same panic reproduced, own process terminated after collecting backtrace",
+    "v3/remade-result: missing synthetic player, bounded timeout; not result acceptance"
+  ]
+}

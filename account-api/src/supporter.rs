@@ -1,17 +1,36 @@
 //! Provider receipts are verified outside the client trust boundary, then recorded atomically.
+pub mod recognition;
 pub mod solana;
+pub mod yookassa;
 use crate::*;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use shared::market::{PaymentProvider, sells};
 use shared::supporter::{
-    AuraStyle, NativeSupporterAction, SignedNativeSupporterRequest, SupporterGrantSummary,
-    SupporterStatus,
+    AuraStyle, NativeSupporterAction, STATUS_GRANT_LIMIT, SignedNativeSupporterRequest,
+    SupporterGrantSummary, SupporterStatus, tier_points,
 };
+
+/// The payment providers this Account API sells through. The one place the
+/// Supporter code reads the market (LR-68 R0 swaps the body for the region).
+pub fn market_providers() -> &'static [PaymentProvider] {
+    shared::market::payment_providers()
+}
+
+/// Whether a Supporter route belongs to a provider in `providers`. Routes of
+/// one provider (`.../apple/...`, `.../solana/...`, `.../yookassa/...`) exist
+/// only where the market sells through it; the rest are provider-neutral.
+pub fn provider_route_allowed(path: &str, providers: &[PaymentProvider]) -> bool {
+    PaymentProvider::ALL.iter().all(|provider| {
+        sells(providers, *provider) || !path.split('/').any(|part| part == provider.key())
+    })
+}
 
 #[derive(Clone, Default)]
 pub struct BillingConfig {
     pub apple: Option<AppleConfig>,
     pub solana: Option<solana::SolanaConfig>,
+    pub yookassa: Option<yookassa::YooKassaConfig>,
 }
 #[derive(Clone)]
 pub struct AppleConfig {
@@ -61,7 +80,38 @@ impl BillingConfig {
         Ok(Self {
             apple,
             solana: solana::SolanaConfig::from_env()?,
+            yookassa: yookassa::YooKassaConfig::from_env()?,
         })
+    }
+    /// The providers this host has settings for.
+    pub fn configured(&self) -> Vec<PaymentProvider> {
+        [
+            (PaymentProvider::Apple, self.apple.is_some()),
+            (PaymentProvider::Solana, self.solana.is_some()),
+            (PaymentProvider::YooKassa, self.yookassa.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(provider, set)| set.then_some(provider))
+        .collect()
+    }
+    /// Refuse settings of a provider the market does not sell through: a free
+    /// build refuses all of them, a global build YooKassa, an RU build Apple
+    /// and Solana (LR-67; LR-69 lets RU accept Apple).
+    pub fn check_market(
+        &self,
+        providers: &[PaymentProvider],
+    ) -> std::result::Result<(), &'static str> {
+        let configured = self.configured();
+        if providers.is_empty() && !configured.is_empty() {
+            return Err("billing_configured_without_supporter");
+        }
+        if configured
+            .iter()
+            .any(|provider| !sells(providers, *provider))
+        {
+            return Err("payment_provider_not_in_market");
+        }
+        Ok(())
     }
 }
 pub fn unavailable() -> Error {
@@ -96,10 +146,42 @@ pub struct VerifiedEvent {
     pub revoked_at: Option<i64>,
     pub event_version: i64,
     pub renewal_enabled: Option<bool>,
+    /// Kopecks paid (YooKassa only). Absent fields keep the stored payload
+    /// hashes of Apple and Solana events unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_minor: Option<i64>,
+    /// Kopecks refunded so far, all refunds of this payment (YooKassa only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refunded_minor: Option<i64>,
 }
 impl VerifiedEvent {
+    /// The grant's tier points by the provider rule (ADR-025): YooKassa one
+    /// point per whole ruble kept after refunds; Apple tier products add their
+    /// catalog points in LR-69; Solana none until O-27.
+    pub fn tier_points(&self) -> u32 {
+        match (self.provider.as_str(), self.amount_minor) {
+            ("yookassa", Some(amount)) => {
+                yookassa::tier_points(amount, self.refunded_minor.unwrap_or(0))
+            }
+            _ => 0,
+        }
+    }
     fn validate(&self) -> Result<()> {
-        if !matches!(self.provider.as_str(), "apple" | "solana")
+        let amounts = match self.provider.as_str() {
+            "yookassa" => {
+                self.amount_minor.is_some_and(|amount| {
+                    (yookassa::MIN_AMOUNT_MINOR..=yookassa::MAX_AMOUNT_MINOR).contains(&amount)
+                        && self
+                            .refunded_minor
+                            .is_some_and(|refunded| (0..=amount).contains(&refunded))
+                }) && self.original_transaction_id.is_none()
+                    && self.app_account_token.is_none()
+                    && self.valid_until - self.valid_from == yookassa::GRANT_SECONDS
+            }
+            "apple" | "solana" => self.amount_minor.is_none() && self.refunded_minor.is_none(),
+            _ => false,
+        };
+        if !amounts
             || self.event_id.is_empty()
             || self.event_id.len() > 256
             || self.period_id.is_empty()
@@ -160,6 +242,7 @@ async fn apply_event_tx(
         }
         return Ok(false);
     }
+    let points = event.tier_points() as i32;
     let existing=sqlx::query("SELECT profile_id,event_version,revoked_at FROM portal.supporter_grants WHERE provider=$1 AND period_id=$2 FOR UPDATE").bind(&event.provider).bind(&event.period_id).fetch_optional(&mut **tx).await?;
     if let Some(row) = existing {
         if row_text(&row, "profile_id")? != profile {
@@ -183,18 +266,73 @@ async fn apply_event_tx(
             return Ok(enriched);
         }
         // Revocation is terminal for this purchased period even if delayed/replayed renewals arrive.
-        sqlx::query("UPDATE portal.supporter_grants SET valid_from=$3,valid_until=$4,revoked_at=COALESCE(revoked_at,$5),renewal_enabled=COALESCE($6,renewal_enabled),event_version=$7 WHERE provider=$1 AND period_id=$2")
-            .bind(&event.provider).bind(&event.period_id).bind(event.valid_from).bind(event.valid_until).bind(event.revoked_at).bind(event.renewal_enabled).bind(event.event_version).execute(&mut **tx).await?;
+        // The amount never changes; tier points follow the newest provider snapshot (refunds).
+        let updated = sqlx::query("UPDATE portal.supporter_grants SET valid_from=$3,valid_until=$4,revoked_at=COALESCE(revoked_at,$5),renewal_enabled=COALESCE($6,renewal_enabled),event_version=$7,tier_points=$8 WHERE provider=$1 AND period_id=$2 AND amount_minor IS NOT DISTINCT FROM $9")
+            .bind(&event.provider).bind(&event.period_id).bind(event.valid_from).bind(event.valid_until).bind(event.revoked_at).bind(event.renewal_enabled).bind(event.event_version).bind(points).bind(event.amount_minor).execute(&mut **tx).await?
+            .rows_affected();
+        if updated != 1 {
+            return Err(conflict());
+        }
+        default_aura_tx(tx, profile, false).await?;
     } else {
-        sqlx::query("INSERT INTO portal.supporter_grants(provider,period_id,profile_id,original_transaction_id,valid_from,valid_until,revoked_at,renewal_enabled,event_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
-            .bind(&event.provider).bind(&event.period_id).bind(profile).bind(&event.original_transaction_id).bind(event.valid_from).bind(event.valid_until).bind(event.revoked_at).bind(event.renewal_enabled).bind(event.event_version).execute(&mut **tx).await?;
+        let first: bool = sqlx::query_scalar(
+            "SELECT NOT EXISTS(SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1)",
+        )
+        .bind(profile)
+        .fetch_one(&mut **tx)
+        .await?;
+        sqlx::query("INSERT INTO portal.supporter_grants(provider,period_id,profile_id,original_transaction_id,valid_from,valid_until,revoked_at,renewal_enabled,event_version,amount_minor,tier_points) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+            .bind(&event.provider).bind(&event.period_id).bind(profile).bind(&event.original_transaction_id).bind(event.valid_from).bind(event.valid_until).bind(event.revoked_at).bind(event.renewal_enabled).bind(event.event_version).bind(event.amount_minor).bind(points).execute(&mut **tx).await?;
+        default_aura_tx(tx, profile, first).await?;
     }
-    sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) VALUES($1,'solar') ON CONFLICT DO NOTHING").bind(profile).execute(&mut **tx).await?;
     Ok(true)
 }
+
+/// After a grant write: a profile without a preference row gets the highest
+/// style its points unlock now (`AuraStyle::highest_unlocked`, the career
+/// store's rule for a missing row). On the first grant a row that only holds
+/// the placeholder base style (written by the recognition toggle before any
+/// payment) is upgraded the same way; a hidden aura stays hidden.
+async fn default_aura_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    profile: &str,
+    first_grant: bool,
+) -> Result<()> {
+    let points: i64 = sqlx::query_scalar("SELECT portal.supporter_points($1,$2)")
+        .bind(profile)
+        .bind(now())
+        .fetch_one(&mut **tx)
+        .await?;
+    let default = AuraStyle::highest_unlocked(tier_points(points)).id();
+    if first_grant {
+        sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) VALUES($1,$2) ON CONFLICT(profile_id) DO UPDATE SET aura=EXCLUDED.aura WHERE portal.supporter_preferences.aura=$3")
+            .bind(profile)
+            .bind(default)
+            .bind(PLACEHOLDER_AURA.id())
+            .execute(&mut **tx)
+            .await?;
+    } else {
+        sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(profile)
+            .bind(default)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
+/// The base style a preference row holds before any grant exists (the
+/// recognition toggle creates the row): the default for zero points.
+pub const PLACEHOLDER_AURA: AuraStyle = AuraStyle::Solar;
 pub async fn status(app: &App, profile: &str) -> Result<SupporterStatus> {
     let current = now();
-    let rows=sqlx::query("SELECT provider,valid_from,valid_until,revoked_at,renewal_enabled FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=$2 AND valid_until>$2) DESC,valid_until DESC LIMIT 100").bind(profile).bind(current).fetch_all(&app.pool).await?;
+    // One snapshot: the bounded grant list (active first), the unbounded tier
+    // sum and the stored preference.
+    let mut tx = app.pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let rows=sqlx::query("SELECT provider,valid_from,valid_until,revoked_at,renewal_enabled,tier_points FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=$2 AND valid_until>$2) DESC,valid_until DESC LIMIT $3").bind(profile).bind(current).bind(STATUS_GRANT_LIMIT).fetch_all(&mut *tx).await?;
     let grants = rows
         .iter()
         .map(|r| {
@@ -204,30 +342,29 @@ pub async fn status(app: &App, profile: &str) -> Result<SupporterStatus> {
                 valid_until: r.try_get("valid_until")?,
                 revoked: r.try_get::<Option<i64>, _>("revoked_at")?.is_some(),
                 renewal_enabled: r.try_get("renewal_enabled")?,
+                tier_points: tier_points(i64::from(r.try_get::<i32, _>("tier_points")?)),
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let active_until = grants
-        .iter()
-        .filter(|g| !g.revoked && g.valid_from <= current && g.valid_until > current)
-        .map(|g| g.valid_until)
-        .max();
-    let aura: Option<String> =
+    let points: i64 = sqlx::query_scalar("SELECT portal.supporter_points($1,$2)")
+        .bind(profile)
+        .bind(current)
+        .fetch_one(&mut *tx)
+        .await?;
+    let aura: Option<Option<String>> =
         sqlx::query_scalar("SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1")
             .bind(profile)
-            .fetch_optional(&app.pool)
-            .await?
-            .flatten();
-    Ok(SupporterStatus {
-        active: active_until.is_some(),
-        equipped_aura: if active_until.is_some() {
-            aura.as_deref().and_then(AuraStyle::from_id)
-        } else {
-            None
-        },
-        active_until,
+            .fetch_optional(&mut *tx)
+            .await?;
+    tx.commit().await?;
+    // An unknown stored id (none can pass the CHECK) reads as hidden.
+    let preference = aura.map(|aura| aura.as_deref().and_then(AuraStyle::from_id));
+    Ok(SupporterStatus::from_grants(
         grants,
-    })
+        current,
+        tier_points(points),
+        preference,
+    ))
 }
 pub async fn dashboard(app: &App, profile: &str) -> Result<Value> {
     let apple = match &app.billing.apple {
@@ -240,9 +377,31 @@ pub async fn dashboard(app: &App, profile: &str) -> Result<Value> {
         }
         None => json!({"available":false,"duration_days":30}),
     };
-    Ok(
-        json!({"supporter":status(app,profile).await?,"apple":apple,"solana":solana,"catalog":AuraStyle::ALL.map(|a|json!({"id":a,"name":a.label()}))}),
-    )
+    let supporter = status(app, profile).await?;
+    Ok(json!({
+        "providers": market_providers().iter().map(|p| p.key()).collect::<Vec<_>>(),
+        "catalog": catalog(&supporter),
+        "supporter": supporter,
+        "recognition": recognition::get(app, profile).await?,
+        "apple": apple,
+        "solana": solana,
+        "yookassa": yookassa::offer(app).await?,
+    }))
+}
+/// Every style with what it needs (`tier_points` 0 = any active grant) and
+/// whether this supporter may wear it now, by the shared entitlement rule.
+pub fn catalog(status: &SupporterStatus) -> Vec<Value> {
+    AuraStyle::ALL
+        .iter()
+        .map(|style| {
+            json!({
+                "id": style,
+                "name": style.label(),
+                "tier_points": style.required_points(),
+                "unlocked": style.unlocked(status.active, status.tier_points),
+            })
+        })
+        .collect()
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -257,9 +416,14 @@ pub async fn equip(app: &App, profile: &str, body: &[u8]) -> Result<Value> {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(forbidden)?;
-    let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1 AND valid_from<=$2 AND valid_until>$2 AND revoked_at IS NULL)").bind(profile).bind(now()).fetch_one(&mut *tx).await?;
-    if p.aura.is_some() && !active {
-        return Err(Error(StatusCode::FORBIDDEN, "supporter_required"));
+    let (active,points):(bool,i64)=sqlx::query_as("SELECT EXISTS(SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1 AND valid_from<=$2 AND valid_until>$2 AND revoked_at IS NULL),portal.supporter_points($1,$2)").bind(profile).bind(now()).fetch_one(&mut *tx).await?;
+    if let Some(style) = p.aura {
+        if !active {
+            return Err(Error(StatusCode::FORBIDDEN, "supporter_required"));
+        }
+        if !style.unlocked(active, tier_points(points)) {
+            return Err(Error(StatusCode::FORBIDDEN, "tier_required"));
+        }
     }
     sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) VALUES($1,$2) ON CONFLICT(profile_id) DO UPDATE SET aura=EXCLUDED.aura").bind(profile).bind(p.aura.map(AuraStyle::id)).execute(&mut *tx).await?;
     tx.commit().await?;
@@ -474,4 +638,193 @@ pub async fn bounded_response(mut response: reqwest::Response, maximum: usize) -
         bytes.extend_from_slice(&chunk);
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::market::Market;
+
+    fn yookassa() -> yookassa::YooKassaConfig {
+        yookassa::YooKassaConfig {
+            shop_id: "123456".into(),
+            secret_key: "test_secret_key".into(),
+            vat_code: 1,
+            new_charges: false,
+            api_base: yookassa::PRODUCTION_API.into(),
+        }
+    }
+    fn apple() -> AppleConfig {
+        AppleConfig {
+            verifier_url: "http://127.0.0.1:1".into(),
+            secret: "0".repeat(64),
+            product_id: "test.supporter".into(),
+            environment: "Sandbox".into(),
+        }
+    }
+
+    #[test]
+    fn a_market_refuses_another_markets_payment_settings() {
+        let global = Market::Global.payment_providers();
+        let ru = Market::Ru.payment_providers();
+        let only_yookassa = BillingConfig {
+            yookassa: Some(yookassa()),
+            ..Default::default()
+        };
+        let only_apple = BillingConfig {
+            apple: Some(apple()),
+            ..Default::default()
+        };
+        assert_eq!(BillingConfig::default().check_market(&[]), Ok(()));
+        assert_eq!(BillingConfig::default().check_market(ru), Ok(()));
+        assert_eq!(only_yookassa.check_market(ru), Ok(()));
+        assert_eq!(only_apple.check_market(global), Ok(()));
+        assert_eq!(
+            only_yookassa.check_market(global),
+            Err("payment_provider_not_in_market")
+        );
+        // Until LR-69 the RU Account API refuses Apple (and Solana) settings.
+        assert_eq!(
+            only_apple.check_market(ru),
+            Err("payment_provider_not_in_market")
+        );
+        let both = BillingConfig {
+            apple: Some(apple()),
+            yookassa: Some(yookassa()),
+            ..Default::default()
+        };
+        assert!(both.check_market(ru).is_err() && both.check_market(global).is_err());
+        // A build without `supporter` refuses every provider's settings.
+        for config in [only_yookassa, only_apple] {
+            assert_eq!(
+                config.check_market(&[]),
+                Err("billing_configured_without_supporter")
+            );
+        }
+    }
+
+    #[test]
+    fn provider_routes_exist_only_where_the_market_sells_through_them() {
+        let global = Market::Global.payment_providers();
+        let ru = Market::Ru.payment_providers();
+        for path in [
+            "me/supporter",
+            "me/supporter/aura",
+            "me/supporter/recognition",
+            "supporter/native",
+        ] {
+            assert!(provider_route_allowed(path, ru), "{path}");
+            assert!(provider_route_allowed(path, global), "{path}");
+        }
+        for path in [
+            "me/supporter/apple/prepare",
+            "me/supporter/solana/checkout",
+            "supporter/apple/notifications",
+        ] {
+            assert!(!provider_route_allowed(path, ru), "{path}");
+            assert!(provider_route_allowed(path, global), "{path}");
+        }
+        for path in [
+            "me/supporter/yookassa/checkout",
+            "me/supporter/yookassa/payments",
+            "supporter/yookassa/notifications",
+        ] {
+            assert!(provider_route_allowed(path, ru), "{path}");
+            assert!(!provider_route_allowed(path, global), "{path}");
+        }
+        // A segment, not a substring: an id containing a provider name is not one.
+        assert!(provider_route_allowed("me/supporter/applesauce", ru));
+    }
+
+    fn event(provider: &str) -> VerifiedEvent {
+        VerifiedEvent {
+            event_id: "e".into(),
+            provider: provider.into(),
+            period_id: "p".into(),
+            original_transaction_id: None,
+            app_account_token: None,
+            product_id: None,
+            environment: None,
+            valid_from: 1000,
+            valid_until: 1000 + yookassa::GRANT_SECONDS,
+            revoked_at: None,
+            event_version: 0,
+            renewal_enabled: Some(false),
+            amount_minor: None,
+            refunded_minor: None,
+        }
+    }
+
+    #[test]
+    fn grant_points_follow_the_provider_rule_and_only_yookassa_carries_amounts() {
+        let mut donation = event("yookassa");
+        donation.amount_minor = Some(1000 * yookassa::KOPECKS);
+        donation.refunded_minor = Some(0);
+        assert!(donation.validate().is_ok());
+        assert_eq!(donation.tier_points(), 1000);
+        donation.refunded_minor = Some(600 * yookassa::KOPECKS + 1);
+        assert_eq!(donation.tier_points(), 399);
+        for bad in [
+            VerifiedEvent {
+                amount_minor: None,
+                ..donation.clone()
+            },
+            VerifiedEvent {
+                refunded_minor: None,
+                ..donation.clone()
+            },
+            VerifiedEvent {
+                refunded_minor: Some(1001 * yookassa::KOPECKS),
+                ..donation.clone()
+            },
+            VerifiedEvent {
+                amount_minor: Some(99 * yookassa::KOPECKS),
+                refunded_minor: Some(0),
+                ..donation.clone()
+            },
+            VerifiedEvent {
+                valid_until: 1000 + 31 * 86_400,
+                ..donation.clone()
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?}");
+        }
+        // Apple and Solana grants carry no amount and no points in M0.
+        for provider in ["apple", "solana"] {
+            let plain = event(provider);
+            assert!(plain.validate().is_ok());
+            assert_eq!(plain.tier_points(), 0);
+            let forged = VerifiedEvent {
+                amount_minor: Some(1000 * yookassa::KOPECKS),
+                ..plain
+            };
+            assert!(forged.validate().is_err(), "{provider}");
+        }
+        assert!(event("paypal").validate().is_err());
+        // Absent amounts keep the stored payload of Apple and Solana events.
+        let json = serde_json::to_string(&event("solana")).unwrap();
+        assert!(!json.contains("amount_minor") && !json.contains("refunded_minor"));
+    }
+
+    #[test]
+    fn the_dashboard_catalog_uses_the_shared_entitlement_rule() {
+        let status = SupporterStatus {
+            active: true,
+            tier_points: 1000,
+            ..Default::default()
+        };
+        let catalog = catalog(&status);
+        assert_eq!(catalog.len(), AuraStyle::ALL.len());
+        for (entry, style) in catalog.iter().zip(AuraStyle::ALL) {
+            assert_eq!(entry["id"], style.id());
+            assert_eq!(entry["tier_points"], style.required_points());
+            assert_eq!(entry["unlocked"], style.unlocked(true, 1000));
+        }
+        let none = catalog_for_inactive();
+        assert!(none.iter().all(|entry| entry["unlocked"] == false));
+    }
+
+    fn catalog_for_inactive() -> Vec<Value> {
+        catalog(&SupporterStatus::default())
+    }
 }

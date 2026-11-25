@@ -1,6 +1,7 @@
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::HeroClass;
 use shared::map::Team;
@@ -58,6 +59,7 @@ impl GameWorld {
             let spawn = spawn_position_for_team(map_layout, Team::Green);
 
             ConnectedPlayer {
+                bot_persona: None,
                 career_profile: None,
                 career_capable: false,
                 draft: Default::default(),
@@ -228,6 +230,9 @@ pub fn handle_join_request_with_sprite(
     player.hero.identity.team = team;
     player.hero.identity.character = character;
     player.hero.identity.hero_class = hero_class;
+    if !player.hero.identity.is_bot {
+        player.draft.role = hero_class.primary_role();
+    }
     player.hero.identity.avatar = normalized_avatar.map(str::to_owned);
     player.hero.identity.sprite_character = Some(normalized_sprite.to_owned());
     reset_player_round(player, map_layout, now);
@@ -305,7 +310,10 @@ pub fn handle_transform_request_with_structures(
         return;
     }
 
-    if player.hero.hp <= 0.0 || player.hero.skills.control.movement(now) == 0.0 {
+    if player.hero.hp <= 0.0
+        || player.hero.skills.control.movement(now) == 0.0
+        || player.hero.skills.cast_locked(now)
+    {
         player.timers.last_movement_at = now;
         player.timers.movement_slack = 0.0;
         return;

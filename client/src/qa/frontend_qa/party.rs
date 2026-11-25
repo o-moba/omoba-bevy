@@ -178,6 +178,7 @@ fn party_fixture(stage: usize) -> PartyView {
                 invited: id == 14,
             })
             .collect(),
+        error: None,
     }
 }
 fn prematch_fixture(stage: usize) -> PrematchSnapshot {
@@ -187,6 +188,8 @@ fn prematch_fixture(stage: usize) -> PrematchSnapshot {
         _ => PrematchPhase::Loading,
     };
     PrematchSnapshot {
+        join_remaining_ms: None,
+        unique_classes_across_teams: false,
         generation: 1,
         phase,
         remaining_ms: match stage {
@@ -213,6 +216,7 @@ fn prematch_fixture(stage: usize) -> PrematchSnapshot {
                 sprite_character: None,
                 role: Role::ALL[index % 5],
                 is_bot: index >= 5,
+                bot_persona: None,
                 locked: stage != 5 || index % 2 == 0,
                 loaded: stage == 7 && !(3..5).contains(&index),
             })
@@ -510,7 +514,8 @@ fn capture(
             "LobbyBack",
             "LobbyFriends",
             "LobbyPlayBots",
-            "LobbyQuickMatch",
+            "LobbyCasual",
+            "LobbyRanked",
             "LobbyAccept88",
         ],
         1 => vec![
@@ -526,7 +531,8 @@ fn capture(
             "LobbyBack",
             "LobbyLeave",
             "LobbyPlayBots",
-            "LobbyQuickMatch",
+            "LobbyCasual",
+            "LobbyRanked",
             "LobbySocialScroll",
         ],
         5 => vec![

@@ -1,0 +1,49 @@
+{
+  "status": "PASS",
+  "scope": "Current seed executable and strengthened leaderboard browser acceptance on a clean disposable loopback database; not RU production acceptance",
+  "run_id": 43012620207,
+  "run_url": "https://github.com/o-moba/omoba-bevy/actions/runs/43012620207",
+  "game_head_commit": "1b61b9bdadb1705f57eef00a4c54ad14dfc9b836",
+  "game_merge_commit": "c1c47063e476206dc8cf4fe28375ca821e02fb1c",
+  "game_merge_tree": "e042757216e42b7062680aa2cad642e9ccd51fef",
+  "portal_commit": "84525384bc6e8d37991e2ad3fe4f2dd4a5d30d41",
+  "database": "Fresh GitHub Actions PostgreSQL 18-alpine service on 127.0.0.1:55581",
+  "manual_sql_fixture": false,
+  "manual_sql_after_seed": false,
+  "projection_wait_seconds": 7,
+  "unit": {
+    "tests": 260,
+    "passed": 257,
+    "failed": 0,
+    "expected_skips": 3
+  },
+  "typecheck": "PASS",
+  "ru_production_build": "PASS",
+  "browser": {
+    "entries": 2,
+    "ratings": [1031, 985],
+    "placement_text": "Калибровка 1/20",
+    "mobile_viewport_width": 390,
+    "screenshots_visually_inspected": ["mobile.png", "hidden.png"]
+  },
+  "rejected_runs": [
+    {
+      "run_id": 43010103535,
+      "reason": "Invalid job-level runner context; no jobs started"
+    },
+    {
+      "run_id": 43010406980,
+      "reason": "The API binary was not built; acceptance stopped before database or seed execution"
+    },
+    {
+      "run_id": 43011390908,
+      "reason": "Browser acceptance passed, but RU service environment contaminated two unit tests and tee without pipefail hid their failure; the run is not accepted as a complete gate"
+    }
+  ],
+  "limitations": [
+    "Synthetic loopback fixture only; no production accounts or organic matchmaking",
+    "Headless Chrome at 390 px, not a physical device",
+    "No WAN, isolated RU host, deployment, recovery or capacity acceptance",
+    "The temporary review workflow is removed after archiving this pack; the run URL and retained artifacts preserve provenance"
+  ]
+}

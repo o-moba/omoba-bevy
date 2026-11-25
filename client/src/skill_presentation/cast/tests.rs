@@ -1198,6 +1198,53 @@ fn link_needs_a_matching_receipt() {
     }
 }
 
+/// Luminous Field bursts where it stands, up to its cast range from its caster: neither the
+/// cast that places it nor the recast that bursts it opens a link from the hand to the
+/// receipts of the burst, and its row names none. A row that named one would draw none.
+#[test]
+fn a_field_that_bursts_is_not_linked_to_the_hand() {
+    let registry = target();
+    let class = HeroClass::Dawnweaver;
+    let slot = slot_of(class, SkillId::DawnField);
+    let row = registry.profile(SkillId::DawnField).unwrap();
+    assert_eq!(row.cast.as_ref().unwrap().link, None);
+    let mut named = registry.clone();
+    named
+        .skills
+        .get_mut(SkillId::DawnField.id())
+        .unwrap()
+        .cast
+        .as_mut()
+        .unwrap()
+        .link = Some(ParticleShape::Streak);
+    let placed = {
+        let (mut observer, cast) = first_cast(class, SkillId::DawnField);
+        observer.observe(ROUND, true, [cast]).casts.remove(0)
+    };
+    assert!(!placed.recast);
+    let burst = SkillCastObserved {
+        sequence: placed.sequence + 1,
+        recast: true,
+        ..placed.clone()
+    };
+    for registry in [&registry, &named] {
+        let mut book = LinkBook::default();
+        book.turn(ROUND, 10);
+        book.open(registry, &placed);
+        book.open(registry, &burst);
+        // Two victims of the burst, at the field far from the hand.
+        for receipt in [1, 2] {
+            let hit = ConfirmedHit {
+                receipt,
+                source: 7,
+                slot,
+                position: AWAY + Vec3::X * 10.0,
+            };
+            assert_eq!(book.link(&hit), None);
+        }
+    }
+}
+
 /// Thorn Volley throws a spike and then recasts without one: only a recast is linked to its
 /// receipts, and never while the spike may still be what struck.
 #[test]

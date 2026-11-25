@@ -1,13 +1,13 @@
 //! Ability casts and skill upgrades.
 
+use shared::clock::Instant;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, ProjectileStyle};
 use shared::wire::{GameState, ProjectileState, TargetId};
 use shared::{
-    PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot, rank_effect_scale,
-    scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
+    AllyEffect, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
+    rank_effect_scale, scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
 };
 
 use crate::balance::{CAST_SPAWN_HEIGHT, PROJECTILE_LIFETIME, PROJECTILE_RADIUS, PROJECTILE_SPEED};
@@ -46,6 +46,42 @@ pub fn legacy_effect_scale(caster: &ConnectedPlayer, rank: u8) -> f32 {
             caster.hero.identity.hero_class,
             caster.hero.progress.level,
         )
+}
+
+fn nearby_living_allies(
+    world: &GameWorld,
+    caster_addr: SocketAddr,
+    radius: f32,
+) -> impl Iterator<Item = (SocketAddr, &ConnectedPlayer, f32)> {
+    let caster = &world.players[&caster_addr].hero;
+    world.players.iter().filter_map(move |(&address, player)| {
+        let hero = &player.hero;
+        if address == caster_addr
+            || !player.joined
+            || hero.identity.team != caster.identity.team
+            || hero.hp <= 0.0
+        {
+            return None;
+        }
+        let distance_sq = (hero.x - caster.x).powi(2) + (hero.z - caster.z).powi(2);
+        (distance_sq <= radius * radius).then_some((address, player, distance_sq))
+    })
+}
+
+/// Tie-breaking by player ID makes selection independent of map iteration order.
+pub(crate) fn lowest_injured_ally(
+    world: &GameWorld,
+    caster_addr: SocketAddr,
+    radius: f32,
+) -> Option<SocketAddr> {
+    nearby_living_allies(world, caster_addr, radius)
+        .filter(|(_, player, _)| player.hero.hp < player.hero.max_hp)
+        .min_by(|(_, a, _), (_, b, _)| {
+            (a.hero.hp / a.hero.max_hp)
+                .total_cmp(&(b.hero.hp / b.hero.max_hp))
+                .then_with(|| a.hero.identity.id.cmp(&b.hero.identity.id))
+        })
+        .map(|(address, _, _)| address)
 }
 
 pub fn handle_cast_request(
@@ -108,6 +144,15 @@ pub fn handle_cast_request(
     }
     let effect_scale = legacy_effect_scale(caster, rank);
     if def.targeting == TargetingMode::SelfTarget {
+        let ally_to_heal = if let Some(AllyEffect::HealLowest { radius, amount }) = def.ally_effect
+        {
+            let Some(ally) = lowest_injured_ally(world, caster_addr, radius) else {
+                return;
+            };
+            Some((ally, amount * effect_scale))
+        } else {
+            None
+        };
         let Some(caster_mut) = world.players.get_mut(&caster_addr) else {
             return;
         };
@@ -123,6 +168,33 @@ pub fn handle_cast_request(
         if let Some(restore) = def.self_mana_restore {
             caster_mut.hero.mana =
                 (caster_mut.hero.mana + restore * effect_scale).min(caster_mut.hero.max_mana);
+        }
+        let owner = caster_mut.hero.identity.id;
+        if let Some((ally, amount)) = ally_to_heal {
+            let hero = &mut world.players.get_mut(&ally).unwrap().hero;
+            hero.hp = (hero.hp + amount).min(hero.max_hp);
+        }
+        if let Some(AllyEffect::ShieldNearby {
+            radius,
+            amount,
+            duration_secs,
+        }) = def.ally_effect
+        {
+            let mut allies: Vec<_> = nearby_living_allies(world, caster_addr, radius)
+                .map(|(_, player, distance_sq)| (distance_sq, player.hero.identity.id))
+                .collect();
+            allies.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            for target in std::iter::once(owner).chain(allies.into_iter().take(4).map(|(_, id)| id))
+            {
+                crate::skills::shield(
+                    world,
+                    target,
+                    owner,
+                    amount * effect_scale,
+                    duration_secs,
+                    now,
+                );
+            }
         }
         return;
     }

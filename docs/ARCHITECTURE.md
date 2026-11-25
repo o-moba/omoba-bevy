@@ -4,19 +4,23 @@ This page is the map of the repository for people changing it: which crate
 owns what, how a frame flows through the client, how a tick flows through the
 server, the rules that keep the two in step, and the refactoring roadmap the
 maintainers are working through. Feature-level documentation lives in
-[features.md](features.md); operations in [RUNBOOK.md](../RUNBOOK.md).
+[features.md](features.md); operations in [RUNBOOK.md](../RUNBOOK.md). The
+system-level architecture (services and hosts, identity and accounts, protocols,
+data, build and release, methodology, decision log) is in
+[architecture/](architecture/README.md).
 
 ## Crate map
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
-| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`), and the frozen sprite character ids with their normalization. No Bevy, no I/O: no environment, filesystem or network reads, and no Ekza SDK types. | serde, serde_json; no I/O |
+| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`), and the frozen sprite character ids with their normalization, and the build's market (`shared::market`, baked at compile time from `OMOBA_MARKET`/`OMOBA_FEATURE_*`, see [markets.md](markets.md)). No Bevy, no I/O: no runtime environment, filesystem or network reads, and no Ekza SDK types. | serde, serde_json; no I/O |
+| `common` (AGPL) | The authoritative combat simulation (game world, heroes, bots, combat, formation) without transport, authentication or persistence, shared by the server and the client's socket-free offline practice. | shared |
 | `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. No Bevy since step 6a; `sqlx` is a dev-dependency (the PostgreSQL fixtures), production reaches the database through career-store. | shared, passport, career-store, ekza-bevy-sdk (no default features), tokio, ed25519-dalek |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
 | `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models, the sprite roster in `sprite_roster.rs`), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
 | `harness` | Black-box UDP players and gameplay/matchmaking checks that launch the server binary. | shared |
 | `passport` | Ekza passport contract: tickets, device and web accounts, store admission; the asset root (`passport::assets`), the avatar roster and the store-avatar registry (`passport::avatars`), and the companion reaction grant (`passport::entitlements`). | shared, ekza-bevy-sdk (`http`), reqwest |
-| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store, axum, sqlx |
+| `account-api` | Axum/Postgres HTTP service over the career store: portal pairing and sessions, devices and recovery, Supporter billing, class builds, the Ekza library link and sign in with VK ID (portal schema 7). Free-market builds serve no Supporter or Ekza routes. | shared, career-store, axum, sqlx, reqwest |
 | `arena-sync` | CLI that pulls Ekza Arena avatars and merges the avatar manifest. | reqwest |
 
 Rules that follow from the map:
@@ -65,6 +69,34 @@ to register at all; the QA plugins come last, so their
 production values. Frame order comes from the system sets below, never from
 the group order.
 
+The focused `OMOBA_FAIR_PLAY_QA_OUTPUT=<directory>` harness accepts one
+`OMOBA_FAIR_PLAY_QA_SCENE`: `taken`, `party-restart`, `search-restart`,
+`remake-menu`, `remake-prompt`, `surrender-prompt`, `remade-result` or
+`surrender-result`. It removes its transport and supplies labelled synthetic
+session/views to the production renderer. Class-tab activation and the party
+epoch-change toast use their real client paths. `fair-play.png` is captured only
+with the expected visible localized text and fitting required controls (vote
+targets at least44px); `qa-summary.json` records the scope. Missing state/text,
+readback, color pixels or output fails. Use isolated returning-user settings and
+no live server. This is presentation proof, separate from real public gameplay,
+account/consent, keep-awake/haptics or physical-phone acceptance. Select one
+language/viewport and only the changed cases; this does not enable a full matrix.
+
+Desktop fair-play and Creator Loop QA may additionally set
+`OMOBA_QA_OFFSCREEN=1`. Before DefaultPlugins build, it disables Winit/OS-window
+creation; its first QA plugin supplies a virtual primary window at the selected
+`OMOBA_QA_WIDTH`/`OMOBA_QA_HEIGHT` (default852×393, scale1), and a60Hz schedule
+runner. Production main camera/UI render into an image; avatar/party preview
+image targets remain separate. Their existing screenshot commands capture that
+image and retain all text/root/modal/geometry/color-readback gates. Creator Loop
+keeps the selected virtual dimensions instead of imposing its1280×720 desktop
+window. No desktop pixels, focus or OS lock/power settings are read/changed by
+this mode. It needs a supported harness and fails on mobile or an invalid flag;
+a normal run without the flag follows the same DefaultPlugins/window path.
+It is viewport/rendering evidence, not physical-device, OS-window/input,
+keep-awake/haptic or real-match evidence. An opt-in fair-play fixture remains
+synthetic even though it uses production rendering.
+
 QA harnesses live in `client/src/qa/` behind the `qa` cargo feature. It is on
 by default, so `cargo run -p client`, packaging, the mobile builds and the
 capture scripts compile them as before. Each harness is dormant unless its
@@ -78,6 +110,8 @@ just the debug toggles; `OMOBA_OFFLINE_OVERLAY_QA_ONLY=1` captures Home and
 the actual offline match with cosmetic mist Auto/Stretch/hidden), `OMOBA_FOG_COVERAGE_QA_DIR` (production fog node
 with a uniform mask: Auto negative control, then actual production Stretch;
 private harness in `team_vision/coverage_qa.rs`), `OMOBA_CAREER_QA_OUTPUT`,
+`OMOBA_CREATOR_LOOP_QA` (a file-driven creator-loop capture whose name keeps
+the shell up; see `creator_loop_qa.rs`),
 `OMOBA_SUPPORTER_QA_DIR`, `OMOBA_HELP_QA_SHOTS` (the controls guide's
 controller focus and Settings → Controls return), `OMOBA_BOOT_SPLASH_SHOTS`
 (the boot splash and the Home it reveals; every other harness starts without

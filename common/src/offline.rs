@@ -7,15 +7,17 @@ use crate::{
     host::CombatHost,
     match_rules::{MatchMode, MatchRules},
 };
+use shared::clock::Instant;
+#[cfg(any(test, feature = "test-support"))]
+use shared::{HeroClass, map::Team, prematch::Role};
 use shared::{
+    bot_profile::BotDifficulty,
     debug::{DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE},
+    handheld::HandheldSelection,
     protocol::{JoinRejection, SnapshotMeta},
     wire::{ClientPacket, GameState, ServerPacket},
 };
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::{net::SocketAddr, time::Duration};
 pub const START_LEVEL: u32 = 6;
 pub const EPOCH: u64 = u64::MAX;
 pub const LOCAL_ADDR: SocketAddr =
@@ -28,6 +30,9 @@ pub struct PracticeSession {
     pub match_id: u64,
     tick: u64,
     error: Option<JoinRejection>,
+    /// Behaviour level of both teams' bots. A local practice setting, so it
+    /// survives Leave and Rematch; Elite until the host sets it.
+    bot_difficulty: BotDifficulty,
 }
 impl PracticeSession {
     pub fn new(now: Instant) -> Self {
@@ -39,7 +44,25 @@ impl PracticeSession {
             match_id: 1,
             tick: 0,
             error: None,
+            bot_difficulty: BotDifficulty::Elite,
         }
+    }
+    pub fn bot_difficulty(&self) -> BotDifficulty {
+        self.bot_difficulty
+    }
+    /// Set the level of both teams' bots, retuning live bots in place.
+    pub fn set_bot_difficulty(&mut self, level: BotDifficulty) {
+        self.bot_difficulty = level;
+        for team in [shared::map::Team::Green, shared::map::Team::Blue] {
+            self.bots.set_difficulty(team, level, &self.world.players);
+        }
+    }
+    /// A fresh round keeping the local settings.
+    fn reset_for_round(&mut self, round: u64) {
+        let level = self.bot_difficulty;
+        *self = Self::new(self.now);
+        self.match_id = round;
+        self.set_bot_difficulty(level);
     }
     pub fn host(&mut self) -> CombatHost<'_> {
         CombatHost {
@@ -104,6 +127,10 @@ impl PracticeSession {
                 {
                     return;
                 }
+                if !handheld.compatible(hero_class) {
+                    self.reject_join(JoinRejection::AvatarNotAuthorized);
+                    return;
+                }
                 self.error = None;
                 self.world.ensure_connected(LOCAL_ADDR, self.now);
                 let p = self.world.players.get_mut(&LOCAL_ADDR).unwrap();
@@ -117,7 +144,11 @@ impl PracticeSession {
                     &self.world.map_layout,
                     self.now,
                 );
-                p.hero.identity.handheld = handheld;
+                p.hero.identity.handheld = if handheld.allowed_in_match() {
+                    handheld
+                } else {
+                    HandheldSelection::ClassDefault
+                };
                 // Explicit practice configuration: all four slots available; authoritative stats/ranks.
                 while p.hero.progress.level < START_LEVEL {
                     let xp = p.hero.progress.next_level_xp;
@@ -126,24 +157,9 @@ impl PracticeSession {
                 crate::bots::auto_rank_skills(p);
                 p.hero.hp = p.hero.max_hp;
                 p.hero.mana = p.hero.max_mana;
-                self.world.game_state = GameState::Running;
-                self.world.last_wave_spawn_at = self.now
-                    - (crate::balance::MINION_WAVE_INTERVAL
-                        - crate::balance::FIRST_MINION_WAVE_DELAY);
-                crate::neutrals::schedule_boss_spawns(&mut self.world.neutrals, self.now);
-                self.combat_log
-                    .ledger
-                    .begin(Vec::new())
-                    .expect("fresh practice ledger");
-                let now = self.now;
-                self.host().fill_practice_bots(now);
-                self.register_scoreboard();
+                self.start_round();
             }
-            ClientPacket::Leave => {
-                let round = self.match_id + 1;
-                *self = Self::new(self.now);
-                self.match_id = round;
-            }
+            ClientPacket::Leave => self.reset_for_round(self.match_id + 1),
             ClientPacket::RequestRematch => {
                 // A late/repeated Play Again must never reset a running round.
                 // Match the authoritative server's terminal-only transition.
@@ -165,9 +181,7 @@ impl PracticeSession {
                     session_id: None,
                     passport_ticket: None,
                 };
-                let round = self.match_id + 1;
-                *self = Self::new(self.now);
-                self.match_id = round;
+                self.reset_for_round(self.match_id + 1);
                 self.command(join);
             }
             packet => {
@@ -181,6 +195,68 @@ impl PracticeSession {
                 );
             }
         }
+    }
+    /// The round start a `Join` triggers: Running, the first wave timer, the
+    /// boss schedule and the started ledger, then the practice bots, each on
+    /// the scoreboard.
+    fn start_round(&mut self) {
+        self.start_round_with(|host, now| host.fill_practice_bots(now));
+    }
+    fn start_round_with(&mut self, spawn_bots: impl FnOnce(&mut CombatHost<'_>, Instant)) {
+        self.world.game_state = GameState::Running;
+        self.world.last_wave_spawn_at = self.now
+            - (crate::balance::MINION_WAVE_INTERVAL - crate::balance::FIRST_MINION_WAVE_DELAY);
+        crate::neutrals::schedule_boss_spawns(&mut self.world.neutrals, self.now);
+        self.combat_log
+            .ledger
+            .begin(Vec::new())
+            .expect("fresh practice ledger");
+        let now = self.now;
+        spawn_bots(&mut self.host(), now);
+        self.register_scoreboard();
+    }
+    /// A human-less round for the difficulty simulator
+    /// (docs/plans/bot-personas.md, S3): the round start a `Join` performs,
+    /// with each team's bots at its own level, Green then Blue. The levels
+    /// are the teams' own, not the practice setting, so they do not survive
+    /// Leave or Rematch.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn bots_only(now: Instant, levels: [BotDifficulty; 2]) -> Self {
+        let mut practice = Self::with_team_levels(now, levels);
+        practice.start_round();
+        practice
+    }
+
+    /// A human-less 5v5 round with explicit picks for Green then Blue.
+    /// Each roster follows `Role::ALL` order and each pick must match its role.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn bots_with_rosters(
+        now: Instant,
+        levels: [BotDifficulty; 2],
+        rosters: [[HeroClass; 5]; 2],
+    ) -> Self {
+        let mut practice = Self::with_team_levels(now, levels);
+        practice.start_round_with(|host, now| {
+            for (team, roster) in [Team::Green, Team::Blue].into_iter().zip(rosters) {
+                for (role, class) in Role::ALL.into_iter().zip(roster) {
+                    assert_eq!(class.primary_role(), role, "{class:?} in {team:?} roster");
+                    host.spawn_roster_bot(team, class, role, now)
+                        .expect("fresh practice roster has room for both teams");
+                }
+            }
+        });
+        practice
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn with_team_levels(now: Instant, levels: [BotDifficulty; 2]) -> Self {
+        let mut practice = Self::new(now);
+        for (team, level) in [Team::Green, Team::Blue].into_iter().zip(levels) {
+            practice
+                .bots
+                .set_difficulty(team, level, &practice.world.players);
+        }
+        practice
     }
     pub fn advance(&mut self, dt: f32) {
         let dt = if dt.is_finite() {
@@ -209,18 +285,17 @@ impl PracticeSession {
                 .combat_log
                 .ledger
                 .register(shared::career::ParticipantResult {
+                    input_kind: Default::default(),
+                    participation: None,
                     player_id: p.hero.identity.id,
                     is_bot: p.hero.identity.is_bot,
+                    bot_persona: p.bot_persona.map(|persona| persona.slug().to_owned()),
                     profile_id: None,
-                    nickname: format!(
-                        "{} {}",
-                        if p.hero.identity.is_bot {
-                            "Bot"
-                        } else {
-                            "Practice"
-                        },
-                        p.hero.identity.id
-                    ),
+                    nickname: if p.hero.identity.is_bot {
+                        p.display_nickname()
+                    } else {
+                        format!("Practice {}", p.hero.identity.id)
+                    },
                     team: p.hero.identity.team,
                     hero_class: p.hero.identity.hero_class,
                     character: "ipfs".into(),
@@ -352,6 +427,84 @@ mod tests {
             p.advance(0.05);
         }
     }
+
+    #[test]
+    fn cleric_legacy_cast_packets_protect_allies_offline() {
+        let mut practice = PracticeSession::new(Instant::now());
+        practice.command(join(HeroClass::Cleric));
+        let local = &practice.world.players[&LOCAL_ADDR].hero;
+        let target = TargetId {
+            kind: TargetKind::Player,
+            id: local.identity.id,
+        };
+        let (x, z) = (local.x, local.z);
+        let ally_addr = practice
+            .world
+            .players
+            .iter()
+            .filter(|(addr, player)| {
+                **addr != LOCAL_ADDR && player.hero.identity.team == Team::Green
+            })
+            .min_by_key(|(_, player)| player.hero.identity.id)
+            .map(|(&addr, _)| addr)
+            .unwrap();
+        let ally = &mut practice.world.players.get_mut(&ally_addr).unwrap().hero;
+        ally.x = x + 2.0;
+        ally.z = z;
+        ally.hp = 20.0;
+        practice.command(ClientPacket::Cast { target, slot: 1 });
+        assert!(practice.world.players[&ally_addr].hero.hp > 20.0);
+        practice.now += Duration::from_secs(1);
+        practice.command(ClientPacket::Cast { target, slot: 3 });
+        assert!(
+            crate::skills::state(&practice.world.players[&ally_addr], practice.now)
+                .is_some_and(|state| state.shield_hp > 0.0)
+        );
+    }
+
+    #[test]
+    fn incompatible_handheld_is_rejected_before_join_and_can_be_retried() {
+        use shared::handheld::HandheldSelection;
+        let mut practice = PracticeSession::new(Instant::now());
+        let equipped = |id: &str| {
+            let mut packet = join(HeroClass::Wildspark);
+            let ClientPacket::Join { handheld, .. } = &mut packet else {
+                unreachable!()
+            };
+            *handheld = HandheldSelection::Item(id.into());
+            packet
+        };
+        practice.command(equipped("forge-sword"));
+        assert_eq!(practice.error, Some(JoinRejection::AvatarNotAuthorized));
+        assert!(practice.world.players.is_empty());
+
+        practice.command(equipped("wildspark-repeater"));
+        assert_eq!(practice.error, None);
+        assert_eq!(
+            practice.world.players[&LOCAL_ADDR].hero.identity.handheld,
+            HandheldSelection::Item("wildspark-repeater".into())
+        );
+    }
+
+    #[test]
+    fn offline_join_with_empty_equipment_uses_the_class_default() {
+        for (class, expected) in [
+            (HeroClass::Warrior, Some("forge-sword")),
+            (HeroClass::Stormfist, None),
+        ] {
+            let mut practice = PracticeSession::new(Instant::now());
+            let mut packet = join(class);
+            let ClientPacket::Join { handheld, .. } = &mut packet else {
+                unreachable!()
+            };
+            *handheld = HandheldSelection::Unequipped;
+            practice.command(packet);
+            let equipped = &practice.world.players[&LOCAL_ADDR].hero.identity.handheld;
+            assert_eq!(*equipped, HandheldSelection::ClassDefault);
+            assert_eq!(equipped.resolve(class), expected);
+        }
+    }
+
     #[test]
     fn terminal_rematch_is_once_only_and_late_retries_do_not_reset_movement() {
         let mut p = PracticeSession::new(Instant::now());
@@ -390,12 +543,67 @@ mod tests {
     }
 
     #[test]
+    fn bot_level_applies_to_both_teams_and_survives_leave_and_rematch() {
+        use crate::bots::BotProfile;
+        let profiles = |p: &PracticeSession| -> Vec<_> {
+            p.world
+                .players
+                .iter()
+                .filter(|(_, player)| player.hero.identity.is_bot)
+                .map(|(addr, _)| p.bots.profile(*addr))
+                .collect()
+        };
+        let mut p = PracticeSession::new(Instant::now());
+        assert_eq!(p.bot_difficulty(), BotDifficulty::Elite);
+        p.command(join(HeroClass::Warrior));
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::ELITE)));
+
+        p.set_bot_difficulty(BotDifficulty::Regular);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
+        p.world.game_state = GameState::Victory {
+            winner: Team::Green,
+        };
+        p.command(ClientPacket::RequestRematch);
+        assert_eq!(p.match_id, 2);
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
+        p.command(ClientPacket::Leave);
+        p.command(join(HeroClass::Mage));
+        assert_eq!(p.bot_difficulty(), BotDifficulty::Regular);
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
+    }
+
+    #[test]
     fn repeated_practice_keeps_roster_separated_and_movable() {
         let mut p = PracticeSession::new(Instant::now());
         p.command(join(HeroClass::Wildspark));
+        let mut previous = Vec::new();
         for _ in 0..3 {
             assert_eq!(p.world.players.values().filter(|p| p.joined).count(), 10);
             let players: Vec<_> = p.world.players.values().filter(|p| p.joined).collect();
+            let mut roster: Vec<_> = players
+                .iter()
+                .map(|p| (p.hero.identity.id, p.hero.identity.hero_class))
+                .collect();
+            roster.sort_unstable_by_key(|(id, _)| *id);
+            let classes: Vec<_> = roster.into_iter().map(|(_, class)| class).collect();
+            assert_eq!(
+                classes
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
+                10
+            );
+            // The selected human keeps the chosen class as bot pools rotate.
+            assert_eq!(
+                p.world.players[&LOCAL_ADDR].hero.identity.hero_class,
+                HeroClass::Wildspark
+            );
+            assert_ne!(classes, previous);
+            previous = classes;
             for (i, a) in players.iter().enumerate() {
                 for b in players.iter().skip(i + 1) {
                     assert!(
@@ -745,6 +953,8 @@ mod tests {
         hero.z = 0.0;
         run(&mut p, 0.1);
         p.command(ClientPacket::Transform {
+            input_kind: Default::default(),
+            input_active: false,
             x: 10.5,
             y: 0.5,
             z: 0.0,
@@ -761,6 +971,8 @@ mod tests {
         });
         let after = p.world.players[&LOCAL_ADDR].hero.x;
         p.command(ClientPacket::Transform {
+            input_kind: Default::default(),
+            input_active: false,
             x: 10.0,
             y: 0.5,
             z: 0.0,
@@ -811,6 +1023,8 @@ mod tests {
                     predicted_x += direction * speed * dt;
                     let yaw = shared::math::hero_yaw_towards(direction, 0.0);
                     p.command(ClientPacket::Transform {
+                        input_kind: Default::default(),
+                        input_active: false,
                         x: predicted_x,
                         y: crate::balance::PLAYER_GROUND_Y,
                         z: origin[1],

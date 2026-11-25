@@ -5,11 +5,26 @@ It describes all 17 classes, their 68 skills, current basic attacks, semantic
 motion references and authored cosmetic requirements. The executable game and
 combat protocol do not consume this document in this iteration.
 
+What creators may submit to the game - every animation slot of every hero, its
+default and the rules a custom clip must pass - is the separate
+[game contract](game-contract.md) (`ekza.game-contract.v1`), which uses the same
+canonical JSON and revision rule. Its asset slots will be cut from this
+catalogue's requirements (GP5).
+
 The original [Studio proposal (PR #78)](https://github.com/o-moba/omoba-bevy/pull/78) remains the
 roadmap for Registry publication, requirement-targeted review and playable sets.
 This export implements discovery and preparation of a contribution brief. It does
 not add a Registry endpoint or imply that publishing a model approves it for a
 particular requirement.
+
+## Classic hero identity
+
+The [game-owned hero design companion](hero-designs.md) adds canonical class/base
+binding for the new Classic direction. It is exported with the game contract,
+not inferred from the older generic avatar catalogue. Every current assignment
+is explicitly unconfigured; discovery and a compatible rig grant no Classic
+approval. The contract's `any` target remains useful authoring context outside
+this gate and cannot override a concrete Classic target.
 
 ## Export and check
 
@@ -129,24 +144,25 @@ configured GLB fallback; Last Spark uses a different flying rocket; Snapline's
 three traps reuse one model. Shockline and explosion effects remain engine-owned.
 The exporter asserts the current tumbler precedence so a presentation change
 cannot silently preserve an obsolete brief. Explicitly selected handhelds still
-remain selected in both weapon modes; coordinated two-gun skins are future work.
+remain selected in both weapon modes. A one-GLB
+[Wildspark set](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb)
+switches between its own repeater and launcher variants; two independently
+approved guns are future work. Both Q briefs ask for that one set GLB under the
+Studio requirement `wildspark.handheld.set`. The catalogue keeps its two
+per-mode rows and exports no third row for the set.
 
-Only the six current class-default handheld GLBs are publicly copied, with the
-CC-BY-4.0 grant from `client/assets/weapons/LICENSE.md`. The seven-item weapon
-manifest also contains a hammer that is not currently a class default. Icons
-retain CC-BY-4.0 attribution and motion references retain Quaternius CC0 credit.
-World-prop notices currently lack an unambiguous asset-specific redistribution
-grant, so their source hashes are references and their GLB bytes are withheld.
-No new license is assigned. Avatar files are outside this export.
+The catalogue publishes the seven default handheld GLBs used as authored
+baselines under the CC-BY-4.0 grant in `client/assets/weapons/LICENSE.md`.
+Icons retain CC-BY-4.0 attribution and motion references retain Quaternius CC0
+credit. World props with unresolved redistribution notices appear as hashed
+references.
 
 ## Next integration slices
 
 The website can pin a contribution brief to `projectId`, catalogue `revision` and
-`requirementId`, link to the supported Studio surface, and let the creator carry
-that context into an existing upload. Completing the loop requires Registry to
-store an exact requirement-to-rendition association and provide owner review.
-After that, SDK/runtime work can admit a complete reviewed cosmetic set, keep
-asset identities pinned for a match, and fall back to packaged defaults.
-Projectile/prop profiles and constrained motion capabilities need their own
-validation and native-game proof. These later stages do not require changing
-the catalogue's discovery purpose or moving gameplay authority into uploads.
+`requirementId` and carry that context into the Studio upload. Registry already
+records a submission target when it is available. The next step is to make the
+reviewed association authoritative for the exact rendition and character slot,
+then carry it through SDK admission and storefront previews. Projectile and
+prop profiles and constrained motion capabilities need their own validation
+and native-game proof.

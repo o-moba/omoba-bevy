@@ -1,41 +1,7 @@
 //! Close, target-resolved dagger techniques. Recipes dispatch these actions on
-//! any core; no class identity grants damage, control or proc eligibility.
+//! any core; no class identity grants damage or control eligibility.
 use super::*;
 use shared::loadout::Technique;
-use std::collections::hash_map::RandomState;
-use std::hash::BuildHasher;
-
-/// Private keyed randomness belongs to the authoritative world, never a packet.
-/// RandomState is independently seeded by std's platform entropy. Only accepted
-/// eligible hits draw; neither request ids nor public match state seed the hash.
-#[derive(Default)]
-pub(super) struct Chance {
-    key: RandomState,
-    counter: u64,
-    #[cfg(test)]
-    forced: Option<bool>,
-}
-impl Chance {
-    fn vital_break(&mut self) -> bool {
-        #[cfg(test)]
-        if let Some(outcome) = self.forced.take() {
-            self.counter += 1;
-            return outcome;
-        }
-        // Rejection sampling makes precisely one of fifty outcomes a proc.
-        let ceiling = u64::MAX - u64::MAX % 50;
-        loop {
-            self.counter = self.counter.wrapping_add(1);
-            if self.counter == 0 {
-                self.key = RandomState::new();
-            }
-            let value = self.key.hash_one(self.counter);
-            if value < ceiling {
-                return value.is_multiple_of(50);
-            }
-        }
-    }
-}
 
 pub(super) fn handles(action: Technique) -> bool {
     matches!(
@@ -195,12 +161,6 @@ pub(super) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2],
             return;
         };
         victim.hero.skills.advanced.charm = None;
-        // Victim forward points away from the caster, so the caster is behind.
-        crate::sim::cast::face_player_action(
-            victim,
-            target.pos[0] - origin[0],
-            target.pos[1] - origin[1],
-        );
         victim.timers.last_movement_at = now;
         victim.timers.movement_slack = 0.0;
         return;
@@ -216,7 +176,7 @@ pub(super) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2],
     };
     let mut src = source(owner, slot);
     src.style = ProjectileStyle::Crescent;
-    let mut events = apply_hit(
+    let events = apply_hit(
         w,
         target.target,
         damage * scale * rear_multiplier,
@@ -228,39 +188,6 @@ pub(super) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2],
         false,
         now,
     );
-    let survivor_hp = w
-        .players
-        .values()
-        .find(|p| {
-            p.hero.identity.id == target.target.id && target.target.kind == TargetKind::Player
-        })
-        .map_or(0.0, |p| p.hero.hp);
-    // Actual HP movement is required: absorbed hits and sandbox infinite-HP
-    // receipts cannot roll. A dead or already-one-HP target never rolls either.
-    if action == Technique::DaggerBackstab
-        && rear
-        && survivor_hp > 1.0
-        && survivor_hp < target.hp
-        && events.iter().any(|e| {
-            e.target.id == target.target.id
-                && e.target.kind == CombatEntityKind::Player
-                && e.amount > 0.0
-        })
-        && w.skill_runtime.dagger_chance.vital_break()
-    {
-        // The ordinary damage gate still checks immunity and consumes shields.
-        // No on-hit recursion: a vital break can neither execute nor lifesteal.
-        if let Some(event) = crate::combat_feedback::apply_player_nonlethal_damage(
-            &mut w.players,
-            target.target.id,
-            survivor_hp - 1.0,
-            now,
-        ) {
-            let mut event = src.annotate(event);
-            event.near_lethal = true;
-            events.push(event);
-        }
-    }
     w.skill_runtime.pending.extend(events);
 }
 

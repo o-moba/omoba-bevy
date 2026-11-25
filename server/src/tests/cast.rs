@@ -195,12 +195,12 @@ fn self_target_abilities_apply_heal_and_respect_unlock_gates() {
     let now = Instant::now();
     let caster: SocketAddr = "127.0.0.1:52301".parse().unwrap();
     let other: SocketAddr = "127.0.0.1:52302".parse().unwrap();
-    setup_caster_and_target(&mut world, caster, other, HeroClass::Cleric, 5.0, now);
+    setup_caster_and_target(&mut world, caster, other, HeroClass::Warrior, 5.0, now);
     let self_target = TargetId {
         kind: TargetKind::Player,
         id: world.players.get(&caster).unwrap().hero.identity.id,
     };
-    let w = ability_for_class_slot(HeroClass::Cleric, SkillSlot::W);
+    let w = ability_for_class_slot(HeroClass::Warrior, SkillSlot::W);
     assert_eq!(w.targeting, TargetingMode::SelfTarget);
 
     // Level 1: W is locked -> cast must be a complete no-op.
@@ -250,6 +250,99 @@ fn self_target_abilities_apply_heal_and_respect_unlock_gates() {
         world.projectiles.is_empty(),
         "self ability must not spawn a projectile"
     );
+}
+
+#[test]
+fn cleric_renew_heals_the_lowest_health_ally_and_rejects_an_empty_cast() {
+    let mut world = GameWorld::empty();
+    let now = Instant::now();
+    let caster = "127.0.0.1:52311".parse().unwrap();
+    let ally = "127.0.0.1:52312".parse().unwrap();
+    let other_ally = "127.0.0.1:52313".parse().unwrap();
+    let enemy = "127.0.0.1:52314".parse().unwrap();
+    setup_caster_and_target(&mut world, caster, ally, HeroClass::Cleric, 2.0, now);
+    setup_caster_and_target(&mut world, caster, other_ally, HeroClass::Cleric, 4.0, now);
+    setup_caster_and_target(&mut world, caster, enemy, HeroClass::Cleric, 1.0, now);
+    for address in [ally, other_ally] {
+        world.players.get_mut(&address).unwrap().hero.identity.team = Team::Green;
+    }
+    let caster_player = world.players.get_mut(&caster).unwrap();
+    caster_player.hero.progress.level = 2;
+    caster_player.hero.hp = 20.0;
+    let mana = caster_player.hero.mana;
+    let self_target = TargetId {
+        kind: TargetKind::Player,
+        id: caster_player.hero.identity.id,
+    };
+    world.players.get_mut(&enemy).unwrap().hero.hp = 5.0;
+    cast_slot(&mut world, caster, self_target, 1, now);
+    assert_eq!(world.players[&caster].timers.last_cast_at[1], None);
+    assert_eq!(world.players[&caster].hero.mana, mana);
+    assert_eq!(world.players[&caster].hero.last_action.sequence, 0);
+
+    let ally_hero = &mut world.players.get_mut(&ally).unwrap().hero;
+    ally_hero.hp = 10.0;
+    ally_hero.max_hp = 80.0;
+    let other_hero = &mut world.players.get_mut(&other_ally).unwrap().hero;
+    other_hero.hp = 15.0;
+    other_hero.max_hp = 200.0;
+    cast_slot(&mut world, caster, self_target, 1, now);
+    let caster_player = &world.players[&caster];
+    let scale = crate::sim::cast::legacy_effect_scale(caster_player, 1);
+    assert!((world.players[&other_ally].hero.hp - (15.0 + 30.0 * scale)).abs() < EPSILON);
+    assert_eq!(world.players[&ally].hero.hp, 10.0);
+    assert_eq!(world.players[&enemy].hero.hp, 5.0);
+    assert_eq!(caster_player.hero.hp, 20.0);
+    assert_eq!(caster_player.timers.last_cast_at[1], Some(now));
+    assert_eq!(caster_player.hero.mana, mana - 20.0);
+    assert_eq!(caster_player.hero.last_action.slot, 1);
+}
+
+#[test]
+fn cleric_blessing_applies_a_timed_replicated_shield_to_nearby_allies() {
+    let mut world = GameWorld::empty();
+    let now = Instant::now();
+    let caster = "127.0.0.1:52321".parse().unwrap();
+    let in_range = "127.0.0.1:52322".parse().unwrap();
+    let out_of_range = "127.0.0.1:52323".parse().unwrap();
+    let enemy = "127.0.0.1:52324".parse().unwrap();
+    setup_caster_and_target(&mut world, caster, in_range, HeroClass::Cleric, 7.9, now);
+    setup_caster_and_target(
+        &mut world,
+        caster,
+        out_of_range,
+        HeroClass::Cleric,
+        8.1,
+        now,
+    );
+    setup_caster_and_target(&mut world, caster, enemy, HeroClass::Cleric, 2.0, now);
+    for address in [in_range, out_of_range] {
+        world.players.get_mut(&address).unwrap().hero.identity.team = Team::Green;
+    }
+    let caster_player = world.players.get_mut(&caster).unwrap();
+    caster_player.hero.progress.level = 5;
+    let self_target = TargetId {
+        kind: TargetKind::Player,
+        id: caster_player.hero.identity.id,
+    };
+    cast_slot(&mut world, caster, self_target, 3, now);
+    assert_eq!(world.players[&caster].timers.last_cast_at[3], None);
+
+    world.players.get_mut(&caster).unwrap().hero.progress.level = 6;
+    cast_slot(&mut world, caster, self_target, 3, now);
+    let caster_player = &world.players[&caster];
+    let shield = 40.0 * crate::sim::cast::legacy_effect_scale(caster_player, 1);
+    let shield_at = |address, time| {
+        common::skills::state(&world.players[&address], time).map_or(0.0, |s| s.shield_hp)
+    };
+    assert_eq!(caster_player.timers.last_cast_at[3], Some(now));
+    assert_eq!(shield_at(caster, now), shield);
+    assert_eq!(shield_at(in_range, now), shield);
+    assert_eq!(shield_at(out_of_range, now), 0.0);
+    assert_eq!(shield_at(enemy, now), 0.0);
+    assert_eq!(shield_at(in_range, now + Duration::from_secs(3)), 0.0);
+    let ally = world.players.get_mut(&in_range).unwrap();
+    assert!((ally.hero.skills.absorb(shield + 5.0, now) - 5.0).abs() < EPSILON);
 }
 
 #[test]

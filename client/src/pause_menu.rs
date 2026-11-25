@@ -3,6 +3,9 @@
 //! `PauseAction`, the kit recognizes clicks and taps and paints the buttons,
 //! and the systems here only consume `Activated<PauseAction>`.
 // i18n-strict
+mod match_votes;
+#[cfg(test)]
+use crate::ui::Button;
 use bevy::{
     app::AppExit,
     prelude::*,
@@ -23,7 +26,6 @@ use crate::persistence::{
     ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
 };
 use crate::render_settings::RenderSettings;
-use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::TeamSelection;
 use crate::ui::living_background::{
     self, LivingBackground, LivingBands, LivingScene, MotionSettings,
@@ -65,6 +67,7 @@ pub(crate) enum PauseMenuSet {
 
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
+        match_votes::configure(app);
         app.init_resource::<PauseMenuState>()
             .init_resource::<SelectedSettingsTab>()
             .init_resource::<AudioSettings>()
@@ -159,6 +162,10 @@ pub(crate) enum SettingsTab {
     Camera,
     Hud,
     Language,
+    /// The build, the age sign, the legal documents and the source of the
+    /// region's release (LR-06); only where the region has any
+    /// (`legal::about_shown`).
+    About,
 }
 
 // Bevy resources are unique entity components. The selected value must use a
@@ -278,6 +285,8 @@ struct SettingsServerAddrLabel;
 /// The Language row's value (the active language's native name).
 #[derive(Component)]
 struct LanguageValue;
+#[derive(Component)]
+pub(crate) struct AccountRegionValue;
 
 #[derive(Component)]
 struct PauseMenuPanel;
@@ -324,6 +333,7 @@ pub(crate) enum PauseAction {
     OpenPractice,
     /// Switch to the next shipped language.
     CycleLanguage,
+    AccountRegion,
     ToggleReduceMotion,
     ToggleBeginnerTips,
     ToggleFpsReadout,
@@ -991,6 +1001,19 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                 );
                                 rail.commands().entity(button).insert(SettingsRailItem);
                             }
+                            if crate::legal::about_shown() {
+                                let about = widgets::controls::tab(
+                                    rail,
+                                    Localized::new("legal.about.title"),
+                                    Some(Icon::NavInfo),
+                                    widgets::controls::TabPlacement::Rail,
+                                    form,
+                                    false,
+                                    PauseAction::SettingsTab(SettingsTab::About),
+                                    "SettingsTabAbout",
+                                );
+                                rail.commands().entity(about).insert(SettingsRailItem);
+                            }
                             rail.spawn((
                                 Node {
                                     height: Val::Px(1.0),
@@ -1065,6 +1088,7 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                             Name::new("PauseMenuMainSection"),
                         ))
                         .with_children(|main| {
+                            match_votes::spawn(main);
                             main.spawn((
                                 Text::new(tr("pause.hint.online")),
                                 theme::role_text(TextRole::Caption),
@@ -1154,6 +1178,24 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     PauseAction::CycleLanguage,
                                     "PauseMenuLanguage",
                                 );
+                                if crate::account_region::selectable() {
+                                    widgets::toggle_row(
+                                        settings,
+                                        Localized::new("region.title"),
+                                        crate::i18n::tr(
+                                            if shared::region::market()
+                                                == shared::market::Market::Ru
+                                            {
+                                                "region.ru"
+                                            } else {
+                                                "region.global"
+                                            },
+                                        ),
+                                        AccountRegionValue,
+                                        PauseAction::AccountRegion,
+                                        "PauseMenuAccountRegionRow",
+                                    );
+                                }
                             });
                             settings_group(settings, SettingsTab::Sound, |settings| {
                                 section_title(
@@ -1287,6 +1329,16 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     Name::new("PauseMenuCredits"),
                                 ));
                             });
+                            if crate::legal::about_shown() {
+                                settings_group(settings, SettingsTab::About, |settings| {
+                                    section_title(
+                                        settings,
+                                        "legal.about.title",
+                                        "PauseMenuAboutTitle",
+                                    );
+                                    crate::legal::spawn_about(settings);
+                                });
+                            }
                             settings_group(settings, SettingsTab::Graphics, |settings| {
                                 section_title(
                                     settings,
@@ -2051,7 +2103,7 @@ fn update_setting_labels(
 fn server_addr_for_prefs(resolved: &ResolvedServerAddressForPrefs) -> &str {
     let s = resolved.0.as_str().trim();
     if s.is_empty() {
-        DEFAULT_GAME_SERVER_ADDR
+        crate::session_config::default_server_addr()
     } else {
         s
     }
@@ -2073,6 +2125,10 @@ fn sync_settings_server_addr_label(
         {
             next.push('\n');
             next.push_str(&detail);
+        }
+        if let Some(reason) = crate::net::compatibility_reason(&session) {
+            next.push('\n');
+            next.push_str(reason);
         }
     }
     if let Ok(mut text) = label_q.single_mut() {
@@ -2331,9 +2387,18 @@ mod tests {
         for id in ids {
             let row = named(&mut app, id);
             let label = app.world().get::<Children>(row).unwrap()[0];
-            let label_rect = rect(&app, label, 2.0);
+            // Compare the layout columns even for rows below the scroll viewport.
+            let layout_rect = |entity| {
+                crate::ui::gesture::logical_ui_rect(
+                    app.world().get::<ComputedNode>(entity).unwrap(),
+                    app.world().get::<UiGlobalTransform>(entity).unwrap(),
+                    None,
+                    2.0,
+                )
+            };
+            let label_rect = layout_rect(label);
             let parts = *app.world().get::<widgets::KitParts>(row).unwrap();
-            let track_rect = rect(&app, parts.track.unwrap(), 2.0);
+            let track_rect = layout_rect(parts.track.unwrap());
             if let Some(x) = label_x {
                 assert!((label_rect.min.x - x).abs() < 1.0);
             }
@@ -2592,10 +2657,11 @@ mod tests {
             .iter(app.world())
             .map(|(tab, _)| *tab as u8)
             .collect();
+        // Five tabs, and About where the region has legal links (LR-06).
         assert_eq!(
             present.len(),
-            5,
-            "all five tab markers must survive spawning"
+            5 + usize::from(crate::legal::about_shown()),
+            "every tab marker must survive spawning"
         );
         assert_eq!(
             app.world().resource::<SelectedSettingsTab>().0,
@@ -2951,6 +3017,30 @@ mod tests {
         assert!(app.world().resource::<AudioSettings>().muted);
     }
 
+    /// LR-06: Settings has an About tab and page exactly where the region
+    /// has legal links (RU); a global build's Settings are unchanged.
+    #[test]
+    fn about_is_in_settings_only_where_the_region_has_legal_links() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_pause_menu_ui);
+        app.update();
+        let shown = crate::legal::about_shown();
+        assert_eq!(
+            shown,
+            matches!(shared::region::market(), shared::market::Market::Ru)
+        );
+        assert_eq!(
+            harness::find(app.world_mut(), "SettingsTabAbout").is_some(),
+            shown
+        );
+        let group = app
+            .world_mut()
+            .query::<&SettingsTab>()
+            .iter(app.world())
+            .any(|tab| *tab == SettingsTab::About);
+        assert_eq!(group, shown);
+    }
+
     #[test]
     fn settings_back_button_is_outside_the_scrolling_body() {
         let mut app = App::new();
@@ -3097,48 +3187,29 @@ mod tests {
         use crate::ui::gesture::TapTracker;
         let entity = Entity::PLACEHOLDER;
         let rect = Rect::from_center_size(Vec2::new(100.0, 100.0), Vec2::new(180.0, 46.0));
-        let buttons = [(entity, rect)];
+        let hit = |_| Some(entity);
         let mut state = TapTracker::default();
         assert_eq!(
-            state.event(1, TouchPhase::Started, rect.center(), &buttons),
+            state.event(1, TouchPhase::Started, rect.center(), hit),
             None
         );
+        assert_eq!(state.event(2, TouchPhase::Ended, rect.center(), hit), None);
         assert_eq!(
-            state.event(2, TouchPhase::Ended, rect.center(), &buttons),
+            state.event(1, TouchPhase::Moved, rect.center() + Vec2::Y * 30.0, hit),
             None
         );
+        assert_eq!(state.event(1, TouchPhase::Ended, rect.center(), hit), None);
+        state.event(3, TouchPhase::Started, rect.center(), hit);
         assert_eq!(
-            state.event(
-                1,
-                TouchPhase::Moved,
-                rect.center() + Vec2::Y * 30.0,
-                &buttons
-            ),
+            state.event(3, TouchPhase::Canceled, rect.center(), hit),
             None
         );
+        state.event(4, TouchPhase::Started, rect.center(), hit);
         assert_eq!(
-            state.event(1, TouchPhase::Ended, rect.center(), &buttons),
-            None
-        );
-        state.event(3, TouchPhase::Started, rect.center(), &buttons);
-        assert_eq!(
-            state.event(3, TouchPhase::Canceled, rect.center(), &buttons),
-            None
-        );
-        state.event(4, TouchPhase::Started, rect.center(), &buttons);
-        assert_eq!(
-            state.event(
-                4,
-                TouchPhase::Ended,
-                rect.center() + Vec2::X * 4.0,
-                &buttons
-            ),
+            state.event(4, TouchPhase::Ended, rect.center() + Vec2::X * 4.0, hit),
             Some(entity)
         );
-        assert_eq!(
-            state.event(4, TouchPhase::Ended, rect.center(), &buttons),
-            None
-        );
+        assert_eq!(state.event(4, TouchPhase::Ended, rect.center(), hit), None);
     }
 
     #[test]
@@ -3224,9 +3295,10 @@ mod tests {
         // A clipped-away button cannot receive a new tap through the scroll panel.
         app.world_mut()
             .entity_mut(button)
-            .insert(bevy::ui::CalculatedClip {
-                clip: Rect::from_corners(Vec2::ZERO, Vec2::splat(10.0)),
-            });
+            .insert(bevy::ui::CalculatedClip::default().with_rect(
+                Rect::from_corners(Vec2::ZERO, Vec2::splat(10.0)),
+                &UiGlobalTransform::from_translation(Vec2::ZERO),
+            ));
         app.world_mut()
             .write_message(event(3, TouchPhase::Started, center));
         app.world_mut()

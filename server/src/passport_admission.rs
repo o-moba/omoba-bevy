@@ -37,12 +37,13 @@ impl WeaponCatalogue {
             self.items = items
                 .into_iter()
                 .filter(|item| {
-                    ekza_bevy_sdk::assets::validate_item(
-                        item,
-                        ekza_bevy_sdk::assets::AssetKind::Weapon,
-                        &omoba_passport::weapon_store::selector(),
-                    )
-                    .is_ok()
+                    shared::handheld::weapon_binding(&item.slug).is_some()
+                        && ekza_bevy_sdk::assets::validate_item(
+                            item,
+                            ekza_bevy_sdk::assets::AssetKind::Weapon,
+                            &omoba_passport::weapon_store::selector(),
+                        )
+                        .is_ok()
                 })
                 .map(|item| item.slug)
                 .collect();
@@ -133,14 +134,50 @@ pub(super) struct PassportAdmissions {
 
 impl Default for PassportAdmissions {
     fn default() -> Self {
+        Self::for_market(shared::market::FEATURES.ekza)
+    }
+}
+
+/// Why a build without Ekza admits no hosted item; no request is made.
+const NO_EKZA: &str = "this build has no Ekza services";
+
+fn no_weapons(_: &str) -> Result<Vec<ekza_bevy_sdk::assets::StoreAsset>, String> {
+    Err(NO_EKZA.into())
+}
+
+fn no_free_avatars(_: &str) -> Result<Vec<StoreAvatar>, String> {
+    Err(NO_EKZA.into())
+}
+
+impl PassportAdmissions {
+    /// The admissions of a build with `ekza`. Without Ekza there is no passport
+    /// and every registry read fails at once, without a request: a protected
+    /// avatar or `ekza-` weapon is denied, shipped content stays free.
+    fn for_market(ekza: bool) -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
             weapons: Arc::default(),
-            fetch_weapons: omoba_passport::weapon_store::fetch_approved,
-            api: PassportApi::from_env().ok(),
+            fetch_weapons: if ekza {
+                omoba_passport::weapon_store::fetch_approved
+            } else {
+                no_weapons
+            },
+            api: if ekza {
+                PassportApi::from_env().ok()
+            } else {
+                None
+            },
             free: Arc::default(),
-            fetch_free: omoba_passport::community::fetch_free,
-            registry: omoba_passport::community::registry_url(),
+            fetch_free: if ekza {
+                omoba_passport::community::fetch_free
+            } else {
+                no_free_avatars
+            },
+            registry: if ekza {
+                omoba_passport::community::registry_url()
+            } else {
+                String::new()
+            },
             pending: HashSet::new(),
             sender,
             receiver: Mutex::new(receiver),
@@ -185,17 +222,14 @@ impl PassportAdmissions {
             _ => None,
         };
         if let Some(shared::handheld::HandheldSelection::Item(id)) = handheld {
+            if shared::handheld::weapon_binding(id).is_none() {
+                return Admission::Denied;
+            }
             // Only shipped props bypass hosted approval. Operator imports are
             // useful for local sandbox rehearsal but do not grant online use.
-            let shipped = omoba_passport::weapons::Catalog::parse(include_bytes!(
-                "../../client/assets/weapons/manifest.json"
-            ))
-            .expect("shipped props");
+            let shipped = omoba_passport::weapons::shipped_catalog();
             if !shipped.items.iter().any(|item| item.id == *id) {
-                if id.len() != 37
-                    || !id.starts_with("ekza-")
-                    || !id[5..].bytes().all(|b| b.is_ascii_hexdigit())
-                {
+                if !is_ekza_weapon_slug(id) {
                     return Admission::Denied;
                 }
                 let cache = self.weapons.lock().unwrap();
@@ -402,6 +436,64 @@ impl PassportAdmissions {
     }
 }
 
+/// The store slug shape of a hosted handheld (`ekza-` and 32 hex digits).
+fn is_ekza_weapon_slug(id: &str) -> bool {
+    id.len() == 37 && id.starts_with("ekza-") && id[5..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The operator line for a loadout decision that names Ekza items: a hosted
+/// handheld and/or a store avatar (Studio or passport). Shipped props, roster
+/// avatars and malformed ids are not echoed, and tickets and session ids are
+/// never part of it. `None` when the loadout names no Ekza item.
+pub(crate) fn ekza_decision_line(
+    player: Option<u64>,
+    packet: &ClientPacket,
+    allowed: bool,
+) -> Option<String> {
+    use shared::prematch::{PrematchAction, PrematchRequest};
+    let (handheld, avatar) = match packet {
+        ClientPacket::Join {
+            handheld, avatar, ..
+        }
+        | ClientPacket::Prematch {
+            request:
+                PrematchRequest {
+                    action:
+                        PrematchAction::Select {
+                            handheld, avatar, ..
+                        },
+                    ..
+                },
+        } => (handheld, avatar),
+        _ => return None,
+    };
+    let handheld = match handheld {
+        shared::handheld::HandheldSelection::Item(id) if is_ekza_weapon_slug(id) => Some(id),
+        _ => None,
+    };
+    let avatar = avatar
+        .as_deref()
+        .map(str::trim)
+        .filter(|slug| ekza_bevy_sdk::passport::is_protected_slug(slug));
+    if handheld.is_none() && avatar.is_none() {
+        return None;
+    }
+    Some(format!(
+        "Ekza loadout {} for player {}: handheld {}, avatar {}",
+        if allowed { "admitted" } else { "denied" },
+        player.map_or_else(|| "?".to_owned(), |id| id.to_string()),
+        handheld.map_or("-", String::as_str),
+        avatar.unwrap_or("-"),
+    ))
+}
+
+/// Print [`ekza_decision_line`], if any.
+pub(crate) fn log_ekza_decision(player: Option<u64>, packet: &ClientPacket, allowed: bool) {
+    if let Some(line) = ekza_decision_line(player, packet, allowed) {
+        println!("{line}");
+    }
+}
+
 /// Make the granted avatar visible to slug normalization and to the clients
 /// that will render it. Roster entries are already known.
 fn register(slug: &str, granted: ProtectedAvatar) -> bool {
@@ -415,6 +507,7 @@ fn register(slug: &str, granted: ProtectedAvatar) -> bool {
         license: "See creator terms".into(),
         source_url: granted.support.rendition.url.clone(),
         author: None,
+        attribution: None,
         thumbnail: None,
         passport: Some(granted),
         free: false,
@@ -442,6 +535,7 @@ fn register_free(item: &StoreAvatar) -> bool {
             .unwrap_or_else(|| "See creator terms".into()),
         source_url: item.protected.support.rendition.url.clone(),
         author: item.author.clone(),
+        attribution: None,
         thumbnail: None,
         passport: Some(item.protected.clone()),
         free: true,
@@ -492,7 +586,6 @@ mod tests {
 
     use super::*;
     use crate::match_rules::MatchConfig;
-    use crate::prematch;
     use crate::runtime::ServerRuntime;
     use ekza_bevy_sdk::passport::{ConsumedTicket, ProjectSupport, Rendition};
 
@@ -532,6 +625,7 @@ mod tests {
             name: "Community Robert".into(),
             author: Some("alice".into()),
             license: Some("CC0".into()),
+            attribution: None,
             thumbnail_url: None,
             protected,
             free,
@@ -606,15 +700,10 @@ mod tests {
             },
             now,
         );
-        let generation = prematch::snapshot(
-            &rt.prematch,
-            &rt.world.players,
-            &rt.world.players[&addr],
-            rt.rules,
-            now,
-        )
-        .unwrap()
-        .generation;
+        let generation = rt
+            .prematch_snapshot(&rt.world.players[&addr], now)
+            .unwrap()
+            .generation;
         let free = store_item(STUDIO_FREE, 'c', true);
         let owned = store_item(
             &format!("solana:devnet:avatar-data:{}", "4".repeat(32)),
@@ -624,7 +713,7 @@ mod tests {
         let action = |slug: String| PrematchAction::Select {
             handheld: Default::default(),
             character: CharacterChoice::Ipfs,
-            hero_class: HeroClass::Cleric,
+            hero_class: HeroClass::Warden,
             avatar: Some(slug),
             sprite_character: None,
             role: Role::Support,
@@ -645,7 +734,7 @@ mod tests {
             ..
         } = &mut denied_request.action
         {
-            *hero_class = HeroClass::Warrior;
+            *hero_class = HeroClass::Dawnweaver;
             *handheld = shared::handheld::HandheldSelection::Unequipped;
         }
         rt.handle_packet(
@@ -657,15 +746,9 @@ mod tests {
         );
         // Receipt alone must not look like a final approval to the frontend.
         assert_eq!(
-            prematch::snapshot(
-                &rt.prematch,
-                &rt.world.players,
-                &rt.world.players[&addr],
-                rt.rules,
-                now
-            )
-            .unwrap()
-            .last_request_id,
+            rt.prematch_snapshot(&rt.world.players[&addr], now)
+                .unwrap()
+                .last_request_id,
             0
         );
         rt.handle_packet(
@@ -676,15 +759,9 @@ mod tests {
             now,
         );
         assert_eq!(
-            prematch::snapshot(
-                &rt.prematch,
-                &rt.world.players,
-                &rt.world.players[&addr],
-                rt.rules,
-                now
-            )
-            .unwrap()
-            .last_request_id,
+            rt.prematch_snapshot(&rt.world.players[&addr], now)
+                .unwrap()
+                .last_request_id,
             0
         );
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -700,18 +777,12 @@ mod tests {
         );
         assert_eq!(
             rt.world.players[&addr].hero.identity.hero_class,
-            HeroClass::Cleric
+            HeroClass::Warden
         );
         assert_eq!(
-            prematch::snapshot(
-                &rt.prematch,
-                &rt.world.players,
-                &rt.world.players[&addr],
-                rt.rules,
-                now
-            )
-            .unwrap()
-            .last_request_id,
+            rt.prematch_snapshot(&rt.world.players[&addr], now)
+                .unwrap()
+                .last_request_id,
             1
         );
         rt.handle_packet(
@@ -726,7 +797,7 @@ mod tests {
             Some(free.slug.as_str())
         );
         let retained = &rt.world.players[&addr];
-        assert_eq!(retained.hero.identity.hero_class, HeroClass::Cleric);
+        assert_eq!(retained.hero.identity.hero_class, HeroClass::Warden);
         assert_eq!(
             retained.hero.identity.handheld,
             shared::handheld::HandheldSelection::ClassDefault
@@ -735,9 +806,7 @@ mod tests {
         assert!(!rt.passport_admissions.is_pending(addr));
         assert_eq!(
             retained.draft.error.as_deref(),
-            Some(
-                "This avatar or weapon is unavailable. Refresh Studio and choose approved equipment."
-            )
+            Some("This avatar or weapon is unavailable. Choose different equipment.")
         );
     }
 
@@ -997,8 +1066,8 @@ mod weapon_tests {
     };
     use shared::{HeroClass, handheld::HandheldSelection, map::Team, wire::CharacterChoice};
     fn item() -> StoreAsset {
-        let id = "ekza:weapon:1c366765-3f44-4d36-b14c-acaba3bfce53".to_string();
-        let hash = "b".repeat(64);
+        let id = "ekza:weapon:38a9903e-b3ec-4b12-a5f8-83516c77ba8b".to_string();
+        let hash = "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659".to_string();
         StoreAsset {
             slug: asset_slug(AssetKind::Weapon, &id, &hash),
             asset_id: id,
@@ -1006,6 +1075,7 @@ mod weapon_tests {
             name: "Approved hammer".into(),
             author: None,
             license: None,
+            attribution: None,
             thumbnail_url: None,
             free: true,
             support: ProjectSupport {
@@ -1049,6 +1119,57 @@ mod weapon_tests {
         panic!("weapon admission did not finish")
     }
     #[test]
+    fn a_build_without_ekza_denies_every_hosted_item_and_keeps_shipped_content_free() {
+        let mut gate = PassportAdmissions::for_market(false);
+        assert!(gate.api.is_none() && gate.registry.is_empty());
+        // The fetchers fail at once: no registry is asked.
+        assert_eq!(
+            (gate.fetch_weapons)("https://registry.ekza.io")
+                .err()
+                .as_deref(),
+            Some(NO_EKZA)
+        );
+        assert!((gate.fetch_free)("https://registry.ekza.io").is_err());
+        let addr = |port: u16| SocketAddr::from(([127, 0, 0, 1], port));
+        // Shipped props and the default avatar need nothing.
+        assert!(matches!(
+            gate.begin(addr(50201), &join("forge-sword", None)),
+            Admission::Free
+        ));
+        // A hosted weapon: its (failing) read denies it, then the retry window does.
+        assert!(matches!(
+            gate.begin(addr(50202), &join(&item().slug, None)),
+            Admission::Pending
+        ));
+        assert!(!settle(&mut gate).allowed);
+        assert!(matches!(
+            gate.begin(addr(50203), &join(&item().slug, None)),
+            Admission::Denied
+        ));
+        // A protected avatar without a ticket: the free list is unavailable.
+        let protected = format!("ekza-{}", "a".repeat(64));
+        assert!(matches!(
+            gate.begin(addr(50204), &join("forge-sword", Some(&protected))),
+            Admission::Pending
+        ));
+        assert!(!settle(&mut gate).allowed);
+        // With a ticket: there is no passport to consume it at.
+        let mut ticketed = join("forge-sword", Some(&protected));
+        if let ClientPacket::Join {
+            passport_ticket, ..
+        } = &mut ticketed
+        {
+            *passport_ticket = Some("t".repeat(32));
+        }
+        assert!(matches!(
+            gate.begin(addr(50205), &ticketed),
+            Admission::Denied
+        ));
+        // An Ekza build reads its registry.
+        assert!(!PassportAdmissions::for_market(true).registry.is_empty());
+    }
+
+    #[test]
     fn approved_weapon_is_independently_admitted_but_cannot_bypass_avatar_gate() {
         let mut gate = PassportAdmissions {
             api: None,
@@ -1083,6 +1204,70 @@ mod weapon_tests {
         ));
     }
     #[test]
+    fn ekza_decisions_log_slugs_and_player_but_never_secrets_or_junk() {
+        let avatar = format!("ekza-{}", "a".repeat(64));
+        let mut packet = join(&item().slug, Some(&format!(" {avatar} ")));
+        if let ClientPacket::Join {
+            passport_ticket, ..
+        } = &mut packet
+        {
+            *passport_ticket = Some("ticket-secret-0123456789".into());
+        }
+        let line = ekza_decision_line(Some(7), &packet, true).unwrap();
+        assert_eq!(
+            line,
+            format!(
+                "Ekza loadout admitted for player 7: handheld {}, avatar {avatar}",
+                item().slug
+            )
+        );
+        assert!(!line.contains("ticket-secret") && !line.contains("weapon-test"));
+        assert_eq!(
+            ekza_decision_line(None, &join(&item().slug, None), false).unwrap(),
+            format!(
+                "Ekza loadout denied for player ?: handheld {}, avatar -",
+                item().slug
+            )
+        );
+        // A draft selection is reported the same way.
+        let select = ClientPacket::Prematch {
+            request: shared::prematch::PrematchRequest {
+                server_epoch: 1,
+                match_id: 1,
+                generation: 1,
+                request_id: 1,
+                action: shared::prematch::PrematchAction::Select {
+                    handheld: HandheldSelection::ClassDefault,
+                    character: CharacterChoice::default(),
+                    hero_class: HeroClass::Mage,
+                    avatar: Some(avatar.clone()),
+                    sprite_character: None,
+                    role: shared::prematch::Role::Support,
+                    passport_ticket: None,
+                },
+            },
+        };
+        assert_eq!(
+            ekza_decision_line(Some(3), &select, false).unwrap(),
+            format!("Ekza loadout denied for player 3: handheld -, avatar {avatar}")
+        );
+        // Shipped props, roster avatars and malformed ids are not Ekza items.
+        for (weapon, avatar) in [
+            ("dagger", Some("agnes")),
+            ("ekza-not-hex\nforged line", Some("ekza-NOT-A-SLUG\nforged")),
+            ("ekza-0123", None),
+        ] {
+            assert_eq!(
+                ekza_decision_line(Some(7), &join(weapon, avatar), true),
+                None
+            );
+        }
+        assert_eq!(
+            ekza_decision_line(Some(7), &ClientPacket::Leave, true),
+            None
+        );
+    }
+    #[test]
     fn healthy_empty_revokes_future_weapon_use_and_outage_preserves_previous_catalogue() {
         let now = Instant::now();
         let mut cache = WeaponCatalogue::default();
@@ -1104,7 +1289,7 @@ mod weapon_tests {
     }
     #[test]
     fn ordinary_join_replicates_weapon_and_draft_rejection_preserves_last_equipment() {
-        use crate::{match_rules::MatchConfig, prematch, runtime::ServerRuntime};
+        use crate::{match_rules::MatchConfig, runtime::ServerRuntime};
         use shared::prematch::{PrematchAction, PrematchRequest, Role};
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.set_nonblocking(true).unwrap();
@@ -1141,14 +1326,7 @@ mod weapon_tests {
             *prematch = true
         }
         rt.handle_packet(peer, peer_join, now);
-        let view = prematch::snapshot(
-            &rt.prematch,
-            &rt.world.players,
-            &rt.world.players[&peer],
-            rt.rules,
-            now,
-        )
-        .unwrap();
+        let view = rt.prematch_snapshot(&rt.world.players[&peer], now).unwrap();
         assert_eq!(
             view.players
                 .iter()
@@ -1158,11 +1336,6 @@ mod weapon_tests {
             HandheldSelection::Item(item().slug)
         );
         let hp = rt.world.players[&owner].hero.max_hp;
-        rt.passport_admissions
-            .weapons
-            .lock()
-            .unwrap()
-            .apply(Ok(vec![]), Instant::now());
         let request = |request_id, handheld| PrematchRequest {
             server_epoch: rt.server_epoch,
             match_id: rt.match_id,
@@ -1178,25 +1351,126 @@ mod weapon_tests {
                 passport_ticket: None,
             },
         };
-        let denied = request(1, HandheldSelection::Item(item().slug));
-        let unequip = request(2, HandheldSelection::Unequipped);
+        let mut incompatible = request(1, HandheldSelection::Item(item().slug));
+        let PrematchAction::Select { hero_class, .. } = &mut incompatible.action else {
+            unreachable!()
+        };
+        *hero_class = HeroClass::Wildspark;
+        let denied = request(2, HandheldSelection::Item(item().slug));
+        let old_empty_selection = request(3, HandheldSelection::Unequipped);
+        rt.handle_packet(
+            owner,
+            ClientPacket::Prematch {
+                request: incompatible,
+            },
+            now,
+        );
+        let player = &rt.world.players[&owner];
+        assert_eq!(player.hero.identity.hero_class, HeroClass::Warrior);
+        assert_eq!(
+            player.hero.identity.handheld,
+            HandheldSelection::Item(item().slug)
+        );
+        assert_eq!(player.draft.acknowledged_request_id, 1);
+        assert_eq!(
+            player.draft.error.as_deref(),
+            Some("Choose a weapon compatible with this class.")
+        );
+        rt.passport_admissions
+            .weapons
+            .lock()
+            .unwrap()
+            .apply(Ok(vec![]), Instant::now());
         rt.handle_packet(owner, ClientPacket::Prematch { request: denied }, now);
         assert!(rt.world.players[&owner].draft.error.is_some());
         assert_eq!(
             rt.world.players[&owner].hero.identity.handheld,
             HandheldSelection::Item(item().slug)
         );
-        rt.handle_packet(owner, ClientPacket::Prematch { request: unequip }, now);
+        rt.handle_packet(
+            owner,
+            ClientPacket::Prematch {
+                request: old_empty_selection,
+            },
+            now,
+        );
         assert!(rt.world.players[&owner].draft.error.is_none());
         assert_eq!(
             rt.world.players[&owner].hero.identity.handheld,
-            HandheldSelection::Unequipped
+            HandheldSelection::ClassDefault
+        );
+        assert_eq!(
+            rt.world.players[&peer].hero.identity.handheld,
+            HandheldSelection::Item("forge-hammer".into())
         );
         assert_eq!(rt.world.players[&owner].hero.max_hp, hp);
     }
 
     #[test]
-    fn revoked_weapon_reconnect_can_unequip_without_restoring_revoked_prop() {
+    fn direct_join_and_reclaim_check_the_class_actually_equipped() {
+        use crate::{match_rules::MatchConfig, runtime::ServerRuntime};
+        use shared::protocol::{JoinRejection, PROTOCOL_VERSION};
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let mut rt = ServerRuntime::new(socket, MatchConfig::dev());
+        let owner: SocketAddr = "127.0.0.1:50321".parse().unwrap();
+        let resumed: SocketAddr = "127.0.0.1:50322".parse().unwrap();
+        let now = Instant::now();
+        rt.handle_packet(
+            owner,
+            ClientPacket::Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
+            now,
+        );
+        let wildspark = |weapon| {
+            let mut packet = join(weapon, None);
+            let ClientPacket::Join { hero_class, .. } = &mut packet else {
+                unreachable!()
+            };
+            *hero_class = HeroClass::Wildspark;
+            packet
+        };
+        for id in ["forge-sword", "wild-repeater"] {
+            rt.handle_packet(owner, wildspark(id), now);
+            assert!(!rt.world.players[&owner].joined, "{id}");
+            assert_eq!(
+                rt.world.players[&owner].join_error,
+                Some(JoinRejection::AvatarNotAuthorized)
+            );
+        }
+        rt.handle_packet(owner, wildspark("wildspark-repeater"), now);
+        assert!(rt.world.players[&owner].joined);
+        let id = rt.world.players[&owner].hero.identity.id;
+        rt.world.players.get_mut(&owner).unwrap().last_seen = now - Duration::from_secs(6);
+
+        rt.handle_packet(
+            resumed,
+            ClientPacket::Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
+            now,
+        );
+        // These packets advertise Warrior, but a reclaim keeps Wildspark.
+        rt.handle_packet(resumed, join("forge-sword", None), now);
+        assert!(!rt.world.players[&resumed].joined);
+        assert_eq!(
+            rt.world.players[&resumed].join_error,
+            Some(JoinRejection::AvatarNotAuthorized)
+        );
+        rt.handle_packet(resumed, join("wildspark-repeater", None), now);
+        let player = &rt.world.players[&resumed];
+        assert!(player.joined);
+        assert_eq!(player.hero.identity.id, id);
+        assert_eq!(player.hero.identity.hero_class, HeroClass::Wildspark);
+        assert_eq!(
+            player.hero.identity.handheld,
+            HandheldSelection::Item("wildspark-repeater".into())
+        );
+    }
+
+    #[test]
+    fn revoked_weapon_reconnect_uses_class_default_without_restoring_revoked_prop() {
         use crate::{match_rules::MatchConfig, runtime::ServerRuntime};
         for fallback in [
             HandheldSelection::Unequipped,
@@ -1240,13 +1514,16 @@ mod weapon_tests {
             assert!(player.joined);
             assert_eq!(player.hero.identity.id, id);
             assert_eq!(player.hero.hp, hp);
-            assert_eq!(player.hero.identity.handheld, fallback);
+            assert_eq!(
+                player.hero.identity.handheld,
+                HandheldSelection::ClassDefault
+            );
             assert!(!rt.world.players.contains_key(&owner));
         }
     }
 
     #[test]
-    fn wrong_kind_profile_pending_and_owned_items_never_authorize_weapons() {
+    fn wrong_kind_profile_pending_owned_and_unreviewed_items_never_authorize_weapons() {
         let mut variants = vec![];
         let mut bad = item();
         bad.support.status = "pending".into();
@@ -1260,6 +1537,22 @@ mod weapon_tests {
         let mut bad = item();
         bad.support.profile = "humanoid-glb-v1".into();
         variants.push(bad);
+        let mut unreviewed = item();
+        unreviewed.support.rendition.sha256 = "b".repeat(64);
+        unreviewed.slug = asset_slug(
+            AssetKind::Weapon,
+            &unreviewed.asset_id,
+            &unreviewed.support.rendition.sha256,
+        );
+        assert!(
+            ekza_bevy_sdk::assets::validate_item(
+                &unreviewed,
+                AssetKind::Weapon,
+                &omoba_passport::weapon_store::selector()
+            )
+            .is_ok()
+        );
+        variants.push(unreviewed);
         for bad in variants {
             let mut cache = WeaponCatalogue::default();
             cache.apply(Ok(vec![bad]), Instant::now());

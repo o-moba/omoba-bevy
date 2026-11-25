@@ -1,7 +1,7 @@
 //! Structure protection, damage and tower fire.
 
+use shared::clock::Instant;
 use std::collections::HashMap;
-use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
 use shared::map::{Lane, Team};
@@ -128,10 +128,13 @@ pub fn simulate_tower_attacks(world: &mut GameWorld, now: Instant) -> Vec<Combat
                 (minion.state.id, pos, tower_position.distance_squared(pos))
             })
             .filter(|(_, _, dist_sq)| *dist_sq <= range_sq)
+            // Equally near minions go to the lowest id, not to `HashMap`
+            // order: a shot must not depend on the map's hash seed.
             .min_by(|left, right| {
                 left.2
                     .partial_cmp(&right.2)
                     .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| left.0.cmp(&right.0))
             });
 
         if let Some((target_id, _, _)) = best_minion {

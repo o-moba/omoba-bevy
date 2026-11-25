@@ -1,0 +1,54 @@
+{
+  "task": "VRM1-RENDITION-20261022",
+  "date": "2026-10-22",
+  "base": "origin/dev a598e42",
+  "criteria": {
+    "AC1": {
+      "status": "PASS",
+      "evidence": "seed-san.vrm (VRMC_vrm 1.0) and Studio-shaped synthetic build exit 0, sourceFormat vrm1, five clips; tests test_real_vrm1_export_builds, test_studio_shaped_vrm1_builds_and_faces_like_vrm0"
+    },
+    "AC2": {
+      "status": "PASS",
+      "evidence": "test_vrm1_matches_the_same_rig_declared_as_vrm0: per-node streams equal VRM0 within 1e-5; mutation (no thumb rename) fails 2 tests"
+    },
+    "AC3": {
+      "status": "PASS",
+      "evidence": "rest left hand at -X after bake, omoba_rest_yaw180 marker, VRMC_vrm kept; re-bake byte-stable; seed-san walk/attack trajectories corr 0.999 with VRM0 anna along Z"
+    },
+    "AC4": {
+      "status": "PASS",
+      "evidence": "15/15 roster rendition SHA-256 identical before/after (ekza_build_rendition.build)"
+    },
+    "AC5": {
+      "status": "PASS",
+      "evidence": "validate_humanoid_profile OK for seed-san, synthetic, anna-as-vrm1 renditions; after follow-up validate-runtime-vrm OK for all three and the seed-san source"
+    },
+    "AC6": {
+      "status": "PASS",
+      "evidence": "test_conflicting_vrm_versions_are_refused: exit 2 build_failed"
+    },
+    "AC7": {
+      "status": "PASS",
+      "evidence": "10 unittest OK; docs/humanoid-motion.md, docs/ekza-production-avatars.md, docs/features.md, CHANGELOG.md, docs/progress/2026-10-22-vrm1-rendition.md"
+    }
+  },
+  "unrelated_suite_failures": [
+    "test_release.DevContour.test_an_ios_archive_of_the_wrong_app_is_refused (PEP 604 annotation on local python3)",
+    "test_sync_ui.UiAssetsTest.test_installed_assets_match_the_manifest_and_the_budget (local omoba-ui handoff drift)"
+  ],
+  "followup": {
+    "FU1": {
+      "status": "PASS",
+      "evidence": "passport uniform-scale rule scoped to humanoid bones + ancestors; new test uniform_scale_is_required_only_where_the_retargeter_reads_it; cargo test -p omoba-passport OK; seed-san passes validate-runtime-vrm"
+    },
+    "FU2": {
+      "status": "PASS",
+      "evidence": "client match path falls back to embedded clips on runtime rig rejection; test rejected_runtime_rig_falls_back_to_embedded_clips (fails with old continue); client player::/humanoid:: 80 OK; seed-san runtime retarget test OK"
+    },
+    "FU3": {
+      "status": "PASS",
+      "evidence": "convert_vrm_to_glb.py uses shared normalize_vrm1_rest_facing; VRM0 byte-identical; idempotent; scripts/test_convert_vrm_to_glb.py 5 OK"
+    },
+    "gates": "cargo clippy -p omoba-passport -p client --all-targets -D warnings clean; rustfmt clean; VRM0 roster rendition hashes 15/15 identical"
+  }
+}
