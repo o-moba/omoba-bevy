@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>OMOBA · ARAM 3×3</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="game.mjs"></script>
+</head>
+<body>
+  <main class="game">
+    <canvas id="arena" aria-label="Арена OMOBA"></canvas>
+    <canvas id="markers" aria-hidden="true"></canvas>
+    <header class="top">
+      <h1>OMOBA <span>ARAM 3×3</span></h1>
+      <div id="score" class="score" aria-label="Убийства и время матча" hidden>
+        <span id="blue-score" class="blue">0</span>
+        <time id="time">0:00</time>
+        <span id="orange-score" class="orange">0</span>
+      </div>
+      <button id="leave" class="leave" type="button" hidden>Выйти</button>
+    </header>
+
+    <div id="hud" class="hud" hidden>
+      <div class="hero-status">
+        <output id="health"></output>
+        <span id="objective"></span>
+      </div>
+      <div class="actions">
+        <button id="attack" type="button"><kbd>Пробел</kbd> Атака</button>
+        <button id="ability" type="button"><kbd>Q</kbd> <span id="skill"></span></button>
+      </div>
+    </div>
+
+    <section id="lobby" class="panel" aria-labelledby="lobby-title">
+      <h2 id="lobby-title">Одна линия. Три роли.</h2>
+      <p id="lobby-caption">Снеси башню, чтобы открыть вражеский нексус.</p>
+      <div id="roles" class="roles">
+        <button type="button" data-role="adc"><b>Стрелок</b><span>Дальний урон</span></button>
+        <button type="button" data-role="tank"><b>Танк</b><span>Защита и удар по площади</span></button>
+        <button type="button" data-role="support"><b>Саппорт</b><span>Лечение команды</span></button>
+      </div>
+      <p id="status" role="status">Загружаю арену…</p>
+    </section>
+
+    <section id="end" class="panel" aria-labelledby="outcome" hidden>
+      <h2 id="outcome"></h2>
+      <p id="result"></p>
+      <button id="restart" type="button">Ещё матч</button>
+    </section>
+    <div id="notice" class="notice" role="status" hidden></div>
+  </main>
+</body>
+</html>

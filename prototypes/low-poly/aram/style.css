@@ -1,0 +1,72 @@
+:root {
+  color-scheme: light;
+  font-family: "Avenir Next", system-ui, sans-serif;
+  background: #e4ebe2;
+  color: #25332b;
+  --paper: #fcfbf1;
+  --line: #dbe0d1;
+  --blue: #3358c8;
+  --orange: #b94731;
+}
+* { box-sizing: border-box; }
+body { margin: 0; overflow: hidden; }
+.game { position: relative; width: 100vw; height: 100dvh; display: grid; place-items: center; }
+canvas { width: 100%; height: 100%; position: absolute; inset: 0; }
+#arena { touch-action: none; }
+#markers { pointer-events: none; }
+.top, .hud {
+  position: absolute; inset-inline: clamp(8px, 2vw, 24px);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  pointer-events: none;
+}
+.top { top: max(8px, env(safe-area-inset-top)); }
+.hud { bottom: max(8px, env(safe-area-inset-bottom)); align-items: end; }
+h1 { margin: 0; font-size: clamp(12px, 2.2vw, 19px); letter-spacing: .12em; font-weight: 800; }
+h1 span {
+  display: inline-block; font-size: .72em; letter-spacing: .025em;
+  margin-inline-start: .3em; font-weight: 650;
+}
+button {
+  border: 1px solid var(--line); border-radius: 10px; color: inherit; background: var(--paper);
+  font: inherit; cursor: pointer; touch-action: manipulation;
+}
+button:hover:not(:disabled) { border-color: #7d917a; }
+button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+button:disabled { cursor: default; opacity: .55; }
+.leave, .actions button, #restart {
+  pointer-events: auto; padding: .60em .85em; font-size: 13px; font-weight: 700;
+}
+.score, .hero-status, .notice {
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--paper); font-size: 13px;
+}
+.score {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 13px; align-items: center; font-weight: 800;
+}
+.score time { min-width: 2.7em; text-align: center; font-variant-numeric: tabular-nums; font-weight: 650; }
+.blue { color: var(--blue); }
+.orange { color: var(--orange); }
+.hero-status { display: grid; gap: 2px; }
+.hero-status output { font-weight: 800; }
+.hero-status span { font-size: 11px; }
+.actions { display: flex; gap: 5px; }
+kbd { font: inherit; font-size: 10px; color: #566554; margin-inline-end: 2px; }
+.panel {
+  position: relative; z-index: 1; width: min(calc(100% - 24px), 530px); padding: clamp(12px, 4vw, 26px);
+  border: 1px solid var(--line); border-radius: 18px; background: var(--paper);
+  box-shadow: 0 12px 32px #283a2630;
+}
+.panel h2 { margin: 0 0 6px; font-size: clamp(20px, 4vw, 32px); line-height: 1.04; }
+.panel p { margin: 8px 0; font-size: 13px; }
+.roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-block: 16px 8px; }
+.roles button { text-align: left; padding: clamp(6px, 2vw, 12px); background: #ecf1e5; }
+.roles b, .roles span { display: block; }
+.roles b { font-size: clamp(12px, 2.5vw, 15px); }
+.roles span { margin-top: 3px; font-size: 11px; color: #4c5b4d; }
+#status { min-height: 16px; color: #4c5b4d; }
+.notice { position: absolute; bottom: 58px; text-align: center; }
+[hidden] { display: none !important; }
+@media (pointer: coarse), (max-width: 520px) {
+  kbd { display: none; }
+}
