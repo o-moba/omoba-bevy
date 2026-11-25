@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::camera::{CameraState, MainCamera};
 use crate::combat::CombatStats;
-use crate::maps::MapLayout;
+use crate::maps::{ARAM_BOARD_HALF_EXTENTS, MapLayout};
 use crate::net::{
     ClientSession, NetworkAvatar, NetworkHeroClass, NetworkMinion, NetworkNeutral,
     NetworkNeutralCampType, NetworkSpriteCharacter, NetworkStructure, NeutralCampType,
@@ -36,6 +36,7 @@ impl Plugin for MinimapPlugin {
             .init_resource::<MinimapUiState>()
             .init_resource::<MinimapNavigationState>()
             .add_systems(Startup, setup_minimap_ui)
+            .add_systems(Update, sync_minimap_terrain)
             .add_systems(
                 PostUpdate,
                 adapt_minimap_edge.before(bevy::ui::UiSystems::Layout),
@@ -93,6 +94,9 @@ struct MinimapUiState {
 }
 #[derive(Component)]
 struct MinimapRoot;
+
+#[derive(Component)]
+struct MinimapTerrain;
 
 /// Persistent anchor marker; life state comes only from current neutral entities.
 #[derive(Component, Clone, Copy, Debug)]
@@ -256,11 +260,7 @@ fn adapt_minimap_edge(
     }
 }
 
-fn setup_minimap_ui(
-    mut commands: Commands,
-    mut state: ResMut<MinimapUiState>,
-    layout: Res<MapLayout>,
-) {
+fn setup_minimap_ui(mut commands: Commands, mut state: ResMut<MinimapUiState>) {
     commands
         .spawn((
             // Block world clicks on the decorative frame as well as the map.
@@ -314,34 +314,6 @@ fn setup_minimap_ui(
             ));
             state.container = Some(map.id());
             map.with_children(|map| {
-                for center in layout.jungle_block_centers() {
-                    let point = map_point(*layout, Vec3::new(center.x, 0.0, center.y));
-                    map.spawn((
-                        marker_node(point, 32.0),
-                        BackgroundColor(Color::srgb(0.07, 0.19, 0.145)),
-                    ));
-                }
-                let river = layout.river_polyline();
-                spawn_map_line(
-                    map,
-                    *layout,
-                    river[0],
-                    river[1],
-                    13.0,
-                    Color::srgb(0.08, 0.27, 0.29),
-                );
-                for lane in layout.lane_polylines() {
-                    for segment in lane.windows(2) {
-                        spawn_map_line(
-                            map,
-                            *layout,
-                            segment[0],
-                            segment[1],
-                            5.0,
-                            Color::srgb(0.40, 0.43, 0.29),
-                        );
-                    }
-                }
                 for edge in 0..4 {
                     map.spawn((
                         Node {
@@ -358,6 +330,84 @@ fn setup_minimap_ui(
         });
 }
 
+fn sync_minimap_terrain(
+    mut commands: Commands,
+    containers: Query<Entity, With<MinimapContainer>>,
+    terrain: Query<Entity, With<MinimapTerrain>>,
+    layout: Res<MapLayout>,
+) {
+    if !layout.is_changed() && !terrain.is_empty() {
+        return;
+    }
+    let Ok(container) = containers.single() else {
+        return;
+    };
+    for old in &terrain {
+        commands.entity(old).despawn();
+    }
+    let aram = layout.is_aram();
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            MinimapTerrain,
+            Pickable::IGNORE,
+            ChildOf(container),
+        ))
+        .with_children(|map| {
+            if aram {
+                let height =
+                    ARAM_BOARD_HALF_EXTENTS.y / ARAM_BOARD_HALF_EXTENTS.x * MINIMAP_INNER_SIZE;
+                map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(height),
+                        top: Val::Px((MINIMAP_INNER_SIZE - height) * 0.5),
+                        border_radius: BorderRadius::all(Val::Px(7.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.14, 0.26, 0.21)),
+                    Pickable::IGNORE,
+                ));
+            } else {
+                for center in layout.jungle_block_centers() {
+                    let point = map_point(*layout, Vec3::new(center.x, 0.0, center.y));
+                    map.spawn((
+                        marker_node(point, 32.0),
+                        BackgroundColor(Color::srgb(0.07, 0.19, 0.145)),
+                        Pickable::IGNORE,
+                    ));
+                }
+            }
+            let river = layout.river_polyline();
+            spawn_map_line(
+                map,
+                *layout,
+                river[0],
+                river[1],
+                13.0,
+                Color::srgb(0.08, 0.27, 0.29),
+            );
+            for lane in layout.lane_polylines() {
+                for segment in lane.windows(2) {
+                    spawn_map_line(
+                        map,
+                        *layout,
+                        segment[0],
+                        segment[1],
+                        if aram { 19.0 } else { 5.0 },
+                        Color::srgb(0.40, 0.43, 0.29),
+                    );
+                }
+            }
+        });
+}
+
 fn spawn_map_line(
     parent: &mut ChildSpawnerCommands,
     layout: MapLayout,
@@ -369,7 +419,7 @@ fn spawn_map_line(
     let a = map_point(layout, Vec3::new(a.x, 0.0, a.y));
     let b = map_point(layout, Vec3::new(b.x, 0.0, b.y));
     let (node, transform) = line_node(a, b, width);
-    parent.spawn((node, transform, BackgroundColor(color)));
+    parent.spawn((node, transform, BackgroundColor(color), Pickable::IGNORE));
 }
 pub(crate) fn line_node(a: Vec2, b: Vec2, width: f32) -> (Node, UiTransform) {
     let delta = b - a;
@@ -797,6 +847,12 @@ fn update_minimap_icons_system(
         );
     }
     despawn_removed_icons(&mut commands, &mut state.minion_icons, &seen);
+    if layout.is_aram() {
+        for icon in state.camp_icons.iter_mut().filter_map(Option::take) {
+            commands.entity(icon).despawn();
+        }
+        return;
+    }
     let camps = shared::jungle::camp_layout(layout.size().x);
     let mut living = [false; shared::jungle::CAMP_COUNT];
     for (transform, kind, stats) in &neutrals {
@@ -1035,6 +1091,10 @@ fn sync_minimap_visibility_for_session(
 /// Unclamped projection also serves footprint clipping; clamping its endpoints
 /// independently would distort off-map camera edges.
 pub(crate) fn map_point(layout: MapLayout, world: Vec3) -> Vec2 {
+    if layout.is_aram() {
+        return (world.xz() / (2.0 * ARAM_BOARD_HALF_EXTENTS.x) + Vec2::splat(0.5))
+            * MINIMAP_INNER_SIZE;
+    }
     let normalized = (world.xz() - layout.min) / layout.size();
     Vec2::new(normalized.y, 1.0 - normalized.x) * MINIMAP_INNER_SIZE
 }
@@ -1042,9 +1102,16 @@ fn minimap_cursor_to_world(layout: MapLayout, rect: Rect, cursor: Vec2) -> Optio
     if !rect.contains(cursor) || rect.size().min_element() <= 0.0 {
         return None;
     }
-    let normalized = (cursor - rect.min) / rect.size();
-    let world = layout.min + Vec2::new(1.0 - normalized.y, normalized.x) * layout.size();
+    let world = minimap_uv_to_world(layout, (cursor - rect.min) / rect.size());
     Some(layout.clamp_position(Vec3::new(world.x, PLAYER_SIZE * 0.5, world.y)))
+}
+
+pub(crate) fn minimap_uv_to_world(layout: MapLayout, normalized: Vec2) -> Vec2 {
+    if layout.is_aram() {
+        (normalized - Vec2::splat(0.5)) * (2.0 * ARAM_BOARD_HALF_EXTENTS.x)
+    } else {
+        layout.min + Vec2::new(1.0 - normalized.y, normalized.x) * layout.size()
+    }
 }
 fn team_color(team: Team) -> Color {
     match team {

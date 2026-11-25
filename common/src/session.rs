@@ -342,9 +342,9 @@ pub fn handle_transform_request_with_structures(
         ))
     };
 
-    // Validate the entire swept XZ segment, including long/debug-speed steps.
-    // This is the same immutable forest collision map used for client routes.
-    let accepted_xz = shared::navigation::world_navigation()
+    // Validate the swept segment against the same map used for client routes.
+    let accepted_xz = map_layout
+        .navigation()
         .clip_movement([current.x, current.z], [accepted.x, accepted.z]);
     let accepted_xz = clip_live_structures([current.x, current.z], accepted_xz, structures);
     // Whatever the step did not spend stays available as slack, capped at

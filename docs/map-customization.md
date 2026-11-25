@@ -184,7 +184,11 @@ projectile skins have their own [combat registry](combat-cosmetics.md).
 
 ## Geometry is a separate versioned contract
 
-The supported geometry is `verdant-confluence-compact-v2`. Shared layout coordinates,
+Online matches use `verdant-confluence-compact-v2`. The local ARAM 3×3 mode
+uses `single-lane-aram-v1` and starts from the client's ARAM button. Its
+single lane, towers and embedded art are documented in the [ARAM prototype](../prototypes/low-poly/README.md).
+
+Shared layout coordinates,
 static collision and authored terrain must agree. Snapshots identify the arena;
 a client with incompatible geometry refuses to apply it. Version 0.42 uses a compiled `WORLD_SCALE = 0.8` profile: terrain,
 static collisions, brush, lanes and base anchors share the same XZ transform;

@@ -9,6 +9,7 @@ use crate::{
 };
 use shared::clock::Instant;
 use shared::{
+    HeroClass,
     bot_profile::BotDifficulty,
     debug::{DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE},
     protocol::{JoinRejection, SnapshotMeta},
@@ -16,6 +17,7 @@ use shared::{
 };
 use std::{net::SocketAddr, time::Duration};
 pub const START_LEVEL: u32 = 6;
+pub const ARAM_CLASSES: [HeroClass; 3] = [HeroClass::Warrior, HeroClass::Ranger, HeroClass::Cleric];
 pub const EPOCH: u64 = u64::MAX;
 pub const LOCAL_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
@@ -33,8 +35,16 @@ pub struct PracticeSession {
 }
 impl PracticeSession {
     pub fn new(now: Instant) -> Self {
+        Self::with_map(Default::default(), now)
+    }
+
+    pub fn new_aram(now: Instant) -> Self {
+        Self::with_map(shared::map::ResolvedMap::aram(), now)
+    }
+
+    fn with_map(map: shared::map::ResolvedMap, now: Instant) -> Self {
         Self {
-            world: GameWorld::new(Default::default(), now),
+            world: GameWorld::new(map, now),
             bots: Default::default(),
             combat_log: Default::default(),
             now,
@@ -57,16 +67,21 @@ impl PracticeSession {
     /// A fresh round keeping the local settings.
     fn reset_for_round(&mut self, round: u64) {
         let level = self.bot_difficulty;
-        *self = Self::new(self.now);
+        *self = Self::with_map(self.world.map_config.clone(), self.now);
         self.match_id = round;
         self.set_bot_difficulty(level);
     }
     pub fn host(&mut self) -> CombatHost<'_> {
+        let team_size = if self.world.map_layout.is_aram() {
+            3
+        } else {
+            5
+        };
         CombatHost {
             world: &mut self.world,
             bots: &mut self.bots,
             combat_log: &mut self.combat_log,
-            rules: MatchRules::for_mode(MatchMode::Practice, 5),
+            rules: MatchRules::for_mode(MatchMode::Practice, team_size),
             match_id: self.match_id,
         }
     }
@@ -76,6 +91,9 @@ impl PracticeSession {
     /// Avatar entitlement/asset admission is supplied by the UI host before this call.
     pub fn command(&mut self, packet: ClientPacket) {
         if let Some(debug) = DebugCommand::from_packet(&packet) {
+            if self.world.map_layout.is_aram() {
+                return;
+            }
             match debug {
                 DebugCommand::Practice(command) => {
                     let now = self.now;
@@ -124,6 +142,12 @@ impl PracticeSession {
                 {
                     return;
                 }
+                let hero_class =
+                    if self.world.map_layout.is_aram() && !ARAM_CLASSES.contains(&hero_class) {
+                        HeroClass::Ranger
+                    } else {
+                        hero_class
+                    };
                 if !handheld.compatible(hero_class) {
                     self.reject_join(JoinRejection::AvatarNotAuthorized);
                     return;
@@ -194,8 +218,9 @@ impl PracticeSession {
     /// the scoreboard.
     fn start_round(&mut self) {
         self.world.game_state = GameState::Running;
-        self.world.last_wave_spawn_at = self.now
-            - (crate::balance::MINION_WAVE_INTERVAL - crate::balance::FIRST_MINION_WAVE_DELAY);
+        let (interval, initial_delay) =
+            crate::world::minion_wave_timing(self.world.map_layout.is_aram());
+        self.world.last_wave_spawn_at = self.now - (interval - initial_delay);
         crate::neutrals::schedule_boss_spawns(&mut self.world.neutrals, self.now);
         self.combat_log
             .ledger
@@ -324,10 +349,12 @@ impl PracticeSession {
         let mut packet = ServerPacket::Snapshot {
             vision: None,
             sandbox: None,
-            debug_access: local.filter(|p| p.joined).map(|_| DebugAccess {
-                toggles: true,
-                practice: true,
-            }),
+            debug_access: local
+                .filter(|p| p.joined && !world.map_layout.is_aram())
+                .map(|_| DebugAccess {
+                    toggles: true,
+                    practice: true,
+                }),
             match_mode: OFFLINE_PRACTICE_MODE.into(),
             geometry_id: world.map_config.geometry_id.clone(),
             map_profile: world.map_config.map_profile.clone(),
@@ -347,7 +374,11 @@ impl PracticeSession {
             minions,
             neutrals,
             team_buffs: world.team_buffs.snapshot(now),
-            forest_pickups: world.forest_pickups.snapshot(&world.game_state),
+            forest_pickups: if world.map_layout.is_aram() {
+                Vec::new()
+            } else {
+                world.forest_pickups.snapshot(&world.game_state)
+            },
             game_state: world.game_state.clone(),
             rematch_in_secs: None,
         };
@@ -415,6 +446,128 @@ mod tests {
         assert_eq!(
             practice.world.players[&LOCAL_ADDR].hero.identity.handheld,
             HandheldSelection::Item("wildspark-repeater".into())
+        );
+    }
+
+    #[test]
+    fn aram_runs_three_roles_and_one_mid_wave_per_team() {
+        use shared::map::{ARAM_GEOMETRY_ID, Lane};
+
+        let mut p = PracticeSession::new_aram(Instant::now());
+        p.command(join(HeroClass::Ranger));
+        assert_eq!(p.world.map_config.geometry_id, ARAM_GEOMETRY_ID);
+        assert!(p.world.neutrals.is_empty());
+        assert!(matches!(p.world.game_state, GameState::Running));
+        assert_eq!(p.world.structures.len(), 4);
+        for team in [Team::Green, Team::Blue] {
+            let players: Vec<_> = p
+                .world
+                .players
+                .values()
+                .filter(|player| player.joined && player.hero.identity.team == team)
+                .collect();
+            assert_eq!(players.len(), 3);
+            assert!(ARAM_CLASSES.iter().all(|&class| {
+                players
+                    .iter()
+                    .any(|player| player.hero.identity.hero_class == class)
+            }));
+            assert!(
+                crate::world::build_minion_path(&p.world.map_layout, Lane::Top, team).is_empty()
+            );
+            assert!(
+                crate::world::build_minion_path(&p.world.map_layout, Lane::Bot, team).is_empty()
+            );
+        }
+        let positions: Vec<_> = p
+            .world
+            .players
+            .values()
+            .map(|player| (player.hero.identity.id, player.hero.x))
+            .collect();
+        run(&mut p, 4.0);
+        assert_eq!(p.world.minions.len(), 6);
+        assert!(
+            p.world
+                .minions
+                .values()
+                .all(|minion| minion.path.iter().all(|point| point.z == 0.0))
+        );
+        assert!(
+            p.world
+                .players
+                .values()
+                .filter(|player| player.hero.identity.is_bot)
+                .all(|player| {
+                    let id = player.hero.identity.id;
+                    let from = positions.iter().find(|(other, _)| *other == id).unwrap().1;
+                    (player.hero.x - from).abs() > 1.0
+                        && p.world
+                            .map_layout
+                            .navigation()
+                            .point_clear([player.hero.x, player.hero.z])
+                })
+        );
+        assert!(
+            matches!(p.snapshot(), ServerPacket::Snapshot { forest_pickups, debug_access: None, .. } if forest_pickups.is_empty())
+        );
+    }
+
+    #[test]
+    fn aram_uses_structure_siege_and_keeps_geometry_on_rematch() {
+        use crate::sim::towers::apply_structure_damage;
+        use shared::map::{ARAM_GEOMETRY_ID, ARAM_NEXUS_X, ARAM_TOWER_X};
+        use shared::wire::StructureKind;
+
+        let mut p = PracticeSession::new_aram(Instant::now());
+        p.set_bot_difficulty(BotDifficulty::Regular);
+        p.command(join(HeroClass::Cleric));
+        let objective = |kind| {
+            p.world
+                .structures
+                .values()
+                .find(|item| item.state.kind == kind && item.state.team == Team::Blue)
+                .map(|item| (item.state.id, item.state.x))
+                .unwrap()
+        };
+        let (tower, tower_x) = objective(StructureKind::Tower);
+        let (nexus, nexus_x) = objective(StructureKind::BaseTower);
+        assert_eq!((tower_x, nexus_x), (ARAM_TOWER_X, ARAM_NEXUS_X));
+        let mut damage = |id| {
+            apply_structure_damage(
+                &mut p.world.structures,
+                id,
+                10_000.0,
+                Team::Green,
+                &mut p.world.game_state,
+            )
+        };
+        assert!(damage(nexus).is_none());
+        assert!(damage(tower).is_some());
+        assert!(damage(nexus).is_some());
+        assert!(matches!(
+            p.world.game_state,
+            GameState::Victory {
+                winner: Team::Green
+            }
+        ));
+
+        p.command(ClientPacket::RequestRematch);
+        assert_eq!(p.match_id, 2);
+        assert_eq!(p.bot_difficulty(), BotDifficulty::Regular);
+        assert_eq!(p.world.map_config.geometry_id, ARAM_GEOMETRY_ID);
+        assert_eq!(p.world.structures.len(), 4);
+        assert_eq!(
+            p.world
+                .players
+                .values()
+                .filter(|player| player.joined)
+                .count(),
+            6
+        );
+        assert_eq!(
+            p.world.players[&LOCAL_ADDR].hero.identity.hero_class,
+            HeroClass::Cleric
         );
     }
 

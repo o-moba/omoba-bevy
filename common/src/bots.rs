@@ -942,6 +942,7 @@ mod motion_tests {
 /// combatants only move when actually overlapping, so avoidance cannot make an
 /// otherwise settled attack stance oscillate.
 fn steer_bot_step(
+    nav: &shared::navigation::NavigationMap,
     id: u64,
     origin: [f32; 2],
     desired: [f32; 2],
@@ -966,7 +967,6 @@ fn steer_bot_step(
     } else {
         max_step.min(distance)
     };
-    let nav = shared::navigation::world_navigation();
     let straight = clip_hero_step(
         origin,
         [
@@ -1505,11 +1505,22 @@ impl CombatHost<'_> {
             .filter(|p| p.joined && p.hero.identity.team == team)
             .map(|p| p.hero.identity.hero_class)
             .collect();
+        let compact = [
+            (HeroClass::Warrior, Lane::Mid, false, Role::Solo),
+            (HeroClass::Ranger, Lane::Mid, false, Role::Carry),
+            (HeroClass::Cleric, Lane::Mid, false, Role::Support),
+        ];
+        let composition = if self.world.map_layout.is_aram() {
+            compact.as_slice()
+        } else {
+            BOT_COMPOSITION.as_slice()
+        };
         let (composition_class, composition_lane, composition_jungle, composition_role) =
-            BOT_COMPOSITION
-                .into_iter()
+            composition
+                .iter()
+                .copied()
                 .find(|(class, ..)| !teammates.contains(class))
-                .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
+                .unwrap_or(composition[teammates.len() % composition.len()]);
         let class = class.unwrap_or(composition_class);
         let (lane, jungle, role) = if kind == BotKind::Lane {
             (composition_lane, composition_jungle, composition_role)
@@ -1566,6 +1577,7 @@ impl CombatHost<'_> {
         if !matches!(self.world.game_state, GameState::Running) || dt <= 0.0 {
             return;
         }
+        let nav = self.world.map_layout.navigation();
         let mut addresses: Vec<_> = self.bots.controllers.keys().copied().collect();
         addresses.sort_unstable();
         let mut discs: Vec<_> = self
@@ -1631,8 +1643,7 @@ impl CombatHost<'_> {
                         from[0] + (goal[0] - from[0]) / distance * step,
                         from[1] + (goal[1] - from[1]) / distance * step,
                     ];
-                    let clipped =
-                        shared::navigation::world_navigation().clip_movement(from, desired);
+                    let clipped = nav.clip_movement(from, desired);
                     let clipped = shared::navigation::clip_discs(from, clipped, &discs);
                     let dummy = self.world.players.get_mut(&addr).unwrap();
                     dummy.hero.x = clipped[0];
@@ -1681,8 +1692,7 @@ impl CombatHost<'_> {
                             origin[0] + dx / distance * step,
                             origin[1] + dz / distance * step,
                         ];
-                        let next =
-                            shared::navigation::world_navigation().clip_movement(origin, desired);
+                        let next = nav.clip_movement(origin, desired);
                         let next = shared::navigation::clip_discs(origin, next, &discs);
                         handle_transform_request_with_structures(
                             self.world.players.get_mut(&addr).unwrap(),
@@ -2274,11 +2284,7 @@ impl CombatHost<'_> {
                 {
                     controller.next_route = now + ROUTE_INTERVAL;
                     controller.goal = Some(destination);
-                    let route = shared::navigation::world_navigation().plan_route(
-                        origin,
-                        destination,
-                        &safe_discs,
-                    );
+                    let route = nav.plan_route(origin, destination, &safe_discs);
                     sim_probe::record(|| sim_probe::Event::Route {
                         bot: addr,
                         found: route.is_some(),
@@ -2298,11 +2304,7 @@ impl CombatHost<'_> {
                     desired = point;
                 } else if !arrived
                     && (goal_changed || !controller.unreachable)
-                    && shared::navigation::world_navigation().segment_clear_with_discs(
-                        origin,
-                        destination,
-                        &discs,
-                    )
+                    && nav.segment_clear_with_discs(origin, destination, &discs)
                 {
                     // Until the next plan, walk a clear line straight to the
                     // destination. The turret clip below still stops the
@@ -2327,7 +2329,7 @@ impl CombatHost<'_> {
             let step = hero_stats::move_speed(&self.world.players[&addr])
                 * self.world.players[&addr].hero.skills.movement(now)
                 * dt;
-            let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
+            let accepted = steer_bot_step(nav, id, origin, desired, step, &others, &discs);
             let accepted = shared::navigation::clip_discs(origin, accepted, &danger);
             let movement = [accepted[0] - origin[0], accepted[1] - origin[1]];
             if movement[0].hypot(movement[1]) > 0.000_1 {

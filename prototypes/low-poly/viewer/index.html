@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>OMOBA · Low-poly</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="viewer.js"></script>
+</head>
+<body>
+  <main>
+    <canvas id="arena" aria-label="Игровая камера low-poly арены OMOBA"></canvas>
+    <header class="controls">
+      <h1>OMOBA</h1>
+      <div class="teams" role="group" aria-label="Управляемая команда">
+        <button id="blue" type="button" aria-pressed="true"><span></span>Синие</button>
+        <button id="ember" type="button" aria-pressed="false"><span></span>Красные</button>
+      </div>
+    </header>
+    <p id="status" role="status">Загружаю арену…</p>
+    <p id="instructions" hidden>WASD, стрелки или нажатие по арене</p>
+  </main>
+</body>
+</html>

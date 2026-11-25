@@ -1,5 +1,5 @@
-//! The authored Verdant scene is presentation only. Network entities remain
-//! the owners of live structures; the static GLBs exclude all eight copies.
+//! Authored 3D arenas are presentation only. Network entities remain the
+//! owners of live structures; the static terrain scenes exclude their models.
 mod surroundings;
 
 use bevy::prelude::*;
@@ -17,6 +17,9 @@ pub struct Verdant3dPlugin;
 
 impl Plugin for Verdant3dPlugin {
     fn build(&self, app: &mut App) {
+        if app.is_plugin_added::<bevy::asset::AssetPlugin>() {
+            bevy::asset::embedded_asset!(app, "verdant3d/aram.glb");
+        }
         app.init_resource::<VerdantPaletteMaterials>()
             .add_systems(
                 Startup,
@@ -27,10 +30,12 @@ impl Plugin for Verdant3dPlugin {
             .add_systems(
                 PostUpdate,
                 (
+                    sync_arena_scenery,
                     reconcile_structures,
                     apply_environment_palette,
                     animate_nexus_rings,
                 )
+                    .chain()
                     .before(bevy::transform::TransformSystems::Propagate)
                     .run_if(in_models3d()),
             );
@@ -44,6 +49,12 @@ pub struct VerdantEnvironment;
 /// The separately owned foliage layer shares the existing F4 debug toggle.
 #[derive(Component)]
 pub struct VerdantFoliage;
+
+#[derive(Component)]
+struct VerdantScenery;
+
+#[derive(Component)]
+pub(crate) struct AramEnvironment;
 
 /// Exactly one scene child belongs to each authoritative structure root.
 #[derive(Component)]
@@ -259,6 +270,30 @@ impl VerdantAssets {
     }
 }
 
+#[derive(Resource)]
+struct AramAssets([Handle<WorldAsset>; 5]);
+
+impl AramAssets {
+    fn load(server: &AssetServer) -> Self {
+        Self(std::array::from_fn(|index| {
+            server.load(
+                bevy::gltf::GltfAssetLabel::Scene(index)
+                    .from_asset("embedded://client/verdant3d/aram.glb"),
+            )
+        }))
+    }
+
+    fn structure(&self, kind: StructureKind, team: Team) -> Handle<WorldAsset> {
+        let index = match (kind, team) {
+            (StructureKind::Tower, Team::Green) => 1,
+            (StructureKind::Tower, Team::Blue) => 2,
+            (StructureKind::BaseTower, Team::Green) => 3,
+            (StructureKind::BaseTower, Team::Blue) => 4,
+        };
+        self.0[index].clone()
+    }
+}
+
 pub(crate) fn default_structure_profile(kind: StructureKind, team: Team) -> &'static str {
     match (kind, team) {
         (StructureKind::Tower, Team::Green) => "tower_green",
@@ -312,7 +347,9 @@ fn spawn_environment(
     // Source export is already Y-up, one meter per unit. Do not reorient it.
     commands.spawn((
         VerdantEnvironment,
+        VerdantScenery,
         WorldAssetRoot(assets.environment.clone()),
+        Visibility::Inherited,
         Transform::from_scale(Vec3::new(
             shared::map::WORLD_SCALE,
             1.0,
@@ -322,8 +359,10 @@ fn spawn_environment(
     ));
     commands.spawn((
         VerdantFoliage,
+        VerdantScenery,
         DecorRoot,
         WorldAssetRoot(assets.foliage.clone()),
+        Visibility::Inherited,
         Transform::from_scale(Vec3::new(
             shared::map::WORLD_SCALE,
             1.0,
@@ -337,7 +376,56 @@ fn spawn_environment(
     );
 }
 
+fn sync_arena_scenery(
+    mut commands: Commands,
+    layout: Res<MapLayout>,
+    server: Option<Res<AssetServer>>,
+    mut verdant: Query<(&mut Visibility, Has<VerdantFoliage>), With<VerdantScenery>>,
+    mut aram: Query<&mut Visibility, (With<AramEnvironment>, Without<VerdantScenery>)>,
+    mut old_foliage: Local<Option<Visibility>>,
+) {
+    let is_aram = layout.is_aram();
+    if is_aram
+        && aram.is_empty()
+        && let Some(server) = server
+    {
+        let assets = AramAssets::load(&server);
+        commands.spawn((
+            AramEnvironment,
+            WorldAssetRoot(assets.0[0].clone()),
+            Visibility::Inherited,
+            Name::new("ARAM / environment"),
+        ));
+        commands.insert_resource(assets);
+    }
+    for (mut visibility, foliage) in &mut verdant {
+        let desired = if is_aram {
+            if foliage && old_foliage.is_none() {
+                *old_foliage = Some(*visibility);
+            }
+            Visibility::Hidden
+        } else if foliage {
+            old_foliage.take().unwrap_or(*visibility)
+        } else {
+            Visibility::Inherited
+        };
+        visibility.set_if_neq(desired);
+    }
+    let desired = if is_aram {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut visibility in &mut aram {
+        visibility.set_if_neq(desired);
+    }
+}
+
 fn structure_transform(layout: &MapLayout, root: &Transform, kind: StructureKind) -> Transform {
+    if layout.is_aram() {
+        // Native ARAM GLB scene groups pivot at the static platforms' top.
+        return Transform::from_xyz(0.0, 0.27 - root.translation.y, 0.0);
+    }
     let ground = layout.terrain_height_3d(root.translation.x, root.translation.z);
     // The authoritative root's Y is the legacy box center. Keep that root
     // intact and move only its presentation child to the exported ground pivot.
@@ -361,6 +449,7 @@ fn reconcile_structures(
     mode: Res<PlayerVisualMode>,
     layout: Res<MapLayout>,
     assets: Option<Res<VerdantAssets>>,
+    aram_assets: Option<Res<AramAssets>>,
     mut roots: Query<
         (
             Entity,
@@ -387,21 +476,34 @@ fn reconcile_structures(
     if *mode != PlayerVisualMode::Models3d {
         return;
     }
-    let Some(assets) = assets else { return };
+    let is_aram = layout.is_aram();
+    let scene_for = |kind, team| {
+        if is_aram {
+            aram_assets
+                .as_ref()
+                .map(|assets| assets.structure(kind, team))
+        } else {
+            assets.as_ref().map(|assets| assets.structure(kind, team))
+        }
+    };
     for (owner, root, kind, team, stats, attached, config) in &mut roots {
+        let Some(scene) = scene_for(*kind, *team) else {
+            continue;
+        };
         let key = config.filter(|v| !v.key.is_empty()).map(|v| v.key.as_str());
         let profile = config.filter(|v| !v.visual_profile.is_empty()).map_or_else(
             || default_structure_profile(*kind, *team),
             |v| v.visual_profile.as_str(),
         );
-        let transform = structure_transform(&layout, root, *kind)
-            .with_scale(structure_presentation_scale(*kind, config.map(|c| c.tier)));
+        let mut transform = structure_transform(&layout, root, *kind);
+        if !is_aram {
+            transform.scale = structure_presentation_scale(*kind, config.map(|c| c.tier));
+        }
         let visibility = if stats.hp > 0.0 {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
-        let scene = assets.structure(*kind, *team);
         if let Some(mut attached) = attached
             && let Ok((
                 current_scene,
@@ -437,20 +539,22 @@ fn reconcile_structures(
             // replace that child as a unit while preserving the network owner.
             commands.entity(attached.visual).despawn();
         }
-        let child = commands
-            .spawn((
-                WorldAssetRoot(scene),
-                transform,
-                visibility,
-                VerdantStructureVisual { owner },
-                MapPropInstance::structure(
-                    key.map_or_else(|| format!("structure:{}", owner.to_bits()), str::to_owned),
-                    profile.to_owned(),
-                    default_structure_model(*kind, *team).into(),
-                ),
-                Name::new(format!("Verdant / {team:?} {kind:?}")),
-            ))
-            .id();
+        let name = if is_aram { "ARAM" } else { "Verdant" };
+        let mut child = commands.spawn((
+            WorldAssetRoot(scene),
+            transform,
+            visibility,
+            VerdantStructureVisual { owner },
+            Name::new(format!("{name} / {team:?} {kind:?}")),
+        ));
+        if !is_aram {
+            child.insert(MapPropInstance::structure(
+                key.map_or_else(|| format!("structure:{}", owner.to_bits()), str::to_owned),
+                profile.to_owned(),
+                default_structure_model(*kind, *team).into(),
+            ));
+        }
+        let child = child.id();
         commands
             .entity(owner)
             .add_child(child)
@@ -480,6 +584,90 @@ mod tests {
         assert_eq!(
             structure_presentation_scale(StructureKind::BaseTower, Some(2)),
             Vec3::ONE
+        );
+    }
+
+    #[test]
+    fn aram_loads_its_authored_scenes_and_restores_verdant_after_exit() {
+        let mut app = crate::test_support::asset_app();
+        app.insert_resource(PlayerVisualMode::Models3d)
+            .init_resource::<MapLayout>()
+            .add_plugins(Verdant3dPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        let owner = structure(&mut app, StructureKind::Tower, Team::Green);
+        let foliage = app
+            .world_mut()
+            .query_filtered::<Entity, With<VerdantFoliage>>()
+            .single(app.world())
+            .unwrap();
+        *app.world_mut().get_mut::<Visibility>(foliage).unwrap() = Visibility::Visible;
+        app.update();
+        let verdant_tower = app.world().get::<AttachedStructure>(owner).unwrap().visual;
+
+        app.insert_resource(MapLayout::aram());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        loop {
+            app.update();
+            let server = app.world().resource::<AssetServer>();
+            let assets = app.world().resource::<AramAssets>();
+            if assets
+                .0
+                .iter()
+                .all(|asset| server.is_loaded_with_dependencies(asset.id()))
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "ARAM GLB did not load"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        let terrain = app
+            .world_mut()
+            .query_filtered::<Entity, With<AramEnvironment>>()
+            .single(app.world())
+            .unwrap();
+        let aram_tower = app.world().get::<AttachedStructure>(owner).unwrap().visual;
+        assert_ne!(aram_tower, verdant_tower);
+        assert!(app.world().get_entity(verdant_tower).is_err());
+        assert!(app.world().get::<MapPropInstance>(aram_tower).is_none());
+        assert_eq!(
+            app.world().get::<WorldAssetRoot>(aram_tower).unwrap().0,
+            app.world()
+                .resource::<AramAssets>()
+                .structure(StructureKind::Tower, Team::Green)
+        );
+        assert!(
+            app.world_mut()
+                .query_filtered::<&Visibility, With<VerdantScenery>>()
+                .iter(app.world())
+                .all(|visibility| *visibility == Visibility::Hidden)
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(terrain),
+            Some(&Visibility::Inherited)
+        );
+        app.world_mut().get_mut::<CombatStats>(owner).unwrap().hp = 0.0;
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(aram_tower),
+            Some(&Visibility::Hidden)
+        );
+
+        app.insert_resource(MapLayout::default());
+        app.update();
+        assert!(app.world().get_entity(aram_tower).is_err());
+        assert_eq!(
+            app.world().get::<Visibility>(foliage),
+            Some(&Visibility::Visible)
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(terrain),
+            Some(&Visibility::Hidden)
         );
     }
 

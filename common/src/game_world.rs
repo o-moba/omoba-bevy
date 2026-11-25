@@ -14,7 +14,7 @@ use crate::entities::{
 };
 use crate::forest_pickups;
 use crate::neutrals::{build_boss_neutrals, build_neutral_camps};
-use crate::world::{build_configured_structures, build_map_layout};
+use crate::world::{build_configured_structures, map_layout_for};
 
 /// Per-tick time context shared by the simulation functions.
 #[derive(Clone, Copy)]
@@ -56,7 +56,7 @@ impl GameWorld {
         // Fill the arena-facing side first, rather than placing Blue heroes
         // behind their nexus where a small spawn crowd can block the exit.
         let heading = (-origin[1]).atan2(-origin[0]);
-        let navigation = shared::navigation::world_navigation();
+        let navigation = self.map_layout.navigation();
         let position = (0..6)
             .flat_map(|ring| {
                 (0..24).map(move |step| {
@@ -105,12 +105,14 @@ impl GameWorld {
     }
 
     pub fn new(map_config: shared::map::ResolvedMap, now: Instant) -> Self {
-        let map_layout = build_map_layout();
+        let map_layout = map_layout_for(map_config.geometry_id == shared::map::ARAM_GEOMETRY_ID);
         let mut next_neutral_id: u64 = 9_001;
-        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
-        // Raid bosses start dormant; the Lobby -> Running transition arms
-        // their spawn schedule (see `schedule_boss_spawns`).
-        neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
+        let mut neutrals = HashMap::new();
+        if !map_layout.is_aram() {
+            neutrals = build_neutral_camps(&mut next_neutral_id);
+            // Raid bosses start dormant; the Lobby -> Running transition arms their schedule.
+            neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
+        }
         Self {
             skill_runtime: crate::skills::SkillWorld::default(),
             players: HashMap::new(),
@@ -148,7 +150,7 @@ impl GameWorld {
             forest_pickups: forest_pickups::ForestPickups::default(),
             game_state: GameState::Running,
             match_elapsed_secs: 0.0,
-            map_layout: build_map_layout(),
+            map_layout: map_layout_for(false),
             map_config: shared::map::ResolvedMap::default(),
             next_player_id: 1,
             next_projectile_id: 1,

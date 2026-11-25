@@ -292,7 +292,7 @@ fn travel(
             return Some(c.pos);
         }
     }
-    let clipped = shared::navigation::world_navigation().clip_movement(c.pos, end);
+    let clipped = w.map_layout.navigation().clip_movement(c.pos, end);
     let clipped = crate::session::clip_live_structures(c.pos, clipped, &w.structures);
     let clipped = shared::navigation::clip_discs(c.pos, clipped, &terrain(w, now));
     match id.kind {
@@ -2498,7 +2498,7 @@ pub(super) fn active_count(w: &GameWorld) -> usize {
 }
 
 fn legal_landing(w: &GameWorld, pos: [f32; 2], now: Instant) -> bool {
-    shared::navigation::world_navigation().point_clear(pos)
+    w.map_layout.navigation().point_clear(pos)
         && w.structures.values().filter(|s| s.state.hp > 0.0).all(|s| {
             distance(pos, [s.state.x, s.state.z])
                 > crate::world::structure_collision_radius(s.state.kind)

@@ -16,6 +16,10 @@ const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 pub(crate) const LANE_WIDTH: f32 = shared::map::LANE_WIDTH;
 const LANE_EDGE_PADDING: f32 = shared::map::LANE_EDGE_PADDING;
 pub(crate) const RIVER_WIDTH: f32 = shared::map::RIVER_WIDTH;
+pub(crate) const ARAM_BOARD_HALF_EXTENTS: Vec2 = Vec2::new(
+    25.0 * shared::map::ARAM_ART_SCALE,
+    11.0 * shared::map::ARAM_ART_SCALE,
+);
 /// Fraction of the map size where the outer jungle blocks/camps sit
 /// (mirrors `JUNGLE_MAP_OUTER_FRAC` in server/src/balance.rs).
 const JUNGLE_MAP_OUTER_FRAC: f32 = 0.34;
@@ -58,21 +62,42 @@ pub struct MapLayout {
     pub away_spawn: Vec3,
     pub min: Vec2,
     pub max: Vec2,
+    pub(crate) aram: bool,
 }
 
 impl Default for MapLayout {
     fn default() -> Self {
-        let geometry = shared::map::geometry();
+        Self::from_geometry(shared::map::geometry(), false)
+    }
+}
+
+impl MapLayout {
+    fn from_geometry(geometry: shared::map::ArenaGeometry, aram: bool) -> Self {
         Self {
             home_spawn: Vec3::new(geometry.home[0], PLAYER_SIZE * 0.5, geometry.home[1]),
             away_spawn: Vec3::new(geometry.away[0], PLAYER_SIZE * 0.5, geometry.away[1]),
             min: Vec2::from_array(geometry.bounds.min),
             max: Vec2::from_array(geometry.bounds.max),
+            aram,
         }
     }
-}
 
-impl MapLayout {
+    pub(crate) fn aram() -> Self {
+        Self::from_geometry(shared::map::aram_geometry(), true)
+    }
+
+    pub(crate) fn is_aram(self) -> bool {
+        self.aram
+    }
+
+    pub(crate) fn navigation(self) -> &'static shared::navigation::NavigationMap {
+        if self.is_aram() {
+            shared::navigation::aram_navigation()
+        } else {
+            shared::navigation::world_navigation()
+        }
+    }
+
     pub fn size(self) -> Vec2 {
         self.max - self.min
     }
@@ -121,6 +146,13 @@ impl MapLayout {
     /// These control points match the Verdant export and the 2D renderer and
     /// mirror the server's `lane_control_points` (server/src/world.rs).
     pub(crate) fn lane_polylines(self) -> [Vec<Vec2>; 3] {
+        if self.is_aram() {
+            return [
+                vec![self.home_spawn.xz(), self.away_spawn.xz()],
+                vec![],
+                vec![],
+            ];
+        }
         [
             shared::map::Lane::Mid,
             shared::map::Lane::Top,
@@ -136,6 +168,12 @@ impl MapLayout {
 
     /// River center line in the XZ plane (NW corner to SE corner).
     pub(crate) fn river_polyline(self) -> [Vec2; 2] {
+        if self.is_aram() {
+            return [
+                Vec2::new(0.0, -ARAM_BOARD_HALF_EXTENTS.y),
+                Vec2::new(0.0, ARAM_BOARD_HALF_EXTENTS.y),
+            ];
+        }
         let lane_edge_offset = self.lane_edge_offset();
         [
             Vec2::new(self.min.x + lane_edge_offset, self.max.y - lane_edge_offset),
@@ -169,6 +207,9 @@ impl MapLayout {
     /// side ramps extend `PAD_RAMP_LENGTH` past the pad corners and overlap
     /// there, so the corner height is the max of the two slabs.
     pub fn terrain_height(self, x: f32, z: f32) -> f32 {
+        if self.is_aram() {
+            return 0.0;
+        }
         let home = pad_surface_height(x - self.home_spawn.x, z - self.home_spawn.z);
         let away = pad_surface_height(x - self.away_spawn.x, z - self.away_spawn.z);
         home.max(away)
@@ -181,6 +222,15 @@ impl MapLayout {
     /// shipped verdant/manifest.json surface contract and geometry checks.
     /// Server movement remains flat XZ; Sprite2d uses `terrain_height`.
     pub fn terrain_height_3d(self, x: f32, z: f32) -> f32 {
+        if self.is_aram() {
+            // The authored lane is raised by a low stone step at the bridge.
+            return if z.abs() <= 7.825 {
+                let bridge = ((5.125 - x.abs()) / 1.0).clamp(0.0, 1.0);
+                0.035 + (0.205 - 0.035) * bridge
+            } else {
+                0.0
+            };
+        }
         let height = |center: Vec3| {
             let offset = (x - center.x).abs().max((z - center.z).abs());
             BASE_PAD_HEIGHT
@@ -228,7 +278,21 @@ pub struct MapsPlugin;
 
 impl Plugin for MapsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MapLayout>();
+        app.init_resource::<MapLayout>().add_systems(
+            Update,
+            sync_layout.before(crate::net::ClientNetPipeline::IngestSnapshot),
+        );
+    }
+}
+
+fn sync_layout(session: Option<Res<crate::net::ClientSession>>, mut layout: ResMut<MapLayout>) {
+    let aram = session.is_some_and(|session| session.is_aram());
+    if layout.is_aram() != aram {
+        *layout = if aram {
+            MapLayout::aram()
+        } else {
+            MapLayout::default()
+        };
     }
 }
 

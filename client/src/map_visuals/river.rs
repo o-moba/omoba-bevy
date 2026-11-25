@@ -61,7 +61,6 @@ fn environment_ancestor(
 fn repair_river(
     mut commands: Commands,
     mode: Res<PlayerVisualMode>,
-    layout: Option<Res<MapLayout>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     nodes: Query<
@@ -80,7 +79,9 @@ fn repair_river(
     if *mode != PlayerVisualMode::Models3d {
         return;
     }
-    let Some(layout) = layout else { return };
+    // The Verdant scene can finish loading while an offline ARAM is selected.
+    // Its asynchronously repaired channel still uses the Verdant datum.
+    let layout = MapLayout::default();
     for (entity, name, transform, parent) in &nodes {
         let name = name.as_str();
         let channel = name == "River / turquoise channel";

@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
 pub const GEOMETRY_ID: &str = "verdant-confluence-compact-v2";
+pub const ARAM_GEOMETRY_ID: &str = "single-lane-aram-v1";
+pub const ARAM_ART_SCALE: f32 = 2.5;
+pub const ARAM_TOWER_X: f32 = 11.0 * ARAM_ART_SCALE;
+pub const ARAM_NEXUS_X: f32 = 22.0 * ARAM_ART_SCALE;
 /// Compiled arena tuning. Change this single scalar for a coordinated client/
 /// host build; actors, attack ranges and movement speed keep their world units.
 pub const WORLD_SCALE: f32 = 0.8;
@@ -59,6 +63,23 @@ pub fn geometry() -> ArenaGeometry {
         right_x: edge,
         top_z: edge,
         bottom_z: -edge,
+    }
+}
+
+/// The compact practice bridge. Bounds describe the walkable area, not the
+/// decorative terrain around the lane.
+pub fn aram_geometry() -> ArenaGeometry {
+    ArenaGeometry {
+        home: [-ARAM_NEXUS_X, 0.0],
+        away: [ARAM_NEXUS_X, 0.0],
+        bounds: Bounds {
+            min: [-59.0, -8.0],
+            max: [59.0, 8.0],
+        },
+        left_x: -59.0,
+        right_x: 59.0,
+        top_z: 8.0,
+        bottom_z: -8.0,
     }
 }
 
@@ -292,6 +313,32 @@ pub struct ResolvedMap {
     pub geometry_id: String,
     pub map_profile: String,
     pub structures: Vec<ResolvedStructure>,
+}
+impl ResolvedMap {
+    /// The embedded offline arena reuses ordinary siege roles and profiles.
+    /// It is intentionally selected outside the server's map-config parser.
+    pub fn aram() -> Self {
+        let mut map = Self {
+            geometry_id: ARAM_GEOMETRY_ID.into(),
+            map_profile: "aram_3v3".into(),
+            ..Self::default()
+        };
+        map.structures
+            .retain(|item| item.lane.is_none() || (item.lane == Some(Lane::Mid) && item.tier == 0));
+        for item in &mut map.structures {
+            let direction = match item.team {
+                Team::Green => -1.0,
+                Team::Blue => 1.0,
+            };
+            let x = if item.lane.is_none() {
+                ARAM_NEXUS_X
+            } else {
+                ARAM_TOWER_X
+            };
+            item.position = [direction * x, 0.0];
+        }
+        map
+    }
 }
 impl Default for ResolvedMap {
     fn default() -> Self {

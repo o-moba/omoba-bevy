@@ -60,6 +60,27 @@ struct Qa {
 }
 impl Plugin for OfflineQaPlugin {
     fn build(&self, app: &mut App) {
+        if let Some(directory) = std::env::var_os("OMOBA_ARAM_SMOKE_DIR").map(PathBuf::from) {
+            std::fs::create_dir_all(&directory).expect("ARAM QA directory");
+            app.insert_resource(AramQa {
+                directory,
+                step: 0,
+                started: Instant::now(),
+                origin: Vec3::ZERO,
+                moved: 0.0,
+            })
+            .insert_resource(bevy::winit::WinitSettings::continuous())
+            .add_systems(
+                PreUpdate,
+                (focus, drive_aram.after(bevy::ui::UiSystems::Focus)),
+            )
+            .add_systems(
+                Update,
+                fixture_window.before(crate::mobile_controls::MobileControlsSet::Layout),
+            )
+            .add_systems(Last, fixture_pacing);
+            return;
+        }
         let Some(directory) = std::env::var_os("OMOBA_OFFLINE_SMOKE_DIR").map(PathBuf::from) else {
             return;
         };
@@ -114,6 +135,139 @@ impl Plugin for OfflineQaPlugin {
         );
     }
 }
+
+#[derive(Resource)]
+struct AramQa {
+    directory: PathBuf,
+    step: u8,
+    started: Instant,
+    origin: Vec3,
+    moved: f32,
+}
+
+fn drive_aram(world: &mut World) {
+    let Some(mut qa) = world.remove_resource::<AramQa>() else {
+        return;
+    };
+    let screen = *world.resource::<State<AppScreen>>().get();
+    let capture = |world: &mut World, name| {
+        world
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(qa.directory.join(name)));
+    };
+    let advanced = match qa.step {
+        0 => {
+            if let Ok(mut window) = world
+                .query_filtered::<&mut Window, With<PrimaryWindow>>()
+                .single_mut(world)
+            {
+                window.resolution.set_scale_factor_override(Some(1.0));
+                window.resolution.set(852.0, 393.0);
+            }
+            true
+        }
+        1 if screen == AppScreen::Home
+            && qa.started.elapsed() >= Duration::from_secs(2)
+            && ui_ready(world, "HomeAram") =>
+        {
+            capture(world, "01-aram-home.png");
+            true
+        }
+        2 if qa.directory.join("01-aram-home.png").is_file() => press(world, "HomeAram"),
+        3 if screen == AppScreen::HeroSelect
+            && ui_ready(world, "ClassButton-ranger")
+            && ui_ready(world, "ClassButton-warrior")
+            && ui_ready(world, "ClassButton-cleric")
+            && !ui_ready(world, "ClassButton-mage") =>
+        {
+            capture(world, "02-aram-roles.png");
+            true
+        }
+        4 if qa.directory.join("02-aram-roles.png").is_file() => press(world, "ClassButton-ranger"),
+        5 if ui_ready(world, "FindMatchButton") => press(world, "FindMatchButton"),
+        6 if screen == AppScreen::InMatch => {
+            if world
+                .resource::<crate::help_overlay::HelpOverlayVisible>()
+                .0
+            {
+                press(world, "HelpDismissButton");
+                false
+            } else if gameplay_ready(world)
+                && let Ok((entity, pose)) = world
+                    .query_filtered::<(Entity, &Transform), With<Player>>()
+                    .single(world)
+            {
+                qa.origin = pose.translation;
+                let step = Vec3::new(-qa.origin.x.signum() * 17.0, 0.0, 1.5);
+                world.entity_mut(entity).insert(MovementTarget {
+                    target: qa.origin + step,
+                });
+                true
+            } else {
+                false
+            }
+        }
+        7 => {
+            qa.moved = world
+                .query_filtered::<&Transform, With<Player>>()
+                .single(world)
+                .map_or(0.0, |pose| pose.translation.xz().distance(qa.origin.xz()));
+            let game = world.resource::<crate::net::GameStateSnapshot>();
+            let roster = game
+                .scoreboard
+                .as_ref()
+                .map_or(0, |board| board.players.len());
+            let aram = game.geometry_id == shared::map::ARAM_GEOMETRY_ID
+                && world.resource::<crate::maps::MapLayout>().is_aram();
+            let structures = world
+                .query::<&crate::net::NetworkStructure>()
+                .iter(world)
+                .count();
+            let wave = world
+                .query::<&crate::net::NetworkMinion>()
+                .iter(world)
+                .next()
+                .is_some();
+            if qa.moved >= 8.0 && aram && roster == 6 && structures == 4 && wave {
+                capture(world, "03-aram-match.png");
+                true
+            } else {
+                false
+            }
+        }
+        8 if qa.directory.join("03-aram-match.png").is_file() => {
+            world.write_message(SessionUiCommand::LeaveMatch);
+            true
+        }
+        _ => false,
+    };
+    if advanced {
+        qa.step += 1;
+    }
+    let restored = qa.step == 9
+        && screen == AppScreen::Home
+        && !world.resource::<ClientSession>().is_offline()
+        && !world.resource::<crate::maps::MapLayout>().is_aram();
+    if restored || qa.started.elapsed() > Duration::from_secs(100) {
+        std::fs::write(
+            qa.directory.join("result.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "pass": restored, "step": qa.step, "screen": format!("{screen:?}"),
+                "moved_meters": qa.moved, "viewport": [852, 393],
+            }))
+            .unwrap(),
+        )
+        .expect("ARAM QA result");
+        world.write_message(if restored {
+            AppExit::Success
+        } else {
+            AppExit::error()
+        });
+    } else {
+        world.insert_resource(qa);
+    }
+}
+
 fn focus(windows: Query<Entity, With<PrimaryWindow>>, _main: bevy::ecs::system::NonSendMarker) {
     let Ok(entity) = windows.single() else {
         return;

@@ -292,6 +292,9 @@ struct TeamSelectButton;
 struct ClassSelectButton;
 
 #[derive(Component)]
+struct ClassSelectLabel(HeroClass);
+
+#[derive(Component)]
 struct AvatarSelectButton;
 
 /// Placeholder node inside an avatar button that receives the thumbnail image
@@ -1069,7 +1072,9 @@ fn sync_hero_select_status(
     mut notices: Query<&mut Text, (With<HeroSelectNotice>, Without<HeroSelectStatus>)>,
 ) {
     let (line, color) = {
-        if session.is_offline() {
+        if session.is_aram() {
+            (tr("team.aram_hint").to_owned(), crate::ui::theme::GOLD)
+        } else if session.is_offline() {
             (tr("home.offline_hint").to_owned(), crate::ui::theme::GOLD)
         } else {
             let (line, _) = crate::frontend::home::connection_line(&session);
@@ -1458,6 +1463,7 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
             Localized::new(name).into_text(),
             theme::role_text(TextRole::Button),
             TextColor(theme::IVORY),
+            ClassSelectLabel(class),
         ));
     });
 }
@@ -1623,6 +1629,9 @@ fn team_select_ui_system(
                 }
             }
             HeroSelectAction::Class(class) => {
+                if client_session.is_aram() && !common::offline::ARAM_CLASSES.contains(class) {
+                    continue;
+                }
                 selection.pick_class(*class);
                 selection_changed = true;
             }
@@ -1647,6 +1656,11 @@ fn team_select_ui_system(
             HeroSelectAction::ConnectAccount => crate::passport::connect_account(),
             HeroSelectAction::RefreshStudio => crate::passport::refresh_avatar_catalogue(),
             HeroSelectAction::LockIn(team) => {
+                if client_session.is_aram()
+                    && !common::offline::ARAM_CLASSES.contains(&selection.hero_class)
+                {
+                    continue;
+                }
                 let (join, next_screen) = match lock_in(
                     *team,
                     &selection,
@@ -1843,8 +1857,13 @@ fn autojoin_from_env(
 fn sync_practice_picker(
     session: Res<ClientSession>,
     mut labels: Query<&mut Text, With<JoinActionLabel>>,
+    mut classes: Query<(&UiAction<HeroSelectAction>, &mut Node), With<ClassSelectButton>>,
+    mut class_labels: Query<(&ClassSelectLabel, &mut Localized)>,
 ) {
-    let label = tr(if session.is_offline() {
+    let aram = session.is_aram();
+    let label = tr(if aram {
+        "team.join.aram"
+    } else if session.is_offline() {
         "team.join.practice"
     } else if crate::sandbox::requested() {
         "team.join.combat_test"
@@ -1854,6 +1873,25 @@ fn sync_practice_picker(
     for mut text in &mut labels {
         if text.0 != label {
             text.0 = label.into();
+        }
+    }
+    for (action, mut node) in &mut classes {
+        let hidden = aram
+            && matches!(action.0, HeroSelectAction::Class(class) if !common::offline::ARAM_CLASSES.contains(&class));
+        let display = if hidden { Display::None } else { Display::Flex };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+    for (&ClassSelectLabel(class), mut label) in &mut class_labels {
+        let key = match (aram, class) {
+            (true, HeroClass::Ranger) => "team.aram.ranger",
+            (true, HeroClass::Warrior) => "team.aram.warrior",
+            (true, HeroClass::Cleric) => "team.aram.cleric",
+            _ => class_keys(class).0,
+        };
+        if label.key != key {
+            label.key = key;
         }
     }
 }

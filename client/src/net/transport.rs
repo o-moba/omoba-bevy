@@ -98,6 +98,7 @@ pub(in crate::net) fn spawn_network_transport(
             outgoing_rx,
             incoming_tx,
             signal_tx,
+            client_session.is_aram(),
         ));
     } else {
         commands.remove_resource::<offline::LocalPractice>();

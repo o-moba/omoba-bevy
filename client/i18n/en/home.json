@@ -22,6 +22,7 @@
   "home.play.play": "PLAY",
   "home.party_leader": "{leader} leads your party",
   "home.button.offline_practice": "Offline practice",
+  "home.button.aram": "ARAM 3×3",
   "home.offline_hint": "Local simulation · No history or progress",
   "home.quick_hint": "Quick match fills empty seats with bots.\nProgress in every match · rating in PvP.",
   "home.slogan": "Choose a hero. Make your mark.",

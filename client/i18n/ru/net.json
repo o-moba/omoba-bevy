@@ -10,6 +10,7 @@
   "net.status.disconnected": "Связь потеряна или истекло время ожидания. Когда сервер станет доступен, нажмите «Повторить» и начните игру снова.",
   "net.status.join_unconfirmed": "Сервер не подтвердил вход в матч. Нажмите «Повторить», чтобы попробовать снова.",
   "net.practice.banner": "ОФЛАЙН-ТРЕНИРОВКА · Уровень {level} · Без наград",
+  "net.practice.aram_banner": "ARAM 3×3 · Уровень {level} · Без наград",
   "net.practice.you": "Вы",
   "net.practice.bot": "Бот {id}",
   "net.compatibility.handshake": "Версии проверки совместимости различаются.",

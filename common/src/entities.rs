@@ -384,6 +384,7 @@ impl MinionAggroTarget {
 }
 
 pub struct MapLayoutState {
+    pub(crate) aram: bool,
     pub home: Vec3f,
     pub away: Vec3f,
     pub min_x: f32,
@@ -401,6 +402,18 @@ pub struct MapLayoutState {
 }
 
 impl MapLayoutState {
+    pub fn is_aram(&self) -> bool {
+        self.aram
+    }
+
+    pub fn navigation(&self) -> &'static shared::navigation::NavigationMap {
+        if self.aram {
+            shared::navigation::aram_navigation()
+        } else {
+            shared::navigation::world_navigation()
+        }
+    }
+
     pub fn clamp_player_position(&self, position: Vec3f) -> Vec3f {
         Vec3f::new(
             position.x.clamp(self.min_x, self.max_x),

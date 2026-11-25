@@ -92,6 +92,7 @@ pub fn simulate_tower_attacks(world: &mut GameWorld, now: Instant) -> Vec<Combat
     }
     let green_sight = vision::sources(Team::Green, world);
     let blue_sight = vision::sources(Team::Blue, world);
+    let has_brush = !world.map_layout.is_aram();
     let GameWorld {
         players,
         minions,
@@ -154,7 +155,7 @@ pub fn simulate_tower_attacks(world: &mut GameWorld, now: Instant) -> Vec<Combat
 
         let mut best_target: Option<(u64, Vec3f, f32)> = None;
         for player in players.values() {
-            if !vision::player_visible(
+            if !vision::player_visible_with_brush(
                 if structure.state.team == Team::Green {
                     &green_sight
                 } else {
@@ -162,6 +163,7 @@ pub fn simulate_tower_attacks(world: &mut GameWorld, now: Instant) -> Vec<Combat
                 },
                 player,
                 now,
+                has_brush,
             ) || !player.joined
                 || player.hero.hp <= 0.0
                 || player.hero.identity.team == structure.state.team

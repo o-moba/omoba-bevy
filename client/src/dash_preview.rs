@@ -73,11 +73,10 @@ fn draw(
                     - shared::navigation::HERO_RADIUS,
             }),
     );
-    let landing = shared::navigation::world_navigation().blink_landing(
-        from.xz().to_array(),
-        requested.xz().to_array(),
-        &solids,
-    );
+    let landing =
+        layout
+            .navigation()
+            .blink_landing(from.xz().to_array(), requested.xz().to_array(), &solids);
     let end = Vec3::new(landing[0], from.y, landing[1]);
     let color = Color::srgba(0.28, 0.9, 1.0, 0.95);
     if *mode == PlayerVisualMode::Sprite2d {

@@ -10,6 +10,7 @@
   "net.status.disconnected": "已断开 - 连接丢失或超时。服务器恢复后请点击“重试”，然后再来一局。",
   "net.status.join_unconfirmed": "服务器未确认你的加入请求。请点击“重试”再试一次。",
   "net.practice.banner": "离线练习 · {level} 级 · 无奖励",
+  "net.practice.aram_banner": "ARAM 3×3 · {level} 级 · 无奖励",
   "net.practice.you": "你",
   "net.practice.bot": "电脑 {id}",
   "net.compatibility.handshake": "版本匹配检查不同。",

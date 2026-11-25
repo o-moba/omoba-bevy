@@ -123,6 +123,9 @@
         "client/src/qa/offline_qa.rs"
       ],
       "ignore": {
+        "01-aram-home.png": "Opt-in OMOBA_ARAM_SMOKE_DIR capture of the Home ARAM entry.",
+        "02-aram-roles.png": "Opt-in OMOBA_ARAM_SMOKE_DIR capture of the three ARAM roles.",
+        "03-aram-match.png": "Opt-in OMOBA_ARAM_SMOKE_DIR capture of the one-lane match.",
         "01-shop-owned-component.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: confirmed purchase and component-credit catalog.",
         "02-shop-scrolled-upgrades.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: raw-touch shop scroll to advanced items.",
         "01-debug-tools-bottom.png": "Focused scroll-bottom verification with OMOBA_OFFLINE_DEBUG_QA_ONLY=1; default offline run retains its normal practice-tools frame.",

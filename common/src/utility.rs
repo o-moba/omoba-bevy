@@ -103,8 +103,7 @@ pub fn handle_utility_request_with_terrain(
                     radius: crate::world::structure_collision_radius(s.state.kind),
                 }
             }));
-            let to =
-                shared::navigation::world_navigation().blink_landing(from, [to.x, to.z], &blocked);
+            let to = map.navigation().blink_landing(from, [to.x, to.z], &blocked);
             player.hero.x = to[0];
             player.hero.y = PLAYER_GROUND_Y;
             player.hero.z = to[1];

@@ -1,5 +1,4 @@
-//! Welcome screen: who you are, what you can look at, and the one button that
-//! starts a match.
+//! Welcome screen: profile, navigation and match entry points.
 //!
 //! Text comes from the `home` dictionary; the render key includes the locale
 //! generation, so a language change rebuilds the screen.
@@ -54,6 +53,7 @@ enum HomeAction {
     Ranked,
     BotPractice,
     OfflinePractice,
+    Aram,
     Card,
     Collection,
     History,
@@ -382,6 +382,7 @@ fn spawn_home_utilities(
 #[derive(PartialEq, Clone)]
 struct HomeSignature {
     resume_available: bool,
+    local_modes_available: bool,
     nickname: String,
     rating: i32,
     rated_matches: u32,
@@ -426,6 +427,7 @@ fn signature(
         resume_available: false,
         update: None,
         protect: false,
+        local_modes_available: !session.has_committed_join(),
         locale: locale.map_or(0, Locale::generation),
         ui_scale_bits: ui_scale.to_bits(),
         viewport_bits: (viewport.x.to_bits(), viewport.y.to_bits()),
@@ -1027,20 +1029,48 @@ fn spawn_home(
                             }
                         });
                 }
-                // Local practice remains available even when a server advertises
-                // matchmaking. A server bot allocation and socket-free practice
-                // are distinct choices, with different progress guarantees.
-                kit::spawn_button(
-                    column,
-                    secondary(row_width),
-                    tr("home.button.offline_practice"),
-                    TextStyle::new(TextRole::Button),
-                    ButtonKind::Secondary,
-                    Some(Icon::NavBot),
-                    HomeAction::OfflinePractice,
-                    "HomeOfflinePractice".into(),
-                    (),
-                );
+                // Keep both local modes reachable alongside server matchmaking
+                // in the fixed-height phone composition.
+                let gap = space::S8 * unit;
+                let aram_width = if phone { 82.0 * unit } else { 90.0 };
+                column
+                    .spawn((
+                        Node {
+                            width: Val::Px(row_width),
+                            column_gap: Val::Px(gap),
+                            ..default()
+                        },
+                        Name::new("HomeLocalModes"),
+                    ))
+                    .with_children(|row| {
+                        for (key, action, id, width) in [
+                            (
+                                "home.button.offline_practice",
+                                HomeAction::OfflinePractice,
+                                "HomeOfflinePractice",
+                                row_width - gap - aram_width,
+                            ),
+                            ("home.button.aram", HomeAction::Aram, "HomeAram", aram_width),
+                        ] {
+                            let button = kit::spawn_button(
+                                row,
+                                secondary(width),
+                                tr(key),
+                                TextStyle::new(TextRole::Button).sized(Metric::new(15.0, 12.0)),
+                                ButtonKind::Secondary,
+                                None,
+                                action,
+                                id.into(),
+                                (),
+                            );
+                            if !party_line.local_modes_available {
+                                row.commands().entity(button).insert(Pressable {
+                                    disabled: true,
+                                    ..default()
+                                });
+                            }
+                        }
+                    });
                 column.spawn((
                     widgets::label(
                         tr("home.offline_hint"),
@@ -1515,8 +1545,15 @@ fn home_actions(
                     },
                 ));
             }
-            HomeAction::OfflinePractice => {
-                session_ui.write(crate::net::SessionUiCommand::StartOffline);
+            HomeAction::OfflinePractice | HomeAction::Aram => {
+                if session.has_committed_join() {
+                    continue;
+                }
+                session_ui.write(if *action == HomeAction::Aram {
+                    crate::net::SessionUiCommand::StartAram
+                } else {
+                    crate::net::SessionUiCommand::StartOffline
+                });
                 next.set(AppScreen::HeroSelect);
             }
             HomeAction::Play | HomeAction::Ranked | HomeAction::BotPractice => {
@@ -2242,8 +2279,19 @@ mod tests {
             .resource_mut::<ClientSession>()
             .set_state_for_test(ClientConnectionState::Connected);
         app.update();
-        for id in ["HomeBotPractice", "HomeOfflinePractice"] {
+        for (id, action) in [
+            ("HomeBotPractice", HomeAction::BotPractice),
+            ("HomeOfflinePractice", HomeAction::OfflinePractice),
+            ("HomeAram", HomeAction::Aram),
+        ] {
             let button = harness::find(app.world_mut(), id).unwrap();
+            assert_eq!(
+                app.world()
+                    .get::<crate::ui::UiAction<HomeAction>>(button)
+                    .unwrap()
+                    .0,
+                action,
+            );
             assert!(
                 !app.world()
                     .get::<Pressable>(button)
@@ -2256,13 +2304,13 @@ mod tests {
                 .iter(app.world())
                 .any(|name| name.as_str() == "HomeOfflineNotice")
         );
-        harness::press(app.world_mut(), "HomeOfflinePractice");
+        harness::press(app.world_mut(), "HomeAram");
         app.update();
         assert!(
             app.world_mut()
                 .resource_mut::<Messages<crate::net::SessionUiCommand>>()
                 .drain()
-                .any(|command| matches!(command, crate::net::SessionUiCommand::StartOffline))
+                .any(|command| matches!(command, crate::net::SessionUiCommand::StartAram))
         );
         assert!(
             app.world()

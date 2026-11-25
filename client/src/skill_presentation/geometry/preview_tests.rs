@@ -1279,7 +1279,9 @@ impl Duel {
         let (flags, effects) = self.replicated();
         let def = skill(id);
         let origin = self.origin();
-        let clip = |from: Vec2, to: Vec2| movement_clip(&[], &[], from, to);
+        let clip = |from: Vec2, to: Vec2| {
+            movement_clip(crate::maps::MapLayout::default(), &[], &[], from, to)
+        };
         preview_shape(
             def,
             &PreviewContext {

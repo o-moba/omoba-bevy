@@ -193,7 +193,7 @@ impl CombatHost<'_> {
         let own = spawn_position_for_team(&self.world.map_layout, team);
         let enemy = spawn_position_for_team(&self.world.map_layout, opposite_team(team));
         let dir = Vec3f::new(enemy.x - own.x, 0.0, enemy.z - own.z).normalize_or_zero();
-        let nav = shared::navigation::world_navigation();
+        let nav = self.world.map_layout.navigation();
         for distance in [DUMMY_DISTANCE, DUMMY_DISTANCE * 0.6, 2.0] {
             let candidate = self.world.map_layout.clamp_player_position(Vec3f::new(
                 origin[0] + dir.x * distance,

@@ -185,6 +185,7 @@ pub(super) fn move_player_analog(
     mut basic: ResMut<BasicAttackState>,
 ) {
     let (mobile, pad) = sources;
+    let map = map.as_deref().copied().unwrap_or_default();
     let Some((movement, allowed)) = analog_source(
         mobile.as_deref(),
         pad.as_deref(),
@@ -252,12 +253,9 @@ pub(super) fn move_player_analog(
                 * speed
                 * time.delta_secs().min(0.1)
                 * crate::sandbox::time_scale(game.as_deref());
-        let mut desired = resolve_player_collisions(current, desired, &other_players, &structures);
-        if let Some(map) = map.as_ref() {
-            desired = map.clamp_position(desired);
-        }
-        desired = clip_static_movement(current, desired);
-        desired = crate::navigation::clip_skill_terrain(current, desired, game.as_deref());
+        let desired = resolve_player_collisions(current, desired, &other_players, &structures);
+        let desired = clip_static_movement(map, current, desired);
+        let desired = crate::navigation::clip_skill_terrain(current, desired, game.as_deref());
         transform.translation.x = desired.x;
         transform.translation.z = desired.z;
         let yaw = shared::math::hero_yaw_towards(direction.x, direction.z);
@@ -351,7 +349,7 @@ pub(super) fn plan_movement_routes(
                         })
                         .collect();
                     discs.extend_from_slice(&terrain);
-                    shared::navigation::world_navigation().segment_clear_with_discs(
+                    layout.navigation().segment_clear_with_discs(
                         transform.translation.xz().to_array(),
                         next.xz().to_array(),
                         &discs,

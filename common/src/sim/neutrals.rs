@@ -139,6 +139,7 @@ pub fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEven
     if !matches!(world.game_state, GameState::Running) {
         return Vec::new();
     }
+    let navigation = world.map_layout.navigation();
     let GameWorld {
         players,
         neutrals,
@@ -256,7 +257,7 @@ pub fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEven
                     },
                     now,
                 ),
-                shared::navigation::world_navigation(),
+                navigation,
             );
         }
     }
