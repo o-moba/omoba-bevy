@@ -27,6 +27,7 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 | Play a match with bots | [Run locally](#play-locally) with `make practice` |
 | Test on an iPhone | [Device build](mobile/ios/README.md) and [TestFlight workflow](mobile/ios/TESTFLIGHT.md) |
 | Make characters, worlds or effects | [Create with us](#create-with-us) |
+| Find a class, ability, combat handler or test | [Hero code map](docs/hero-code-map.md) and [repository skill](.agents/skills/omoba-class-navigator/SKILL.md) |
 | Bring avatars into another game | [Integrate Ekza](#bring-ekza-into-your-game) |
 | Host matches or connect a phone and PC | [Hosting and connection](#host-a-practice-match) and [runbook](RUNBOOK.md) |
 | Help the game and its protocol grow | [Support the project](#support-the-project) |
