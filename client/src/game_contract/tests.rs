@@ -399,6 +399,10 @@ fn wildspark_slots_carry_its_guns() {
         "wild-launcher"
     );
     assert_eq!(
+        ext("skill.wild_rocket.windup")["handheld"]["muzzleWindowSecs"],
+        Value::Null
+    );
+    assert_eq!(
         ext("skill.wild_zap.release")["handheld"]["muzzleWindowSecs"],
         json!([0.08, 0.25])
     );
