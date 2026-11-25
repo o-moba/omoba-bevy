@@ -160,7 +160,12 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                         client_session.set_join_error(Some(JoinRejection::ProtocolMismatch));
                         continue;
                     }
-                    if !geometry_id.is_empty() && geometry_id != shared::map::GEOMETRY_ID {
+                    let supported_geometry = if client_session.is_aram() {
+                        geometry_id == shared::map::ARAM_GEOMETRY_ID
+                    } else {
+                        geometry_id.is_empty() || geometry_id == shared::map::GEOMETRY_ID
+                    };
+                    if !supported_geometry {
                         client_session.set_join_error(Some(JoinRejection::MapGeometryMismatch));
                         client_session.admitted = false;
                         latest_snapshot = None;
@@ -324,6 +329,35 @@ mod tests {
                 .frame
                 .is_some()
         );
+    }
+
+    #[test]
+    fn aram_geometry_is_admitted_only_by_an_explicit_local_aram_session() {
+        for (aram, geometry, accepted) in [
+            (false, shared::map::ARAM_GEOMETRY_ID, false),
+            (true, shared::map::GEOMETRY_ID, false),
+            (true, "", false),
+            (true, shared::map::ARAM_GEOMETRY_ID, true),
+        ] {
+            let (mut app, incoming, _) = admission_app();
+            if aram {
+                let mut session = app.world_mut().resource_mut::<ClientSession>();
+                session.offline_return_addr = Some("127.0.0.1:4000".into());
+                session.server_addr_display = super::super::offline::ARAM_ADDRESS.into();
+            }
+            let mut snapshot = serde_json::to_value(admission_snapshot(1, 1, true, None)).unwrap();
+            snapshot["geometry_id"] = json!(geometry);
+            incoming
+                .send(serde_json::from_value(snapshot).unwrap())
+                .unwrap();
+            app.update();
+            let session = app.world().resource::<ClientSession>();
+            assert_eq!(session.admitted, accepted);
+            assert_eq!(
+                session.join_error,
+                (!accepted).then_some(JoinRejection::MapGeometryMismatch)
+            );
+        }
     }
 
     #[test]

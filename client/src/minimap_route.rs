@@ -44,10 +44,16 @@ struct CollisionOverlay;
 fn setup_collision_overlay(
     mut commands: Commands,
     containers: Query<Entity, With<MinimapContainer>>,
-    existing: Query<(), With<CollisionOverlay>>,
+    existing: Query<Entity, With<CollisionOverlay>>,
     layout: Res<MapLayout>,
     mut images: ResMut<Assets<Image>>,
 ) {
+    if layout.is_aram() {
+        for entity in &existing {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
     if !existing.is_empty() {
         return;
     }
@@ -59,7 +65,7 @@ fn setup_collision_overlay(
     // footprint used by collision, including trunk clearance, rather than canopy.
     let size = MINIMAP_INNER_SIZE as u32;
     let mut pixels = vec![0; (size * size * 4) as usize];
-    let navigation = shared::navigation::world_navigation();
+    let navigation = layout.navigation();
     for y in 0..size {
         for x in 0..size {
             let point = layout.min

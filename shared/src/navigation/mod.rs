@@ -95,6 +95,14 @@ pub fn world_navigation() -> &'static NavigationMap {
     })
 }
 
+pub fn aram_navigation() -> &'static NavigationMap {
+    static ARAM: OnceLock<NavigationMap> = OnceLock::new();
+    ARAM.get_or_init(|| {
+        NavigationMap::new(crate::map::aram_geometry().bounds, Vec::new())
+            .expect("embedded ARAM bridge bounds must be valid")
+    })
+}
+
 fn finite(point: Point) -> bool {
     point.into_iter().all(f32::is_finite)
 }

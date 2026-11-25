@@ -24,5 +24,10 @@
   "team.join.find_match": "Найти матч",
   "team.join.combat_test": "Войти в тест сражений",
   "team.join.practice": "Начать тренировку",
+  "team.join.aram": "Начать ARAM",
+  "team.aram_hint": "ARAM 3×3 · Одна линия · Боты",
+  "team.aram.ranger": "Стрелок",
+  "team.aram.warrior": "Танк",
+  "team.aram.cleric": "Поддержка",
   "team.notice.offline_avatar": "Офлайн-тренировка использует встроенные аватары. Выберите аватар из первой группы."
 }

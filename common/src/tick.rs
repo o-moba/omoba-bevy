@@ -98,7 +98,7 @@ pub fn finish(
         crate::skills::observe(world, &events, now);
         combat_log.extend(now, events);
     }
-    if options.simulating {
+    if options.simulating && !world.map_layout.is_aram() {
         world
             .forest_pickups
             .tick(&mut world.players, &world.game_state, now);

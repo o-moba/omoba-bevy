@@ -3,7 +3,9 @@
 use bevy::prelude::*;
 #[cfg(test)]
 use shared::navigation::NavigationMap;
-use shared::navigation::{Bounds, Disc, HERO_RADIUS, world_navigation};
+#[cfg(test)]
+use shared::navigation::world_navigation;
+use shared::navigation::{Bounds, Disc, HERO_RADIUS};
 
 use crate::maps::MapLayout;
 use crate::net::StructureKind;
@@ -47,7 +49,7 @@ pub(crate) fn plan_route_with_terrain(
         min: layout.min.to_array(),
         max: layout.max.to_array(),
     };
-    let world = world_navigation();
+    let world = layout.navigation();
     let world_bounds = world.bounds();
     #[cfg(test)]
     let custom;
@@ -127,9 +129,14 @@ pub(crate) fn clip_skill_terrain(
 /// pillar. `structures` are the discs a ground move is clipped against. The server keeps a
 /// landing out of a structure's disc only, which is nearer than a walking hero gets; the
 /// client must not be stricter than that, or it would refuse casts the server accepts.
-pub(crate) fn blink_point_legal(point: Vec2, structures: &[Disc], terrain: &[Disc]) -> bool {
+pub(crate) fn blink_point_legal(
+    layout: MapLayout,
+    point: Vec2,
+    structures: &[Disc],
+    terrain: &[Disc],
+) -> bool {
     let apart = |disc: &Disc| point.distance(Vec2::from_array(disc.center));
-    world_navigation().point_clear(point.to_array())
+    layout.navigation().point_clear(point.to_array())
         && structures.iter().all(|disc| apart(disc) > disc.radius)
         && terrain
             .iter()
@@ -430,21 +437,37 @@ mod tests {
         let middle = Vec2::ZERO;
         let way = Vec2::new(0.6, 0.8);
         assert!((0..=8).all(|step| map.point_clear((middle + way * step as f32).to_array())));
-        assert!(blink_point_legal(middle, &[], &[]));
+        assert!(blink_point_legal(MapLayout::default(), middle, &[], &[]));
 
         // The server keeps a landing out of the disc of a structure: 1.3 for a tower and
         // 3.2 for a base, not the 1.8 and 3.7 a walking hero is held at.
         for (kind, disc) in [(StructureKind::Tower, 1.3), (StructureKind::BaseTower, 3.2)] {
             let solid = [structure(middle, kind)];
             assert!(!blink_point_legal(
+                MapLayout::default(),
                 middle + way * (disc - 0.01),
                 &solid,
                 &[]
             ));
-            assert!(blink_point_legal(middle + way * (disc + 0.01), &solid, &[]));
-            assert!(!blink_point_legal(middle, &solid, &[]));
+            assert!(blink_point_legal(
+                MapLayout::default(),
+                middle + way * (disc + 0.01),
+                &solid,
+                &[]
+            ));
+            assert!(!blink_point_legal(
+                MapLayout::default(),
+                middle,
+                &solid,
+                &[]
+            ));
             // A structure that fell is not in the list any more.
-            assert!(blink_point_legal(middle + way * (disc - 0.01), &[], &[]));
+            assert!(blink_point_legal(
+                MapLayout::default(),
+                middle + way * (disc - 0.01),
+                &[],
+                &[]
+            ));
         }
 
         // An armed pillar is a disc of radius 1.0 and keeps a hero's radius more.
@@ -452,22 +475,57 @@ mod tests {
             center: middle.to_array(),
             radius: 1.0,
         }];
-        assert!(!blink_point_legal(middle + way * 1.4, &[], &pillar));
-        assert!(blink_point_legal(middle + way * 1.6, &[], &pillar));
+        assert!(!blink_point_legal(
+            MapLayout::default(),
+            middle + way * 1.4,
+            &[],
+            &pillar
+        ));
+        assert!(blink_point_legal(
+            MapLayout::default(),
+            middle + way * 1.6,
+            &[],
+            &pillar
+        ));
         // Every solid has to allow the landing.
         let tower = [structure(middle + way * 3.0, StructureKind::Tower)];
-        assert!(blink_point_legal(middle + way * 1.6, &tower, &pillar));
-        assert!(!blink_point_legal(middle + way * 1.75, &tower, &pillar));
-        assert!(blink_point_legal(middle + way * 4.35, &tower, &pillar));
+        assert!(blink_point_legal(
+            MapLayout::default(),
+            middle + way * 1.6,
+            &tower,
+            &pillar
+        ));
+        assert!(!blink_point_legal(
+            MapLayout::default(),
+            middle + way * 1.75,
+            &tower,
+            &pillar
+        ));
+        assert!(blink_point_legal(
+            MapLayout::default(),
+            middle + way * 4.35,
+            &tower,
+            &pillar
+        ));
 
         // The static map: a point in the forest, one off the map and no point at all.
         let forest = (1..80)
             .map(|step| Vec2::X * step as f32)
             .find(|at| !map.point_clear(at.to_array()))
             .expect("the forest is somewhere along +X");
-        assert!(!blink_point_legal(forest, &[], &[]));
-        assert!(!blink_point_legal(Vec2::splat(10_000.0), &[], &[]));
-        assert!(!blink_point_legal(Vec2::new(f32::NAN, 0.0), &[], &[]));
+        assert!(!blink_point_legal(MapLayout::default(), forest, &[], &[]));
+        assert!(!blink_point_legal(
+            MapLayout::default(),
+            Vec2::splat(10_000.0),
+            &[],
+            &[]
+        ));
+        assert!(!blink_point_legal(
+            MapLayout::default(),
+            Vec2::new(f32::NAN, 0.0),
+            &[],
+            &[]
+        ));
     }
 
     /// A practice authority with one hero that has Fault Line on Q and Rift Step on E,
@@ -628,7 +686,7 @@ mod tests {
                 let landed = authority.lands(center + way * (radius + 5.0), aim);
                 assert_eq!(landed, expected, "{kind:?} {gap}");
                 assert_eq!(
-                    blink_point_legal(aim, &[disc], &[]),
+                    blink_point_legal(MapLayout::default(), aim, &[disc], &[]),
                     landed,
                     "{kind:?} {gap}"
                 );
@@ -640,7 +698,7 @@ mod tests {
         let (id, center, disc) = authority.structure(StructureKind::Tower);
         let way = open_way(center, 0.5, 6.0);
         let aim = center + way * 0.6;
-        assert!(!blink_point_legal(aim, &[disc], &[]));
+        assert!(!blink_point_legal(MapLayout::default(), aim, &[disc], &[]));
         authority
             .session
             .world
@@ -650,7 +708,7 @@ mod tests {
             .state
             .hp = 0.0;
         assert!(authority.lands(center + way * 6.0, aim));
-        assert!(blink_point_legal(aim, &[], &[]));
+        assert!(blink_point_legal(MapLayout::default(), aim, &[], &[]));
 
         // An armed pillar, as the client reads it from the replicated effect.
         for (gap, expected) in [(-MARGIN, false), (MARGIN, true)] {
@@ -672,7 +730,7 @@ mod tests {
             let landed = authority.lands(center + way * (reach + 5.0), aim);
             assert_eq!(landed, expected, "pillar {gap}");
             assert_eq!(
-                blink_point_legal(aim, &[], &pillars),
+                blink_point_legal(MapLayout::default(), aim, &[], &pillars),
                 landed,
                 "pillar {gap}"
             );
@@ -688,9 +746,9 @@ mod tests {
         assert!(map.point_clear(open.to_array()));
         let mut authority = Authority::new();
         assert!(!authority.lands(forest - Vec2::X * 5.0, forest));
-        assert!(!blink_point_legal(forest, &[], &[]));
+        assert!(!blink_point_legal(MapLayout::default(), forest, &[], &[]));
         let mut authority = Authority::new();
         assert!(authority.lands(forest - Vec2::X * 5.0, open));
-        assert!(blink_point_legal(open, &[], &[]));
+        assert!(blink_point_legal(MapLayout::default(), open, &[], &[]));
     }
 }

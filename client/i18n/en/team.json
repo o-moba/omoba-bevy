@@ -24,5 +24,10 @@
   "team.join.find_match": "Find match",
   "team.join.combat_test": "Enter Combat Test",
   "team.join.practice": "Start practice",
+  "team.join.aram": "Start ARAM",
+  "team.aram_hint": "ARAM 3×3 · One lane · Bots",
+  "team.aram.ranger": "Marksman",
+  "team.aram.warrior": "Tank",
+  "team.aram.cleric": "Support",
   "team.notice.offline_avatar": "Offline practice uses the included avatars. Choose an avatar from the first group."
 }

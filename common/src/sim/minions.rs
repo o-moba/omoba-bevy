@@ -106,6 +106,7 @@ pub fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent
 
     let green_sight = vision::sources(Team::Green, world);
     let blue_sight = vision::sources(Team::Blue, world);
+    let has_brush = !world.map_layout.is_aram();
     let GameWorld {
         players,
         minions,
@@ -119,7 +120,7 @@ pub fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent
     let visible_players: HashSet<u64> = players
         .values()
         .filter(|p| {
-            vision::player_visible(
+            vision::player_visible_with_brush(
                 if p.hero.identity.team == Team::Green {
                     &blue_sight
                 } else {
@@ -127,6 +128,7 @@ pub fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent
                 },
                 p,
                 now,
+                has_brush,
             )
         })
         .map(|p| p.hero.identity.id)

@@ -45,6 +45,8 @@ pub enum SessionUiCommand {
     ResumeMatch,
     /// Replace remote I/O with an in-process, unrated character practice.
     StartOffline,
+    /// Start a local one-lane ARAM match with bots.
+    StartAram,
     /// Switch to a trusted lobby allocation without overwriting the saved lobby.
     ConnectAllocated(String),
     /// Leave the current match or queue and return to the front end. The
@@ -352,6 +354,10 @@ impl ClientSession {
 
     pub(crate) fn is_offline(&self) -> bool {
         self.offline_return_addr.is_some()
+    }
+
+    pub(crate) fn is_aram(&self) -> bool {
+        self.is_offline() && self.server_addr_display == offline::ARAM_ADDRESS
     }
 
     #[cfg(test)]
@@ -959,8 +965,11 @@ pub(in crate::net) fn update_session_lifecycle(
     .then_some(SessionUiCommand::LeaveMatch);
     for event in ui_requests.iter().chain(recovery_exit.iter()) {
         match event {
-            SessionUiCommand::StartOffline => {
-                if client_session.has_committed_join() || client_session.is_offline() {
+            SessionUiCommand::StartOffline | SessionUiCommand::StartAram => {
+                let aram = matches!(event, SessionUiCommand::StartAram);
+                if client_session.has_committed_join()
+                    || (client_session.is_offline() && client_session.is_aram() == aram)
+                {
                     continue;
                 }
                 if let Some(channels) = channels.as_ref() {
@@ -969,11 +978,16 @@ pub(in crate::net) fn update_session_lifecycle(
                 if let Some(directory) = directory.as_mut() {
                     directory.cancel_handoff();
                 }
-                client_session.offline_return_addr =
-                    Some(client_session.server_addr_display.clone());
+                if client_session.offline_return_addr.is_none() {
+                    client_session.offline_return_addr =
+                        Some(client_session.server_addr_display.clone());
+                }
                 client_session.ephemeral_endpoint = true;
                 client_session.abandon_join();
                 team_selection.team = None;
+                if aram && !common::offline::ARAM_CLASSES.contains(&team_selection.hero_class) {
+                    team_selection.pick_class(HeroClass::Ranger);
+                }
                 // Practice only uses avatars bundled with the app; no wallet or download.
                 if !offline::shipped_avatar(team_selection.avatar.as_deref()) {
                     team_selection.avatar = None;
@@ -994,11 +1008,12 @@ pub(in crate::net) fn update_session_lifecycle(
                     service.take_return_to_lobby();
                 }
                 client_session.outbox.push(SessionEvent::ServerScopeReset);
-                spawn_network_transport(
-                    &mut commands,
-                    &mut client_session,
-                    offline::ADDRESS.into(),
-                );
+                let address = if aram {
+                    offline::ARAM_ADDRESS
+                } else {
+                    offline::ADDRESS
+                };
+                spawn_network_transport(&mut commands, &mut client_session, address.into());
                 incoming_dead.0 = false;
                 retried_this_frame = true;
             }
@@ -1895,6 +1910,15 @@ mod tests {
 
     #[test]
     fn offline_leave_restores_saved_endpoint_and_next_join_uses_real_udp_transport() {
+        offline_transport_roundtrip(false);
+    }
+
+    #[test]
+    fn aram_roundtrip_switches_local_geometry_and_restores_the_saved_endpoint() {
+        offline_transport_roundtrip(true);
+    }
+
+    fn offline_transport_roundtrip(aram: bool) {
         use crate::world::{AvatarAssetCache, PlayerModelCatalog};
         use bevy::{asset::AssetApp, ecs::system::RunSystemOnce};
 
@@ -1956,6 +1980,20 @@ mod tests {
             .write_message(SessionUiCommand::StartOffline);
         app.update();
         assert!(app.world().resource::<ClientSession>().is_offline());
+        if aram {
+            // Switching the empty local lobby must preserve the remote address.
+            app.world_mut().write_message(SessionUiCommand::StartAram);
+            app.update();
+        }
+        assert_eq!(app.world().resource::<ClientSession>().is_aram(), aram);
+        assert_eq!(
+            app.world().resource::<GameStateSnapshot>().geometry_id,
+            if aram {
+                shared::map::ARAM_GEOMETRY_ID
+            } else {
+                shared::map::GEOMETRY_ID
+            }
+        );
         assert!(app.world().contains_resource::<offline::LocalPractice>());
         assert_eq!(
             app.world().resource::<ResolvedServerAddressForPrefs>().0,
@@ -2002,6 +2040,17 @@ mod tests {
             !targets.is_empty(),
             "the real local snapshot must spawn practice targets"
         );
+        if aram {
+            // Enemy actors outside allied sight are absent from the entity view.
+            let game = app.world().resource::<GameStateSnapshot>();
+            let roster = &game.scoreboard.as_ref().unwrap().players;
+            for team in [Team::Green, Team::Blue] {
+                assert_eq!(
+                    roster.iter().filter(|player| player.team == team).count(),
+                    3
+                );
+            }
+        }
         let visual = app
             .world_mut()
             .spawn(Name::new("practice target child"))
@@ -2025,6 +2074,7 @@ mod tests {
                 .is_empty()
         );
         assert!(!app.world().resource::<ClientSession>().is_offline());
+        assert!(!app.world().resource::<ClientSession>().is_aram());
         assert!(!app.world().resource::<ClientSession>().ephemeral_endpoint);
         assert!(!app.world().resource::<ClientSession>().has_committed_join());
         assert_eq!(

@@ -51,9 +51,9 @@ use crate::{
             surfaces,
         },
     },
-    verdant3d::{VerdantEnvironment, VerdantFoliage, VerdantStructureVisual},
+    verdant3d::{AramEnvironment, VerdantEnvironment, VerdantFoliage, VerdantStructureVisual},
     world::AvatarAssetCache,
-    world2d::World2dStatic,
+    world2d::{AramWorld2d, World2dStatic},
 };
 
 /// Dictionary keys of the loading tips.
@@ -209,6 +209,9 @@ struct LoadingAssets<'w, 's> {
     >,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
     foliage: Query<'w, 's, Entity, With<VerdantFoliage>>,
+    aram: Query<'w, 's, Entity, With<AramEnvironment>>,
+    structures: Query<'w, 's, Entity, With<VerdantStructureVisual>>,
+    aram_sprites: Query<'w, 's, (), With<AramWorld2d>>,
     map_sprites: Query<'w, 's, &'static Sprite, With<World2dStatic>>,
     player_sprites: Query<'w, 's, (&'static PlayerSpriteVisual, &'static Sprite)>,
 }
@@ -269,10 +272,23 @@ fn procedural_assets_ready(
 
 fn assess_readiness(
     game: Res<GameStateSnapshot>,
+    layout: Res<crate::maps::MapLayout>,
     mut state: ResMut<DraftClient>,
     assets: LoadingAssets,
 ) {
     let map_ready = || {
+        if layout.is_aram() {
+            return if *assets.mode == PlayerVisualMode::Models3d {
+                !assets.aram.is_empty()
+                    && assets.aram.iter().all(|entity| assets.scene_ready(entity))
+                    && assets
+                        .structures
+                        .iter()
+                        .all(|entity| assets.scene_ready(entity))
+            } else {
+                !assets.aram_sprites.is_empty()
+            };
+        }
         if *assets.mode == PlayerVisualMode::Models3d {
             !assets.environment.is_empty()
                 && !assets.foliage.is_empty()

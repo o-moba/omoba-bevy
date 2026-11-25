@@ -185,6 +185,14 @@ pub fn locked_camera_offset_for_team(zoom: f32, _team: Team) -> Vec3 {
     locked_camera_offset(zoom)
 }
 
+fn battlefield_offset(layout: MapLayout, zoom: f32, team: Team) -> Vec3 {
+    if layout.is_aram() {
+        Vec3::new(4.0, 27.0, 21.0) * zoom
+    } else {
+        locked_camera_offset_for_team(zoom, team)
+    }
+}
+
 fn toggle_camera_lock(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     context: Res<GameplayInputContext>,
@@ -379,7 +387,7 @@ fn update_camera(
             } else {
                 let team = player_team.single().copied().unwrap_or(Team::Blue);
                 let mut offset = Quat::from_rotation_y(cam_state.orbit_yaw)
-                    * locked_camera_offset_for_team(cam_state.zoom, team);
+                    * battlefield_offset(*map_layout, cam_state.zoom, team);
                 offset.y *= cam_state.orbit_height;
                 *camera_transform = Transform::from_translation(target + offset)
                     .looking_at(Vec3::new(target.x, PLAYER_SIZE / 2.0, target.z), Vec3::Y);
@@ -469,7 +477,7 @@ fn update_camera(
             let zoom = cam_state.zoom;
             let team = player_team.single().copied().unwrap_or(Team::Blue);
             let mut offset = Quat::from_rotation_y(cam_state.orbit_yaw)
-                * locked_camera_offset_for_team(zoom, team);
+                * battlefield_offset(*map_layout, zoom, team);
             offset.y *= cam_state.orbit_height;
             let mut target_position = target + offset;
             // A small travel lift preserves the overview without turning towards movement.

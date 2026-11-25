@@ -46,6 +46,7 @@ pub(super) fn move_player(
             return;
         }
     }
+    let map_layout = map_layout.as_deref().copied().unwrap_or_default();
     let other_players = transform_sets
         .p1()
         .iter()
@@ -114,10 +115,7 @@ pub(super) fn move_player(
         if distance < move_delta || distance < 0.01 {
             let mut desired = target_pos_flat;
             desired = resolve_player_collisions(current_pos, desired, &other_players, &structures);
-            if let Some(map_layout) = map_layout.as_ref() {
-                desired = map_layout.clamp_position(desired);
-            }
-            desired = clip_static_movement(current_pos, desired);
+            desired = clip_static_movement(map_layout, current_pos, desired);
             desired =
                 crate::navigation::clip_skill_terrain(current_pos, desired, game_state.as_deref());
             transform.translation.x = desired.x;
@@ -135,10 +133,7 @@ pub(super) fn move_player(
         } else {
             let mut desired = current_pos + direction * move_delta;
             desired = resolve_player_collisions(current_pos, desired, &other_players, &structures);
-            if let Some(map_layout) = map_layout.as_ref() {
-                desired = map_layout.clamp_position(desired);
-            }
-            desired = clip_static_movement(current_pos, desired);
+            desired = clip_static_movement(map_layout, current_pos, desired);
             desired =
                 crate::navigation::clip_skill_terrain(current_pos, desired, game_state.as_deref());
             transform.translation.x = desired.x;
@@ -274,8 +269,10 @@ pub(super) fn apply_gravity(
 
 /// Shared swept collision is applied after local crowd/structure resolution,
 /// so a push or long frame cannot move the hero through static forest geometry.
-pub(super) fn clip_static_movement(from: Vec3, desired: Vec3) -> Vec3 {
-    let [x, z] = shared::navigation::world_navigation()
+pub(super) fn clip_static_movement(layout: MapLayout, from: Vec3, desired: Vec3) -> Vec3 {
+    let desired = layout.clamp_position(desired);
+    let [x, z] = layout
+        .navigation()
         .clip_movement([from.x, from.z], [desired.x, desired.z]);
     Vec3::new(x, desired.y, z)
 }
@@ -358,6 +355,7 @@ pub(super) fn resolve_player_collisions(
 
 pub(super) fn resolve_player_structure_overlap(
     mut player_query: Query<&mut Transform, With<Player>>,
+    map_layout: Option<Res<MapLayout>>,
     structures: Query<
         (&Transform, &StructureKind, Option<&CombatStats>),
         (With<NetworkStructure>, Without<Player>),
@@ -390,7 +388,8 @@ pub(super) fn resolve_player_structure_overlap(
         }
     }
 
-    resolved = clip_static_movement(player_transform.translation, resolved);
+    let layout = map_layout.as_deref().copied().unwrap_or_default();
+    resolved = clip_static_movement(layout, player_transform.translation, resolved);
     player_transform.translation.x = resolved.x;
     player_transform.translation.z = resolved.z;
 }

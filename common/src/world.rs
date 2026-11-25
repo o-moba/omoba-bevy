@@ -119,8 +119,17 @@ pub fn add_structure(
 }
 
 pub fn build_map_layout() -> MapLayoutState {
-    let g = shared::map::geometry();
+    map_layout_for(false)
+}
+
+pub(crate) fn map_layout_for(aram: bool) -> MapLayoutState {
+    let g = if aram {
+        shared::map::aram_geometry()
+    } else {
+        shared::map::geometry()
+    };
     MapLayoutState {
+        aram,
         home: Vec3f::new(g.home[0], 0.0, g.home[1]),
         away: Vec3f::new(g.away[0], 0.0, g.away[1]),
         min_x: g.bounds.min[0],
@@ -181,11 +190,18 @@ pub fn lane_control_points(_layout: &MapLayoutState, lane: Lane) -> Vec<Vec3f> {
         .collect()
 }
 
-pub fn build_minion_path(_layout: &MapLayoutState, lane: Lane, team: Team) -> Vec<Vec3f> {
-    let mut points: Vec<Vec3f> = shared::map::minion_lane_points(lane)
-        .into_iter()
-        .map(|point| Vec3f::new(point[0], 0.0, point[1]))
-        .collect();
+pub fn build_minion_path(layout: &MapLayoutState, lane: Lane, team: Team) -> Vec<Vec3f> {
+    let mut points: Vec<Vec3f> = if layout.is_aram() {
+        if lane != Lane::Mid {
+            return Vec::new();
+        }
+        vec![layout.home, layout.away]
+    } else {
+        shared::map::minion_lane_points(lane)
+            .into_iter()
+            .map(|point| Vec3f::new(point[0], 0.0, point[1]))
+            .collect()
+    };
     if team == Team::Blue {
         points.reverse();
     }
@@ -195,11 +211,24 @@ pub fn build_minion_path(_layout: &MapLayoutState, lane: Lane, team: Team) -> Ve
     points
 }
 
+pub(crate) fn minion_wave_timing(aram: bool) -> (Duration, Duration) {
+    if aram {
+        (Duration::from_secs(15), Duration::from_secs(3))
+    } else {
+        (
+            MINION_WAVE_INTERVAL,
+            crate::balance::FIRST_MINION_WAVE_DELAY,
+        )
+    }
+}
+
 pub fn spawn_minion_waves_if_due(world: &mut GameWorld, now: Instant) {
     if !matches!(world.game_state, GameState::Running) {
         return;
     }
-    if now.duration_since(world.last_wave_spawn_at) < MINION_WAVE_INTERVAL {
+    if now.duration_since(world.last_wave_spawn_at)
+        < minion_wave_timing(world.map_layout.is_aram()).0
+    {
         return;
     }
     world.last_wave_spawn_at = now;
@@ -210,7 +239,12 @@ pub fn spawn_minion_waves_if_due(world: &mut GameWorld, now: Instant) {
         ..
     } = world;
 
-    for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
+    let lanes: &[Lane] = if map_layout.is_aram() {
+        &[Lane::Mid]
+    } else {
+        &[Lane::Top, Lane::Mid, Lane::Bot]
+    };
+    for &lane in lanes {
         spawn_minion_wave_for_team_lane(map_layout, minions, next_minion_id, Team::Green, lane);
         spawn_minion_wave_for_team_lane(map_layout, minions, next_minion_id, Team::Blue, lane);
     }

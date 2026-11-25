@@ -371,15 +371,17 @@ fn the_movement_clip_stops_at_structures_and_pillars() {
     // Open ground at the middle of the map.
     let from = Vec2::ZERO;
     let to = Vec2::new(10.0, 0.0);
-    assert!(movement_clip(&[], &[], from, to).distance(to) < 1e-4);
+    assert!(
+        movement_clip(crate::maps::MapLayout::default(), &[], &[], from, to).distance(to) < 1e-4
+    );
     let disc = |x: f32, radius: f32| Disc {
         center: [x, 0.0],
         radius,
     };
     let tower = [disc(6.0, 1.3)];
     let pillar = [disc(4.0, 1.0)];
-    let at_tower = movement_clip(&tower, &[], from, to);
-    let at_pillar = movement_clip(&[], &pillar, from, to);
+    let at_tower = movement_clip(crate::maps::MapLayout::default(), &tower, &[], from, to);
+    let at_pillar = movement_clip(crate::maps::MapLayout::default(), &[], &pillar, from, to);
     // A hero is half a unit wide: it stops that far short of either disc.
     let hero = shared::navigation::HERO_RADIUS;
     assert!((at_tower.x - (6.0 - 1.3 - hero)).abs() < 0.01, "{at_tower}");
@@ -389,8 +391,8 @@ fn the_movement_clip_stops_at_structures_and_pillars() {
     );
     // The nearer of the two stops the move, whichever list it is in.
     for both in [
-        movement_clip(&tower, &pillar, from, to),
-        movement_clip(&pillar, &tower, from, to),
+        movement_clip(crate::maps::MapLayout::default(), &tower, &pillar, from, to),
+        movement_clip(crate::maps::MapLayout::default(), &pillar, &tower, from, to),
     ] {
         assert!(both.distance(at_pillar) < 1e-4, "{both}");
     }
@@ -400,7 +402,7 @@ fn the_movement_clip_stops_at_structures_and_pillars() {
         .map(|step| Vec2::X * step as f32)
         .find(|at| !map.point_clear(at.to_array()))
         .expect("the forest is somewhere along +X");
-    let stopped = movement_clip(&[], &[], from, edge);
+    let stopped = movement_clip(crate::maps::MapLayout::default(), &[], &[], from, edge);
     assert!(
         stopped.x < edge.x - 1e-3 && stopped.x > edge.x - 1.0,
         "{stopped} {edge}"

@@ -576,6 +576,9 @@ fn sync_visibility(
     let vision_active = game
         .as_ref()
         .is_some_and(|g| matches!(g.state, GameState::Running) && g.vision.is_some());
+    let aram = game
+        .as_ref()
+        .is_some_and(|g| g.geometry_id == shared::map::ARAM_GEOMETRY_ID);
     art.active = *mode == PlayerVisualMode::Models3d && vision_active;
     for mut node in &mut overlay {
         node.display = if art.active {
@@ -585,7 +588,7 @@ fn sync_visibility(
         };
     }
     for (brush, mut visible) in &mut brush {
-        *visible = if brush.mode == *mode {
+        *visible = if brush.mode == *mode && !aram {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -787,20 +790,21 @@ fn update_minimap_mask(
     let Some(data) = image.data.as_mut() else {
         return;
     };
-    let sources = prepare_fog_sources(&vision.sources, true);
+    let include_brush = !layout.is_aram();
+    let sources = prepare_fog_sources(&vision.sources, include_brush);
     for y in 0..MAP_SIZE {
         for x in 0..MAP_SIZE {
             let uv = Vec2::new(
                 (x as f32 + 0.5) / MAP_SIZE as f32,
                 (y as f32 + 0.5) / MAP_SIZE as f32,
             );
-            let p = layout.min + Vec2::new(1. - uv.y, uv.x) * layout.size();
+            let p = crate::minimap::minimap_uv_to_world(*layout, uv);
             let i = ((y * MAP_SIZE + x) * 4) as usize;
             data[i..i + 4].copy_from_slice(&[
                 4,
                 10,
                 16,
-                fog_alpha_with_brush(&sources, p.to_array(), true),
+                fog_alpha_with_brush(&sources, p.to_array(), include_brush),
             ]);
         }
     }

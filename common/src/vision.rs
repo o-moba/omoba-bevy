@@ -95,6 +95,15 @@ pub fn revealed(player: &ConnectedPlayer, now: Instant) -> bool {
         })
 }
 pub fn player_visible(sight: &[VisionSource], player: &ConnectedPlayer, now: Instant) -> bool {
+    player_visible_with_brush(sight, player, now, true)
+}
+
+pub(crate) fn player_visible_with_brush(
+    sight: &[VisionSource],
+    player: &ConnectedPlayer,
+    now: Instant,
+    has_brush: bool,
+) -> bool {
     player.joined
         && (!crate::skills::advanced::camouflaged(player, now)
             || revealed(player, now)
@@ -110,7 +119,7 @@ pub fn player_visible(sight: &[VisionSource], player: &ConnectedPlayer, now: Ins
             || point_visible(
                 sight,
                 [player.hero.x, player.hero.z],
-                !revealed(player, now),
+                has_brush && !revealed(player, now),
             ))
 }
 pub fn target_visible(team: Team, target: TargetId, world: &GameWorld, now: Instant) -> bool {
@@ -132,11 +141,14 @@ pub fn target_visible_with(
         neutrals,
         ..
     } = world;
+    let has_brush = !world.map_layout.is_aram();
     match target.kind {
         TargetKind::Player => players
             .values()
             .find(|p| p.hero.identity.id == target.id)
-            .is_some_and(|p| p.hero.identity.team == team || player_visible(sight, p, now)),
+            .is_some_and(|p| {
+                p.hero.identity.team == team || player_visible_with_brush(sight, p, now, has_brush)
+            }),
         TargetKind::Minion => minions.get(&target.id).is_some_and(|p| {
             p.state.team == team
                 || world.skill_runtime.npc_revealed(target, team, now)
@@ -194,7 +206,8 @@ pub fn filter_snapshot(
     } else {
         Vec::new()
     };
-    let local_brush = (viewer.joined && viewer.hero.hp > 0.0)
+    let has_brush = !world.map_layout.is_aram();
+    let local_brush = (has_brush && viewer.joined && viewer.hero.hp > 0.0)
         .then(|| brush_at([viewer.hero.x, viewer.hero.z]))
         .flatten();
     let enemy_sight = sources(
@@ -208,7 +221,7 @@ pub fn filter_snapshot(
         local_brush,
         local_hidden: local_brush.is_some()
             && viewer.hero.hp > 0.0
-            && !player_visible(&enemy_sight, viewer, now),
+            && !player_visible_with_brush(&enemy_sight, viewer, now, has_brush),
         sources: sight.clone(),
     });
     players.retain(|p| {
@@ -217,7 +230,7 @@ pub fn filter_snapshot(
                 || live_players
                     .values()
                     .find(|live| live.hero.identity.id == p.id)
-                    .is_some_and(|live| player_visible(&sight, live, now)))
+                    .is_some_and(|live| player_visible_with_brush(&sight, live, now, has_brush)))
     });
     // Towers are public map landmarks, including their destruction state. Combat
     // still requires target_visible; public map knowledge does not grant sight.

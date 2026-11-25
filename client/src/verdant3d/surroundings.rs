@@ -65,7 +65,9 @@ pub(super) fn spawn(
         })
         .load("verdant/surroundings.png");
     commands.spawn((
+        super::VerdantScenery,
         Name::new("Verdant / distant forest surroundings"),
+        Visibility::Inherited,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(size.x, size.y))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color_texture: Some(painting),

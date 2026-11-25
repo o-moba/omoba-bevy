@@ -9,6 +9,7 @@ use shared::{
     wire::{ClientPacket, ServerPacket},
 };
 pub(super) const ADDRESS: &str = "offline-practice";
+pub(super) const ARAM_ADDRESS: &str = "offline-aram";
 
 pub(super) fn shipped_avatar(slug: Option<&str>) -> bool {
     slug.is_none_or(|s| {
@@ -30,8 +31,14 @@ impl LocalPractice {
         commands: Receiver<ClientPacket>,
         snapshots: Sender<ServerPacket>,
         signals: Sender<NetThreadSignal>,
+        aram: bool,
     ) -> Self {
-        let mut simulation = common::offline::PracticeSession::new(std::time::Instant::now());
+        let now = std::time::Instant::now();
+        let mut simulation = if aram {
+            common::offline::PracticeSession::new_aram(now)
+        } else {
+            common::offline::PracticeSession::new(now)
+        };
         // Until the practice picker lands, a desktop tester sets the level of
         // both teams' bots with OMOBA_BOT_DIFFICULTY; unset keeps Elite.
         match shared::bot_profile::BotDifficulty::from_env() {
@@ -168,7 +175,7 @@ pub(super) fn sync_banner(
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut shown_for: Local<Option<f32>>,
-    mut banners: Query<&mut Node, With<PracticeBanner>>,
+    mut banners: Query<(&mut Node, &mut crate::i18n::Localized), With<PracticeBanner>>,
 ) {
     let practice = session.is_offline()
         && screen.is_some_and(|s| *s.get() == crate::frontend::AppScreen::InMatch);
@@ -185,7 +192,15 @@ pub(super) fn sync_banner(
     } else {
         practice
     };
-    for mut node in &mut banners {
+    let key = if session.is_aram() {
+        "net.practice.aram_banner"
+    } else {
+        "net.practice.banner"
+    };
+    for (mut node, mut label) in &mut banners {
+        if label.key != key {
+            label.key = key;
+        }
         let display = if visible {
             Display::Flex
         } else {
@@ -249,7 +264,7 @@ mod tests {
                 let (commands, incoming) = crossbeam_channel::unbounded();
                 let (outgoing, snapshots) = crossbeam_channel::unbounded();
                 let (signals, _) = crossbeam_channel::unbounded();
-                app.insert_resource(LocalPractice::new(incoming, outgoing, signals));
+                app.insert_resource(LocalPractice::new(incoming, outgoing, signals, false));
                 app.add_systems(Update, step);
                 commands
                     .send(ClientPacket::Join {
@@ -295,7 +310,7 @@ mod tests {
         let (commands, incoming) = crossbeam_channel::unbounded();
         let (outgoing, snapshots) = crossbeam_channel::unbounded();
         let (signals, _) = crossbeam_channel::unbounded();
-        app.insert_resource(LocalPractice::new(incoming, outgoing, signals));
+        app.insert_resource(LocalPractice::new(incoming, outgoing, signals, false));
         app.add_systems(Update, step);
         commands
             .send(ClientPacket::Join {

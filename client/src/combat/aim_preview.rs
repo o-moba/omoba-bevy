@@ -9,6 +9,7 @@ use shared::navigation::Disc;
 
 use super::selection::TargetCandidates;
 use super::standard::point;
+use crate::maps::MapLayout;
 use crate::net::{GameStateSnapshot, StructureKind, TargetKind};
 use crate::skill_presentation::geometry::{
     self, GeoShape, PickCandidate, PickRule, Preview, PreviewContext, PreviewMark,
@@ -292,9 +293,15 @@ pub(crate) fn ally_aim(
 /// Where a ground move from one point toward another ends: the static map, then the
 /// living structures, then the armed pillars the client sees, in the order of the server
 /// (`common/src/skills/advanced.rs:277-279`).
-pub(crate) fn movement_clip(structures: &[Disc], terrain: &[Disc], from: Vec2, to: Vec2) -> Vec2 {
+pub(crate) fn movement_clip(
+    layout: MapLayout,
+    structures: &[Disc],
+    terrain: &[Disc],
+    from: Vec2,
+    to: Vec2,
+) -> Vec2 {
     let start = from.to_array();
-    let end = shared::navigation::world_navigation().clip_movement(start, to.to_array());
+    let end = layout.navigation().clip_movement(start, to.to_array());
     let end = shared::navigation::clip_discs(start, end, structures);
     Vec2::from_array(shared::navigation::clip_discs(start, end, terrain))
 }
@@ -312,6 +319,7 @@ pub(super) struct Caster<'a> {
 #[derive(SystemParam)]
 pub(crate) struct AimWorld<'w, 's> {
     game: Option<Res<'w, GameStateSnapshot>>,
+    layout: Option<Res<'w, MapLayout>>,
     visible: Query<'w, 's, &'static InheritedVisibility>,
 }
 
@@ -339,7 +347,8 @@ impl AimWorld<'_, '_> {
     /// refused is a cast that is not sent.
     pub(super) fn blink_legal(&self, point: Vec2, units: &TargetCandidates) -> bool {
         let (structures, terrain) = self.solids(units);
-        crate::navigation::blink_point_legal(point, &structures, &terrain)
+        let layout = self.layout.as_deref().copied().unwrap_or_default();
+        crate::navigation::blink_point_legal(layout, point, &structures, &terrain)
     }
 
     /// The aim to send for a cast that needs an ally under `rule`, from what the client
@@ -395,7 +404,8 @@ impl AimWorld<'_, '_> {
         let hero = caster.id.or(game.map(|game| game.your_id)).unwrap_or(0);
         let candidates = pick_candidates(caster.position, hero, caster.team, units, &self.visible);
         let (structures, terrain) = self.solids(units);
-        let clip = |from: Vec2, to: Vec2| movement_clip(&structures, &terrain, from, to);
+        let layout = self.layout.as_deref().copied().unwrap_or_default();
+        let clip = |from: Vec2, to: Vec2| movement_clip(layout, &structures, &terrain, from, to);
         let mut preview = geometry::preview_shape(
             def,
             &PreviewContext {
@@ -416,7 +426,7 @@ impl AimWorld<'_, '_> {
         );
         // A blink is not clipped to a legal point: the server drops the cast instead.
         if preview.shape == PreviewShape::BlinkLanding
-            && !crate::navigation::blink_point_legal(aim, &structures, &terrain)
+            && !crate::navigation::blink_point_legal(layout, aim, &structures, &terrain)
         {
             preview.refused = true;
         }

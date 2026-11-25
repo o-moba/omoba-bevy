@@ -10,7 +10,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::map_visuals::MapVisualRegistry;
-use crate::maps::{LANE_WIDTH, MapLayout, RIVER_WIDTH};
+use crate::maps::{ARAM_BOARD_HALF_EXTENTS, LANE_WIDTH, MapLayout, RIVER_WIDTH};
 use crate::sprite::{PlayerVisualMode, in_sprite2d};
 
 pub const WORLD_TILE_SIZE: f32 = 4.0 * shared::map::WORLD_SCALE;
@@ -60,6 +60,9 @@ pub fn y_sorted_z(band: f32, render_y: f32, owner: Entity) -> f32 {
 
 #[derive(Component)]
 pub struct World2dStatic;
+
+#[derive(Component)]
+pub(crate) struct AramWorld2d;
 
 /// Registry binding on each actual repeated tree/anchor sprite, not ground tiles.
 #[derive(Component)]
@@ -234,11 +237,71 @@ impl Plugin for World2dPlugin {
             .init_resource::<World2dAssets>()
             .add_systems(
                 Startup,
-                (load_world2d_assets, setup_world2d)
+                (load_world2d_assets, setup_world2d, spawn_aram_world2d)
                     .chain()
                     .run_if(in_sprite2d()),
             )
-            .add_systems(Update, apply_prop_profiles.run_if(in_sprite2d()));
+            .add_systems(
+                Update,
+                (apply_prop_profiles, sync_arena_visibility).run_if(in_sprite2d()),
+            );
+    }
+}
+
+fn spawn_aram_world2d(mut commands: Commands) {
+    let board = ARAM_BOARD_HALF_EXTENTS * 2.0;
+    for (name, size, depth, color) in [
+        (
+            "AramBoard",
+            board,
+            layer::GROUND,
+            Color::srgb(0.63, 0.71, 0.49),
+        ),
+        (
+            "AramRiver",
+            Vec2::new(4.5, board.y),
+            layer::WATER,
+            Color::srgb(0.40, 0.70, 0.68),
+        ),
+        (
+            "AramLane",
+            Vec2::new(board.x - 4.0, 15.65),
+            layer::PATH,
+            Color::srgb(0.83, 0.77, 0.62),
+        ),
+        (
+            "AramBridge",
+            Vec2::new(9.4, 16.7),
+            layer::PATH + 1.0,
+            Color::srgb(0.91, 0.83, 0.66),
+        ),
+    ] {
+        commands.spawn((
+            Sprite::from_color(color, size),
+            Transform::from_xyz(0.0, 0.0, depth),
+            Visibility::Hidden,
+            AramWorld2d,
+            Name::new(name),
+        ));
+    }
+}
+
+fn sync_arena_visibility(
+    layout: Res<MapLayout>,
+    mut terrain: Query<
+        (&mut Visibility, Has<AramWorld2d>),
+        Or<(With<World2dStatic>, With<AramWorld2d>)>,
+    >,
+) {
+    if !layout.is_changed() {
+        return;
+    }
+    for (mut visibility, aram) in &mut terrain {
+        *visibility = if layout.is_aram() == aram {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
