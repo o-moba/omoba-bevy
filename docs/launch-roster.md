@@ -116,6 +116,57 @@ before the rocket entered the camera view, and the confirmed hit. The heroes
 were 39.6 m apart. The defending snapshot began the warning 32 m from the
 defender and kept the caster's ID and hidden position out of its view.
 
+## Run the human pilot
+
+Use ten players on the same software revision and a host address reachable on
+the private LAN. Pair the candidates as follows for the first two matches.
+
+| Duty | Team A | Team B |
+| --- | --- | --- |
+| Solo | Warrior | Cinderforge |
+| Jungle | Warden | Stormfist |
+| Mid | Orbitwright | Mage |
+| Carry | Wildspark | Ranger |
+| Support | Chainkeeper | Frostguard |
+
+From the agreed checkout, bind the standalone server to the host's LAN IP.
+Replace the example address with that IP on the host and in each client
+command. Use loopback when all test processes are on the same machine.
+
+```sh
+env -u OMOBA_DATABASE_URL -u OMOBA_MAP_CONFIG -u OMOBA_COMBAT_SANDBOX \
+  OMOBA_SERVER_ROLE=standalone OMOBA_MATCH_MODE=release OMOBA_TEAM_SIZE=5 \
+  SERVER_ADDR=192.168.1.10:4000 cargo run --release --locked -p server \
+  2>&1 | tee round-01-server.log
+```
+
+```sh
+env -u OMOBA_AUTOJOIN -u OMOBA_COMBAT_SANDBOX \
+  GAME_SERVER_ADDR=192.168.1.10:4000 cargo run --release --locked -p client
+```
+
+Use a separate `OMOBA_CLIENT_CONFIG_DIR` per desktop process if several players
+share one computer. Mobile testers use a compatible Dev build and can enter
+the LAN address through Home → Connection → Custom before restarting the app.
+
+1. Number each team by the duty order above. Join through Play in the order
+   A1, B1, A2, B2 through A5, B5. Wait for each player to appear in the draft
+   before the next enters. The first team joins Green. Once all ten are
+   present, each player selects and locks the planned class and role.
+2. Save the locked draft, the server log, and clips from the caster and the
+   defender when an interaction matters. Capture the result screen promptly
+   when the game ends. Check for `round_start connected=10` and record any
+   disconnect or seat substitution before using the match as human evidence.
+3. Stop the owned foreground server with Ctrl+C and run a fresh process with
+   `round-02-server.log`. Have the same players rejoin in order B1, A1 through
+   B5, A5, retaining their heroes and roles. Confirm the swapped colors in
+   the locked draft. An in-place rematch keeps the existing seats.
+
+A loopback preflight exercised this order with ten scripted protocol clients
+in each round. Both drafts locked the listed classes and roles and both logs
+reported `round_start connected=10` with the teams swapped. The human matches
+provide the interaction observations and the launch decision evidence.
+
 ## Scenarios to record
 
 Record the build, side, player count, actual roles, input device and whether
