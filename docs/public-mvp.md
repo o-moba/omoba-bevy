@@ -22,6 +22,10 @@ The wire names predate the split: `humans_only` is Ranked, `quick` is Casual PvP
 so older protocol 11 clients keep working (an old Quick search plays Casual PvP).
 The policy is in [match-progression.md › Queues](match-progression.md#queues-ranked-casual-pvp-and-vs-bots).
 
+Casual PvP and vs Bots can use named server-controlled teammates and opponents
+with bundled portraits and scripted Match chat. See the
+[low-population matchmaking plan](plans/ranked-bot-fill.md).
+
 Players select an initial hero, inspect their assigned team, lock their choices,
 see a shared three-second countdown, and load together. The server waits for all
 allocated humans and a durable database acknowledgment before starting gameplay.
@@ -222,6 +226,7 @@ OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test' make test-postgres
 export OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test'
 export HARNESS_SERVER_BIN="$PWD/target/debug/server"
 node scripts/test_public_mvp.mjs --scenario=lifecycle --clients=1 --preference=bot_practice
+node scripts/test_public_mvp.mjs --clients=2 --preference=quick --seconds=16 --input-hz=0 --expect-bot-chat
 node scripts/test_public_mvp.mjs --scenario=abandoned --clients=1 --preference=bot_practice
 node scripts/test_public_mvp.mjs --scenario=recovery --clients=1 --preference=bot_practice --seconds=5
 node scripts/test_public_mvp.mjs --clients=100 --preference=humans_only --seconds=30 --input-hz=20

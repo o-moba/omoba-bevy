@@ -1399,6 +1399,7 @@ fn avatar_portrait_path(
 
 fn portrait(
     parent: &mut ChildSpawnerCommands,
+    bot_portrait: Option<String>,
     avatar: Option<&str>,
     sprite: Option<&str>,
     mode: PlayerVisualMode,
@@ -1406,26 +1407,30 @@ fn portrait(
     sprites: Option<&SpriteVisualAssets>,
     size: f32,
 ) {
-    let image = if mode == PlayerVisualMode::Sprite2d {
-        sprite
-            .and_then(|id| {
-                crate::sprite_roster::sprite_character_roster()
-                    .iter()
-                    .position(|entry| entry.id == id)
-            })
-            .zip(sprites)
-            .map(|(index, sprites)| {
-                let (image, layout, index) = sprites.portrait(index);
-                ImageNode::from_atlas_image(image, TextureAtlas { layout, index })
-            })
-    } else {
-        None
-    }
-    .or_else(|| {
-        avatar_portrait_path(avatar, crate::passport::thumbnail_asset_path)
-            .zip(assets)
-            .map(|(path, assets)| ImageNode::new(assets.load(path)))
-    });
+    let image = bot_portrait
+        .zip(assets)
+        .map(|(path, assets)| ImageNode::new(assets.load(path)))
+        .or_else(|| {
+            if mode != PlayerVisualMode::Sprite2d {
+                return None;
+            }
+            sprite
+                .and_then(|id| {
+                    crate::sprite_roster::sprite_character_roster()
+                        .iter()
+                        .position(|entry| entry.id == id)
+                })
+                .zip(sprites)
+                .map(|(index, sprites)| {
+                    let (image, layout, index) = sprites.portrait(index);
+                    ImageNode::from_atlas_image(image, TextureAtlas { layout, index })
+                })
+        })
+        .or_else(|| {
+            avatar_portrait_path(avatar, crate::passport::thumbnail_asset_path)
+                .zip(assets)
+                .map(|(path, assets)| ImageNode::new(assets.load(path)))
+        });
     let mut entity = parent.spawn((
         Node {
             width: Val::Px(size),
@@ -1518,6 +1523,10 @@ fn desktop_team(
                 .with_children(|p| {
                     portrait(
                         p,
+                        shared::bot_personas::portrait_asset_path(
+                            player.is_bot,
+                            player.bot_persona.as_deref(),
+                        ),
                         player.avatar.as_deref(),
                         player.sprite_character.as_deref(),
                         mode,
@@ -1613,6 +1622,10 @@ fn mobile_team(
                 p.spawn(row_node()).with_children(|p| {
                     portrait(
                         p,
+                        shared::bot_personas::portrait_asset_path(
+                            player.is_bot,
+                            player.bot_persona.as_deref(),
+                        ),
                         player.avatar.as_deref(),
                         player.sprite_character.as_deref(),
                         mode,
@@ -2294,6 +2307,7 @@ fn history_body(
             .with_children(|p| {
                 portrait(
                     p,
+                    None,
                     item.avatar.as_deref(),
                     item.sprite_character.as_deref(),
                     mode,
@@ -3160,6 +3174,7 @@ mod tests {
                 input_kind: Default::default(),
                 participation: None,
                 is_bot: false,
+                bot_persona: None,
                 player_id: 7,
                 profile_id: Some("a".repeat(64)),
                 nickname: "Дмитрий".into(),

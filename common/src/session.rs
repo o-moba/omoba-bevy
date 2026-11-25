@@ -59,6 +59,7 @@ impl GameWorld {
             let spawn = spawn_position_for_team(map_layout, Team::Green);
 
             ConnectedPlayer {
+                bot_persona: None,
                 career_profile: None,
                 career_capable: false,
                 draft: Default::default(),

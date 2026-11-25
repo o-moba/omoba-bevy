@@ -226,6 +226,7 @@ fn quick_rematches_do_not_reuse_completed_or_pending_social_assembly_keys() {
                     channel: SocialChannel::Match,
                     text: "你好世界".repeat(30),
                 },
+                bot_chat: None,
             })
             .collect();
         let packet = ServerPacket::Social {

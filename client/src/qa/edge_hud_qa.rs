@@ -193,6 +193,8 @@ fn fixture(
         kills: Vec::new(),
         players: (0..10)
             .map(|index| LiveScorePlayer {
+                is_bot: false,
+                bot_persona: None,
                 avatar: None,
                 player_id: if index == 0 {
                     local_id

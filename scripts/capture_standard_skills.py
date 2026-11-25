@@ -615,7 +615,7 @@ def main(argv=None):
     parser.add_argument("--assets", type=Path, default=Path("client/assets"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--hero", action="append", choices=HEROES)
-    parser.add_argument("--handhelds", action="store_true", help="Warrior: equip sword/hammer/scepter, run, attack, swap avatar, unequip")
+    parser.add_argument("--handhelds", action="store_true", help="Warrior sword and hammer, running, attack, avatar swap and unequip")
     parser.add_argument("--roster", action="store_true", help="Capture all remaining classes, each Q/W/E/R accepted by live server")
     parser.add_argument("--phases", action="store_true",
                         help="Three state-gated stills per skill (windup, release, impact or settled); default: all 17 classes")

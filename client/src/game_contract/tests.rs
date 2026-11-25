@@ -388,7 +388,7 @@ fn wildspark_slots_carry_its_guns() {
     let ext = |id: &str| body["slots"][id]["ext"][PROFILE].clone();
     assert_eq!(
         ext("basic.wildspark.0")["handheld"]["item"],
-        "wild-repeater"
+        "wildspark-repeater"
     );
     assert_eq!(
         ext("basic.wildspark.rockets.0")["handheld"]["item"],

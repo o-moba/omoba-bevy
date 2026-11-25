@@ -144,6 +144,7 @@ fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> Particip
         input_kind: Default::default(),
         participation: None,
         is_bot: false,
+        bot_persona: None,
         player_id,
         profile_id: Some(profile.profile_id.clone()),
         nickname: profile.nickname.clone(),

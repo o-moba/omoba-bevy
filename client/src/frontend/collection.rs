@@ -12,12 +12,13 @@ use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use omoba_passport::avatars::AvatarDefinition;
+use shared::{HeroClass, handheld::HandheldSelection};
 
 use super::AppScreen;
 use super::card::ProfileCard;
 use super::preview::{AvatarPreview, PreviewStatus};
 use super::widgets;
-use crate::i18n::{Locale, Localized, tr, trf};
+use crate::i18n::{Locale, Localized, data, tr, trf};
 use crate::team::{AvatarThumbnails, TeamSelection};
 use crate::ui::kit_assets::{Frame, Icon, KitImage};
 use crate::ui::living_background::{self, LivingBands, LivingScene};
@@ -205,7 +206,7 @@ fn spawn_catalogue_grid(
     thumbnails: &AvatarThumbnails,
     phone: bool,
     filter: CollectionFilter,
-    handheld: &shared::handheld::HandheldSelection,
+    selection: &TeamSelection,
 ) {
     let ekza = crate::account_region::features().ekza;
     grid.spawn(Node {
@@ -243,7 +244,7 @@ fn spawn_catalogue_grid(
     ))
     .with_children(|grid| {
         if filter == CollectionFilter::Weapons {
-            spawn_weapon_choices(grid, handheld, phone, ekza);
+            spawn_weapon_choices(grid, selection, phone, ekza);
             return;
         }
         if filter != CollectionFilter::Studio {
@@ -353,14 +354,16 @@ fn spawn_catalogue_grid(
 /// choices only.
 fn spawn_weapon_choices(
     grid: &mut ChildSpawnerCommands,
-    handheld: &shared::handheld::HandheldSelection,
+    selection: &TeamSelection,
     phone: bool,
     ekza: bool,
 ) {
     use omoba_passport::store::CatalogueStatus;
+    let handheld = &selection.effective_handheld();
+    let hero_name = data::hero_name(selection.hero_class);
     grid.spawn(widgets::heading(tr("collection.weapons"), 17.0));
     grid.spawn(widgets::label(
-        tr("collection.weapons_hint"),
+        &trf("collection.weapons_hint", &[("hero", &hero_name)]),
         12.0,
         theme::MUTED,
     ));
@@ -379,7 +382,7 @@ fn spawn_weapon_choices(
             Name::new("SelectedWeaponStatus"),
         ));
     }
-    let choices = handheld_choices();
+    let choices = handheld_choices(selection.hero_class);
     // The tiles show author and licence; the chosen item's attribution line
     // (CC-BY credit) is shown in full here.
     if let Some(attribution) = choices
@@ -567,7 +570,7 @@ fn refresh_collection_catalogue(
                     &thumbnails,
                     platform.is_mobile(),
                     *filter,
-                    &selection.handheld,
+                    &selection,
                 );
             });
     }
@@ -693,7 +696,7 @@ fn spawn_collection(
                         &thumbnails,
                         phone,
                         *filter,
-                        &selection.handheld,
+                        &selection,
                     );
                 });
 
@@ -863,7 +866,10 @@ fn collection_actions(
                 omoba_passport::weapon_store::refresh(true);
             }
             CollectionAction::Handheld(choice) => {
-                if let shared::handheld::HandheldSelection::Item(id) = choice {
+                if !choice.compatible(selection.hero_class) {
+                    continue;
+                }
+                if let HandheldSelection::Item(id) = choice {
                     if !omoba_passport::weapon_store::eligible(id) {
                         continue;
                     }
@@ -1313,11 +1319,14 @@ pub(super) struct HandheldChoice {
 }
 
 /// Identical cosmetic choices in the collection and the authoritative draft.
-pub(super) fn handheld_choices() -> Vec<HandheldChoice> {
+pub(super) fn handheld_choices(class: HeroClass) -> Vec<HandheldChoice> {
     handheld_choices_from(
         &omoba_passport::weapons::catalog().items,
         omoba_passport::weapon_store::snapshot().2,
     )
+    .into_iter()
+    .filter(|choice| choice.value.compatible(class))
+    .collect()
 }
 
 /// Library entries first, then the shipped choices, then the catalogue; the
@@ -1401,6 +1410,22 @@ pub(super) fn handheld_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weapon_picker_only_offers_models_for_the_selected_class() {
+        let offered =
+            |class, id: &str| handheld_choices(class).iter().any(|choice| choice.id == id);
+        assert!(offered(HeroClass::Warrior, "Handheld-forge-sword"));
+        assert!(offered(HeroClass::Warrior, "Handheld-forge-hammer"));
+        assert!(offered(HeroClass::Cinderforge, "Handheld-forge-hammer"));
+        assert!(!offered(HeroClass::Wildspark, "Handheld-forge-sword"));
+        assert!(!offered(HeroClass::Warrior, "Handheld-verdant-bow"));
+        assert!(offered(HeroClass::Wildspark, "Handheld-wildspark-repeater"));
+        assert!(!offered(HeroClass::Wildspark, "Handheld-wild-repeater"));
+        assert!(offered(HeroClass::Riftshot, "Handheld-wild-repeater"));
+        assert!(!offered(HeroClass::Riftshot, "Handheld-wildspark-repeater"));
+        assert!(offered(HeroClass::Wildspark, "Handheld-wild-launcher"));
+    }
 
     /// The per-frame connection refresh keeps the Studio line in the active
     /// language instead of the passport crate's English label.

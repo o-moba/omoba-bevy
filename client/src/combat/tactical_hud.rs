@@ -692,6 +692,8 @@ mod tests {
         let player = |id, team| LiveScorePlayer {
             player_id: id,
             nickname: format!("Player{id}"),
+            is_bot: false,
+            bot_persona: None,
             avatar: Some("agnes".into()),
             team,
             hero_class: shared::HeroClass::Wildspark,

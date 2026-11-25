@@ -119,6 +119,7 @@ fn result(a: &ProfileSummary, b: &ProfileSummary, id: &str, n: u64) -> MatchResu
         participation: None,
         player_id,
         is_bot: false,
+        bot_persona: None,
         profile_id: Some(profile.profile_id.clone()),
         nickname: profile.nickname.clone(),
         team,

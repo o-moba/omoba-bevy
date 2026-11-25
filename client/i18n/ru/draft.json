@@ -1,6 +1,8 @@
 {
   "draft.notice.unlock_first": "Сначала отмените подтверждение выбора, чтобы внести изменения.",
   "draft.notice.avatar_unavailable": "Этот аватар недоступен в вашей библиотеке.",
+  "draft.notice.weapon_incompatible": "Это оружие недоступно для выбранного класса.",
+  "draft.weapons_for": "Оружие для класса {hero}",
   "draft.notice.verifying": "Проверка аватара…",
   "draft.notice.verification_failed": "Проверка аватара не удалась. Ваш выбранный герой не изменён.",
   "draft.warning.same_avatar": "Союзник выбрал такой же аватар · обсудите выбор перед подтверждением.",
@@ -9,6 +11,7 @@
   "draft.warning.default": "Роли описывают ваш план; класс определяет ваши способности.",
   "draft.roster.you": " · ВЫ",
   "draft.roster.bot": " · БОТ",
+  "draft.roster.bot_label": "БОТ",
   "draft.roster.class_role": "{hero} · {role}",
   "draft.roster.ready": "ГОТОВО",
   "draft.roster.loading": "ЗАГРУЗКА",

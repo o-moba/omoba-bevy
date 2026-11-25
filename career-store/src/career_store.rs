@@ -1520,6 +1520,16 @@ fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
         {
             return Err("Participant loadout is too large.".into());
         }
+        if p.bot_persona.as_ref().is_some_and(|slug| {
+            !p.is_bot
+                || slug.is_empty()
+                || slug.len() > 32
+                || !slug
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+        }) {
+            return Err("Invalid bot persona.".into());
+        }
         p.rating = None;
         p.progression_xp_gained = 0;
     }
@@ -1621,6 +1631,7 @@ fn validate_rated(result: &MatchResult) -> StoreResult<()> {
 fn same_person(a: &ParticipantResult, b: &ParticipantResult) -> bool {
     a.player_id == b.player_id
         && a.is_bot == b.is_bot
+        && a.bot_persona == b.bot_persona
         && a.profile_id == b.profile_id
         && a.nickname == b.nickname
         && a.team == b.team

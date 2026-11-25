@@ -208,6 +208,7 @@ impl Arena {
                 input_kind: Default::default(),
                 participation: None,
                 is_bot: false,
+                bot_persona: None,
                 player_id: p.hero.identity.id,
                 profile_id: None,
                 nickname: format!("Hero {}", p.hero.identity.id),

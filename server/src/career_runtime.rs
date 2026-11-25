@@ -73,21 +73,13 @@ fn participant(player: &ConnectedPlayer) -> ParticipantResult {
         input_kind: Default::default(),
         participation: None,
         is_bot: player.hero.identity.is_bot,
+        bot_persona: player.bot_persona.map(|persona| persona.slug().to_owned()),
         player_id: player.hero.identity.id,
         profile_id: player
             .career_profile
             .as_ref()
             .map(|profile| profile.profile_id.clone()),
-        nickname: player.career_profile.as_ref().map_or_else(
-            || {
-                if player.hero.identity.is_bot {
-                    format!("Bot {}", player.hero.identity.id)
-                } else {
-                    format!("Guest {}", player.hero.identity.id)
-                }
-            },
-            |profile| profile.nickname.clone(),
-        ),
+        nickname: player.display_nickname(),
         team: player.hero.identity.team,
         hero_class: player.hero.identity.hero_class,
         character: serde_json::to_value(player.hero.identity.character)
@@ -394,6 +386,7 @@ impl ServerRuntime {
         now: Instant,
     ) {
         let ClientPacket::Join {
+            handheld,
             prematch,
             team,
             character,
@@ -408,6 +401,7 @@ impl ServerRuntime {
         };
         let player = self.world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
+        let was_joined = player.joined;
         if !player.protocol_compatible {
             return;
         }
@@ -419,14 +413,23 @@ impl ServerRuntime {
                 Some(shared::protocol::JoinRejection::SessionActive);
             return;
         }
-        let player = &self.world.players[&addr];
+        let player = self.world.players.get_mut(&addr).unwrap();
         if player.joined {
+            // A reclaimed endpoint passed admission. A repeated Join on the
+            // existing endpoint cannot change the equipped item.
+            if !was_joined {
+                player.hero.identity.handheld = handheld;
+            }
             self.combat_log.ledger.update_player(
                 player.hero.identity.id,
                 player.hero.progress.level,
                 false,
             );
             self.career.backend.set_playing(addr, true);
+            return;
+        }
+        if !handheld.compatible(hero_class) {
+            player.join_error = Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
             return;
         }
         let id = player.hero.identity.id;
@@ -475,6 +478,7 @@ impl ServerRuntime {
         let player = self.world.players.get_mut(&addr).unwrap();
         player.career_profile = Some(profile);
         player.draft.capable = prematch;
+        player.hero.identity.handheld = handheld;
         handle_join_request_with_sprite(
             player,
             team,

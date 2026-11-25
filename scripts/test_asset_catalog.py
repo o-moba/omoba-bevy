@@ -195,6 +195,38 @@ class AssetCatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(CatalogError, "effective rocket form changed"):
             Exporter(root).build(COMMIT)
 
+    def test_wildspark_repeater_requires_its_own_packaged_binding(self):
+        root = self.fixture()
+
+        def replace_wildspark_model(data):
+            row = next(item for item in data["items"] if item["id"] == "wildspark-repeater")
+            row["model"] = "weapons/wild-repeater.glb"
+
+        self.mutate(root, "client/assets/weapons/manifest.json", replace_wildspark_model)
+        with self.assertRaisesRegex(CatalogError, "Wildspark default repeater binding changed"):
+            Exporter(root).build(COMMIT)
+
+    def test_each_handheld_must_have_and_match_its_manifest_hash(self):
+        root = self.fixture()
+        manifest = "client/assets/weapons/manifest.json"
+        approved = json.loads((ROOT / manifest).read_text())
+        for index, weapon in enumerate(approved["items"]):
+            for message, mutate in (
+                    ("Missing or invalid handheld approval SHA-256", lambda row: row.pop("sha256")),
+                    ("Handheld manifest SHA-256 mismatch", lambda row: row.update(sha256="0" * 64))):
+                with self.subTest(weapon=weapon["id"], case=message):
+                    invalid = copy.deepcopy(approved)
+                    mutate(invalid["items"][index])
+                    (root / manifest).write_text(json.dumps(invalid))
+                    with self.assertRaisesRegex(CatalogError, f"{message}: .*{weapon['id']}"):
+                        Exporter(root).build(COMMIT)
+
+    def test_approved_model_cannot_be_reused_as_another_heros_baseline(self):
+        self.authored_mutation_fails(lambda data: next(
+            row for row in data["requirements"] if row["id"] == "ranger.handheld.bow"
+        )["baseline"].update(sourcePath="client/assets/weapons/forge-sword.glb"),
+            "Handheld baseline lacks approval for its heroes: ranger.handheld.bow")
+
     def test_previews_are_optional_verified_and_change_revision(self):
         model = next(r["baseline"] for r in self.catalog["requirements"] if r["baseline"]["kind"] == "model")
         self.assertIsNone(model["preview"])
@@ -233,17 +265,19 @@ class AssetCatalogTests(unittest.TestCase):
     def test_runtime_mapping_drift_requires_authored_review(self):
         root = self.fixture()
         source = root / "shared/src/handheld.rs"
-        source.write_text(source.read_text().replace('Some("wild-repeater")', 'Some("wild-launcher")'))
+        original = source.read_text()
+        self.assertIn('"wild-repeater"', original)
+        source.write_text(original.replace('"wild-repeater"', '"wild-launcher"', 1))
         with self.assertRaisesRegex(CatalogError, "Authored source evidence changed"):
             Exporter(root).build(COMMIT)
 
-    def test_held_weapon_override_drift_requires_authored_review(self):
+    def test_held_weapon_resolution_drift_requires_authored_review(self):
         root = self.fixture()
         source = root / "client/src/held_weapons.rs"
         text = source.read_text()
-        self.assertIn('"weapons/wildspark-repeater.glb".to_owned()', text)
-        source.write_text(text.replace('"weapons/wildspark-repeater.glb".to_owned()',
-                                       '"weapons/wild-repeater.glb".to_owned()'))
+        self.assertIn("let model = def.model.clone();", text)
+        source.write_text(text.replace("let model = def.model.clone();",
+                                       'let model = "weapons/wild-repeater.glb".to_owned();', 1))
         with self.assertRaisesRegex(CatalogError, "Authored source evidence changed: client/src/held_weapons.rs"):
             Exporter(root).build(COMMIT)
 

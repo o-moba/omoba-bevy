@@ -155,6 +155,7 @@ fn fixture() -> CareerView {
             input_kind: Default::default(),
             participation: None,
             is_bot: false,
+            bot_persona: None,
             player_id: index + 1,
             profile_id: Some(if index == 0 {
                 own.profile_id.clone()

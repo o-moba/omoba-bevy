@@ -475,6 +475,7 @@ impl SocialClient {
                     team: sender.team,
                     age_ms: 0,
                     kind,
+                    bot_chat: None,
                 },
                 Instant::now(),
             );
@@ -1503,11 +1504,14 @@ fn render_chat_log(
             .iter()
             .filter(|e| social.visible_sender(e.player_id))
         {
-            if let SocialEventKind::Chat {
-                channel,
-                text: message,
-            } = &event.kind
+            if let SocialEventKind::Chat { channel, .. } = &event.kind
+                && let Some(message) = event.chat_text(crate::i18n::active().code())
             {
+                let bot_nickname = event
+                    .bot_chat
+                    .as_ref()
+                    .map(|_| trf("career.player.bot", &[("name", &event.nickname)]));
+                let nickname = bot_nickname.as_deref().unwrap_or(&event.nickname);
                 p.spawn(row()).with_children(|p| {
                     text(
                         p,
@@ -1515,8 +1519,8 @@ fn render_chat_log(
                             "social.message",
                             &[
                                 ("channel", &channel_label(*channel)),
-                                ("nickname", &event.nickname),
-                                ("message", message),
+                                ("nickname", &nickname),
+                                ("message", &message),
                             ],
                         ),
                         14.0,
@@ -1866,12 +1870,15 @@ fn render_bubbles(
         Option<&crate::model_scale::NormalizeModelScale>,
         Option<&crate::net::NetworkSpriteCharacter>,
     )>,
-    bubbles: Query<(Entity, &SocialBubble)>,
+    bubbles: Query<(Entity, &SocialBubble, Option<&Text>)>,
     ui_scale: Option<Res<UiScale>>,
     mobile: Option<Res<MobileControls>>,
     bars: Query<(&crate::combat::CombatBarAnchor, &Transform)>,
 ) {
-    let current: Vec<_> = bubbles.iter().map(|(entity, key)| (entity, *key)).collect();
+    let current: Vec<_> = bubbles
+        .iter()
+        .map(|(entity, key, text)| (entity, *key, text.map(|text| text.0.as_str())))
+        .collect();
     let mut desired = Vec::new();
     let Ok((camera_entity, camera)) = camera.single() else {
         reconcile_bubbles(&mut commands, &current, desired);
@@ -1963,7 +1970,7 @@ fn render_bubbles(
                 },
             });
         }
-        if let SocialEventKind::Chat { text, .. } = &event.kind {
+        if let Some(text) = event.chat_text(crate::i18n::active().code()) {
             desired.push(BubbleDraw {
                 node: Node {
                     padding: UiRect::all(Val::Px(5.0)),
@@ -2044,13 +2051,18 @@ struct BubbleDraw {
 
 fn reconcile_bubbles(
     commands: &mut Commands,
-    current: &[(Entity, SocialBubble)],
+    current: &[(Entity, SocialBubble, Option<&str>)],
     desired: Vec<BubbleDraw>,
 ) {
     let mut retained = HashSet::new();
     for draw in desired {
-        let existing = current.iter().find(|(_, key)| *key == draw.key);
-        let entity = if let Some((entity, _)) = existing {
+        let existing = current.iter().find(|(_, key, _)| *key == draw.key);
+        let entity = if let Some((entity, _, old_text)) = existing {
+            if let Some(text) = draw.text.as_ref()
+                && Some(text.as_str()) != *old_text
+            {
+                commands.entity(*entity).insert(Text::new(text.clone()));
+            }
             *entity
         } else if let Some(text) = draw.text.clone() {
             commands
@@ -2119,7 +2131,7 @@ fn reconcile_bubbles(
                 .insert(image);
         }
     }
-    for (entity, _) in current {
+    for (entity, _, _) in current {
         if !retained.contains(entity) {
             commands.entity(*entity).despawn();
         }
@@ -2355,6 +2367,7 @@ mod tests {
                     channel: SocialChannel::Team,
                     text: "confirmed".into(),
                 },
+                bot_chat: None,
             },
             now,
         );
@@ -2952,7 +2965,7 @@ mod tests {
             let current: Vec<_> = world
                 .query::<(Entity, &SocialBubble)>()
                 .iter(world)
-                .map(|(entity, key)| (entity, *key))
+                .map(|(entity, key)| (entity, *key, None))
                 .collect();
             reconcile_bubbles(&mut world.commands(), &current, desired);
             world.flush();
@@ -3020,6 +3033,7 @@ mod tests {
             team: shared::social::SocialTeam::Green,
             age_ms: 0,
             kind,
+            bot_chat: None,
         }
     }
     fn view(events: Vec<SocialEvent>) -> SocialView {

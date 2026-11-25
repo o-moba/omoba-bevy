@@ -848,6 +848,8 @@ mod tests {
         shared::live_score::LiveScorePlayer {
             player_id: id,
             nickname: "Hidden opponent".into(),
+            is_bot: false,
+            bot_persona: None,
             avatar: None,
             team: shared::map::Team::Blue,
             hero_class: shared::HeroClass::Ranger,

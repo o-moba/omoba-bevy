@@ -215,6 +215,7 @@ fn prematch_fixture(stage: usize) -> PrematchSnapshot {
                 sprite_character: None,
                 role: Role::ALL[index % 5],
                 is_bot: index >= 5,
+                bot_persona: None,
                 locked: stage != 5 || index % 2 == 0,
                 loaded: stage == 7 && !(3..5).contains(&index),
             })

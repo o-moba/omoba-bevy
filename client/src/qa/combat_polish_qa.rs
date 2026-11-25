@@ -470,6 +470,8 @@ fn prepare(
     let player = |id, name: &str, team| shared::live_score::LiveScorePlayer {
         player_id: id,
         nickname: name.into(),
+        is_bot: false,
+        bot_persona: None,
         avatar: Some("agnes".into()),
         team,
         hero_class: shared::HeroClass::Wildspark,

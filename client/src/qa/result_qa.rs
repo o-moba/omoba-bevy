@@ -231,6 +231,8 @@ fn live_row(team: shared::map::Team) -> LiveScoreboard {
         kills: Vec::new(),
         players: (0..10)
             .map(|index| LiveScorePlayer {
+                is_bot: false,
+                bot_persona: None,
                 avatar: None,
                 player_id: YOUR_ID + index,
                 nickname: [

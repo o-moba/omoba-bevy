@@ -1139,6 +1139,62 @@ mod tests {
     }
 
     #[test]
+    fn social_chat_golden_replays_human_and_localized_bot_lines() {
+        use crate::social::{
+            BotChatTranslation, SocialChannel, SocialEvent, SocialEventKind, SocialTeam, SocialView,
+        };
+
+        const GOLDEN: &str = r#"{"type":"social","server_epoch":7,"match_id":3,"sequence":2,"social":{"events":[{"id":1,"player_id":8,"nickname":"Игрок","team":"green","age_ms":200,"kind":{"kind":"chat","channel":"match","text":"Привет"}},{"id":2,"player_id":9,"nickname":"Рикошет","team":"green","age_ms":0,"kind":{"kind":"chat","channel":"match","text":"Красава, Игрок!"},"bot_chat":{"en":"Nice one, Игрок!","zh_hans":"Игрок，太帅了！"}}],"request_id":null,"error":null,"allowed_reactions":[]}}"#;
+        let packet = ServerPacket::Social {
+            server_epoch: 7,
+            match_id: 3,
+            sequence: 2,
+            social: SocialView {
+                events: vec![
+                    SocialEvent {
+                        id: 1,
+                        player_id: 8,
+                        nickname: "Игрок".into(),
+                        team: SocialTeam::Green,
+                        age_ms: 200,
+                        kind: SocialEventKind::Chat {
+                            channel: SocialChannel::Match,
+                            text: "Привет".into(),
+                        },
+                        bot_chat: None,
+                    },
+                    SocialEvent {
+                        id: 2,
+                        player_id: 9,
+                        nickname: "Рикошет".into(),
+                        team: SocialTeam::Green,
+                        age_ms: 0,
+                        kind: SocialEventKind::Chat {
+                            channel: SocialChannel::Match,
+                            text: "Красава, Игрок!".into(),
+                        },
+                        bot_chat: Some(BotChatTranslation {
+                            en: "Nice one, Игрок!".into(),
+                            zh_hans: "Игрок，太帅了！".into(),
+                        }),
+                    },
+                ],
+                ..Default::default()
+            },
+        };
+        assert_eq!(serde_json::to_string(&packet).unwrap(), GOLDEN);
+        let decoded: ServerPacket = serde_json::from_str(GOLDEN).unwrap();
+        let ServerPacket::Social { social, .. } = decoded else {
+            panic!("not a social packet");
+        };
+        assert!(social.events[0].bot_chat.is_none());
+        assert_eq!(
+            social.events[1].chat_text("zh-Hans"),
+            Some("Игрок，太帅了！")
+        );
+    }
+
+    #[test]
     fn character_choice_wire_ids_are_the_snake_case_slugs() {
         for choice in CharacterChoice::ALL {
             let wire = serde_json::to_string(&choice).unwrap();

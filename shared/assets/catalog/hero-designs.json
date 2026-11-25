@@ -137,13 +137,13 @@
       "status": "unconfigured"
     }
   ],
-  "gameContractRevision": "sha256-bae71784fff170720fcaf18da3992c05a4800257f89954157b687406b1257402",
+  "gameContractRevision": "sha256-a8f3ffaf95b4f57bab3f56ce0aed8d44d713c5d10ae47ed576ceb7bfbf8101b4",
   "gameId": "omoba",
   "modeScope": "classic",
-  "revision": "sha256-ab21e6cae6a586124e48bfb8422156c29386956518179dc05e8ddff721d98b69",
+  "revision": "sha256-2c634902b97d8edf595d7f025026fad9c4730388969c01699d5a41aff25dde2b",
   "schema": "omoba.hero-designs.v1",
   "source": {
-    "commit": "51f3b711d6316eb9b2913009c712e805ca57a773",
+    "commit": "9eb642bd32418839db050bb8aa00fb7e83f905d4",
     "exporter": "scripts/export_game_contract.py",
     "inputsSha256": "a6b741d7868fcd521d90734c8881f919cffb61df15123821d3b8190b66d2f296"
   }

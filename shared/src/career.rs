@@ -110,6 +110,8 @@ pub struct ParticipantResult {
     // Omission preserves old durable receipts and older snapshot consumers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub participation: Option<Participation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_persona: Option<String>,
     pub profile_id: Option<String>,
     pub nickname: String,
     pub team: Team,
