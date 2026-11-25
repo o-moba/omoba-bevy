@@ -91,6 +91,31 @@ only partly. Test those decisions with human teammates before using those
 comparisons to tune damage or shields. The Warden's repeatable camp gold lead
 is a separate early-game question from the whole-match comparison.
 
+## Defender view of Last Spark
+
+Use the native debug client and server to repeat the one-viewport check. The
+fixture binds to loopback and starts Wildspark out of the defending team's
+sight. The cast uses the ordinary UDP request and the defender receives the
+normal fog-filtered snapshots. The 1280 × 720 recording and wire evidence are
+saved together for review.
+
+```sh
+cargo build --locked -p client -p server
+python3 scripts/capture_wildspark_warning.py \
+  --client-bin target/debug/client --server-bin target/debug/server \
+  --assets client/assets --output /tmp/omoba-last-spark-defender
+```
+
+Check the clipped warning and hidden caster in the matching server snapshots.
+Inspect the red lane, rocket and damage feedback in the native frames. The
+recording also reports the largest frame request gap during the cast. Use the
+human test to assess whether a player can respond in time on their device.
+
+The local desktop run showed the red warning across the defender, its clearing
+before the rocket entered the camera view, and the confirmed hit. The heroes
+were 39.6 m apart. The defending snapshot began the warning 32 m from the
+defender and kept the caster's ID and hidden position out of its view.
+
 ## Scenarios to record
 
 Record the build, side, player count, actual roles, input device and whether

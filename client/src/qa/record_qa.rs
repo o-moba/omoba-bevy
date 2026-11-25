@@ -1,6 +1,6 @@
 //! Opt-in frame recorder for demo videos. Disabled unless OMOBA_RECORD_DIR is
-//! set. It reads the primary window back at OMOBA_RECORD_FPS (default 30) and
-//! writes numbered PNGs plus `frames.jsonl` with each frame's wall-clock time,
+//! set. It reads the primary window or opt-in offscreen surface back at
+//! OMOBA_RECORD_FPS (default 30) and writes numbered PNGs plus `frames.jsonl`,
 //! so an encoder can rebuild real-time playback even when readbacks drop
 //! frames. PNG encoding runs on the async compute pool, off the main thread.
 //!
@@ -26,11 +26,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bevy::{
-    prelude::*,
-    render::view::screenshot::{Screenshot, ScreenshotCaptured},
-    tasks::AsyncComputeTaskPool,
-};
+use bevy::{prelude::*, render::view::screenshot::ScreenshotCaptured, tasks::AsyncComputeTaskPool};
 
 /// Frames still being encoded before new readbacks are skipped (real time)
 /// or the next step waits (frame-stepped).
@@ -66,8 +62,10 @@ impl Plugin for RecordQaPlugin {
                 Duration::from_secs_f64(1.0 / f64::from(wall_fps))
             });
         if pace.is_some() {
-            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(interval))
-                .add_systems(Last, keep_presenting.before(record));
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(interval));
+            if !app.world().contains_resource::<super::offscreen::Surface>() {
+                app.add_systems(Last, keep_presenting.before(record));
+            }
         }
         app.insert_resource(Recorder {
             directory,
@@ -175,7 +173,11 @@ fn keep_presenting(
     }
 }
 
-fn record(mut commands: Commands, mut recorder: ResMut<Recorder>) {
+fn record(
+    mut commands: Commands,
+    mut recorder: ResMut<Recorder>,
+    surface: Option<Res<super::offscreen::Surface>>,
+) {
     if recorder.stopped {
         return;
     }
@@ -224,8 +226,10 @@ fn record(mut commands: Commands, mut recorder: ResMut<Recorder>) {
     {
         let _ = writeln!(file, "{line}");
     }
-    commands.spawn(Screenshot::primary_window()).observe(
-        move |captured: On<ScreenshotCaptured>| {
+    let target = surface.as_deref().map(|surface| &surface.image);
+    commands
+        .spawn(super::offscreen::screenshot(target))
+        .observe(move |captured: On<ScreenshotCaptured>| {
             let image = captured.image.clone();
             let path = path.clone();
             let in_flight = in_flight.clone();
@@ -239,8 +243,7 @@ fn record(mut commands: Commands, mut recorder: ResMut<Recorder>) {
                     in_flight.fetch_sub(1, Ordering::Relaxed);
                 })
                 .detach();
-        },
-    );
+        });
 }
 
 #[cfg(test)]
