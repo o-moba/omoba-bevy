@@ -27,6 +27,7 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 | Play a match with bots | [Run locally](#play-locally) with `make practice` |
 | Test on an iPhone | [Device build](mobile/ios/README.md) and [TestFlight workflow](mobile/ios/TESTFLIGHT.md) |
 | Make characters, worlds or effects | [Create with us](#create-with-us) |
+| Find a class, ability, combat handler or test | [Hero code map](docs/hero-code-map.md) and [repository skill](.agents/skills/omoba-class-navigator/SKILL.md) |
 | Bring avatars into another game | [Integrate Ekza](#bring-ekza-into-your-game) |
 | Host matches or connect a phone and PC | [Hosting and connection](#host-a-practice-match) and [runbook](RUNBOOK.md) |
 | Help the game and its protocol grow | [Support the project](#support-the-project) |
@@ -233,7 +234,6 @@ programmers. Start small, show what you made and credit the people who helped.
 | Characters, weapon/projectile skins and combat effects | [Combat cosmetics](docs/combat-cosmetics.md) |
 | Props, forests, rivers, towers and map composition | [Map customization](docs/map-customization.md) |
 | Combat pacing, camps, distances and balance | [Balance tuning](docs/balance-tuning.md) |
-| Class kits, combat code and tests | [Hero code map](docs/hero-code-map.md), [class navigator skill](.agents/skills/omoba-class-navigator/SKILL.md) |
 | Music, interface sounds and combat cues | [Audio authoring and sources](docs/game-audio.md) |
 | Playability, accessibility and phone usability | [Playtest checklist](docs/playtest-script.md) and [bug report](docs/bug-report-template.md) |
 | Shared tools, integrations or documentation | [Contribution guide](CONTRIBUTING.md) and [issues](https://github.com/o-moba/omoba-bevy/issues) |

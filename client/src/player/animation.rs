@@ -1,7 +1,8 @@
 use crate::combat::CombatStats;
-use crate::domain::{MovementTarget, Player};
+use crate::domain::Player;
 use crate::net::{
     GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, PlayerCosmeticAction, RemotePlayer,
+    RemotePlayerInterpolation,
 };
 use crate::skill_presentation::cast::SkillCastObserved;
 use crate::skill_presentation::stage::{EndKind, StageChange, StageEvent};
@@ -105,9 +106,8 @@ pub(super) struct CharacterAnimationSet {
     pub(super) motion_nodes: Vec<(String, AnimationNodeIndex)>,
 }
 
-/// Grace period before Run falls back to Idle. Remote players advance in
-/// snapshot-interpolation bursts with still frames in between; without this
-/// hysteresis the animation flaps Run<->Idle several times per second.
+/// Maximum grace for a remote player whose moving interpolation segment ran
+/// out of samples. Consecutive stationary poses take precedence over it.
 pub(crate) const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
 
 #[derive(Component)]
@@ -116,7 +116,7 @@ pub(crate) struct PlayerAnimationBinding {
     key: AvatarKey,
     pub(super) playback: HeroAnimationPlayback,
     last_owner_position: Vec3,
-    /// Seconds since the owner last visibly moved (drives the idle grace).
+    /// Seconds since the owner last moved horizontally, for remote sample gaps.
     seconds_since_movement: f32,
     sandbox_preview: Option<u64>,
     sandbox_paused: bool,
@@ -954,7 +954,6 @@ pub(super) fn sync_player_animation_state(
         ),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
-    local_movement_query: Query<(Option<&MovementTarget>, Option<&Jumping>), With<Player>>,
     player_state_query: Query<
         (
             &Transform,
@@ -962,6 +961,8 @@ pub(super) fn sync_player_animation_state(
             Option<&PlayerCosmeticAction>,
             Option<&crate::net::PlayerLoadout>,
             Option<&crate::net::NetworkHeroClass>,
+            Has<Player>,
+            Option<&RemotePlayerInterpolation>,
         ),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
@@ -1014,7 +1015,7 @@ pub(super) fn sync_player_animation_state(
         }
     }
     for (mut animation_player, mut binding, mut graph_handle) in &mut animation_query {
-        let Ok((owner_transform, stats, action, loadout, class)) =
+        let Ok((owner_transform, stats, action, loadout, class, local, interpolation)) =
             player_state_query.get(binding.owner)
         else {
             continue;
@@ -1112,19 +1113,19 @@ pub(super) fn sync_player_animation_state(
         };
         let distance = owner_transform
             .translation
-            .distance(binding.last_owner_position);
+            .xz()
+            .distance(binding.last_owner_position.xz());
         let moved = distance / time.delta_secs().max(0.001) > 0.05;
         binding.last_owner_position = owner_transform.translation;
         if moved {
             binding.seconds_since_movement = 0.0;
+        } else if interpolation.is_some_and(RemotePlayerInterpolation::has_confirmed_stop) {
+            binding.seconds_since_movement = LOCOMOTION_IDLE_GRACE_SECS;
         } else {
             binding.seconds_since_movement += simulation_delta;
         }
-        let moved_recently = binding.seconds_since_movement < LOCOMOTION_IDLE_GRACE_SECS;
-        let moving_by_intent = local_movement_query
-            .get(binding.owner)
-            .map(|(target, jumping)| target.is_some() || jumping.is_some())
-            .unwrap_or(false);
+        let moving =
+            moved || (!local && binding.seconds_since_movement < LOCOMOTION_IDLE_GRACE_SECS);
         let preview = if snapshot.is_some() {
             sandbox
                 .as_ref()
@@ -1202,7 +1203,7 @@ pub(super) fn sync_player_animation_state(
             }
             let mut restart = binding.playback.advance(
                 stats.is_alive(),
-                moving_by_intent || moved || moved_recently,
+                moving,
                 confirmed_action,
                 finished,
                 |state| set.available(state),
@@ -1312,7 +1313,14 @@ pub(super) fn sync_player_animation_state(
         let cue_node = set.node(binding.playback.state);
         let cue_rate = binding.playing_cue(set).map_or(1.0, |cue| cue.rate);
         for (node, active) in animation_player.playing_animations_mut() {
-            let rate = if *node == cue_node { cue_rate } else { 1.0 };
+            let rate = if *node == cue_node {
+                cue_rate
+            } else if binding.playback.state == HeroAnimationState::Idle && *node == set.run_node {
+                // Fade the last running pose into idle without taking more steps.
+                0.0
+            } else {
+                1.0
+            };
             active.set_speed(speed * rate);
             if paused || fallback_frozen {
                 active.pause();

@@ -27,7 +27,8 @@ fn keys(value: &Value) -> BTreeSet<&str> {
 
 #[test]
 fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_schema() {
-    let avatar = harness::longest_roster_avatar_slug();
+    let (class, avatar) = harness::longest_class_default_loadout(&HeroClass::ALL);
+    let (legacy_class, legacy_avatar) = harness::longest_class_default_loadout(&HeroClass::LEGACY);
     let server =
         ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "release"), ("OMOBA_TEAM_SIZE", "5")]);
     // Capture a real legacy packet before upgrading this endpoint. The first
@@ -36,8 +37,8 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
     observer.join_with_cosmetics(
         Team::Green,
         Character::Ipfs,
-        HeroClass::Warrior,
-        Some(avatar.as_str()),
+        legacy_class,
+        Some(legacy_avatar),
         Some("cathedral-moth-bellringer"),
     );
     let legacy_deadline = Instant::now() + Duration::from_secs(3);
@@ -68,8 +69,8 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         bot.join_with_cosmetics(
             Team::Green,
             Character::Ipfs,
-            HeroClass::Warrior,
-            Some(avatar.as_str()),
+            class,
+            Some(avatar),
             Some("cathedral-moth-bellringer"),
         );
     }
@@ -172,10 +173,19 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
     );
     assert_eq!(snapshot["your_id"].as_u64(), Some(legacy_own_id));
     let player_keys = keys(&array(&legacy, "players")[0]);
+    let mut advanced_player_keys = player_keys.clone();
+    advanced_player_keys.insert("loadout");
     let mut teams = HashMap::new();
     for player in array(&snapshot, "players") {
-        assert_eq!(keys(player), player_keys);
-        assert_eq!(player["avatar"], avatar.as_str());
+        let expected_avatar = if player["id"].as_u64() == Some(legacy_own_id) {
+            assert_eq!(keys(player), player_keys);
+            legacy_avatar
+        } else {
+            assert_eq!(keys(player), advanced_player_keys);
+            assert!(player["loadout"].is_object());
+            avatar
+        };
+        assert_eq!(player["avatar"], expected_avatar);
         assert_eq!(player["sprite_character"], "cathedral-moth-bellringer");
         *teams.entry(player["team"].as_str().unwrap()).or_insert(0) += 1;
     }

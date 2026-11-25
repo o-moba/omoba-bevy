@@ -189,6 +189,7 @@ fn prematch_fixture(stage: usize) -> PrematchSnapshot {
     };
     PrematchSnapshot {
         join_remaining_ms: None,
+        unique_classes_across_teams: false,
         generation: 1,
         phase,
         remaining_ms: match stage {

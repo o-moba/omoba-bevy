@@ -250,6 +250,20 @@ impl ServerRuntime {
 }
 
 impl ServerRuntime {
+    fn validate_standalone_ranked_roster_size(&self) -> io::Result<()> {
+        let class_count = shared::HeroClass::ALL.len();
+        if self.career_queue_enabled() && self.rules.roster_size() as usize > class_count {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Standalone Ranked requires a unique class per player. Set OMOBA_TEAM_SIZE to {} or less ({class_count} available classes).",
+                    class_count / 2
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn shutdown_gracefully(&mut self) -> io::Result<()> {
         let now = self.clock.now();
         let outcome = if self.match_started_at.is_some() {
@@ -375,6 +389,7 @@ pub(crate) fn run() -> io::Result<()> {
 
     let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config, limits);
     runtime.match_service = match_service;
+    runtime.validate_standalone_ranked_roster_size()?;
     runtime.max_match_duration = max_match_duration;
     runtime.social.set_env_chat(chat);
     let bot_difficulty = bots::boot_bot_difficulty(
@@ -413,4 +428,48 @@ pub(crate) fn run() -> io::Result<()> {
             std::thread::sleep(SIMULATION_STEP_SLEEP - step_elapsed);
         }
     }
+}
+
+#[test]
+fn standalone_ranked_roster_must_fit_the_available_classes() {
+    use career_backend::MemoryCareer;
+
+    let largest_ranked_size = shared::HeroClass::ALL.len() as u32 / 2;
+    let validate = |mode, team_size, career| {
+        ServerRuntime::for_test(
+            MemoryTransport::new("127.0.0.1:0".parse().unwrap()),
+            ManualClock::new(Instant::now()),
+            career,
+            MatchConfig { mode, team_size },
+        )
+        .validate_standalone_ranked_roster_size()
+    };
+    validate(
+        MatchMode::Release,
+        largest_ranked_size,
+        MemoryCareer::test_backend(1),
+    )
+    .unwrap();
+    let error = validate(
+        MatchMode::Release,
+        largest_ranked_size + 1,
+        MemoryCareer::test_backend(1),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    assert!(error.to_string().contains(&format!(
+        "Set OMOBA_TEAM_SIZE to {largest_ranked_size} or less"
+    )));
+    validate(
+        MatchMode::Release,
+        largest_ranked_size + 1,
+        MemoryCareer::disabled(1),
+    )
+    .unwrap();
+    validate(
+        MatchMode::Practice,
+        largest_ranked_size + 1,
+        MemoryCareer::test_backend(1),
+    )
+    .unwrap();
 }

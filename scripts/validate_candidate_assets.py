@@ -10,6 +10,8 @@ import json
 from pathlib import Path, PurePosixPath
 import struct
 
+from validate_avatar_assets import SET01_LICENSE, SET01_LICENSE_URL, set01_runtime_errors
+
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "client/assets/config/asset_policy.json"
 WEAPON_MANIFEST = ROOT / "client/assets/weapons/manifest.json"
@@ -39,18 +41,23 @@ def glb_json(path):
     return json.loads(data[20:20 + length])
 
 
-def embedded_conflicts(gltf):
-    meta = gltf.get("extensions", {}).get("VRM", {}).get("meta", {})
-    errors = []
-    required = {"licenseName": "CC0", "allowedUserName": "Everyone", "commercialUssageName": "Allow"}
-    for key, expected in required.items():
-        if meta.get(key) != expected:
-            errors.append(f"embedded {key} must be {expected}, got {meta.get(key)!r}")
-    for key in ("allowCommercialUse", "allowRedistribution"):
-        if key in meta and meta[key] is not True:
-            errors.append(f"embedded {key} restricts use")
-    if "modification" in meta and meta["modification"] != "ALLOW":
-        errors.append("embedded modification restricts use")
+def embedded_conflicts(gltf, approved=None):
+    if approved and approved["license"] == SET01_LICENSE:
+        errors = set01_runtime_errors(gltf, approved["author"])
+        if approved["embedded_license"] != SET01_LICENSE_URL:
+            errors.append("reviewed Set 01 license URL differs from the original")
+    else:
+        meta = gltf.get("extensions", {}).get("VRM", {}).get("meta", {})
+        errors = []
+        required = {"licenseName": "CC0", "allowedUserName": "Everyone", "commercialUssageName": "Allow"}
+        for key, expected in required.items():
+            if meta.get(key) != expected:
+                errors.append(f"embedded {key} must be {expected}, got {meta.get(key)!r}")
+        for key in ("allowCommercialUse", "allowRedistribution"):
+            if key in meta and meta[key] is not True:
+                errors.append(f"embedded {key} restricts use")
+        if "modification" in meta and meta["modification"] != "ALLOW":
+            errors.append("embedded modification restricts use")
     for collection in ("buffers", "images"):
         for entry in gltf.get(collection, []):
             uri = entry.get("uri", "")
@@ -89,7 +96,7 @@ def validate(asset_root, policy_path=POLICY):
         actors = policy["approved_actor_models"]
         referenced = set()
         for directory, expected_count, procedural_ids in (
-                ("avatars", 15, set()), ("bosses", 1, {"wendigo-boss"}),
+                ("avatars", 32, set()), ("bosses", 1, {"wendigo-boss"}),
                 ("minions", 0, {"minion-green", "minion-blue"})):
             manifest = json.loads((root / directory / "manifest.json").read_text())
             entries = manifest["avatars"]
@@ -113,6 +120,10 @@ def validate(asset_root, policy_path=POLICY):
                     continue
                 if entry.get("license") != approved["license"] or entry.get("source_url") != approved["source_url"]:
                     errors.append(f"manifest provenance mismatch: {relative}")
+                if approved["license"] == SET01_LICENSE and (
+                        entry.get("collection") != "OMOBA Set 01"
+                        or entry.get("author") != approved["author"]):
+                    errors.append(f"manifest Set 01 provenance mismatch: {relative}")
                 if entry.get("thumbnail") != approved.get("thumbnail"):
                     errors.append(f"unreviewed actor preview reference: {relative}")
                 if entry.get("thumbnail"):
@@ -128,7 +139,7 @@ def validate(asset_root, policy_path=POLICY):
                 continue
             if sha(path) != approved["sha256"]:
                 errors.append(f"unreviewed model hash: {relative}")
-            errors.extend(f"{relative}: {issue}" for issue in embedded_conflicts(glb_json(path)))
+            errors.extend(f"{relative}: {issue}" for issue in embedded_conflicts(glb_json(path), approved))
         environment_path = safe_path(root, policy["environment_manifest"])
         if sha(environment_path) != policy["environment_manifest_sha256"]:
             errors.append("unreviewed environment manifest hash")

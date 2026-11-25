@@ -4,8 +4,8 @@
 Bakes the base clip set (idle, walk, attack, cast, death) from the CC0
 Quaternius Universal Animation Library (Blender Rigify DEF-* skeleton,
 `assets-src/animations/AnimationLibrary_Godot_Standard.gltf`) into every
-avatar GLB listed in `client/assets/avatars/manifest.json`, so the runtime
-keeps using the stock Bevy glTF loader with embedded clips.
+legacy avatar GLB listed in `client/assets/avatars/manifest.json`. OMOBA Set 01
+models use the shared motion library at runtime and keep their source bytes.
 
 Method (world-space delta retarget, both rigs T-pose):
   * Source reference pose: the UAL `A_TPose` clip sampled at its first key.
@@ -706,6 +706,9 @@ def main() -> int:
     for entry in manifest["avatars"]:
         slug = entry["slug"]
         if args.only and slug not in args.only:
+            continue
+        if entry.get("collection") == "OMOBA Set 01":
+            print(f"Skipping {slug} (shared runtime motion)")
             continue
         glb_path = args.avatars_dir / f"{slug}.glb"
         print(f"Retargeting {slug} ...")

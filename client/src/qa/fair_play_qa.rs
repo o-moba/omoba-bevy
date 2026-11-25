@@ -210,6 +210,7 @@ fn draft(wide: bool) -> PrematchSnapshot {
     let avatars = ["agnes", "pirate-bot", "good-knight", "lady-koi", "crowley"];
     PrematchSnapshot {
         join_remaining_ms: None,
+        unique_classes_across_teams: true,
         generation: 1,
         phase: PrematchPhase::Draft,
         remaining_ms: 23_000,

@@ -1,4 +1,4 @@
-//! Focused multi-client wire verification for sprite cosmetic identity.
+//! Focused multi-client wire verification for 3D and sprite cosmetic identity.
 
 use std::time::Duration;
 
@@ -7,7 +7,7 @@ use harness::{Bot, Character, HeroClass, ServerProcess, Team};
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 #[test]
-fn distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default() {
+fn class_avatars_replicate_independently_of_sprite_choices() {
     let server = ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "dev")]);
     let mut teapot = Bot::connect_framed(server.addr());
     let mut jelly = Bot::connect_framed(server.addr());
@@ -25,22 +25,22 @@ fn distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default() {
     jelly.join_with_cosmetics(
         Team::Blue,
         Character::Toka,
-        HeroClass::Mage,
-        None,
+        HeroClass::Wildspark,
+        Some("agnes"),
         Some("void-jelly-astronaut"),
     );
     orchard.join_with_cosmetics(
         Team::Green,
         Character::Cube,
-        HeroClass::Cleric,
+        HeroClass::Warden,
         None,
         Some("orchard-comet-centaur"),
     );
     invalid.join_with_cosmetics(
         Team::Green,
         Character::Wang,
-        HeroClass::Ranger,
-        None,
+        HeroClass::Riftshot,
+        Some("unregistered-invalid-model"),
         Some("../not-an-asset"),
     );
     omitted.join(Team::Blue, Character::Cube);
@@ -107,4 +107,10 @@ fn distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default() {
         omitted_state.sprite_character.as_deref(),
         Some("mossback-teapot")
     );
+
+    assert_eq!(teapot_state.avatar.as_deref(), Some("set01-warrior"));
+    assert_eq!(jelly_state.avatar.as_deref(), Some("set01-wildspark"));
+    assert_eq!(orchard_state.avatar.as_deref(), Some("set01-warden"));
+    assert_eq!(invalid_state.avatar.as_deref(), Some("set01-riftshot"));
+    assert_eq!(omitted_state.avatar.as_deref(), Some("set01-warrior"));
 }

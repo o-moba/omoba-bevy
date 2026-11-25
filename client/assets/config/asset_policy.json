@@ -139,6 +139,142 @@
       "license": "CC0",
       "embedded_license": "CC0",
       "thumbnail": "king-mutatio.png"
+    },
+    "avatars/set01-warrior.glb": {
+      "sha256": "fa831de8dd9cebbab2ee20ca7ac550231bc7dcedb619cba987ff39a2303d69bd",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-warrior.jpg"
+    },
+    "avatars/set01-mage.glb": {
+      "sha256": "1dc5a3b6d2e4b34289382f96bb5d2eeb0d0ea631f9e7109eaf5008e8e9235c2a",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-mage.jpg"
+    },
+    "avatars/set01-ranger.glb": {
+      "sha256": "f2cb31099b8ba029a965f880d1711889e3ee249dccabb1e1e7c04d0e2dc6af10",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-ranger.jpg"
+    },
+    "avatars/set01-healer.glb": {
+      "sha256": "9f7ca59dec09ab35ac5dda513403c87484fd949d62bfa8dc47e4fd43f68d9389",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-healer.jpg"
+    },
+    "avatars/set01-warden.glb": {
+      "sha256": "1ea572b17f3d02b33080e262d448bbec5360cb7b0e7dc15d926f6372d3d70a42",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-warden.jpg"
+    },
+    "avatars/set01-dawnweaver.glb": {
+      "sha256": "02bd2f8ff372767b746d215857202ee14aa60efa97df34356f7aa2dbf38de953",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-dawnweaver.jpg"
+    },
+    "avatars/set01-wildspark.glb": {
+      "sha256": "ec793cd0f10def36009b7d236ab1cd8de0b1d4a2b328ba74e2f8c2dc849c3111",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-wildspark.jpg"
+    },
+    "avatars/set01-cinderforge.glb": {
+      "sha256": "250b851539f1c7902c31d7222bbb8b9508567f5aab6c85eb88b96e937c117143",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-cinderforge.jpg"
+    },
+    "avatars/set01-edgeweaver.glb": {
+      "sha256": "2669e11c52e2464b4a11763dbe3aa60958854d68238acce453487d62b0188261",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-edgeweaver.jpg"
+    },
+    "avatars/set01-stormfist.glb": {
+      "sha256": "054b084dd4d558442ff7a1cc1159e945b7880bb62f21b72d507bb37ba7bc3644",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-stormfist.jpg"
+    },
+    "avatars/set01-veilstalker.glb": {
+      "sha256": "17a3dcabe19bcd692240bd363d39ede2fc5d9181b67c064ac05cc3b697528bc8",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-veilstalker.jpg"
+    },
+    "avatars/set01-emberveil.glb": {
+      "sha256": "59ce50de2fb9183d968f8c9926f753f1945070f30c9485314dedb054e94b5054",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-emberveil.jpg"
+    },
+    "avatars/set01-orbitwright.glb": {
+      "sha256": "6cba7863e6bc57ef744cf4fdcdfe6f792a2cd148561934ce690522f353512269",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-orbitwright.jpg"
+    },
+    "avatars/set01-riftshot.glb": {
+      "sha256": "c64a6f6336e9a57f499bdc8c807e4f217087ff501871721e1d993c851756e092",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-riftshot.jpg"
+    },
+    "avatars/set01-chainkeeper.glb": {
+      "sha256": "ac341e0a3bc12d1e0ae156616a3437997df2c7a21254015b873092c1af5761a0",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-chainkeeper.jpg"
+    },
+    "avatars/set01-frostguard.glb": {
+      "sha256": "cb48bca71cd0512e02a31926b535947a6b1f5d3936866b0a39aa9d187cc8423f",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-frostguard.jpg"
+    },
+    "avatars/set01-adventurer.glb": {
+      "sha256": "c9c7e10e42cdfd98a77accb054b873b922dce50c10c6836678c17c39fc94fa68",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "license": "VRM Public License 1.0",
+      "embedded_license": "https://vrm.dev/licenses/1.0/",
+      "author": "Wotori",
+      "thumbnail": "set01-adventurer.jpg"
     }
   },
   "environment_manifest": "verdant/manifest.json",

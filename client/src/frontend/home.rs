@@ -2392,7 +2392,7 @@ mod tests {
                     &sent[..],
                     [NetworkCommand::JoinPrematch {
                         hero_class: shared::HeroClass::Mage,
-                        handheld: shared::handheld::HandheldSelection::Unequipped,
+                        handheld: shared::handheld::HandheldSelection::ClassDefault,
                         ..
                     }]
                 ),

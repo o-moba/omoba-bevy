@@ -5,6 +5,19 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Ship an original Set 01 default avatar for each of the 17 hero classes.
+  Hero selection scrolls classes and avatars independently. Eligible Ekza
+  skins appear in hero selection and draft after sign-in from the account UI.
+
+- Save weapon skins per hero class. Normal matches use the class loadout when
+  an older client requests empty hands. Combat Test still supports empty hands.
+
+- Start the transition from running to standing as soon as 3D heroes stop
+  moving. An active move order no longer keeps a blocked hero running in place.
+
+- Fill bot teams with different hero classes across the arena. In Ranked,
+  confirming a class reserves it for the entire match draft.
+
 - Require exact model approval for each hero when equipping a handheld. Filter
   the Collection and draft by the selected hero and enforce the same rules on
   the server, including reconnects. Pin packaged weapons by SHA-256 and keep

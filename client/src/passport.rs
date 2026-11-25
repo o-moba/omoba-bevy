@@ -69,6 +69,10 @@ pub fn is_connected() -> bool {
     SESSION.get().is_some()
 }
 
+pub(crate) fn avatar_library_signed_in() -> bool {
+    account_connected() || is_connected()
+}
+
 /// Start pairing from the menu. A running attempt is left alone; a build
 /// without Ekza never starts one.
 pub fn connect() {
@@ -185,8 +189,7 @@ pub fn wallet_status_line() -> String {
 #[path = "ekza_account.rs"]
 mod ekza_account;
 pub use ekza_account::{
-    account_button_label, account_connected, account_status_line, connect_account, library_avatars,
-    poll_account,
+    account_button_label, account_connected, connect_account, library_avatars, poll_account,
 };
 
 pub enum TicketPoll {
