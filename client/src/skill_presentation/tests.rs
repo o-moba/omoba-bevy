@@ -488,7 +488,7 @@ fn a_windup_is_a_loop_or_fitted_to_its_telegraph() {
         }
         held += 1;
     }
-    assert_eq!(held, 5);
+    assert_eq!(held, 6);
     // Dawn Ray: a charge authored for its 0.8 s warning plays at its own speed and forms its
     // raised two-hand pose (the contact) at least 0.1 s before the ray fires.
     let ray = target.profile(SkillId::DawnRay).unwrap();
