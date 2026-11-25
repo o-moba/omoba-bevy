@@ -364,7 +364,7 @@
     },
     {
       "sourcePath": "client/src/skill_presentation/effects.rs",
-      "sha256": "294fe128dc6f10ae112c0fc7d571fb9e12cc608a66d67eec5a22824d2f38217c"
+      "sha256": "907737f525a7428d749cd7c88eb8803b0b8fd0325f9e2953318dd45af5494ee7"
     },
     {
       "sourcePath": "client/src/skill_icons.rs",
@@ -372,11 +372,11 @@
     },
     {
       "sourcePath": "shared/src/loadout.rs",
-      "sha256": "9e76e7ad1b8b9fffa35705f52b312686ddf2b35c035e0b3d91e6ce8227bce2ea"
+      "sha256": "20771607cc0c8435da39d9c20957e32c35897f3c41c5fb1690f8ed217ed85a45"
     },
     {
       "sourcePath": "client/src/held_weapons.rs",
-      "sha256": "7dc7f753155480735ee7c1546b46a76922db843b63ab481ed5094403ff748e46"
+      "sha256": "b31f90045764fb2257ae75297aec1f8f8529f9b4d4a7fa9a5e7563aed32f29b2"
     }
   ],
   "iconAtlases": [

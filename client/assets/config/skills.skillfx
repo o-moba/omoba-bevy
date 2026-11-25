@@ -254,7 +254,7 @@
       "impact": { "kind": "blast", "shape": "star", "count": 12, "scale": 1.8, "lifetime": 0.7, "slots": ["primary", "accent"] },
       "sound": {
         "cast": { "base": "caster", "speed": 0.75, "slice": "tail", "gain": 1.0, "notes": [{ "delay_ms": 60, "speed": 0.7, "gain": 0.8 }] },
-        "release": { "base": "arrow", "speed": 0.75, "slice": "full", "gain": 0.95 },
+        "release": { "base": "tower", "speed": 1.05, "slice": "tick", "gain": 0.95 },
         "impact": { "base": "tower", "speed": 0.85, "slice": "full", "gain": 1.0 } }
     },
     "fault_line": {
@@ -787,7 +787,7 @@
     "guardians_blessing": {
       "home": "cleric", "release": "hover_pulse", "color": [1.0, 0.83, 0.22], "hdr_gain": 5.0,
       "motion": { "rate": 0.8, "start": 0.1 },
-      "cast": { "pattern": "ground_ring", "shape": "ringlet", "count": 3, "scale": 1.6, "lifetime": 0.5, "slots": ["primary", "white"] },
+      "cast": { "pattern": "ground_ring", "shape": "kite", "count": 5, "scale": 1.6, "lifetime": 0.5, "slots": ["primary", "white"] },
       "sound": {
         "cast": { "base": "holy", "speed": 0.9, "slice": "full", "notes": [{ "delay_ms": 120, "speed": 1.15, "gain": 0.8 }, { "delay_ms": 240, "speed": 1.35, "gain": 0.7 }] } }
     },

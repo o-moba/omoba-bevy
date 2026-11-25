@@ -54,7 +54,7 @@
   "ability.wild_traps.name": "Snapline",
   "ability.wild_traps.desc": "Place three traps that arm, then root enemy heroes.",
   "ability.wild_rocket.name": "Last Spark",
-  "ability.wild_rocket.desc": "Briefly aim, then fire an accelerating rocket. The blast grows with distance. The first enemy hero hit takes extra damage based on their missing health.",
+  "ability.wild_rocket.desc": "Briefly aim, then launch an accelerating rocket that explodes on the first enemy hero. The blast grows with distance. The hero hit directly takes extra damage based on their missing health.",
   "ability.fault_line.name": "Fault Line",
   "ability.fault_line.desc": "Fracture the ground; a delayed solid pillar rises at the endpoint.",
   "ability.furnace_breath.name": "Furnace Breath",
