@@ -37,7 +37,7 @@ use shared::HeroClass;
 /// Wildspark's R: Last Spark, a `Direction` skill.
 const ULT: u8 = 3;
 /// Last Spark sends the far end of its cursor ray so the preview and server agree.
-const ULT_RANGE: f32 = 256.0;
+const ULT_RANGE: f32 = 60.0;
 /// The hero's facing at rest (`Transform::default()`): where a cast without an aim goes.
 const FACING: Vec2 = Vec2::new(0.0, -1.0);
 /// Cursor points on four sides of the hero; none of them along `FACING`.

@@ -178,7 +178,7 @@ fn orbital_guard_preview_starts_at_the_orb() {
 fn a_lane_keeps_its_open_rails_and_its_arrowhead() {
     for (id, length, half_width) in [
         (SkillId::DawnBind, 18.0, 0.35),
-        (SkillId::WildRocket, 256.0, 1.05),
+        (SkillId::WildRocket, 60.0, 1.05),
         (SkillId::MirrorGuard, 10.0, 0.8),
     ] {
         let preview = preview_shape(skill(id), &context(id, &[]));
@@ -345,7 +345,7 @@ fn only_a_long_lane_from_the_caster_reaches_the_minimap() {
     let vector = |id: SkillId| minimap_vector(&preview_shape(skill(id), &context(id, &[])));
     for (id, length, radius) in [
         (SkillId::DawnRay, 45.0, 0.8),
-        (SkillId::WildRocket, 256.0, 1.05),
+        (SkillId::WildRocket, 60.0, 1.05),
         (SkillId::HorizonWave, 256.0, 1.2),
     ] {
         let (from, to, width) = vector(id).unwrap();

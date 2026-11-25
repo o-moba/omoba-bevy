@@ -1210,7 +1210,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(effects.len(), 33 * 2);
+        assert_eq!(effects.len(), 34 * 2);
         let bits = |color: [f32; 3]| color.map(f32::to_bits);
         let (mut primaries, mut secondaries, mut accents) =
             (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
@@ -1225,7 +1225,7 @@ mod tests {
         }
         let mut app = app(registry);
         show(&mut app, effects);
-        assert_eq!(bodies(&app).len(), 33 * 2);
+        assert_eq!(bodies(&app).len(), 34 * 2);
         let made = app.world().resource::<BodyPaints>().made.len();
         // White and the two team colours are the engine's share here.
         let most = 3 * primaries.len() + secondaries.len() + accents.len() + 3;

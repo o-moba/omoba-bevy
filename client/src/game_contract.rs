@@ -886,7 +886,7 @@ fn render_slot(facts: &Facts, id: &str, slot: &SlotFacts, shares: &[&str]) -> Va
             "item": h.item,
             "byMode": h.by_mode,
             "bone": h.bone,
-            "muzzleWindowSecs": h.muzzle_window.map(pair),
+            "muzzleWindowSecs": h.muzzle_window.filter(|_| slot.role != Role::Windup).map(pair),
         })),
     });
     let profile = ext.as_object_mut().expect("slot ext");

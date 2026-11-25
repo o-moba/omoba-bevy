@@ -24,15 +24,24 @@ pub(super) struct Surface {
 
 fn requested(
     flag: Option<&str>,
-    supported_harness: bool,
     mobile: bool,
+    frontend_flow_enabled: bool,
+    mut output_is_set: impl FnMut(&str) -> bool,
 ) -> Result<bool, &'static str> {
     let Some(flag) = flag else {
         return Ok(false);
     };
     if flag != "1" {
-        return Err("OMOBA_QA_OFFSCREEN must be1 or unset");
+        return Err("OMOBA_QA_OFFSCREEN must be 1 or unset");
     }
+    let supported_harness = [
+        "OMOBA_FAIR_PLAY_QA_OUTPUT",
+        "OMOBA_CREATOR_LOOP_QA",
+        "OMOBA_RECORD_DIR",
+    ]
+    .into_iter()
+    .any(&mut output_is_set)
+        || (frontend_flow_enabled && output_is_set("OMOBA_FRONTEND_QA_OUTPUT"));
     if mobile || !supported_harness {
         return Err("Offscreen QA requires a supported desktop harness");
     }
@@ -41,17 +50,12 @@ fn requested(
 
 /// Called before DefaultPlugins so Winit never creates an OS window.
 pub(crate) fn configure(app: &mut App, plugins: PluginGroupBuilder) -> PluginGroupBuilder {
-    let set = |name| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+    let set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
     let flag = std::env::var(ENV).ok();
-    let enabled = requested(
-        flag.as_deref(),
-        set("OMOBA_FAIR_PLAY_QA_OUTPUT")
-            || set("OMOBA_CREATOR_LOOP_QA")
-            || (std::env::var("OMOBA_FRONTEND_QA_FLOW").as_deref() == Ok("1")
-                && set("OMOBA_FRONTEND_QA_OUTPUT")),
-        cfg!(any(target_os = "ios", target_os = "android")),
-    )
-    .expect("invalid offscreen QA configuration");
+    let mobile = cfg!(any(target_os = "ios", target_os = "android"));
+    let frontend_flow_enabled = std::env::var("OMOBA_FRONTEND_QA_FLOW").as_deref() == Ok("1");
+    let enabled = requested(flag.as_deref(), mobile, frontend_flow_enabled, set)
+        .expect("invalid offscreen QA configuration");
     if !enabled {
         return plugins;
     }
@@ -151,12 +155,25 @@ mod tests {
 
     #[test]
     fn explicit_supported_desktop_opt_in_is_required() {
-        assert_eq!(requested(None, false, false), Ok(false));
-        assert_eq!(requested(Some("1"), true, false), Ok(true));
-        for (flag, harness, mobile) in [("0", true, false), ("1", false, false), ("1", true, true)]
-        {
-            assert!(requested(Some(flag), harness, mobile).is_err());
+        let recorder = |name: &str| name == "OMOBA_RECORD_DIR";
+        assert_eq!(requested(None, false, false, recorder), Ok(false));
+        for harness in [
+            "OMOBA_FAIR_PLAY_QA_OUTPUT",
+            "OMOBA_CREATOR_LOOP_QA",
+            "OMOBA_RECORD_DIR",
+        ] {
+            assert_eq!(
+                requested(Some("1"), false, false, |name| name == harness),
+                Ok(true)
+            );
         }
+        let frontend_output = |name: &str| name == "OMOBA_FRONTEND_QA_OUTPUT";
+        assert_eq!(requested(Some("1"), false, true, frontend_output), Ok(true));
+        assert!(requested(Some("1"), false, false, frontend_output).is_err());
+        assert!(requested(Some("1"), false, true, |_| false).is_err());
+        assert!(requested(Some("0"), false, false, recorder).is_err());
+        assert!(requested(Some("1"), false, false, |_| false).is_err());
+        assert!(requested(Some("1"), true, false, recorder).is_err());
     }
 
     #[test]
@@ -200,6 +217,17 @@ mod tests {
             RenderTarget::Image(image.clone().into()).normalize(Some(window))
         );
         assert!(app.world().get::<IsDefaultUiCamera>(main).is_some());
+        assert_eq!(
+            screenshot(Some(&image)).0.normalize(Some(window)),
+            app.world()
+                .get::<RenderTarget>(main)
+                .unwrap()
+                .normalize(Some(window))
+        );
+        assert_eq!(
+            screenshot(None).0.normalize(Some(window)),
+            RenderTarget::Window(WindowRef::Primary).normalize(Some(window))
+        );
         assert!(app.world().get::<IsDefaultUiCamera>(preview).is_none());
         assert_eq!(
             app.world()

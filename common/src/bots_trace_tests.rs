@@ -20,8 +20,6 @@
 //! - The digests must equal the committed baseline. The first baseline was
 //!   recorded from the pre-refactor brain (`origin/dev` `ce04e5f` plus this
 //!   test only), which proved the Elite profile is the old behaviour exactly.
-//!   Neither round has a dagger class, the only gameplay code that draws
-//!   randomness.
 //!
 //! Positions come from `sin`, `cos`, `atan2` and `hypot`, which the platform
 //! `libm` computes, and those last bits differ between C libraries and some

@@ -396,14 +396,13 @@ fn fresh_level_one_heroes_can_clear_three_camps_with_basic_attacks_and_unlocked_
                 hero.mana = (hero.mana + MANA_REGEN_PER_SECOND * 0.1).min(hero.max_mana);
                 handle_basic_attack_request(&mut world, addr, target, tick, now);
                 handle_cast_request(&mut world, addr, target, 0, now);
-                // The second kill unlocks W. Use each class's recovery skill
-                // naturally: mana surge for Mage, a self-heal for the others.
+                // The second kill unlocks W. Use a self-sustain effect when
+                // the kit supplies one and there is HP or mana to restore.
                 let player = &world.players[&addr].hero;
-                let needs_recovery = if class == HeroClass::Mage {
-                    player.mana < player.max_mana * 0.5
-                } else {
-                    player.hp < player.max_hp * 0.8
-                };
+                let sustain = class.ability(shared::SkillSlot::W);
+                let needs_recovery = (sustain.self_mana_restore.is_some()
+                    && player.mana < player.max_mana * 0.5)
+                    || (sustain.self_heal.is_some() && player.hp < player.max_hp * 0.8);
                 if needs_recovery {
                     handle_cast_request(&mut world, addr, target, 1, now);
                 }
@@ -533,7 +532,7 @@ fn lethal_posthumous_neutral_hit_still_pays_once_and_waits_for_respawn() {
 }
 
 #[test]
-fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
+fn warden_forest_tracker_hits_camps_harder_and_earns_extra_gold_without_extra_xp() {
     let now = Instant::now();
     let mut dealt = Vec::new();
     let mut progress = Vec::new();
@@ -575,7 +574,7 @@ fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
         ));
         assert_eq!((gold > template.kill_gold), class == HeroClass::Warden);
     }
-    assert!(progress[1] > progress[0], "Warden gains more camp XP");
+    assert_eq!(progress[1], progress[0], "camp XP is shared across classes");
     assert_eq!(dealt[0], 10.0);
     assert!((dealt[1] - 10.0 * shared::jungle::WARDEN_CAMP_DAMAGE_MULTIPLIER).abs() < 0.001);
 }

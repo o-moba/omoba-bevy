@@ -32,7 +32,7 @@ class GameContractTests(unittest.TestCase):
                          ("ekza.game-contract.v1", "1.0", "1.0"))
         self.assertEqual(document["profiles"], {"used": [PROFILE], "required": []})
         slots = document["slots"]
-        self.assertEqual(len(slots), 107)
+        self.assertEqual(len(slots), 108)
         self.assertEqual(sum(slot["customizable"] for slot in slots.values()), 101)
         self.assertEqual({slot["kind"] for slot in slots.values()}, {"animation"})
         self.assertEqual([target["id"] for target in document["targets"]][:2], ["any", "warrior"])

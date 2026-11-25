@@ -114,6 +114,15 @@ pub fn handle_basic_attack_request(
     {
         return;
     }
+    if attacker.hero.skills.cast_locked(now)
+        && attacker.hero.skills.loadout.as_ref().is_some_and(|kit| {
+            kit.skills().get(attacker.hero.last_action.slot as usize)
+                == Some(&shared::loadout::SkillId::WildRocket)
+        })
+    {
+        // Keep the launcher committed to its aimed shot until the windup ends.
+        return;
+    }
     let (range, mode_damage, _, mana_cost, splash) = crate::skills::attack_modifiers(attacker);
     if !attacker.modifiers.infinite_resource && attacker.hero.mana < mana_cost {
         return;

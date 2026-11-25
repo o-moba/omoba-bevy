@@ -7,23 +7,19 @@ An original OMOBA adaptation of the close-range positional dagger play described
 | Slot | Skill | Rank-one damage | Cooldown | Mana | Behavior |
 |---|---|---:|---:|---:|---|
 | Q | Deadly Blow | 34 | 5s | 12 | Reliable single-target dagger strike in melee. |
-| W | Bluff | 0 | 14s | 20 | Stuns a hostile hero for 1s and turns their back toward the caster. |
-| E | Backstab | 24 / 60 from behind an enemy hero | 9s | 18 | Rear strike on an enemy hero deals 2.5× damage; eligible survivors have a 2% vital-break chance. |
+| W | Bluff | 0 | 14s | 20 | Stuns a hostile hero for 1s while preserving their facing. |
+| E | Backstab | 24 / 60 from behind an enemy hero | 9s | 18 | Rear strike on an enemy hero deals 2.5× damage. |
 | R | Lethal Blow | 48 / 72 from behind an enemy hero | 22s | 28 | Stronger mastery strike; rear bonus 1.5× against enemy heroes. Unlocks through the existing R progression. |
 
 Numbers are those of catalogue `standard-kits-6` (`shared/assets/catalog/skills.json`, `heroes.json`); the dagger damage was tuned in 0.42.0. The rear multiplier of Backstab and Lethal Blow, like Dagger Mastery, applies to enemy heroes only: a minion, a monster or a structure has no rear, and the skill descriptions say so since the 0.44.0 candidate.
 
 Strikes reach 2.6 world units, Bluff 2.8, with the existing target collision-radius allowance. Existing rank, level, item and team-buff scaling applies. Hero baseline: 190 HP, 24 basic damage, 0.7s basic interval, 2.6 basic range; primary role Jungle. Dagger Mastery adds 10% to basic attacks from behind enemy heroes. The recommended purchase path prioritizes physical damage, movement and lifesteal within the existing 16-item economy.
 
-The rear region is a 120-degree cone behind the victim. The server compares victim facing with the vector toward the attacker; coincident/nonfinite positions never qualify. Accepted attacks update authoritative facing as well as animation facing. Bluff holds the victim under the ordinary stun gates, so movement, basic attacks, skills and utilities cannot silently turn the victim out of the setup.
+The rear region is a 120-degree cone behind the victim. The server compares victim facing with the vector toward the attacker. Coincident or nonfinite positions never qualify. Accepted attacks update the attacker's authoritative and animation facing. Bluff stuns the victim in their current orientation, giving Adventurer a brief opportunity to flank. A follow-up Backstab from the front deals its base damage.
 
-## Vital break
+## Combat receipts
 
-Backstab rolls only after an accepted rear hit actually reduces an enemy hero's HP and that hero still has more than 1 HP. Two percent of those hits can remove the remaining HP down to 1. An ordinary lethal hit still kills normally; the special outcome never creates a false kill or bounty. Front hits, minions, bosses, structures, immune targets, fully absorbed hits and rejected/replayed inputs cannot trigger it. Normal shields and immunity remain part of the damage path.
-
-The authority owns private per-world keyed randomness and a private eligible-draw counter. Client request IDs, timestamps, aim vectors and public match IDs do not seed the outcome. Deterministic forced outcomes exist only in Rust unit-test builds. The same execution runs in offline practice. The visible/audio cue follows the confirmed `near_lethal` combat receipt, including normal visibility filtering and event deduplication.
-
-This is a deliberately rare swing, not a dependable execution ability. The initial balance should be tuned using match results and feedback; no competitive-balance guarantee is implied.
+Backstab resolves one ordinary physical hit in both online and offline play. Normal shields, mitigation, immunity and lethal outcomes use the shared damage path. The former 2% effect that left a survivor at 1 HP was removed from live combat. Clients retain the optional `near_lethal` receipt and its presentation for compatibility with older snapshots and QA fixtures.
 
 ## Integration
 

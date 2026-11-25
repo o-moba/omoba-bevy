@@ -14,21 +14,21 @@ fn rocket_acceleration_is_capped_and_tick_partition_independent() {
     assert!((split - whole).abs() < 0.0001);
     assert!((rocket_step(100.0, 0.1, launch, speed, acceleration) - 4.5).abs() < 0.0001);
     for range in [0.01, 3.0, 15.75, 20.0, 256.0] {
-        let time = rocket_time(range, launch, speed, acceleration);
+        let time = shared::loadout::rocket_travel_secs(range, launch, speed, acceleration);
         assert!((rocket_step(0.0, time, launch, speed, acceleration) - range).abs() < 0.001);
     }
 }
 
 #[test]
-fn rocket_can_finish_five_wounded_enemies_with_one_authoritative_blast() {
+fn rocket_only_adds_missing_health_damage_to_the_direct_hit() {
     let (mut w, now, _) = fixture(HeroClass::Wildspark);
     for n in 2..=6 {
         if n > 2 {
             add_player(&mut w, n, HeroClass::Warrior, Team::Blue, [25.0, 0.0], now);
         }
         let p = w.players.get_mut(&addr(n)).unwrap();
-        p.hero.x = 25.0;
-        p.hero.z = (n as f32 - 4.0) * 0.6;
+        p.hero.x = if n == 2 { 24.0 } else { 25.0 };
+        p.hero.z = if n == 2 { 0.0 } else { (n as f32 - 4.0) * 0.6 };
         p.hero.hp = 200.0;
     }
     let healthy = add_player(&mut w, 7, HeroClass::Warrior, Team::Blue, [24.0, 2.8], now);
@@ -44,11 +44,12 @@ fn rocket_can_finish_five_wounded_enemies_with_one_authoritative_blast() {
     w.players.get_mut(&addr(8)).unwrap().hero.hp = 100.0;
     w.players.get_mut(&addr(9)).unwrap().hero.hp = 100.0;
     cast(&mut w, addr(1), 3, [256.0, 0.0], 1, now);
-    let hits = advance(&mut w, now, 0.9);
-    assert_eq!(hits.iter().filter(|e| e.killed).count(), 5);
+    let hits = advance(&mut w, now, 1.4);
+    assert_eq!(hits.iter().filter(|e| e.killed).count(), 1);
     assert_eq!(hits.len(), 6);
-    for n in 2..=6 {
-        assert_eq!(w.players[&addr(n)].hero.hp, 0.0);
+    assert_eq!(w.players[&addr(2)].hero.hp, 0.0);
+    for n in 3..=6 {
+        assert_eq!(w.players[&addr(n)].hero.hp, 116.0);
     }
     assert_eq!(w.players[&addr(7)].hero.hp, 916.0);
     assert_eq!(w.players[&addr(8)].hero.hp, 100.0);
@@ -63,7 +64,95 @@ fn rocket_can_finish_five_wounded_enemies_with_one_authoritative_blast() {
     assert_eq!(blast.skill, SkillId::WildRocket);
     assert_eq!(blast.radius, 3.0);
     assert!(hits.iter().all(|e| e.area_impact == Some(blast)));
-    assert!(advance(&mut w, now + duration(0.9), 0.2).is_empty());
+    assert!(advance(&mut w, now + duration(1.4), 0.2).is_empty());
+}
+
+#[test]
+fn rocket_warns_without_scouting_or_hitting_and_allows_a_dodge_before_launch() {
+    let (mut w, now, _) = fixture(HeroClass::Wildspark);
+    let def = skill(SkillId::WildRocket);
+    cast(&mut w, addr(1), 3, [60.0, 0.0], 1, now);
+    let before_launch = now + duration(0.4);
+    assert!(advance(&mut w, now, 0.4).is_empty());
+    let warning = &effects(&w, before_launch)[0];
+    let id = warning.id;
+    assert_eq!(warning.kind, EffectVisualKind::BeamWarning);
+    assert_eq!(warning.position, [0.0, 0.0]);
+    assert_eq!(warning.end, [def.ability.cast_range, 0.0]);
+    assert!(!warning.armed);
+    assert!(w.players[&addr(1)].hero.skills.cast_locked(before_launch));
+    assert_eq!(w.skill_runtime.rocket_sight(Team::Green).count(), 0);
+    let victim = w.players[&addr(2)].hero.identity.id;
+    crate::basic_attack::handle_basic_attack_request(
+        &mut w,
+        addr(1),
+        target(victim),
+        1,
+        before_launch,
+    );
+    assert!(w.projectiles.is_empty());
+
+    w.players.get_mut(&addr(2)).unwrap().hero.z = 4.0;
+    assert!(advance(&mut w, before_launch, 0.15).is_empty());
+    let launched = now + duration(0.55);
+    let rocket = &effects(&w, launched)[0];
+    assert_eq!(rocket.id, id);
+    assert_eq!(rocket.kind, EffectVisualKind::Rocket);
+    assert!(rocket.armed);
+    assert!(rocket.position[0] > 0.0);
+    assert_eq!(w.skill_runtime.rocket_sight(Team::Green).count(), 1);
+    assert!(!w.players[&addr(1)].hero.skills.cast_locked(launched));
+    assert!(advance(&mut w, launched, 2.0).is_empty());
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
+    assert!(effects(&w, now + duration(2.55)).is_empty());
+}
+
+#[test]
+fn defending_support_can_answer_last_spark_during_its_warning() {
+    let (mut w, now, _) = fixture(HeroClass::Wildspark);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 10.0;
+    let guard = add_player(
+        &mut w,
+        3,
+        HeroClass::Frostguard,
+        Team::Blue,
+        [6.0, 0.0],
+        now,
+    );
+    cast(&mut w, addr(1), 3, [60.0, 0.0], 1, now);
+    let react = now + duration(0.3);
+    assert!(advance(&mut w, now, 0.3).is_empty());
+    assert!(effects(&w, react).iter().any(|effect| {
+        effect.skill == SkillId::WildRocket && effect.kind == EffectVisualKind::BeamWarning
+    }));
+
+    cast(&mut w, addr(3), 2, [0.0, 0.0], 1, react);
+    for event in advance(&mut w, react, 0.7) {
+        assert_eq!(event.target.id, guard);
+        assert_eq!(event.amount, 0.0);
+        assert!(event.area_impact.is_none());
+    }
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
+    assert_eq!(w.players[&addr(3)].hero.hp, 1000.0);
+    assert_eq!(w.players[&addr(3)].hero.skills.advanced.intercepts, 1);
+    assert!(
+        !effects(&w, now + duration(1.0))
+            .iter()
+            .any(|effect| effect.skill == SkillId::WildRocket)
+    );
+}
+
+#[test]
+fn dying_during_last_spark_preparation_removes_the_warning_without_firing() {
+    let (mut w, now, _) = fixture(HeroClass::Wildspark);
+    let caster = w.players[&addr(1)].hero.identity.id;
+    cast(&mut w, addr(1), 3, [60.0, 0.0], 1, now);
+    let after_death = now + duration(0.1);
+    crate::combat_feedback::apply_player_damage(&mut w.players, caster, 2000.0, after_death);
+    assert!(advance(&mut w, after_death, 0.05).is_empty());
+    assert!(effects(&w, after_death + duration(0.05)).is_empty());
+    assert!(advance(&mut w, after_death + duration(0.05), 0.7).is_empty());
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
 }
 
 #[test]
@@ -71,14 +160,14 @@ fn shielded_rocket_has_a_blast_receipt_without_fake_damage() {
     let (mut w, now, victim) = fixture(HeroClass::Wildspark);
     shield(&mut w, victim, victim, 1000.0, 10.0, now);
     cast(&mut w, addr(1), 3, [256.0, 0.0], 1, now);
-    let hits = advance(&mut w, now, 0.4);
+    let hits = advance(&mut w, now, 0.9);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].target.id, victim);
     assert_eq!(hits[0].amount, 0.0);
     assert!(!hits[0].killed);
     assert!(hits[0].area_impact.unwrap().valid());
     assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
-    assert!(effects(&w, now + duration(0.4)).is_empty());
+    assert!(effects(&w, now + duration(0.9)).is_empty());
 }
 
 #[test]

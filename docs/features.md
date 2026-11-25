@@ -288,11 +288,12 @@ Switchfire keeps a fast, stacking single-target repeater and a slower launcher:
 each accepted rocket autoattack costs 4 mana and splashes in a 2 m radius.
 Shockline is an aimed long-range shot that stops at its first enemy and slows it;
 Snapline opens three mechanical traps during their 0.6 s arming period.
-Last Spark now accelerates from 18 to 45 m/s at 54 m/s², passes minions, and
-explodes at its first enemy hero. Its base damage rises from 50% to 100% over
-20 m, then adds 25% of **each** nearby enemy's missing health. The blast radius
-is 3 m (unit collision radii participate); five sufficiently wounded heroes can
-all die in one blast. Healthy and out-of-range controls remain separate.
+Last Spark warns along its aim for 0.45 s before launch. Wildspark stands
+still and holds the launcher during that preparation. The rocket accelerates
+from 18 to 45 m/s at 54 m/s², flies up to 60 m, passes minions and explodes at
+its first enemy hero. Base blast damage rises from 50% to 100% over 20 m.
+The directly hit hero takes extra damage equal to 25% of their missing health.
+Other enemies in the 3 m blast radius take the base blast damage.
 
 Original gunmetal/brass models add a rotating barrel assembly, launcher recoil,
 opening trap jaws and finned rockets. Accepted W/R temporarily draw the launcher;
@@ -302,9 +303,10 @@ falling fragments and delayed embers, regardless of victim count. Damage numbers
 remain per victim; a shielded detonation never prints invented damage. Fog hides
 unseen blast centres, and a vanished projectile alone produces no explosion.
 
-Protocol 11 remains additive-compatible; gameplay revision
-`wildspark-2026-10-09-reference` and catalog `standard-kits-7` require matching
-client and server. See [implementation and verification](progress/2026-10-09-wildspark-reference.md).
+The timing and targeting in the launch iteration ship under gameplay revision
+`launch-roster-balance-1`. Client and server use the same revision. See
+[the launch playtest](launch-roster.md) and
+[the original implementation](progress/2026-10-09-wildspark-reference.md).
 
 ## Creator asset catalogue (first iteration)
 
@@ -437,7 +439,7 @@ The thumb-stick reaches full speed at its visible travel limit (70% of the base 
 
 ## Adventurer dagger class (0.38.0)
 
-Adventurer adds four close-range skills: Deadly Blow, Bluff, Backstab and Lethal Blow. Bluff briefly stuns and turns the victim away; rear geometry uses authoritative facing. A qualifying rear Backstab can leave a surviving enemy hero at 1 HP with a 2% authority-owned chance. The class uses the shared online/offline engine and recipe resolver, a hand-attached dagger and skill-owned humanoid animation. [Class contract and balance](adventurer.md) document exact limits; [implementation verification](progress/2026-10-04-adventurer.md) records current release status.
+Adventurer has four close-range skills: Deadly Blow, Bluff, Backstab and Lethal Blow. Bluff briefly stuns while preserving the victim's facing. Backstab and Lethal Blow reward an actual flank, measured against authoritative facing. The class uses the shared online/offline engine and recipe resolver, a hand-attached dagger and skill-owned humanoid animation. See [class contract and balance](adventurer.md) and [original implementation verification](progress/2026-10-04-adventurer.md).
 
 ## Mobile playtest round two (0.37.0)
 
@@ -518,6 +520,8 @@ Skill descriptions open after holding the same skill for 1.5 seconds using a hot
 
 Eleven modular presets now cover the standard roster. The nine additions are **Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper and Frostguard**, each with a passive, basic profile and Q/W/E/R. Reusable mechanics include parry, charm, camouflage, Energy, persistent orbs, temporary terrain, forging, ally rescue and projectile interception. Keyboard, touch and controller use the same authoritative commands. The roster scrolls independently of avatar selection. See [implementation and remaining TODO](progress/2026-09-29-remaining-roster.md).
 
+Riftshot can use Rift Step as a defensive blink. The follow-up shot targets a nearby visible enemy hero who carries Riftshot's active Rift Seal. The shot checks distance from the landing point. Rift Seal on a structure still detonates through an eligible attack from its owner.
+
 ## Standard kits and reusable skill recipes (0.29.0)
 
 **Dawnweaver** is a ranged control/support kit: spell marks empower attacks, a snare catches two targets, a returning projectile shields allies, a slowing field detonates on recast, and a telegraphed beam finishes the combo. **Wildspark** is a ranged carry: switch between a stacking repeater and Mana-consuming splash rockets, catch enemies with a slowing shot and armed traps, fire a long-range finisher and accelerate after qualifying takedowns. Both classes use any supported avatar and keep the existing level/skill-unlock system.
@@ -576,7 +580,7 @@ Home → **Party & friends** opens a party lobby: invite anyone connected to the
 
 ## Five classes and the Warden jungler (0.23.0-rc.6)
 
-A fifth class, **Warden**, completes one class per draft duty: Warrior → Solo (top), Mage → Mid, Ranger → Carry (bot), Cleric → Support (bot), Warden → Jungle. Choosing a class in the draft proposes its role; a deliberately chosen role is kept. Warden is a melee jungler (210 HP, Feral Swipe / Barkskin / Hunter's Mark / Primal Maul) whose server-authoritative passive **Forest Tracker** deals +35% damage to jungle camps (+15% on bosses) and earns +40% gold and +25% XP per camp kill; boss rewards are unchanged because their value is the team buff. Practice bots now fill a team as that composition, skipping classes a human already took; the bot Warden clears its own half's camps and falls back to mid lane when every camp is down. The skill atlas gains a fifth Warden row in the same painted style. See [the balance note](balance-tuning.md#five-classes-and-the-warden-0230-rc6).
+A fifth class, **Warden**, completes one class per draft duty: Warrior → Solo (top), Mage → Mid, Ranger → Carry (bot), Cleric → Support (bot), Warden → Jungle. Choosing a class in the draft proposes its role and preserves a deliberately chosen role. Warden is a melee jungler (210 HP, Feral Swipe / Barkskin / Hunter's Mark / Primal Maul). **Forest Tracker** gives +35% damage and +40% gold at ordinary camps and +15% damage against bosses. Camp XP and boss rewards use the standard values for all classes. Practice bots fill a team as that composition, skipping classes a human already took. The bot Warden clears its own half's camps and falls back to mid lane when every camp is down. The skill atlas gains a fifth Warden row in the same painted style. See [the balance note](balance-tuning.md#five-classes-and-the-warden-0230-rc6).
 
 ## Offline character practice (0.23.0-rc.5)
 

@@ -393,6 +393,29 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
 fn skill_recovery_blocks_cross_slot_bursts_without_spending_and_basics_overlap() {
     for class in HeroClass::LEGACY {
         let (mut rt, a, _, target, now) = fixture();
+        if class == HeroClass::Cleric {
+            // Renew needs an injured teammate even when the shared recovery is clear.
+            let ally = "127.0.0.1:58003".parse().unwrap();
+            rt.handle_packet(
+                ally,
+                ClientPacket::Join {
+                    handheld: Default::default(),
+                    prematch: false,
+                    team: Team::Green,
+                    character: CharacterChoice::Ipfs,
+                    hero_class: HeroClass::Warrior,
+                    avatar: None,
+                    sprite_character: None,
+                    session_id: Some("basic-cleric-ally".to_owned()),
+                    passport_ticket: None,
+                },
+                now,
+            );
+            let hero = &mut rt.world.players.get_mut(&ally).unwrap().hero;
+            hero.x = 1.0;
+            hero.z = 0.0;
+            hero.hp -= 30.0;
+        }
         let player = rt.world.players.get_mut(&a).unwrap();
         player.hero.identity.hero_class = class;
         apply_level_up(&mut player.hero); // W legitimately unlocks at two.

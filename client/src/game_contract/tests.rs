@@ -210,9 +210,9 @@ fn slots_follow_the_profile_grammar_and_targets_name_known_slots() {
 fn slot_counts_match_the_published_contract() {
     let facts = facts();
     let count = |f: &dyn Fn(&SlotFacts) -> bool| facts.slots.values().filter(|s| f(s)).count();
-    assert_eq!(facts.slots.len(), 107);
+    assert_eq!(facts.slots.len(), 108);
     assert_eq!(count(&|s| facts.rules.customizable(s.role)), 101);
-    assert_eq!(count(&|s| s.role == Role::Windup), 5);
+    assert_eq!(count(&|s| s.role == Role::Windup), 6);
     assert_eq!(count(&|s| s.role == Role::Recast), 8);
     assert_eq!(count(&|s| s.role == Role::Release), 68);
     assert_eq!(count(&|s| s.group == Group::Basic), 22);
@@ -397,6 +397,10 @@ fn wildspark_slots_carry_its_guns() {
     assert_eq!(
         ext("skill.wild_rocket.release")["handheld"]["item"],
         "wild-launcher"
+    );
+    assert_eq!(
+        ext("skill.wild_rocket.windup")["handheld"]["muzzleWindowSecs"],
+        Value::Null
     );
     assert_eq!(
         ext("skill.wild_zap.release")["handheld"]["muzzleWindowSecs"],

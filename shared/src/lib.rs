@@ -165,6 +165,22 @@ pub struct AbilityDefinition {
     pub projectile_damage: Option<f32>,
     pub self_heal: Option<f32>,
     pub self_mana_restore: Option<f32>,
+    pub ally_effect: Option<AllyEffect>,
+}
+
+/// Caster-centred support effects executed from the existing self-cast input.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AllyEffect {
+    HealLowest {
+        radius: f32,
+        amount: f32,
+    },
+    ShieldNearby {
+        radius: f32,
+        amount: f32,
+        duration_secs: f32,
+    },
 }
 
 /// Maximum investable rank shared by every ability definition.
@@ -443,6 +459,7 @@ mod tests {
                     def.projectile_damage.is_some(),
                     def.self_heal.is_some(),
                     def.self_mana_restore.is_some(),
+                    def.ally_effect.is_some(),
                 ];
                 if !class.is_standard() {
                     assert_eq!(effects.iter().filter(|&&x| x).count(), 1, "{}", def.id);
@@ -521,8 +538,10 @@ mod tests {
         assert!(scaled_cast_range(def, 3) > scaled_cast_range(def, 1));
         let heal = ability_for_class_slot(HeroClass::Cleric, SkillSlot::W);
         assert_eq!(scaled_cast_range(heal, 3), 0.0);
-        let scaled_heal = heal.self_heal.unwrap() * rank_effect_scale(3);
-        assert!(scaled_heal > heal.self_heal.unwrap());
+        let Some(AllyEffect::HealLowest { amount, .. }) = heal.ally_effect else {
+            panic!("Renew must heal an ally");
+        };
+        assert!(amount * rank_effect_scale(3) > amount);
     }
 
     #[test]

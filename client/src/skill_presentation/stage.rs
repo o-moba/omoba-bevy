@@ -273,7 +273,7 @@ pub(crate) fn transitions(
     }
     if rule == StageRule::KindGate
         && before.kind == K::BeamWarning
-        && matches!(now.kind, K::Beam | K::Bolt)
+        && matches!(now.kind, K::Beam | K::Bolt | K::Rocket)
     {
         changes.push(Transition::KindFlipped);
     }

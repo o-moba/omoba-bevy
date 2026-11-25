@@ -424,26 +424,27 @@ fn add_minion(w: &mut GameWorld, pos: [f32; 2]) -> u64 {
     id
 }
 #[test]
-fn global_rocket_passes_minions_and_scales_distance_and_missing_health() {
+fn rocket_passes_minions_and_scales_distance_and_missing_health() {
+    let windup = skill(SkillId::WildRocket).windup_secs;
     let (mut near, now, _) = fixture(HeroClass::Wildspark);
-    cast(&mut near, addr(1), 3, [256.0, 0.0], 1, now);
-    advance(&mut near, now, 0.3);
+    cast(&mut near, addr(1), 3, [60.0, 0.0], 1, now);
+    advance(&mut near, now, windup + 0.35);
     let near_damage = 1000.0 - near.players[&addr(2)].hero.hp;
     let (mut far, now, _) = fixture(HeroClass::Wildspark);
     far.players.get_mut(&addr(2)).unwrap().hero.x = 25.0;
     let minion = add_minion(&mut far, [4.0, 0.0]);
     let creep_hp = far.minions[&minion].state.hp;
-    cast(&mut far, addr(1), 3, [256.0, 0.0], 1, now);
-    advance(&mut far, now, 0.7);
+    cast(&mut far, addr(1), 3, [60.0, 0.0], 1, now);
+    advance(&mut far, now, windup + 0.75);
     assert_eq!(far.minions[&minion].state.hp, creep_hp);
     assert_eq!(far.players[&addr(2)].hero.hp, 916.0);
-    assert!(near_damage < 84.0);
+    assert!(near_damage > 0.0 && near_damage < 84.0);
     let (mut wounded, now, _) = fixture(HeroClass::Wildspark);
     let p = wounded.players.get_mut(&addr(2)).unwrap();
     p.hero.x = 25.0;
     p.hero.hp = 500.0;
-    cast(&mut wounded, addr(1), 3, [256.0, 0.0], 1, now);
-    advance(&mut wounded, now, 0.7);
+    cast(&mut wounded, addr(1), 3, [60.0, 0.0], 1, now);
+    advance(&mut wounded, now, windup + 0.75);
     assert_eq!(wounded.players[&addr(2)].hero.hp, 291.0);
 }
 #[test]
@@ -473,9 +474,10 @@ fn npc_root_stops_actual_minion_movement_then_expires() {
 fn visible_incoming_effect_survives_hidden_owner_and_does_not_publish_destination() {
     let (mut w, now, _) = fixture(HeroClass::Wildspark);
     w.players.get_mut(&addr(2)).unwrap().hero.x = 40.0;
-    cast(&mut w, addr(1), 3, [256.0, 0.0], 1, now);
-    advance(&mut w, now, 0.6);
-    let at = now + duration(0.6);
+    cast(&mut w, addr(1), 3, [60.0, 0.0], 1, now);
+    let elapsed = skill(SkillId::WildRocket).windup_secs + 0.7;
+    advance(&mut w, now, elapsed);
+    let at = now + duration(elapsed);
     let owner = w.players[&addr(1)].hero.identity.id;
     let viewer = &w.players[&addr(2)];
     let mut packet = shared::wire::ServerPacket::Snapshot {
@@ -880,9 +882,10 @@ fn accepted_action_facing_is_stable_across_movement_and_rejected_casts() {
 fn rocket_carries_temporary_team_sight_at_its_real_position_until_impact() {
     let (mut w, now, _) = fixture(HeroClass::Wildspark);
     w.players.get_mut(&addr(2)).unwrap().hero.x = 100.0;
-    cast(&mut w, addr(1), 3, [256.0, 0.0], 1, now);
-    advance(&mut w, now, 1.0);
-    let at = now + duration(1.0);
+    cast(&mut w, addr(1), 3, [60.0, 0.0], 1, now);
+    let elapsed = skill(SkillId::WildRocket).windup_secs + 1.0;
+    advance(&mut w, now, elapsed);
+    let at = now + duration(elapsed);
     let rocket = effects(&w, at)
         .into_iter()
         .find(|e| e.kind == EffectVisualKind::Rocket)
@@ -1004,8 +1007,18 @@ fn rocket_accepts_grazing_heroes_but_not_a_clear_miss() {
         let victim = w.players.get_mut(&addr(2)).unwrap();
         victim.hero.x = 25.0;
         victim.hero.z = offset;
-        cast(&mut w, addr(1), 3, [256.0, 0.0], 1, now);
-        advance(&mut w, now, 0.7);
+        cast(&mut w, addr(1), 3, [60.0, 0.0], 1, now);
+        advance(&mut w, now, skill(SkillId::WildRocket).windup_secs + 0.75);
         assert_eq!(w.players[&addr(2)].hero.hp < 1000.0, hit);
     }
+}
+
+#[test]
+fn rocket_expires_before_reaching_a_hero_beyond_its_aim_limit() {
+    let (mut w, now, _) = fixture(HeroClass::Wildspark);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 75.0;
+    cast(&mut w, addr(1), 3, [120.0, 0.0], 1, now);
+    assert!(advance(&mut w, now, 3.0).is_empty());
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
+    assert!(effects(&w, now + duration(3.0)).is_empty());
 }

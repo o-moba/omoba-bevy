@@ -157,6 +157,7 @@ const NOT_UDP_WIRE: &[(&str, &str)] = &[
     ("Placement", "map configuration file"),
     ("SkillSlot", "hero catalog data"),
     ("TargetingMode", "hero catalog data"),
+    ("AllyEffect", "hero catalog data"),
     (
         "AttackProfileId",
         "resolved gameplay profile, not serialized in recipes",

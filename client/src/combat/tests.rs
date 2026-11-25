@@ -1110,6 +1110,24 @@ fn touch_among(
     }
 }
 
+#[test]
+fn cleric_support_skills_on_touch_send_a_self_cast_without_chasing() {
+    for slot in [SkillSlot::W, SkillSlot::R] {
+        let press = touch_among(HeroClass::Cleric, slot.index(), None, |app| {
+            remote_hero(app, 2, Team::Blue, Vec2::X * 2.0);
+            remote_hero(app, 3, Team::Green, Vec2::X * 5.0);
+        });
+        assert!(matches!(
+            press.sent.as_slice(),
+            [NetworkCommand::Cast {
+                target: TargetId { kind: TargetKind::Player, id: 1 },
+                slot: sent_slot
+            }] if usize::from(*sent_slot) == slot.index()
+        ));
+        assert!(press.walking && !press.queued);
+    }
+}
+
 /// A tap has no aim of its own. For a skill that is cast on an ally it is aimed at an
 /// ally and the cast goes out; it used to be aimed at the nearest enemy, which the server
 /// refuses or turns into a cast on the caster.

@@ -13,17 +13,23 @@ use shared::progression::equipped_skill_upgrade_order;
 use shared::shop::plan_purchases;
 use shared::wire::{GameState, TargetId, TargetKind, default_character_choice};
 use shared::{
-    HeroClass, SkillSlot, TargetingMode, ability_for_class_slot, unlocked_slots_for_level,
+    AllyEffect, HeroClass, SkillSlot, TargetingMode, ability_for_class_slot,
+    unlocked_slots_for_level,
 };
 
 use crate::balance::PLAYER_GROUND_Y;
 use crate::entities::{ConnectedPlayer, MapLayoutState, StructureRole};
 use crate::host::CombatHost;
 use crate::session::{handle_join_request_with_sprite, handle_transform_request_with_structures};
-use crate::sim::cast::{apply_skill_upgrade, handle_cast_request, legacy_effect_scale};
+use crate::sim::cast::{
+    apply_skill_upgrade, handle_cast_request, legacy_effect_scale, lowest_injured_ally,
+};
 use crate::sim::towers::structure_is_protected;
 use crate::world::{build_minion_path, spawn_position_for_team, structure_collision_radius};
 use crate::{basic_attack, hero_stats, match_stats, shop, vision};
+
+#[cfg(test)]
+mod jungle_opening_test;
 
 const THINK_INTERVAL: Duration = Duration::from_millis(250);
 /// At most one route plan per bot per interval (LR-10).
@@ -1551,14 +1557,6 @@ impl CombatHost<'_> {
         kind: BotKind,
         now: Instant,
     ) -> Option<SocketAddr> {
-        let slot = (1..=32_u16).find(|slot| {
-            !self
-                .world
-                .players
-                .contains_key(&SocketAddr::from(([0_u16; 8], *slot)))
-        })?;
-        let addr = SocketAddr::from(([0_u16; 8], slot));
-        self.world.ensure_connected(addr, now);
         let (class, lane, jungle, role) = if kind == BotKind::Lane && class.is_none() {
             self.next_roster_slot(team)
         } else {
@@ -1580,6 +1578,41 @@ impl CombatHost<'_> {
                 (class, Lane::Mid, false, Role::Mid)
             }
         };
+        self.spawn_assigned_bot(team, class, kind, (lane, jungle, role), now)
+    }
+
+    /// Seat a simulated roster pick according to its explicit draft role.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn spawn_roster_bot(
+        &mut self,
+        team: Team,
+        class: HeroClass,
+        role: Role,
+        now: Instant,
+    ) -> Option<SocketAddr> {
+        let (_, lane, jungle, _) = BOT_COMPOSITION
+            .into_iter()
+            .find(|(_, _, _, duty)| *duty == role)
+            .expect("each draft role has a bot assignment");
+        self.spawn_assigned_bot(team, class, BotKind::Lane, (lane, jungle, role), now)
+    }
+
+    fn spawn_assigned_bot(
+        &mut self,
+        team: Team,
+        class: HeroClass,
+        kind: BotKind,
+        (lane, jungle, role): (Lane, bool, Role),
+        now: Instant,
+    ) -> Option<SocketAddr> {
+        let slot = (1..=32_u16).find(|slot| {
+            !self
+                .world
+                .players
+                .contains_key(&SocketAddr::from(([0_u16; 8], *slot)))
+        })?;
+        let addr = SocketAddr::from(([0_u16; 8], slot));
+        self.world.ensure_connected(addr, now);
         let persona = if kind == BotKind::Lane {
             self.bots
                 .next_roster_persona(&self.world.players, self.match_id)
@@ -2022,6 +2055,52 @@ impl CombatHost<'_> {
                 if controller.target != previous_target {
                     controller.holding_range = false;
                     controller.route.clear();
+                }
+                // Prioritize saving a wounded teammate over another attack. Support
+                // uses the same authority-side selection as a player's self cast.
+                let bot = &self.world.players[&addr];
+                let class = bot.hero.identity.hero_class;
+                let self_target = TargetId {
+                    kind: TargetKind::Player,
+                    id: bot.hero.identity.id,
+                };
+                for slot in [SkillSlot::R, SkillSlot::W] {
+                    let bot = &self.world.players[&addr];
+                    let Some(effect) = ability_for_class_slot(class, slot).ally_effect else {
+                        continue;
+                    };
+                    let should_cast = match effect {
+                        AllyEffect::HealLowest { radius, .. } => {
+                            lowest_injured_ally(self.world, addr, radius)
+                                .is_some_and(|ally| hp_fraction(&self.world.players[&ally]) < 0.8)
+                        }
+                        AllyEffect::ShieldNearby { radius, .. } => {
+                            (hp_fraction(bot) < 0.4
+                                || lowest_injured_ally(self.world, addr, radius).is_some_and(
+                                    |ally| hp_fraction(&self.world.players[&ally]) < 0.4,
+                                ))
+                                && self.world.players.values().any(|enemy| {
+                                    enemy.joined
+                                        && enemy.hero.hp > 0.0
+                                        && enemy.hero.identity.team != team
+                                        && (enemy.hero.x - bot.hero.x)
+                                            .hypot(enemy.hero.z - bot.hero.z)
+                                            <= radius
+                                        && vision::target_visible(
+                                            team,
+                                            TargetId {
+                                                kind: TargetKind::Player,
+                                                id: enemy.hero.identity.id,
+                                            },
+                                            self.world,
+                                            now,
+                                        )
+                                })
+                        }
+                    };
+                    if should_cast {
+                        handle_cast_request(self.world, addr, self_target, slot.index() as u8, now);
+                    }
                 }
                 if let Some(target) = controller.target {
                     if self.world.players[&addr].hero.skills.loadout.is_some() {
@@ -2820,7 +2899,7 @@ mod turret_tests {
     use shared::wire::StructureKind;
 
     #[test]
-    fn dagger_bot_bluffs_before_backstab_and_stunned_bot_preserves_rear_facing() {
+    fn dagger_bot_bluffs_before_backstab_without_turning_the_stunned_bot() {
         let now = Instant::now();
         let mut world = GameWorld::empty();
         let address: SocketAddr = "[::]:31101".parse().unwrap();
@@ -2849,6 +2928,8 @@ mod turret_tests {
             p.modifiers.unlock_all = true;
             p.hero.progress.skill_points = 0;
         }
+        let facing = shared::math::hero_yaw_towards(-1.0, 0.0);
+        world.players.get_mut(&enemy).unwrap().hero.yaw = facing;
         let mut bots = BotControllers::default();
         bots.attach_existing(address, HeroClass::Adventurer, now);
         let mut log = CombatLog::default();
@@ -2864,7 +2945,7 @@ mod turret_tests {
         assert!(p.timers.last_cast_at[1].is_some(), "Bluff must be first");
         assert!(p.timers.last_cast_at[0].is_none());
         assert!(p.timers.last_cast_at[2].is_none());
-        let away = host.world.players[&enemy].hero.yaw;
+        assert_eq!(host.world.players[&enemy].hero.yaw, facing);
         host.bots.attach_existing(enemy, HeroClass::Warrior, now);
         host.simulate_bots(now + Duration::from_millis(310), 0.01);
         assert!(
@@ -2872,7 +2953,7 @@ mod turret_tests {
             "follow Bluff with Backstab"
         );
         assert!(host.world.players[&enemy].hero.hp < 1000.0);
-        assert_eq!(host.world.players[&enemy].hero.yaw, away);
+        assert_eq!(host.world.players[&enemy].hero.yaw, facing);
         assert!(
             host.world.players[&enemy]
                 .timers
@@ -3172,14 +3253,14 @@ mod sustain_tests {
         assert!(self_sustain_order(p, false).is_empty());
         assert_eq!(self_sustain_order(p, true), [1]);
 
-        // Cleric: W and R heal (R is larger), E restores mana.
+        // Cleric: W and R use the ally-support path; E restores mana.
         let (mut world, _, address) = lone_bot(HeroClass::Cleric, now);
         let p = world.players.get_mut(&address).unwrap();
         assert!(self_sustain_order(p, false).is_empty());
-        assert_eq!(self_sustain_order(p, true), [3, 1]);
+        assert!(self_sustain_order(p, true).is_empty());
         p.hero.mana = MAX_MANA - restore_amount(p, SkillSlot::E);
         assert_eq!(self_sustain_order(p, false), [2]);
-        assert_eq!(self_sustain_order(p, true), [3, 1, 2]);
+        assert_eq!(self_sustain_order(p, true), [2]);
     }
 
     #[test]
@@ -3223,29 +3304,32 @@ mod sustain_tests {
     }
 
     #[test]
-    fn low_health_cleric_bot_casts_the_largest_heal_first() {
-        let mut now = Instant::now();
+    fn cleric_bot_heals_an_ally_without_wasting_its_shield_out_of_combat() {
+        let now = Instant::now();
         let (mut world, mut bots, address) = lone_bot(HeroClass::Cleric, now);
-        world.players.get_mut(&address).unwrap().hero.hp = MAX_HP * 0.1;
-        now += Duration::from_millis(10);
-        think(&mut world, &mut bots, now);
-        let first = now;
-        let p = &world.players[&address];
-        assert_eq!(
-            p.timers.last_cast_at,
-            [None, None, None, Some(first)],
-            "the ultimate heal is the emergency button; shared recovery holds the rest"
+        let ally = "127.0.0.1:32002".parse().unwrap();
+        world.ensure_connected(ally, now);
+        crate::session::handle_join_request(
+            world.players.get_mut(&ally).unwrap(),
+            Team::Green,
+            shared::wire::CharacterChoice::Ipfs,
+            HeroClass::Ranger,
+            None,
+            &world.map_layout,
+            now,
         );
-        let after_ultimate = p.hero.hp;
-        assert!(after_ultimate > MAX_HP * 0.1 && after_ultimate < MAX_HP * 0.28);
-
-        // Past the shared recovery the smaller heal follows; the mana restore
-        // still waits because the bar cannot hold all of it yet.
-        now += Duration::from_millis(500);
-        think(&mut world, &mut bots, now);
+        {
+            let hero = &mut world.players.get_mut(&ally).unwrap().hero;
+            hero.x = 2.0;
+            hero.z = 0.0;
+            hero.hp = 20.0;
+        }
+        let cast_at = now + Duration::from_millis(10);
+        think(&mut world, &mut bots, cast_at);
         let p = &world.players[&address];
-        assert_eq!(p.timers.last_cast_at, [None, Some(now), None, Some(first)]);
-        assert!(p.hero.hp > after_ultimate);
+        assert_eq!(p.timers.last_cast_at, [None, Some(cast_at), None, None]);
+        assert_eq!(p.hero.hp, MAX_HP);
+        assert!(world.players[&ally].hero.hp > 20.0);
     }
 }
 
@@ -3847,6 +3931,54 @@ mod profile_tests {
 
     fn profile_of(bots: &BotControllers, addr: SocketAddr) -> BotProfile {
         bots.controllers[&addr].profile
+    }
+
+    #[test]
+    fn custom_roster_picks_keep_their_role_lane_and_jungle_assignment() {
+        use HeroClass::*;
+        let rosters = [
+            [Warrior, Warden, Mage, Ranger, Frostguard],
+            [Cinderforge, Stormfist, Orbitwright, Wildspark, Chainkeeper],
+        ];
+        let levels = [BotDifficulty::Veteran, BotDifficulty::Elite];
+        let practice =
+            crate::offline::PracticeSession::bots_with_rosters(Instant::now(), levels, rosters);
+        let participants = practice.combat_log.ledger.snapshot();
+        assert_eq!(participants.len(), 10);
+        let seats = [
+            (Role::Solo, Lane::Top, false),
+            (Role::Jungle, Lane::Mid, true),
+            (Role::Mid, Lane::Mid, false),
+            (Role::Carry, Lane::Bot, false),
+            (Role::Support, Lane::Bot, false),
+        ];
+        for ((team, roster), level) in [Team::Green, Team::Blue]
+            .into_iter()
+            .zip(rosters)
+            .zip(levels)
+        {
+            for (class, (role, lane, jungle)) in roster.into_iter().zip(seats) {
+                let (&addr, player) = practice
+                    .world
+                    .players
+                    .iter()
+                    .find(|(_, p)| {
+                        p.hero.identity.team == team && p.hero.identity.hero_class == class
+                    })
+                    .expect("the selected class joined its team");
+                let controller = &practice.bots.controllers[&addr];
+                assert_eq!(player.draft.role, role);
+                assert_eq!(player.hero.progress.level, 1);
+                assert_eq!(controller.kind, BotKind::Lane);
+                assert_eq!((controller.lane, controller.jungle), (lane, jungle));
+                assert_eq!(controller.profile, BotProfile::for_level(level));
+                assert!(participants.iter().any(|p| {
+                    p.player_id == player.hero.identity.id
+                        && p.hero_class == class
+                        && p.team == team
+                }));
+            }
+        }
     }
 
     fn join(world: &mut GameWorld, addr: SocketAddr, team: Team, class: HeroClass, x: f32) {

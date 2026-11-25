@@ -441,8 +441,8 @@ fn the_archetype_table_counts_the_engine_parts_of_every_shape() {
 #[test]
 fn every_target_body_lists_the_parts_its_row_counts() {
     let bodies = target_bodies();
-    // 26 rows with a body (two kinds for the ray) and six auxiliary bodies.
-    assert_eq!(bodies.len(), 33);
+    // Count authored bodies by their bound effect kind, including auxiliary warnings.
+    assert_eq!(bodies.len(), 34);
     for (skill, kind, body) in bodies {
         let e = effect(skill, kind);
         let seen = first(&e, 0.0);
@@ -458,12 +458,13 @@ fn every_target_body_lists_the_parts_its_row_counts() {
             count(|role| matches!(role, Role::Boundary(_))),
             usize::from(engine_parts(body.archetype, &seen.shape))
         );
-        // Rule E-10: the soul has no ground ring; every other body has the boundary of
-        // its archetype.
-        let boundary = match body.archetype {
-            Archetype::Lane => 4,
-            Archetype::Sector => 8,
-            Archetype::Cage => 10,
+        // Rule E-10: the soul has no ground ring. An open lane shows its two
+        // side rails without the end caps of a capsule.
+        let boundary = match (body.archetype, seen.shape) {
+            (Archetype::Lane, GeoShape::Lane { .. }) => 2,
+            (Archetype::Lane, _) => 4,
+            (Archetype::Sector, _) => 8,
+            (Archetype::Cage, _) => 10,
             _ => usize::from(kind != K::Soul),
         };
         assert_eq!(
@@ -497,6 +498,7 @@ fn every_target_body_lists_the_parts_its_row_counts() {
     assert_eq!(total(SkillId::DawnBind, K::Bolt), 5);
     assert_eq!(total(SkillId::DawnField, K::Field), 12);
     assert_eq!(total(SkillId::WildTraps, K::Trap), 11);
+    assert_eq!(total(SkillId::WildRocket, K::BeamWarning), 10);
     assert_eq!(total(SkillId::IronHook, K::Bolt), 10);
     assert_eq!(total(SkillId::IronHook, K::Soul), 1);
     assert_eq!(total(SkillId::OrbitalCommand, K::Orb), 9);
@@ -1313,6 +1315,15 @@ fn inside_the_shape(body: &Body, seen: &Seen, grounded: bool, what: &str) {
                 GeoShape::Capsule { from, to, radius } => {
                     off_segment(at, from, to) <= radius + slack
                 }
+                GeoShape::Lane {
+                    from,
+                    to,
+                    half_width,
+                } => {
+                    let along = beside(at, from, to);
+                    (-slack..=from.distance(to) + slack).contains(&along.y)
+                        && along.x.abs() <= half_width + slack
+                }
                 GeoShape::Sector {
                     apex,
                     axis,
@@ -1382,9 +1393,9 @@ fn no_authored_part_leaves_the_boundary_of_a_strip_a_cone_a_wall_or_a_cage() {
             }
         }
     }
-    // The ray as a warning and as a beam, the wave warning, the fissure, the cone, the
-    // wall and the cage.
-    assert_eq!(rows, 7);
+    // The ray as a warning and as a beam, the wave and rocket warnings, the
+    // fissure, the cone, the wall and the cage.
+    assert_eq!(rows, 8);
 
     // Everything a row could author: every silhouette at the largest sizes the parser
     // lets through, with every behaviour, as core, shell and in every layout of the
@@ -1668,7 +1679,12 @@ fn fill_completes_when_the_server_fires() {
                     );
                     span(points.iter().map(|point| point.xz().length())).1 / (radius * MARKER_REACH)
                 }
-                GeoShape::Capsule { from, to, radius } => {
+                GeoShape::Capsule { from, to, radius }
+                | GeoShape::Lane {
+                    from,
+                    to,
+                    half_width: radius,
+                } => {
                     assert_eq!(part_paint(&slot, &seen), Some(Paint::FillDim));
                     // Rule P-2: it spreads across the width and always has the whole length.
                     let (near, far) = span(points.iter().map(|point| point.z));
@@ -1730,7 +1746,8 @@ fn fill_completes_when_the_server_fires() {
             "furnace_breath",
             "horizon_wave",
             "mirror_guard",
-            "orbital_collapse"
+            "orbital_collapse",
+            "wild_rocket"
         ]
     );
     // The ray that fired has no read-out left and its fill at full strength.

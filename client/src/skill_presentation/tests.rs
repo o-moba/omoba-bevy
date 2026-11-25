@@ -122,6 +122,51 @@ fn effect(skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
 }
 
 #[test]
+fn last_spark_warning_holds_the_aim_pose_until_the_rocket_launches() {
+    let registry = profiles();
+    let class = shared::HeroClass::Wildspark;
+    let state = LoadoutState {
+        recipe: Some(shared::loadout::CoreId::Wildspark.preset()),
+        ..default()
+    };
+    let profile = registry.profile(SkillId::WildRocket).unwrap();
+    let mut effect = effect(SkillId::WildRocket, EffectVisualKind::BeamWarning);
+    let tail = category::tail_secs(SkillId::WildRocket).unwrap();
+    effect.remaining_secs = tail + 0.2;
+    let cue = |effect: &SkillEffectState| {
+        own_windup_cue(
+            &registry,
+            class,
+            Some(&state),
+            7,
+            std::slice::from_ref(effect),
+        )
+    };
+    let (_, warning) = cue(&effect).unwrap();
+    assert!(warning.hold);
+    assert_eq!(Some(&warning.motion), profile.windup.as_ref());
+
+    let telegraph = effect.clone();
+    effect.kind = EffectVisualKind::Rocket;
+    effect.remaining_secs = tail;
+    let rule = category::stage_rule(SkillId::WildRocket, effect.kind);
+    assert_eq!(
+        stage::transitions(rule, &telegraph, &effect),
+        [stage::Transition::KindFlipped]
+    );
+    assert!(stage::transitions(rule, &effect, &effect).is_empty());
+    let (_, release) = cue(&effect).unwrap();
+    assert!(!release.hold);
+    assert_eq!(release.motion, profile.release);
+
+    effect.remaining_secs -= 0.5;
+    assert!(
+        cue(&effect).is_none(),
+        "a late sighting does not replay the release"
+    );
+}
+
+#[test]
 fn hidden_or_other_caster_warning_does_not_drive_this_hero() {
     let state = LoadoutState {
         recipe: Some(shared::loadout::CoreId::Dawnweaver.preset()),
@@ -443,7 +488,7 @@ fn a_windup_is_a_loop_or_fitted_to_its_telegraph() {
         }
         held += 1;
     }
-    assert_eq!(held, 5);
+    assert_eq!(held, 6);
     // Dawn Ray: a charge authored for its 0.8 s warning plays at its own speed and forms its
     // raised two-hand pose (the contact) at least 0.1 s before the ray fires.
     let ray = target.profile(SkillId::DawnRay).unwrap();
@@ -1753,7 +1798,7 @@ fn target_bodies_fit_the_part_and_material_budgets() {
             bodies_seen += 1;
         }
     }
-    assert_eq!(bodies_seen, 33);
+    assert_eq!(bodies_seen, 34);
     // Only skills on a long cooldown spend more than twelve parts.
     assert_eq!(
         long_cooldown,

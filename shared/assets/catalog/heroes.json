@@ -235,7 +235,7 @@
     {
       "id": "cleric",
       "display_name": "Cleric",
-      "tagline": "Support: modest damage, strong heals",
+      "tagline": "Heals wounded allies and shields the group",
       "role": "support",
       "base_hp": 200.0,
       "growth": {
@@ -262,12 +262,12 @@
         {
           "id": "renew",
           "name": "Renew",
-          "description": "Mends the caster's wounds.",
+          "description": "Heals the ally with the lowest health percentage within 8 units.",
           "targeting": "self_target",
           "mana_cost": 20.0,
-          "cooldown_secs": 4.0,
+          "cooldown_secs": 6.0,
           "cast_range": 0.0,
-          "self_heal": 26.0
+          "ally_effect": { "kind": "heal_lowest", "radius": 8.0, "amount": 30.0 }
         },
         {
           "id": "divine_favor",
@@ -282,12 +282,12 @@
         {
           "id": "guardians_blessing",
           "name": "Guardian's Blessing",
-          "description": "Major self-restoration; the strongest heal in the game.",
+          "description": "Shields you and up to four allies within 8 units for 3 seconds.",
           "targeting": "self_target",
-          "mana_cost": 30.0,
-          "cooldown_secs": 18.0,
+          "mana_cost": 40.0,
+          "cooldown_secs": 38.0,
           "cast_range": 0.0,
-          "self_heal": 60.0
+          "ally_effect": { "kind": "shield_nearby", "radius": 8.0, "amount": 40.0, "duration_secs": 3.0 }
         }
       ],
       "recommended_items": [
@@ -339,7 +339,7 @@
         {
           "id": "barkskin",
           "name": "Barkskin",
-          "description": "Hardens like old wood and mends wounds between camps.",
+          "description": "Restores the caster's health.",
           "targeting": "self_target",
           "mana_cost": 16.0,
           "cooldown_secs": 6.0,
@@ -349,7 +349,7 @@
         {
           "id": "hunters_mark",
           "name": "Hunter's Mark",
-          "description": "Thrown spear that pins prey at medium range.",
+          "description": "Throws a spear that damages the selected enemy at medium range.",
           "targeting": "unit_target",
           "mana_cost": 22.0,
           "cooldown_secs": 4.0,
@@ -840,7 +840,7 @@
     {
       "id": "adventurer",
       "display_name": "Adventurer",
-      "tagline": "Dagger assassin: Bluff exposes the back; rear attacks hit harder",
+      "tagline": "Dagger assassin: stun a target and strike from behind",
       "role": "jungle",
       "base_hp": 190,
       "growth": {

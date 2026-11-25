@@ -6,7 +6,7 @@
   "hero.ranger.name": "Ranger",
   "hero.ranger.tagline": "Fast skirmisher: rapid shots, longest reach",
   "hero.cleric.name": "Cleric",
-  "hero.cleric.tagline": "Support: modest damage, strong heals",
+  "hero.cleric.tagline": "Heals wounded allies and shields the group",
   "hero.warden.name": "Warden",
   "hero.warden.tagline": "Jungler: fast camp clears, bonus forest gold",
   "hero.dawnweaver.name": "Dawnweaver",
@@ -32,5 +32,5 @@
   "hero.frostguard.name": "Frostguard",
   "hero.frostguard.tagline": "Protect allies and intercept incoming projectiles",
   "hero.adventurer.name": "Adventurer",
-  "hero.adventurer.tagline": "Dagger assassin: Bluff exposes the back; rear attacks hit harder"
+  "hero.adventurer.tagline": "Dagger assassin: stun a target and strike from behind"
 }

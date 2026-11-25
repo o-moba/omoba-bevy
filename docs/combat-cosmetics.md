@@ -309,7 +309,7 @@ the hit).
 | Cleric | Q | Smite (`smite`) | `rally_raise` | `muzzle_burst` / `cross` | projectile `disc_skim` + `cross` | `flash_star` / `cross` |
 | Cleric | W | Renew (`renew`) | `spell_finish` | `rune_mark` / `ringlet` | - | - |
 | Cleric | E | Divine Favor (`divine_favor`) | `point_command` | `inward_gather` / `star` | - | - |
-| Cleric | R | Guardian's Blessing (`guardians_blessing`) | `hover_pulse` | `spiral_up` / `crescent` | - | - |
+| Cleric | R | Guardian's Blessing (`guardians_blessing`) | `hover_pulse` | `ground_ring` / `ringlet` | - | - |
 | Warden | Q | Feral Swipe (`feral_swipe`) | `jab_cross` | `double_arc` / `claw` | projectile `volley` + `claw` | `claw_rake` / `claw` |
 | Warden | W | Barkskin (`barkskin`) | `guard` | `inward_gather` / `drop` | - | - |
 | Warden | E | Hunter's Mark (`hunters_mark`) | `hurl_overhand` | `muzzle_burst` / `drop` | projectile `dart` + `cone` | `splinter` / `chevron` |
@@ -321,7 +321,7 @@ the hit).
 | Wildspark | Q | Switchfire (`wild_switch`) | `reload_snap` | `toss_arc` / `star` | - | - |
 | Wildspark | W | Shockline (`wild_zap`) | `pistol_shoot` | `muzzle_flash` / `claw` | `traveller` | `spark_fork` / `chevron` |
 | Wildspark | E | Snapline (`wild_traps`) | `toss_underhand` | `muzzle_burst` / `ringlet` | `prop` | `chain_snap` / `chevron` |
-| Wildspark | R | Last Spark (`wild_rocket`) | `shot_heavy` | `muzzle_burst` / `streak` | `traveller` | `blast` / `star` |
+| Wildspark | R | Last Spark (`wild_rocket`) | `aim_hold_loop` → `shot_heavy` | `inward_gather` / `streak` | `lane` warning → `traveller` | `blast` / `star` |
 | Cinderforge | Q | Fault Line (`fault_line`) | `overhead_plant` | `strike_line` / `diamond` | `prop` | `splinter` / `diamond` |
 | Cinderforge | W | Furnace Breath (`furnace_breath`) | `fist_guard_loop` → `two_hand_push` (`fuse`) | `inward_gather` / `diamond` | `sector` | `spark_fork` / `drop` |
 | Cinderforge | E | Anvil Charge (`anvil_charge`) | `dive_lunge` | `ground_slam` / `diamond`, move `charge_dust` | - | `shard_burst` / `diamond` |

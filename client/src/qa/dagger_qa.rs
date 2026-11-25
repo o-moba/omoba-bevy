@@ -456,7 +456,7 @@ fn drive(world: &mut World) {
                 "physical_device_verified":false,"manual_input_verified":false,
                 "synthetic_window_focus":std::env::var("OMOBA_QA_SYNTHETIC_FOCUS").as_deref()==Ok("1"),
                 "combat_location":qa.combat_location.to_array(),
-                "method":"Class selection via UI; socket-free local authority normal Q/W/E/R casts. Last frame injects a labelled presentation-only rare CombatEvent; RNG mechanics are unit tested separately.",
+                "method":"Class selection through the UI and normal Q/W/E/R casts under local authority. The last frame injects a labelled legacy receipt to check presentation compatibility.",
                 "casts":qa.casts,"frames":qa.frames});
             std::fs::write(
                 qa.dir.join("result.json"),

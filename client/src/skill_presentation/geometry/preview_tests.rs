@@ -249,7 +249,7 @@ fn the_preview_table_draws_the_server_rule_of_all_48_modular_skills() {
         (
             "wild_rocket",
             P::Lane,
-            vec![lane(256.0, 1.05)],
+            vec![lane(60.0, 1.05)],
             vec![],
             false,
         ),
