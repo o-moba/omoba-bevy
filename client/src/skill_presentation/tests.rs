@@ -146,8 +146,15 @@ fn last_spark_warning_holds_the_aim_pose_until_the_rocket_launches() {
     assert!(warning.hold);
     assert_eq!(Some(&warning.motion), profile.windup.as_ref());
 
+    let telegraph = effect.clone();
     effect.kind = EffectVisualKind::Rocket;
     effect.remaining_secs = tail;
+    let rule = category::stage_rule(SkillId::WildRocket, effect.kind);
+    assert_eq!(
+        stage::transitions(rule, &telegraph, &effect),
+        [stage::Transition::KindFlipped]
+    );
+    assert!(stage::transitions(rule, &effect, &effect).is_empty());
     let (_, release) = cue(&effect).unwrap();
     assert!(!release.hold);
     assert_eq!(release.motion, profile.release);

@@ -349,16 +349,17 @@ fn track_actions(
         &NetworkHeroClass,
         &crate::net::PlayerCosmeticAction,
         Option<&crate::net::PlayerLoadout>,
+        Option<&crate::combat::CombatStats>,
     )>,
     mut actions: ResMut<WeaponActions>,
 ) {
     actions.0.retain(|entity, _| {
-        actors
-            .get(*entity)
-            .is_ok_and(|(_, class, _, _)| class.0 == shared::HeroClass::Wildspark)
+        actors.get(*entity).is_ok_and(|(_, class, _, _, stats)| {
+            class.0 == shared::HeroClass::Wildspark && stats.is_none_or(|stats| stats.is_alive())
+        })
     });
-    for (entity, class, action, loadout) in &actors {
-        if class.0 != shared::HeroClass::Wildspark {
+    for (entity, class, action, loadout, stats) in &actors {
+        if class.0 != shared::HeroClass::Wildspark || stats.is_some_and(|stats| !stats.is_alive()) {
             continue;
         }
         let state = actions.0.entry(entity).or_insert(ActionTime {

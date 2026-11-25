@@ -321,7 +321,7 @@ the hit).
 | Wildspark | Q | Switchfire (`wild_switch`) | `reload_snap` | `toss_arc` / `star` | - | - |
 | Wildspark | W | Shockline (`wild_zap`) | `pistol_shoot` | `muzzle_flash` / `claw` | `traveller` | `spark_fork` / `chevron` |
 | Wildspark | E | Snapline (`wild_traps`) | `toss_underhand` | `muzzle_burst` / `ringlet` | `prop` | `chain_snap` / `chevron` |
-| Wildspark | R | Last Spark (`wild_rocket`) | `shot_heavy` | `muzzle_burst` / `streak` | `traveller` | `blast` / `star` |
+| Wildspark | R | Last Spark (`wild_rocket`) | `aim_hold_loop` → `shot_heavy` | `inward_gather` / `streak` | `lane` warning → `traveller` | `blast` / `star` |
 | Cinderforge | Q | Fault Line (`fault_line`) | `overhead_plant` | `strike_line` / `diamond` | `prop` | `splinter` / `diamond` |
 | Cinderforge | W | Furnace Breath (`furnace_breath`) | `fist_guard_loop` → `two_hand_push` (`fuse`) | `inward_gather` / `diamond` | `sector` | `spark_fork` / `drop` |
 | Cinderforge | E | Anvil Charge (`anvil_charge`) | `dive_lunge` | `ground_slam` / `diamond`, move `charge_dust` | - | `shard_burst` / `diamond` |

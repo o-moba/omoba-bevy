@@ -143,6 +143,19 @@ fn defending_support_can_answer_last_spark_during_its_warning() {
 }
 
 #[test]
+fn dying_during_last_spark_preparation_removes_the_warning_without_firing() {
+    let (mut w, now, _) = fixture(HeroClass::Wildspark);
+    let caster = w.players[&addr(1)].hero.identity.id;
+    cast(&mut w, addr(1), 3, [60.0, 0.0], 1, now);
+    let after_death = now + duration(0.1);
+    crate::combat_feedback::apply_player_damage(&mut w.players, caster, 2000.0, after_death);
+    assert!(advance(&mut w, after_death, 0.05).is_empty());
+    assert!(effects(&w, after_death + duration(0.05)).is_empty());
+    assert!(advance(&mut w, after_death + duration(0.05), 0.7).is_empty());
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
+}
+
+#[test]
 fn shielded_rocket_has_a_blast_receipt_without_fake_damage() {
     let (mut w, now, victim) = fixture(HeroClass::Wildspark);
     shield(&mut w, victim, victim, 1000.0, 10.0, now);

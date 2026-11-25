@@ -249,10 +249,12 @@
       "body": { "archetype": "traveller", "model": "rocket", "altitude": "chest", "trail": "ribbon", "trail_scale": 2.0,
         "shell": { "mesh": "torus", "slot": "accent", "size": [0.8, 0.8, 0.12], "behave": "pulse" },
         "satellites": { "mesh": "drop", "layout": "helix", "count": 4, "size": [0.24, 0.24, 0.55], "slot": "primary", "behave": "flicker" } },
-      "aux": { "beam_warning": { "archetype": "lane", "fill": true, "marker": "fill_to_edge" } },
+      "aux": { "beam_warning": { "archetype": "lane", "fill": true, "marker": "fill_to_edge",
+          "satellites": { "mesh": "diamond", "layout": "line", "count": 6, "size": [0.7, 0.02, 0.7], "slot": "accent", "behave": "pulse" } } },
       "impact": { "kind": "blast", "shape": "star", "count": 12, "scale": 1.8, "lifetime": 0.7, "slots": ["primary", "accent"] },
       "sound": {
         "cast": { "base": "caster", "speed": 0.75, "slice": "tail", "gain": 1.0, "notes": [{ "delay_ms": 60, "speed": 0.7, "gain": 0.8 }] },
+        "release": { "base": "arrow", "speed": 0.65, "slice": "full", "gain": 0.95 },
         "impact": { "base": "tower", "speed": 0.85, "slice": "full", "gain": 1.0 } }
     },
     "fault_line": {

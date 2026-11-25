@@ -1511,11 +1511,11 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                 max_distance,
                 missing_health_ratio,
             } => {
-                if now < e.armed_at {
-                    w.skill_runtime.effects.insert(id, e);
+                if !e.fired && !owner_alive(w, e.owner) {
                     continue;
                 }
-                if !e.fired && !owner_alive(w, e.owner) {
+                if now < e.armed_at {
+                    w.skill_runtime.effects.insert(id, e);
                     continue;
                 }
                 e.fired = true;
