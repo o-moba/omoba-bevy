@@ -6,13 +6,13 @@
     "id": "omoba",
     "name": "OMOBA"
   },
-  "revision": "sha256-a8f3ffaf95b4f57bab3f56ce0aed8d44d713c5d10ae47ed576ceb7bfbf8101b4",
-  "previousRevision": "sha256-bae71784fff170720fcaf18da3992c05a4800257f89954157b687406b1257402",
+  "revision": "sha256-b289629e0de27ebd1bfec1d3b6f6a9ebd02f49270d2fb2ece287935e59e539e6",
+  "previousRevision": "sha256-a8f3ffaf95b4f57bab3f56ce0aed8d44d713c5d10ae47ed576ceb7bfbf8101b4",
   "license": "CC0-1.0",
   "source": {
-    "commit": "9eb642bd32418839db050bb8aa00fb7e83f905d4",
+    "commit": "1d3dfcd6d9f80486a8d49ad5471180d16aed5e26",
     "exporter": "scripts/export_game_contract.py",
-    "inputsSha256": "505642738c574ba77859a5980932fdf5c534175cbd1dbf69456c4af7f87153bf"
+    "inputsSha256": "773b7a46fc641c363f6cab31664290ac158084e0f920a5d85bc440f8624423d9"
   },
   "profiles": {
     "required": [],
@@ -4681,7 +4681,9 @@
       "label": "Horizon Wave (R) — wind-up",
       "required": false,
       "reserved": false,
-      "sharesDefaultWith": [],
+      "sharesDefaultWith": [
+        "skill.wild_rocket.windup"
+      ],
       "socket": null,
       "usedBy": [
         "riftshot"
@@ -7376,11 +7378,11 @@
       "alternatesWith": [],
       "animation": {
         "inPlace": true,
-        "leadInSecs": null,
+        "leadInSecs": 0.45,
         "loop": false,
         "markers": {
           "contact": {
-            "maxSecs": 0.15,
+            "maxSecs": null,
             "required": true,
             "targetSecs": 0.13
           }
@@ -7409,7 +7411,7 @@
       "description": null,
       "ext": {
         "omoba.character.v1": {
-          "edgeReleased": true,
+          "edgeReleased": false,
           "group": "skill",
           "handheld": {
             "bone": "rightHand",
@@ -7422,7 +7424,7 @@
               0.25
             ]
           },
-          "phase": "instant",
+          "phase": "warn_fire",
           "role": "release",
           "row": {
             "contactSecs": 0.17,
@@ -7434,7 +7436,11 @@
             "start": 0.05
           },
           "skill": "wild_rocket",
-          "telegraph": null
+          "telegraph": {
+            "fitWindup": false,
+            "secs": 0.45,
+            "serverWindupSecs": 0.45
+          }
         }
       },
       "kind": "animation",
@@ -7445,6 +7451,76 @@
         "basic.wildspark.rockets.0",
         "skill.horizon_wave.release",
         "skill.longshot.release"
+      ],
+      "socket": null,
+      "usedBy": [
+        "wildspark"
+      ]
+    },
+    "skill.wild_rocket.windup": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": true,
+        "markers": {},
+        "minIntervalSecs": null,
+        "playback": "loop",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 2,
+          "minSecs": 0.3,
+          "targetSecs": 1.6667
+        }
+      },
+      "asset": null,
+      "customizable": false,
+      "customizableFrom": "1.1",
+      "default": {
+        "loop": true,
+        "markers": {},
+        "name": "aim_hold_loop",
+        "playSecs": 1.6667,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": false,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "item": "wild-launcher",
+            "muzzleWindowSecs": null
+          },
+          "phase": "warn_fire",
+          "role": "windup",
+          "row": {
+            "contactSecs": null,
+            "durationSecs": 1.6667,
+            "effectiveContactSecs": null,
+            "motion": "aim_hold_loop",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "wild_rocket",
+          "telegraph": {
+            "fitWindup": false,
+            "secs": 0.45,
+            "serverWindupSecs": 0.45
+          }
+        }
+      },
+      "kind": "animation",
+      "label": "Last Spark (R) — wind-up",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [
+        "skill.horizon_wave.windup"
       ],
       "socket": null,
       "usedBy": [
@@ -8743,6 +8819,7 @@
           "key": "R",
           "label": "Last Spark",
           "slots": [
+            "skill.wild_rocket.windup",
             "skill.wild_rocket.release"
           ]
         }
@@ -8756,6 +8833,7 @@
         "skill.wild_switch.release",
         "skill.wild_zap.release",
         "skill.wild_traps.release",
+        "skill.wild_rocket.windup",
         "skill.wild_rocket.release"
       ],
       "subtitle": "carry"
@@ -10061,7 +10139,7 @@
         "schemaVersion": 1,
         "sha256": "2af1a6a0332bee5a840554efd7f4efdbf85941efe744c4b03df7fad382879a9a"
       },
-      "presentationSha256": "fe544cd0df722b9dd21753804c77091e3d8ddb64e863aebbfcfb3f0db4958ae4",
+      "presentationSha256": "1799acfee27febb30c3e2938db9d97dc739f3fde3098046cd14745453ae5c92b",
       "protocolVersion": 16,
       "timing": {
         "blendSecs": 0.12,
