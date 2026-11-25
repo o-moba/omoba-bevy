@@ -152,6 +152,7 @@ pub(crate) fn aux_kinds(id: SkillId) -> &'static [EffectVisualKind] {
         SkillId::FourfoldDuel => return &[K::Healing],
         SkillId::AnchorStep => return &[K::Anchor],
         SkillId::IronHook => return &[K::Soul],
+        SkillId::WildRocket => return &[K::BeamWarning],
         _ => {}
     }
     match skill(id).effect {
@@ -239,11 +240,10 @@ pub(crate) fn stage_rule(id: SkillId, kind: EffectVisualKind) -> StageRule {
         SkillEffect::TrapLine { .. } => StageRule::ArmedGate,
         // A warning until it fires, then a beam on the same id (`effects` in
         // `common/src/skills/mod.rs`).
-        SkillEffect::Beam { .. } => StageRule::KindGate,
+        SkillEffect::Beam { .. } | SkillEffect::ImpactRocket { .. } => StageRule::KindGate,
         SkillEffect::LinearProjectile { .. }
         | SkillEffect::ReturningShield { .. }
         | SkillEffect::RecastZone { .. }
-        | SkillEffect::ImpactRocket { .. }
         | SkillEffect::WeaponToggle { .. } => StageRule::Active,
         SkillEffect::Technique { action, .. } => match action {
             // The pillar arms 0.65 s after the cast (`common/src/skills/advanced.rs:660`).
@@ -337,6 +337,7 @@ fn telegraph(id: SkillId) -> Option<(f32, f32)> {
         // A beam lives `BEAM_LINGER_SECS` past its windup (`cast` and `tick` in
         // `common/src/skills/mod.rs`).
         SkillEffect::Beam { .. } => Some((def.windup_secs, BEAM_LINGER_SECS)),
+        SkillEffect::ImpactRocket { .. } => Some((def.windup_secs, def.rocket_flight_lifetime()?)),
         SkillEffect::Technique {
             action,
             duration_secs,
@@ -671,10 +672,17 @@ pub(crate) fn travelling_body(key: SkillKey) -> bool {
     }
 }
 
-/// Legacy heals are self only; their rows may not use a shield shape.
-pub(crate) fn self_heal(key: SkillKey) -> bool {
+/// Legacy heal rows use healing cues, including casts that restore an ally.
+pub(crate) fn heals(key: SkillKey) -> bool {
     match key {
-        SkillKey::Legacy(class, slot) => class.ability(slot).self_heal.is_some(),
+        SkillKey::Legacy(class, slot) => {
+            let ability = class.ability(slot);
+            ability.self_heal.is_some()
+                || matches!(
+                    ability.ally_effect,
+                    Some(shared::AllyEffect::HealLowest { .. })
+                )
+        }
         SkillKey::Modular(_) => false,
     }
 }
@@ -877,7 +885,10 @@ mod tests {
             with_rule(StageRule::ArmedGate),
             ["wild_traps", "fault_line"]
         );
-        assert_eq!(with_rule(StageRule::KindGate), ["dawn_ray", "horizon_wave"]);
+        assert_eq!(
+            with_rule(StageRule::KindGate),
+            ["dawn_ray", "wild_rocket", "horizon_wave"]
+        );
         assert_eq!(
             with_rule(StageRule::Fuse),
             ["furnace_breath", "mirror_guard", "orbital_collapse"]
@@ -911,6 +922,7 @@ mod tests {
         assert_eq!(
             declared,
             [
+                ("wild_rocket", vec![K::BeamWarning]),
                 ("fourfold_duel", vec![K::Healing]),
                 ("anchor_step", vec![K::Anchor]),
                 ("orbital_command", vec![K::Orb]),
@@ -933,6 +945,7 @@ mod tests {
             (SkillId::MirrorGuard, 0.75, 0.2),
             (SkillId::OrbitalCollapse, 0.7, 0.2),
             (SkillId::DawnRay, 0.8, 0.15),
+            (SkillId::WildRocket, 0.45, 1.683_333_4),
             // `max(9, 256 / 22 + 0.2)` minus the 0.7 s windup.
             (SkillId::HorizonWave, 0.7, 256.0 / 22.0 + 0.2 - 0.7),
         ] {
@@ -945,6 +958,7 @@ mod tests {
             modular_where(|id| telegraph_secs(id).is_some()),
             [
                 "dawn_ray",
+                "wild_rocket",
                 "furnace_breath",
                 "mirror_guard",
                 "orbital_collapse",
@@ -960,18 +974,18 @@ mod tests {
     }
 
     #[test]
-    fn derived_phases_cover_the_five_telegraphed_skills() {
+    fn derived_phases_cover_the_telegraphed_skills() {
         let with_phase = |wanted: MotionPhase| modular_where(|id| derived_phase(id) == wanted);
         assert_eq!(
             with_phase(MotionPhase::WarnFire),
-            ["dawn_ray", "horizon_wave"]
+            ["dawn_ray", "wild_rocket", "horizon_wave"]
         );
         assert_eq!(
             with_phase(MotionPhase::Fuse),
             ["furnace_breath", "orbital_collapse"]
         );
         assert_eq!(with_phase(MotionPhase::Parry), ["mirror_guard"]);
-        assert_eq!(with_phase(MotionPhase::Instant).len(), 43);
+        assert_eq!(with_phase(MotionPhase::Instant).len(), 42);
     }
 
     #[test]
@@ -1031,14 +1045,8 @@ mod tests {
             ]
         );
         assert_eq!(
-            keys_where(self_heal),
-            [
-                "battle_rally",
-                "field_dressing",
-                "renew",
-                "guardians_blessing",
-                "barkskin",
-            ]
+            keys_where(heals),
+            ["battle_rally", "field_dressing", "renew", "barkskin"]
         );
         for id in AREA_FLASH_SIGNED_OFF {
             assert!(area_damage(SkillKey::Modular(*id)), "{}", id.id());

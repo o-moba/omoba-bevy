@@ -328,6 +328,17 @@ struct ActionTime {
     rotor: f32,
     muzzle_sequence: u64,
 }
+
+impl ActionTime {
+    fn shot_age(&self) -> f32 {
+        if self.skill == Some(SkillId::WildRocket) {
+            self.age - shared::loadout::skill(SkillId::WildRocket).windup_secs
+        } else {
+            self.age
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 struct WeaponActions(std::collections::HashMap<Entity, ActionTime>);
 
@@ -393,14 +404,15 @@ fn emit_muzzle(
         let Some(action) = actions.0.get_mut(&weapon.owner) else {
             continue;
         };
+        let shot_age = action.shot_age();
         if !visible.get()
             || action.muzzle_sequence == action.sequence
-            || action.age < MUZZLE_WINDOW_SECS[0]
+            || shot_age < MUZZLE_WINDOW_SECS[0]
         {
             continue;
         }
         action.muzzle_sequence = action.sequence;
-        if action.age > MUZZLE_WINDOW_SECS[1] || !flashes_muzzle(action.slot, action.skill) {
+        if shot_age > MUZZLE_WINDOW_SECS[1] || !flashes_muzzle(action.slot, action.skill) {
             continue;
         }
         let Some(muzzle) = muzzle_point(&weapon.model, weapon.mode, weapon.hint) else {
@@ -498,7 +510,7 @@ fn animate_parts(
         };
         let firing = action.slot == shared::BASIC_ATTACK_ACTION_SLOT
             || matches!(action.skill, Some(SkillId::WildZap | SkillId::WildRocket));
-        let recoil = if firing { kick(action.age) } else { 0.0 };
+        let recoil = if firing { kick(action.shot_age()) } else { 0.0 };
         if let Ok(mut pose) = poses.get_mut(entity) {
             *pose = base.0;
             pose.rotation *= Quat::from_rotation_x(-0.11 * recoil);
@@ -882,7 +894,12 @@ mod tests {
         // Rockets mode, or a W/R draw: the launcher's slide recoils and the
         // hidden repeater's rotor keeps its last pose while the owner fires.
         world.get_mut::<HeldWeapon>(weapon).unwrap().mode = WeaponMode::Rockets;
-        let mut launcher_shot = action(Some(SkillId::WildRocket), 0.05);
+        let windup = shared::loadout::skill(SkillId::WildRocket).windup_secs;
+        assert_eq!(
+            kick(action(Some(SkillId::WildRocket), windup * 0.5).shot_age()),
+            0.0
+        );
+        let mut launcher_shot = action(Some(SkillId::WildRocket), windup + 0.05);
         launcher_shot.rotor = rotor + 1.0;
         world
             .resource_mut::<WeaponActions>()

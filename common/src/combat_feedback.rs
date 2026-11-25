@@ -208,35 +208,6 @@ pub fn apply_player_damage_kind(
     now: Instant,
     kind: shared::loadout::DamageType,
 ) -> Option<CombatEvent> {
-    apply_player_damage_with_floor(players, target_id, damage, now, kind, 0.0)
-}
-
-/// Vital breaks use the ordinary immunity/shield/receipt path, with a hard
-/// survivable floor even when very large f32 HP cannot represent `hp - 1`.
-pub(crate) fn apply_player_nonlethal_damage(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    target_id: u64,
-    damage: f32,
-    now: Instant,
-) -> Option<CombatEvent> {
-    apply_player_damage_with_floor(
-        players,
-        target_id,
-        damage,
-        now,
-        shared::loadout::DamageType::True,
-        1.0,
-    )
-}
-
-fn apply_player_damage_with_floor(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    target_id: u64,
-    damage: f32,
-    now: Instant,
-    kind: shared::loadout::DamageType,
-    floor: f32,
-) -> Option<CombatEvent> {
     if !damage.is_finite() || damage <= 0.0 {
         return None;
     }
@@ -289,7 +260,7 @@ fn apply_player_damage_with_floor(
     player.hero.hp = if player.modifiers.infinite_hp {
         before
     } else {
-        (before - damage).max(floor.min(before))
+        (before - damage).max(0.0)
     };
     if player.hero.hp <= 0.0 && player.timers.respawn_at.is_none() {
         player.timers.respawn_at = Some(now + player.timers.respawn_delay);

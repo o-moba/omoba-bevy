@@ -371,7 +371,9 @@ fn telegraph_cue(profile: &SkillProfile, effect: &SkillEffectState) -> Option<Mo
     match profile.phase(SkillKey::Modular(effect.skill)) {
         MotionPhase::WarnFire => match effect.kind {
             EffectVisualKind::BeamWarning => windup(),
-            EffectVisualKind::Beam | EffectVisualKind::Bolt => Some(MotionCue::release(profile)),
+            EffectVisualKind::Beam | EffectVisualKind::Bolt | EffectVisualKind::Rocket => {
+                Some(MotionCue::release(profile))
+            }
             _ => None,
         },
         MotionPhase::Fuse | MotionPhase::Parry => category::own_kinds(effect.skill)

@@ -618,12 +618,12 @@ fn cast_rules_reject_out_of_range_values_and_picks_the_skill_cannot_back() {
     );
     rejects(
         &with("/skills/battle_rally/cast/pattern", json!("shield_flash")),
-        "a self heal may not use a shield shape",
+        "a heal may not use a shield shape",
         "shield pattern on a heal",
     );
     rejects(
         &with("/skills/battle_rally/cast/shape", json!("kite")),
-        "a self heal may not use a shield shape",
+        "a heal may not use a shield shape",
         "shield shape on a heal",
     );
     rejects(
@@ -1566,8 +1566,8 @@ fn authored_picks_agree_with_the_catalog() {
             );
         }
         assert_eq!(
-            cast(json!({ "pattern": "shield_flash" })).contains("a self heal may not"),
-            category::self_heal(key),
+            cast(json!({ "pattern": "shield_flash" })).contains("a heal may not"),
+            category::heals(key),
             "{id}: shield_flash"
         );
 

@@ -993,10 +993,10 @@ fn cast_accent(accent: &CastAccent, owner: AccentOwner) -> Result<(), String> {
             {
                 return Err("strike_line needs a skill that strikes to its own effect".into());
             }
-            if category::self_heal(key)
+            if category::heals(key)
                 && (pattern == AccentPattern::ShieldFlash || lead == Some(ParticleShape::Kite))
             {
-                return Err("a self heal may not use a shield shape".into());
+                return Err("a heal may not use a shield shape".into());
             }
             let recast = id.is_some_and(category::has_recast);
             if let Some(pattern) = accent.recast {

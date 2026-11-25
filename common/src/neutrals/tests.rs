@@ -533,7 +533,7 @@ fn lethal_posthumous_neutral_hit_still_pays_once_and_waits_for_respawn() {
 }
 
 #[test]
-fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
+fn warden_forest_tracker_hits_camps_harder_and_earns_extra_gold_without_extra_xp() {
     let now = Instant::now();
     let mut dealt = Vec::new();
     let mut progress = Vec::new();
@@ -575,7 +575,7 @@ fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
         ));
         assert_eq!((gold > template.kill_gold), class == HeroClass::Warden);
     }
-    assert!(progress[1] > progress[0], "Warden gains more camp XP");
+    assert_eq!(progress[1], progress[0], "camp XP is shared across classes");
     assert_eq!(dealt[0], 10.0);
     assert!((dealt[1] - 10.0 * shared::jungle::WARDEN_CAMP_DAMAGE_MULTIPLIER).abs() < 0.001);
 }

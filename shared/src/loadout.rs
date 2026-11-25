@@ -848,6 +848,32 @@ impl SkillDefinition {
             crate::scaled_mana_cost(&self.ability, rank.clamp(1, self.ability.max_rank))
         }
     }
+
+    /// Time from launch until a rocket expires, including a short final-tick allowance.
+    pub fn rocket_flight_lifetime(&self) -> Option<f32> {
+        let SkillEffect::ImpactRocket {
+            speed,
+            launch_speed,
+            acceleration,
+            ..
+        } = self.effect
+        else {
+            return None;
+        };
+        Some(rocket_travel_secs(self.ability.cast_range, launch_speed, speed, acceleration) + 0.2)
+    }
+}
+
+/// Time to travel a distance during constant acceleration followed by capped speed.
+pub fn rocket_travel_secs(distance: f32, launch: f32, speed: f32, acceleration: f32) -> f32 {
+    let ramp_time = (speed - launch) / acceleration;
+    let ramp_distance = (launch + speed) * ramp_time * 0.5;
+    if distance <= ramp_distance {
+        // Rationalized quadratic root avoids cancellation near the muzzle.
+        2.0 * distance / ((launch * launch + 2.0 * acceleration * distance).sqrt() + launch)
+    } else {
+        ramp_time + (distance - ramp_distance) / speed
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -982,6 +1008,7 @@ fn parse_skills(json: &str) -> Result<Vec<SkillDefinition>, String> {
                 projectile_damage: r.effect.damage(),
                 self_heal: None,
                 self_mana_restore: None,
+                ally_effect: None,
             },
         });
     }

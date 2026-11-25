@@ -959,7 +959,7 @@ fn authored_picks_agree_with_the_catalog() {
             "{id}: charge pattern"
         );
         assert!(
-            !category::self_heal(key)
+            !category::heals(key)
                 || (cast.pattern != AccentPattern::ShieldFlash
                     && cast.lead() != Some(ParticleShape::Kite)),
             "{id}: shield shape on a heal"

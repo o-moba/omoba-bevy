@@ -34,7 +34,7 @@ their own acceptance checks.
 | `butterfly` | Confirmed local healing pickup collection, once per receipt |
 | `trap_trigger` | Authoritative trap activation damage receipt; owner/victim or nearby visible combat |
 | `bluff` | The cast voice of Bluff (`dagger_bluff`), by distance like every other cast voice |
-| `vital_break` | A confirmed `near_lethal` receipt of the Adventurer's Backstab |
+| `vital_break` | A legacy `near_lethal` receipt from the retired dagger effect |
 | `radiant_charge`, `radiant_beam` | The Dawnweaver's Horizon Ray: its cast and warning, and the beam firing (see "Horizon Ray") |
 | `radiant_core` | A confirmed `core_hit` receipt: a beam hit inside the core of the ray; once a frame |
 | `radiance_burst` | A confirmed `radiance_burst` receipt: a detonated Radiance mark, in place of the voice of a hit; once a frame |

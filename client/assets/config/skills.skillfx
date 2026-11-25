@@ -243,12 +243,13 @@
         "impact": { "base": "melee", "speed": 0.75, "slice": "tick", "gain": 0.9 } }
     },
     "wild_rocket": {
-      "home": "wildspark", "release": "shot_heavy", "color": [1.0, 0.2, 0.1], "hdr_gain": 2.6, "accent": [1.0, 0.75, 0.2],
-      "motion": { "rate": 1.0, "start": 0.05 },
-      "cast": { "pattern": "muzzle_burst", "shape": "streak", "count": 6, "scale": 0.85, "lifetime": 0.4, "slots": ["secondary", "primary"] },
+      "home": "wildspark", "windup": "aim_hold_loop", "release": "shot_heavy", "color": [1.0, 0.2, 0.1], "hdr_gain": 2.6, "accent": [1.0, 0.75, 0.2],
+      "motion": { "phase": "warn_fire", "rate": 1.0, "start": 0.05 },
+      "cast": { "pattern": "inward_gather", "shape": "streak", "count": 6, "scale": 0.85, "lifetime": 0.4, "slots": ["secondary", "primary"] },
       "body": { "archetype": "traveller", "model": "rocket", "altitude": "chest", "trail": "ribbon", "trail_scale": 2.0,
         "shell": { "mesh": "torus", "slot": "accent", "size": [0.8, 0.8, 0.12], "behave": "pulse" },
         "satellites": { "mesh": "drop", "layout": "helix", "count": 4, "size": [0.24, 0.24, 0.55], "slot": "primary", "behave": "flicker" } },
+      "aux": { "beam_warning": { "archetype": "lane", "fill": true, "marker": "fill_to_edge" } },
       "impact": { "kind": "blast", "shape": "star", "count": 12, "scale": 1.8, "lifetime": 0.7, "slots": ["primary", "accent"] },
       "sound": {
         "cast": { "base": "caster", "speed": 0.75, "slice": "tail", "gain": 1.0, "notes": [{ "delay_ms": 60, "speed": 0.7, "gain": 0.8 }] },
@@ -784,7 +785,7 @@
     "guardians_blessing": {
       "home": "cleric", "release": "hover_pulse", "color": [1.0, 0.83, 0.22], "hdr_gain": 5.0,
       "motion": { "rate": 0.8, "start": 0.1 },
-      "cast": { "pattern": "spiral_up", "shape": "crescent", "count": 8, "scale": 2.0, "lifetime": 0.5, "slots": ["primary", "accent"] },
+      "cast": { "pattern": "ground_ring", "shape": "ringlet", "count": 3, "scale": 1.6, "lifetime": 0.5, "slots": ["primary", "white"] },
       "sound": {
         "cast": { "base": "holy", "speed": 0.9, "slice": "full", "notes": [{ "delay_ms": 120, "speed": 1.15, "gain": 0.8 }, { "delay_ms": 240, "speed": 1.35, "gain": 0.7 }] } }
     },

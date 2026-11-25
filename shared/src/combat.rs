@@ -92,7 +92,7 @@ pub struct CombatEvent {
     /// Authoritative trap activation; false for ordinary attacks/spells.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub trap_triggered: bool,
-    /// An accepted rear dagger hit reduced a surviving hero to exactly 1 HP.
+    /// Legacy receipt for the retired dagger effect that left a target at 1 HP.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub near_lethal: bool,
     /// A beam's primary hit landed inside its full-damage core.

@@ -395,6 +395,40 @@ mod tests {
     }
 
     #[test]
+    fn cleric_legacy_cast_packets_protect_allies_offline() {
+        let mut practice = PracticeSession::new(Instant::now());
+        practice.command(join(HeroClass::Cleric));
+        let local = &practice.world.players[&LOCAL_ADDR].hero;
+        let target = TargetId {
+            kind: TargetKind::Player,
+            id: local.identity.id,
+        };
+        let (x, z) = (local.x, local.z);
+        let ally_addr = practice
+            .world
+            .players
+            .iter()
+            .filter(|(addr, player)| {
+                **addr != LOCAL_ADDR && player.hero.identity.team == Team::Green
+            })
+            .min_by_key(|(_, player)| player.hero.identity.id)
+            .map(|(&addr, _)| addr)
+            .unwrap();
+        let ally = &mut practice.world.players.get_mut(&ally_addr).unwrap().hero;
+        ally.x = x + 2.0;
+        ally.z = z;
+        ally.hp = 20.0;
+        practice.command(ClientPacket::Cast { target, slot: 1 });
+        assert!(practice.world.players[&ally_addr].hero.hp > 20.0);
+        practice.now += Duration::from_secs(1);
+        practice.command(ClientPacket::Cast { target, slot: 3 });
+        assert!(
+            crate::skills::state(&practice.world.players[&ally_addr], practice.now)
+                .is_some_and(|state| state.shield_hp > 0.0)
+        );
+    }
+
+    #[test]
     fn incompatible_handheld_is_rejected_before_join_and_can_be_retried() {
         use shared::handheld::HandheldSelection;
         let mut practice = PracticeSession::new(Instant::now());

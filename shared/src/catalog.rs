@@ -139,6 +139,7 @@ struct RawAbility {
     projectile_damage: Option<f32>,
     self_heal: Option<f32>,
     self_mana_restore: Option<f32>,
+    ally_effect: Option<crate::AllyEffect>,
 }
 
 #[derive(Deserialize)]
@@ -362,6 +363,13 @@ fn parse_ability(
         ("projectile_damage", ability.projectile_damage),
         ("self_heal", ability.self_heal),
         ("self_mana_restore", ability.self_mana_restore),
+        (
+            "ally_effect.amount",
+            ability.ally_effect.map(|effect| match effect {
+                crate::AllyEffect::HealLowest { amount, .. }
+                | crate::AllyEffect::ShieldNearby { amount, .. } => amount,
+            }),
+        ),
     ];
     let present: Vec<_> = effects
         .iter()
@@ -369,12 +377,26 @@ fn parse_ability(
         .collect();
     check(present.len() == 1, || {
         format!(
-            "{context}: needs exactly one of projectile_damage, self_heal, self_mana_restore, found {}",
+            "{context}: needs exactly one of projectile_damage, self_heal, self_mana_restore, ally_effect, found {}",
             present.len()
         )
     })?;
     let (effect, amount) = present[0];
     check_positive(context, effect, amount)?;
+    match ability.ally_effect {
+        Some(crate::AllyEffect::HealLowest { radius, .. }) => {
+            check_positive(context, "ally_effect.radius", radius)?;
+        }
+        Some(crate::AllyEffect::ShieldNearby {
+            radius,
+            duration_secs,
+            ..
+        }) => {
+            check_positive(context, "ally_effect.radius", radius)?;
+            check_positive(context, "ally_effect.duration_secs", duration_secs)?;
+        }
+        None => {}
+    }
     match ability.targeting {
         TargetingMode::UnitTarget => {
             check(ability.projectile_damage.is_some(), || {
@@ -409,6 +431,7 @@ fn parse_ability(
         projectile_damage: ability.projectile_damage,
         self_heal: ability.self_heal,
         self_mana_restore: ability.self_mana_restore,
+        ally_effect: ability.ally_effect,
     })
 }
 
@@ -636,7 +659,7 @@ mod tests {
         );
         assert_rejected(
             heroes_with(|v| v["classes"][0]["abilities"][1]["self_mana_restore"] = 5.into()),
-            "warrior W: needs exactly one of projectile_damage, self_heal, self_mana_restore, found 2",
+            "warrior W: needs exactly one of projectile_damage, self_heal, self_mana_restore, ally_effect, found 2",
         );
         assert_rejected(
             heroes_with(|v| {
@@ -649,6 +672,10 @@ mod tests {
         assert_rejected(
             heroes_with(|v| v["classes"][3]["abilities"][1]["cast_range"] = 8.into()),
             "cleric W: a self_target ability has cast_range 0",
+        );
+        assert_rejected(
+            heroes_with(|v| v["classes"][3]["abilities"][1]["ally_effect"]["radius"] = 0.into()),
+            "cleric W: ally_effect.radius must be a finite number above 0",
         );
         assert_rejected(
             heroes_with(|v| v["classes"][4]["abilities"][3]["id"] = "rampage".into()),

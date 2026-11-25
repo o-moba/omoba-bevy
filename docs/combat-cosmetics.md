@@ -309,7 +309,7 @@ the hit).
 | Cleric | Q | Smite (`smite`) | `rally_raise` | `muzzle_burst` / `cross` | projectile `disc_skim` + `cross` | `flash_star` / `cross` |
 | Cleric | W | Renew (`renew`) | `spell_finish` | `rune_mark` / `ringlet` | - | - |
 | Cleric | E | Divine Favor (`divine_favor`) | `point_command` | `inward_gather` / `star` | - | - |
-| Cleric | R | Guardian's Blessing (`guardians_blessing`) | `hover_pulse` | `spiral_up` / `crescent` | - | - |
+| Cleric | R | Guardian's Blessing (`guardians_blessing`) | `hover_pulse` | `ground_ring` / `ringlet` | - | - |
 | Warden | Q | Feral Swipe (`feral_swipe`) | `jab_cross` | `double_arc` / `claw` | projectile `volley` + `claw` | `claw_rake` / `claw` |
 | Warden | W | Barkskin (`barkskin`) | `guard` | `inward_gather` / `drop` | - | - |
 | Warden | E | Hunter's Mark (`hunters_mark`) | `hurl_overhand` | `muzzle_burst` / `drop` | projectile `dart` + `cone` | `splinter` / `chevron` |

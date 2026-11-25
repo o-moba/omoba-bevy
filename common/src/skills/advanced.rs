@@ -200,28 +200,26 @@ fn nearest(
     center: [f32; 2],
     radius: f32,
     now: Instant,
+    require_seal: bool,
 ) -> Option<Candidate> {
     let p = actor(w, owner)?;
+    let sealed = |c: &Candidate| {
+        w.skill_runtime.advanced.marks.iter().any(|m| {
+            m.owner == owner && m.target == c.target && m.kind == MarkKind::Seal && m.until > now
+        })
+    };
     candidates(w)
         .into_iter()
         .filter(|c| {
             hostile(c, p.hero.identity.team)
-                && c.target.kind != TargetKind::Structure
                 && distance(c.pos, center) <= radius + c.radius
+                && (!require_seal || sealed(c))
                 && (p.modifiers.bypass_vision
                     || crate::vision::target_visible(p.hero.identity.team, c.target, w, now))
         })
         .min_by(|a, b| {
-            let marked = |c: &Candidate| {
-                w.skill_runtime.advanced.marks.iter().any(|m| {
-                    m.owner == owner
-                        && m.target == c.target
-                        && m.kind == MarkKind::Seal
-                        && m.until > now
-                })
-            };
-            marked(b)
-                .cmp(&marked(a))
+            sealed(b)
+                .cmp(&sealed(a))
                 .then_with(|| distance(a.pos, center).total_cmp(&distance(b.pos, center)))
                 .then_with(|| key(a.target).cmp(&key(b.target)))
         })
@@ -641,7 +639,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                     distance(c.pos, origin) <= range + c.radius
                         && crate::vision::target_visible(team, c.target, w, now)
                 });
-                if let Some(c) = priority.or_else(|| nearest(w, owner, origin, range, now)) {
+                if let Some(c) = priority.or_else(|| nearest(w, owner, origin, range, now, false)) {
                     // The recast ignores the aim, so the hero turns to the unit it strikes.
                     if distance(c.pos, origin) > 0.001 {
                         crate::sim::cast::face_player_action(
@@ -754,7 +752,14 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
         }
         Technique::Lunge => {
             dash_to(w, owner, aim, now);
-            if let Some(c) = nearest(w, owner, position(w, owner).unwrap_or(origin), radius, now) {
+            if let Some(c) = nearest(
+                w,
+                owner,
+                position(w, owner).unwrap_or(origin),
+                radius,
+                now,
+                false,
+            ) {
                 out.extend(hit(w, &e, c, damage * scale, now));
                 let p = actor_mut(w, owner).unwrap();
                 p.timers.last_cast_at[slot as usize] =
@@ -935,7 +940,8 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 .untargetable_until = Some(now + duration(duration_secs));
         }
         Technique::GuidedFires | Technique::BlinkShot | Technique::SpiritDash => {
-            if action == Technique::BlinkShot {
+            let require_seal = action == Technique::BlinkShot;
+            if require_seal {
                 blink_to(w, owner, aim, now);
             } else if action == Technique::SpiritDash {
                 dash_to(w, owner, aim, now);
@@ -956,6 +962,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                         radius
                     },
                     now,
+                    require_seal,
                 ) {
                     out.extend(hit(w, &e, c, damage * scale, now));
                 }
