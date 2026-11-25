@@ -410,10 +410,16 @@ pub fn roster_avatar_slugs() -> Vec<String> {
         .collect()
 }
 
-/// The longest roster slug: the worst case for snapshot size budgets.
-pub fn longest_roster_avatar_slug() -> String {
-    roster_avatar_slugs()
-        .into_iter()
-        .max_by_key(String::len)
-        .expect("the shipped avatar roster must not be empty")
+/// The largest shipped class and avatar pair for snapshot size budgets.
+pub fn longest_class_default_loadout(
+    classes: &[shared::HeroClass],
+) -> (shared::HeroClass, &'static str) {
+    let class = classes
+        .iter()
+        .copied()
+        .max_by_key(|class| class.id().len() + class.default_avatar_slug().len())
+        .expect("the game must have a playable class");
+    let avatar = class.default_avatar_slug();
+    assert!(roster_avatar_slugs().iter().any(|slug| slug == avatar));
+    (class, avatar)
 }

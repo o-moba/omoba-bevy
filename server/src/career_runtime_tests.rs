@@ -75,8 +75,14 @@ fn authenticated_join(
     rt.career
         .backend
         .test_authenticated(address, profile(id, rating, experienced), &session);
+    rt.handle_packet(address, hello(), now);
     rt.handle_packet(address, join(&session), now);
     rt.world.players.get_mut(&address).unwrap().career_capable = true;
+}
+fn hello() -> ClientPacket {
+    ClientPacket::Hello {
+        protocol_version: shared::protocol::PROTOCOL_VERSION,
+    }
 }
 fn start(rt: &mut ServerRuntime, now: Instant) {
     rt.tick(now, 0.0);
@@ -127,6 +133,49 @@ fn invalidated_account_releases_waiting_and_reserved_seats_without_stalling_the_
 }
 
 #[test]
+fn standalone_ranked_queue_requires_framing_to_offer_all_classes() {
+    let mut rt = runtime(MatchConfig::release(1), true);
+    let now = Instant::now();
+    let player = addr(59301);
+    let session = "session-1";
+    rt.career
+        .backend
+        .test_authenticated(player, profile(1, 1000, false), session);
+    rt.handle_packet(player, join(session), now);
+    assert!(rt.career.queue.is_empty());
+    assert_eq!(
+        rt.world.players[&player].join_error,
+        Some(shared::protocol::JoinRejection::ProtocolMismatch)
+    );
+
+    rt.handle_packet(player, hello(), now);
+    rt.handle_packet(player, join(session), now);
+    assert_eq!(rt.world.players[&player].join_error, None);
+    assert_eq!(rt.career.queue.len(), 1);
+
+    authenticated_join(&mut rt, addr(59302), 2, 1000, false, now);
+    let retained = rt.world.players.remove(&player).unwrap();
+    assert!(retained.joined);
+    rt.world.disconnected_sessions.insert(
+        session.into(),
+        common::entities::DisconnectedSession {
+            player: retained,
+            disconnected_at: now,
+        },
+    );
+    let reconnect = addr(59303);
+    rt.career
+        .backend
+        .test_authenticated(reconnect, profile(1, 1000, false), session);
+    rt.handle_packet(reconnect, join(session), now);
+    assert_eq!(
+        rt.world.players[&reconnect].join_error,
+        Some(shared::protocol::JoinRejection::ProtocolMismatch)
+    );
+    assert!(rt.world.disconnected_sessions.contains_key(session));
+}
+
+#[test]
 fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocation() {
     let mut rt = runtime(MatchConfig::release(1), true);
     let now = Instant::now();
@@ -147,6 +196,10 @@ fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocatio
     rt.tick(now, 3.0);
     let allocation = rt.career_allocation_for_test().unwrap();
     assert!(allocation.rated);
+    assert_ne!(
+        allocation.participants[0].hero_class,
+        allocation.participants[1].hero_class
+    );
     assert_eq!(allocation.ruleset, career_runtime::RATED_RULESET);
     let before = rt.world.players[&addr(59301)].economy.gold;
     for i in 1..=3 {
@@ -341,6 +394,7 @@ fn authenticated_reclaim_requires_profile_and_signed_session_preserving_round_id
     rt.career
         .backend
         .test_authenticated(owner, profile(31, 1000, false), "session-31");
+    rt.handle_packet(owner, hello(), now);
     rt.handle_packet(owner, packet(sword.clone()), now);
     rt.world.players.get_mut(&owner).unwrap().career_capable = true;
     assert_eq!(rt.world.players[&owner].hero.identity.handheld, sword);
@@ -379,7 +433,7 @@ fn authenticated_reclaim_requires_profile_and_signed_session_preserving_round_id
     assert_eq!(rt.world.players[&addr(59335)].hero.hp, 17.0);
     assert_eq!(
         rt.world.players[&addr(59335)].hero.identity.handheld,
-        HandheldSelection::Unequipped
+        HandheldSelection::ClassDefault
     );
     assert_eq!(rt.combat_log.ledger.snapshot().len(), 2);
     assert!(
@@ -695,6 +749,7 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
         keys.push(key);
     }
     for (index, socket) in sockets.iter().enumerate() {
+        send(socket, &mut rt, hello());
         send(socket, &mut rt, join(&format!("live-signed-{index}")));
     }
     let now = Instant::now();
@@ -1426,6 +1481,7 @@ fn postgres_live_udp_tier_aura_is_server_checked_and_seen_by_the_other_player() 
         keys.push(key);
     }
     for (index, socket) in sockets.iter().enumerate() {
+        send(socket, &mut rt, hello());
         send(socket, &mut rt, join(&format!("tier-signed-{index}")));
     }
     let now = Instant::now();

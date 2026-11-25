@@ -11,6 +11,7 @@
 //! Run it against a practice server:
 //! `OMOBA_MATCH_MODE=practice cargo run -p server` then
 //! `OMOBA_FRONTEND_QA_FLOW=1 OMOBA_FRONTEND_QA_OUTPUT=<dir> cargo run -p client`.
+//! Set `OMOBA_FRONTEND_QA_CLASS_DEFAULTS=1` to verify shipped class appearances.
 
 use std::{
     path::PathBuf,
@@ -18,14 +19,11 @@ use std::{
 };
 
 use bevy::{
-    app::AppExit,
-    prelude::*,
-    render::view::screenshot::{Screenshot, save_to_disk},
-    window::PrimaryWindow,
+    app::AppExit, prelude::*, render::view::screenshot::save_to_disk, window::PrimaryWindow,
 };
 
 use crate::frontend::AppScreen;
-use crate::net::ClientSession;
+use crate::net::{ClientSession, NetworkAvatar, NetworkHeroClass};
 use crate::player::Player;
 
 /// Frames to hold the home screen before pressing PLAY, so the "no join was
@@ -57,6 +55,9 @@ impl Plugin for FrontendFlowQaPlugin {
             captured: false,
             rejoined_after_leave: false,
             finished: false,
+            verify_class_defaults: std::env::var("OMOBA_FRONTEND_QA_CLASS_DEFAULTS").as_deref()
+                == Ok("1"),
+            verified_class_avatars: Vec::new(),
         })
         .insert_resource(bevy::winit::WinitSettings::continuous())
         .add_systems(Update, drive_flow);
@@ -97,6 +98,8 @@ struct FlowQa {
     /// The session left the match and reached a second one with a new pick.
     rejoined_after_leave: bool,
     finished: bool,
+    verify_class_defaults: bool,
+    verified_class_avatars: Vec<(&'static str, &'static str)>,
 }
 
 impl FlowQa {
@@ -105,6 +108,32 @@ impl FlowQa {
         if self.trace.last() != Some(&name) {
             self.trace.push(name);
         }
+    }
+
+    fn verify_class_avatar(
+        &mut self,
+        class: &NetworkHeroClass,
+        avatar: Option<&NetworkAvatar>,
+        exit: &mut MessageWriter<AppExit>,
+    ) -> bool {
+        if !self.verify_class_defaults {
+            return true;
+        }
+        let expected = class.0.default_avatar_slug();
+        let received = avatar.and_then(|avatar| avatar.0.as_deref());
+        if received != Some(expected) {
+            self.finish(
+                "failed",
+                Some(&format!(
+                    "{} expected {expected}, received {received:?}",
+                    class.0.id()
+                )),
+                exit,
+            );
+            return false;
+        }
+        self.verified_class_avatars.push((class.0.id(), expected));
+        true
     }
 
     fn finish(&mut self, status: &str, reason: Option<&str>, exit: &mut MessageWriter<AppExit>) {
@@ -122,6 +151,7 @@ impl FlowQa {
             "join_committed_from_the_menus": self.join_committed_on_home,
             "local_hero_before_lock_in": self.world_before_lock_in,
             "rejoined_after_leave": self.rejoined_after_leave,
+            "verified_class_avatars": self.verified_class_avatars,
             "coordinated_peer_run": std::env::var("OMOBA_FRONTEND_QA_PEER").as_deref() == Ok("1"),
             "prematch_captures": (["04-team-draft.png", "05-team-countdown.png", "06-team-loading.png"].map(|name| serde_json::json!({"file":name,"exists":self.directory.join(name).is_file()}))),
             "in_match_capture": passed.then(|| "07-in-match.png".to_owned()),
@@ -150,17 +180,20 @@ fn drive_flow(
     mut qa: ResMut<FlowQa>,
     screen: Res<State<AppScreen>>,
     session: Res<ClientSession>,
-    players: Query<(), With<Player>>,
+    players: Query<(&NetworkHeroClass, Option<&NetworkAvatar>), With<Player>>,
     snapshot: Res<crate::net::GameStateSnapshot>,
     mut draft_since: Local<Option<Instant>>,
     mut buttons: crate::qa::TestIdPresses,
     mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
+    surface: Option<Res<super::offscreen::Surface>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.finished {
         return;
     }
+    let screenshot =
+        || super::offscreen::screenshot(surface.as_ref().map(|surface| &surface.image));
     for (_, mut window) in &mut windows {
         let dimension = |key: &str, fallback: u32| {
             std::env::var(key)
@@ -184,6 +217,20 @@ fn drive_flow(
         return;
     }
     qa.frames += 1;
+    if qa.verify_class_defaults && current == AppScreen::HeroSelect && qa.frames == SELECT_FRAMES {
+        let capture = match qa.step {
+            FlowStep::HeroSelect => Some("03-class-default.png"),
+            FlowStep::SecondSelect => Some("08-class-default-after-switch.png"),
+            _ => None,
+        };
+        if let Some(filename) = capture {
+            let _ = std::fs::create_dir_all(&qa.directory);
+            commands
+                .spawn(screenshot())
+                .observe(save_to_disk(qa.directory.join(filename)));
+            return;
+        }
+    }
     if matches!(qa.step, FlowStep::AwaitMatch | FlowStep::AwaitSecondMatch) {
         if current == AppScreen::Draft {
             let since = draft_since.get_or_insert_with(Instant::now);
@@ -202,9 +249,7 @@ fn drive_flow(
                 let path = qa.directory.join("04-team-draft.png");
                 if !path.exists() {
                     let _ = std::fs::create_dir_all(&qa.directory);
-                    commands
-                        .spawn(Screenshot::primary_window())
-                        .observe(save_to_disk(path));
+                    commands.spawn(screenshot()).observe(save_to_disk(path));
                 }
             }
             if since.elapsed() > Duration::from_secs(4) {
@@ -222,9 +267,7 @@ fn drive_flow(
                 };
                 let path = qa.directory.join(filename);
                 if !path.exists() {
-                    commands
-                        .spawn(Screenshot::primary_window())
-                        .observe(save_to_disk(path));
+                    commands.spawn(screenshot()).observe(save_to_disk(path));
                 }
             }
         }
@@ -284,6 +327,9 @@ fn drive_flow(
                 qa.world_before_lock_in = true;
             }
             if qa.frames < SELECT_FRAMES {
+                if qa.verify_class_defaults {
+                    press(&mut buttons, "ClassButton-warden");
+                }
                 return;
             }
             press(&mut buttons, "FindMatchButton");
@@ -300,6 +346,12 @@ fn drive_flow(
                 return;
             }
             if !qa.captured {
+                let Ok((class, avatar)) = players.single() else {
+                    return;
+                };
+                if !qa.verify_class_avatar(class, avatar, &mut exit) {
+                    return;
+                }
                 if std::fs::create_dir_all(&qa.directory).is_err() {
                     qa.finish("failed", Some("cannot create capture directory"), &mut exit);
                     return;
@@ -308,7 +360,7 @@ fn drive_flow(
                 // run's evidence.
                 let _ = std::fs::remove_file(qa.directory.join("07-in-match.png"));
                 commands
-                    .spawn(Screenshot::primary_window())
+                    .spawn(screenshot())
                     .observe(save_to_disk(qa.directory.join("07-in-match.png")));
                 qa.captured = true;
                 return;
@@ -392,7 +444,10 @@ fn drive_flow(
                 qa.finish("failed", Some(rejection.message()), &mut exit);
                 return;
             }
-            if current == AppScreen::InMatch && !players.is_empty() {
+            if current == AppScreen::InMatch
+                && let Ok((class, avatar)) = players.single()
+                && qa.verify_class_avatar(class, avatar, &mut exit)
+            {
                 qa.rejoined_after_leave = true;
                 qa.step = FlowStep::Done;
             }
@@ -423,6 +478,8 @@ mod tests {
             captured: false,
             rejoined_after_leave: false,
             finished: false,
+            verify_class_defaults: false,
+            verified_class_avatars: Vec::new(),
         };
         qa.record(AppScreen::Home);
         qa.record(AppScreen::Home);

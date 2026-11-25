@@ -1154,9 +1154,8 @@ fn adapt_phone_layout(
                 node.width = Val::Percent(100.0);
                 node.height = Val::Px(metric::TOUCH_MIN);
             }
-            // Desktop-only picker parts: no room beside the phone grid, and the
-            // wallet pairing flow is not supported on a phone yet.
-            "HeroSelectTitle" | "HeroSelectStatus" | "HeroSelectPanel" | "EkzaConnectRow" => {
+            // Desktop-only picker parts have no room beside the phone grid.
+            "HeroSelectTitle" | "HeroSelectStatus" | "HeroSelectPanel" => {
                 node.display = Display::None;
             }
             "ServerEntryPanel" => {

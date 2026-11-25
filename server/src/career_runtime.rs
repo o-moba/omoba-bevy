@@ -399,10 +399,17 @@ impl ServerRuntime {
         else {
             return;
         };
+        let roster_frozen = self.career_roster_is_frozen() || self.match_started_at.is_some();
         let player = self.world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
         let was_joined = player.joined;
         if !player.protocol_compatible {
+            return;
+        }
+        // Every seat still eligible for the current draft needs all classes,
+        // including a pre-start reconnect to a reserved seat.
+        if !roster_frozen && !player.framed_snapshots {
+            player.join_error = Some(shared::protocol::JoinRejection::ProtocolMismatch);
             return;
         }
         if !self
@@ -426,6 +433,12 @@ impl ServerRuntime {
                 false,
             );
             self.career.backend.set_playing(addr, true);
+            return;
+        }
+        // While a frozen round can recover existing seats, a new entry waits
+        // for the next draft and still needs framing.
+        if !player.framed_snapshots {
+            player.join_error = Some(shared::protocol::JoinRejection::ProtocolMismatch);
             return;
         }
         if !handheld.compatible(hero_class) {
@@ -666,7 +679,7 @@ impl ServerRuntime {
         if !self.allocated_humans_ready() {
             return false;
         }
-        if !self.prepare_public_unique_loadouts(now) {
+        if !self.prepare_unique_loadouts(now) {
             return false;
         }
         let practice = self.rules.local_results;

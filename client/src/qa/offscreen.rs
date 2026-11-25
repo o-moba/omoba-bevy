@@ -34,7 +34,7 @@ fn requested(
         return Err("OMOBA_QA_OFFSCREEN must be1 or unset");
     }
     if mobile || !supported_harness {
-        return Err("Offscreen QA requires a desktop fair-play or Creator Loop harness");
+        return Err("Offscreen QA requires a supported desktop harness");
     }
     Ok(true)
 }
@@ -45,7 +45,10 @@ pub(crate) fn configure(app: &mut App, plugins: PluginGroupBuilder) -> PluginGro
     let flag = std::env::var(ENV).ok();
     let enabled = requested(
         flag.as_deref(),
-        set("OMOBA_FAIR_PLAY_QA_OUTPUT") || set("OMOBA_CREATOR_LOOP_QA"),
+        set("OMOBA_FAIR_PLAY_QA_OUTPUT")
+            || set("OMOBA_CREATOR_LOOP_QA")
+            || (std::env::var("OMOBA_FRONTEND_QA_FLOW").as_deref() == Ok("1")
+                && set("OMOBA_FRONTEND_QA_OUTPUT")),
         cfg!(any(target_os = "ios", target_os = "android")),
     )
     .expect("invalid offscreen QA configuration");

@@ -46,7 +46,6 @@
   "collection.weapons_included": "Встроенное",
   "collection.weapons_catalogue": "Каталог Ekza",
   "collection.weapon_default": "По классу",
-  "collection.weapon_empty": "Без оружия",
   "collection.weapon_download_pending": "Загружаем выбранное оружие…",
   "collection.weapon_download_failed": "Не удалось загрузить оружие. Нажмите «Обновить», чтобы повторить.",
   "collection.weapon_download_ready": "Выбранное оружие готово.",

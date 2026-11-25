@@ -44,7 +44,11 @@
       "note": "Real button flow into a practice match: draft, countdown, loading, first in-match frame.",
       "sources": [
         "client/src/qa/frontend_flow_qa.rs"
-      ]
+      ],
+      "ignore": {
+        "03-class-default.png": "Only with OMOBA_FRONTEND_QA_CLASS_DEFAULTS=1: initial class default in the hero picker.",
+        "08-class-default-after-switch.png": "Only with OMOBA_FRONTEND_QA_CLASS_DEFAULTS=1: class default after returning and switching classes."
+      }
     },
     "match": {
       "area": "03-in-match-hud",

@@ -44,6 +44,15 @@ fn join(rt: &mut ServerRuntime, addr: SocketAddr, session: &str, now: Instant, e
         now,
     );
 }
+fn hello(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) {
+    rt.handle_packet(
+        addr,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+        now,
+    );
+}
 fn send(rt: &mut ServerRuntime, addr: SocketAddr, id: u64, action: PrematchAction, now: Instant) {
     let request = PrematchRequest {
         server_epoch: rt.server_epoch,
@@ -66,15 +75,131 @@ fn select(role: Role, class: HeroClass) -> PrematchAction {
     }
 }
 fn view(rt: &ServerRuntime, addr: SocketAddr, now: Instant) -> PrematchSnapshot {
-    snapshot(
-        &rt.prematch,
-        &rt.world.players,
-        &rt.world.players[&addr],
-        rt.rules,
-        now,
-    )
-    .unwrap()
+    rt.prematch_snapshot(&rt.world.players[&addr], now).unwrap()
 }
+
+#[test]
+fn join_and_draft_resolve_the_default_avatar_for_every_class() {
+    let (mut rt, now) = fixture(MatchMode::Release, 1);
+    let owner = address(1);
+    let peer = address(2);
+    rt.handle_packet(
+        owner,
+        ClientPacket::Join {
+            handheld: Default::default(),
+            prematch: true,
+            team: Team::Green,
+            character: CharacterChoice::Cube,
+            hero_class: HeroClass::Warden,
+            avatar: Some("agnes".into()),
+            sprite_character: None,
+            session_id: Some("class-default-owner".into()),
+            passport_ticket: None,
+        },
+        now,
+    );
+    assert!(rt.world.players[&owner].joined);
+    assert_eq!(
+        rt.world.players[&owner].hero.identity.avatar.as_deref(),
+        Some("set01-warden")
+    );
+    rt.handle_packet(
+        owner,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+        now,
+    );
+    join(&mut rt, peer, "class-default-peer", now, true);
+    let owner_id = rt.world.players[&owner].hero.identity.id;
+
+    for (index, class) in HeroClass::ALL.into_iter().enumerate() {
+        let request = index as u64 + 1;
+        let mut action = select(Role::Mid, class);
+        let PrematchAction::Select { avatar, .. } = &mut action else {
+            unreachable!();
+        };
+        *avatar = Some(" set01-mage ".into());
+        send(&mut rt, owner, request, action, now);
+        let local = view(&rt, owner, now);
+        assert_eq!(local.last_request_id, request);
+        assert_eq!(local.error, None, "{} should be selectable", class.id());
+        assert!(!rt.passport_admissions.is_pending(owner));
+        let draft = view(&rt, peer, now);
+        let actor = draft
+            .players
+            .iter()
+            .find(|p| p.player_id == owner_id)
+            .unwrap();
+        assert_eq!(actor.hero_class, class);
+        assert_eq!(actor.avatar.as_deref(), Some(class.default_avatar_slug()));
+    }
+}
+
+#[test]
+fn hosted_avatars_still_require_admission_on_join_and_draft_select() {
+    let (mut rt, now) = fixture(MatchMode::Release, 1);
+    let owner = address(1);
+    let hosted = format!(" ekza-{} ", "1".repeat(64));
+    rt.handle_packet(
+        owner,
+        ClientPacket::Join {
+            handheld: Default::default(),
+            prematch: true,
+            team: Team::Green,
+            character: CharacterChoice::Cube,
+            hero_class: HeroClass::Warrior,
+            avatar: Some(hosted.clone()),
+            sprite_character: None,
+            session_id: Some("hosted-approval-owner".into()),
+            passport_ticket: Some("invalid".into()),
+        },
+        now,
+    );
+    assert!(!rt.world.players[&owner].joined);
+    assert_eq!(
+        rt.world.players[&owner].join_error,
+        Some(shared::protocol::JoinRejection::AvatarNotAuthorized)
+    );
+    assert!(!rt.passport_admissions.is_pending(owner));
+
+    join(&mut rt, owner, "hosted-approval-owner", now, true);
+    rt.handle_packet(
+        owner,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+        now,
+    );
+    join(&mut rt, address(2), "hosted-approval-peer", now, true);
+    let mut action = select(Role::Carry, HeroClass::Riftshot);
+    let PrematchAction::Select {
+        avatar,
+        passport_ticket,
+        ..
+    } = &mut action
+    else {
+        unreachable!();
+    };
+    *avatar = Some(hosted);
+    *passport_ticket = Some("invalid".into());
+    send(&mut rt, owner, 1, action, now);
+
+    let player = &rt.world.players[&owner];
+    assert_eq!(player.hero.identity.hero_class, HeroClass::Warrior);
+    assert_eq!(
+        player.hero.identity.avatar.as_deref(),
+        Some("set01-warrior")
+    );
+    assert!(!rt.passport_admissions.is_pending(owner));
+    let rejected = view(&rt, owner, now);
+    assert_eq!(rejected.last_request_id, 1);
+    assert_eq!(
+        rejected.error.as_deref(),
+        Some("This avatar or weapon is unavailable. Choose different equipment.")
+    );
+}
+
 #[test]
 fn automatic_teams_and_opt_in_draft_work_in_all_modes_legacy_remains_inert() {
     for mode in [MatchMode::Dev, MatchMode::Release, MatchMode::Practice] {
@@ -94,14 +219,8 @@ fn automatic_teams_and_opt_in_draft_work_in_all_modes_legacy_remains_inert() {
     assert_eq!(rt.world.players[&address(1)].hero.identity.team, Team::Blue);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert!(
-        snapshot(
-            &rt.prematch,
-            &rt.world.players,
-            &rt.world.players[&address(1)],
-            rt.rules,
-            now
-        )
-        .is_none()
+        rt.prematch_snapshot(&rt.world.players[&address(1)], now)
+            .is_none()
     );
     let legacy: ClientPacket = serde_json::from_str(r#"{"type":"join","team":"green"}"#).unwrap();
     assert!(matches!(
@@ -391,6 +510,18 @@ fn selection_expiry_waits_for_pending_avatar_admission_before_freezing() {
             }
         );
         assert_eq!(
+            rt.world.players[&address(1)]
+                .hero
+                .identity
+                .avatar
+                .as_deref(),
+            Some(if allowed {
+                "set01-healer"
+            } else {
+                "set01-warrior"
+            })
+        );
+        assert_eq!(
             rt.world.players[&address(1)].draft.role,
             if allowed { Role::Support } else { Role::Mid }
         );
@@ -399,7 +530,7 @@ fn selection_expiry_waits_for_pending_avatar_admission_before_freezing() {
     }
 }
 #[test]
-fn stale_namespace_sequence_generation_and_unknown_avatar_preserve_choice() {
+fn stale_namespace_sequence_and_generation_preserve_choice() {
     let (mut rt, now) = fixture(MatchMode::Dev, 2);
     join(&mut rt, address(1), "one", now, true);
     let generation = rt.prematch.generation;
@@ -441,16 +572,10 @@ fn stale_namespace_sequence_generation_and_unknown_avatar_preserve_choice() {
         );
     }
     assert_eq!(rt.world.players[&address(1)].draft.request_id, 1);
-    let mut action = select(Role::Solo, HeroClass::Warrior);
-    if let PrematchAction::Select { avatar, .. } = &mut action {
-        *avatar = Some("unregistered-invalid-model".into());
-    }
-    send(&mut rt, address(1), 2, action, now);
     assert_eq!(
         rt.world.players[&address(1)].hero.identity.hero_class,
         HeroClass::Mage
     );
-    assert!(view(&rt, address(1), now).error.is_some());
 }
 #[test]
 fn dropout_cancels_countdown_and_reconnect_preserves_identity_but_requires_lock_again() {
@@ -485,6 +610,14 @@ fn dropout_cancels_countdown_and_reconnect_preserves_identity_but_requires_lock_
     );
     rt.tick_prematch(now + Duration::from_secs(6));
     assert_eq!(rt.world.players[&address(3)].hero.identity.id, identity);
+    assert_eq!(
+        rt.world.players[&address(3)]
+            .hero
+            .identity
+            .avatar
+            .as_deref(),
+        Some("set01-warrior")
+    );
     assert!(!rt.world.players[&address(1)].draft.locked);
     assert!(!rt.world.players[&address(3)].draft.locked);
 }
@@ -725,14 +858,8 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
     );
     assert_eq!(rt.world.game_state, GameState::Running);
     assert!(
-        snapshot(
-            &rt.prematch,
-            &rt.world.players,
-            &rt.world.players[&d],
-            rt.rules,
-            Instant::now()
-        )
-        .is_none()
+        rt.prematch_snapshot(&rt.world.players[&d], Instant::now())
+            .is_none()
     );
 }
 
@@ -751,6 +878,7 @@ fn loaded_peers_still_wait_for_durable_career_ack_and_frozen_loadout_is_recorded
             },
             &session,
         );
+        hello(&mut rt, address(i), now);
         join(&mut rt, address(i), &session, now, true);
     }
     rt.tick_prematch(now);
@@ -838,14 +966,8 @@ fn running_reconnect_bypasses_draft_and_preserves_class_role_identity() {
     assert_eq!(rt.world.players[&address(2)].draft.role, Role::Jungle);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert!(
-        snapshot(
-            &rt.prematch,
-            &rt.world.players,
-            &rt.world.players[&address(2)],
-            rt.rules,
-            now
-        )
-        .is_none()
+        rt.prematch_snapshot(&rt.world.players[&address(2)], now)
+            .is_none()
     );
 }
 
@@ -983,7 +1105,7 @@ fn late_avatar_authorization_cannot_modify_a_new_roster_generation() {
     );
 }
 
-fn allocated_loading_roster(
+fn allocated_draft_roster(
     preference: shared::match_service::MatchPreference,
 ) -> (ServerRuntime, Instant, std::path::PathBuf) {
     use crate::match_allocation::{AllocatedHuman, Manifest, Worker, unix_ms};
@@ -1028,15 +1150,23 @@ fn allocated_loading_roster(
         released: Vec::new(),
         last_release_scan: None,
     });
-    for (i, human) in humans.iter().enumerate() {
+    for (i, human) in humans.into_iter().enumerate() {
         let addr = address(i as u16 + 1);
         rt.career.backend.test_authenticated(
             addr,
-            shared::career::ProfileSummary::new(human.profile_id.clone(), format!("Player {i}")),
+            shared::career::ProfileSummary::new(human.profile_id, format!("Player {i}")),
             &human.session_id,
         );
+        hello(&mut rt, addr, now);
         join(&mut rt, addr, &human.session_id, now, true);
     }
+    (rt, now, directory)
+}
+
+fn allocated_loading_roster(
+    preference: shared::match_service::MatchPreference,
+) -> (ServerRuntime, Instant, std::path::PathBuf) {
+    let (mut rt, now, directory) = allocated_draft_roster(preference);
     let mut roster: Vec<_> = rt
         .world
         .players
@@ -1046,15 +1176,16 @@ fn allocated_loading_roster(
         .collect();
     roster.sort_unstable();
     let mut next = [0, 0];
-    for (_, addr) in roster {
+    for (slot, (_, addr)) in roster.into_iter().enumerate() {
         let p = rt.world.players.get_mut(&addr).unwrap();
         let team = if p.hero.identity.team == Team::Green {
             0
         } else {
             1
         };
-        // Valid committed choices under the new per-team uniqueness rule.
-        p.hero.identity.hero_class = HeroClass::ALL[next[team]];
+        // Valid committed choices under this queue's uniqueness rule.
+        p.hero.identity.hero_class =
+            HeroClass::ALL[if preference.rated() { slot } else { next[team] }];
         next[team] += 1;
         reset_player_round(p, &rt.world.map_layout, now);
         p.draft.locked = true;
@@ -1230,6 +1361,118 @@ fn locked_teammate_class_rejects_select_and_lock_but_opponent_can_mirror() {
 }
 
 #[test]
+fn ranked_class_reservation_covers_both_teams_and_is_rechecked_after_admission() {
+    use shared::match_service::MatchPreference;
+    let (mut rt, now, directory) = allocated_draft_roster(MatchPreference::Ranked);
+    let (owner, opponent, pending) = (address(1), address(6), address(7));
+    assert!(view(&rt, opponent, now).unique_classes_across_teams);
+    for player in [owner, opponent] {
+        // Tentative choices do not reserve a class. A successful lock does.
+        send(&mut rt, player, 1, select(Role::Mid, HeroClass::Mage), now);
+        assert_eq!(
+            rt.world.players[&player].hero.identity.hero_class,
+            HeroClass::Mage
+        );
+    }
+
+    let request = PrematchRequest {
+        server_epoch: rt.server_epoch,
+        match_id: rt.match_id,
+        generation: rt.prematch.generation,
+        request_id: 1,
+        action: select(Role::Mid, HeroClass::Mage),
+    };
+    let p = rt.world.players.get_mut(&pending).unwrap();
+    p.draft.request_id = request.request_id;
+    rt.prematch
+        .pending
+        .insert(pending, (p.hero.identity.id, request.request_id));
+    send(
+        &mut rt,
+        owner,
+        2,
+        PrematchAction::Lock { locked: true },
+        now,
+    );
+    send(
+        &mut rt,
+        opponent,
+        2,
+        PrematchAction::Lock { locked: true },
+        now,
+    );
+    assert!(rt.world.players[&owner].draft.locked);
+    assert!(!rt.world.players[&opponent].draft.locked);
+    assert_eq!(
+        view(&rt, opponent, now).error.as_deref(),
+        Some("hero_taken_ranked")
+    );
+    rt.complete_prematch_admission(pending, request, true, now);
+    assert_eq!(
+        rt.world.players[&pending].hero.identity.hero_class,
+        HeroClass::Warrior
+    );
+    assert_eq!(
+        view(&rt, pending, now).error.as_deref(),
+        Some("hero_taken_ranked")
+    );
+
+    send(
+        &mut rt,
+        owner,
+        3,
+        PrematchAction::Lock { locked: false },
+        now,
+    );
+    send(
+        &mut rt,
+        opponent,
+        3,
+        PrematchAction::Lock { locked: true },
+        now,
+    );
+    send(&mut rt, owner, 4, select(Role::Mid, HeroClass::Mage), now);
+    assert!(rt.world.players[&opponent].draft.locked);
+    assert_eq!(
+        view(&rt, owner, now).error.as_deref(),
+        Some("hero_taken_ranked")
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn ranked_draft_expiry_assigns_ten_unique_classes_and_preserves_a_confirmed_pick() {
+    use shared::match_service::MatchPreference;
+    let (mut rt, now, directory) = allocated_draft_roster(MatchPreference::Ranked);
+    let owner = address(10);
+    send(
+        &mut rt,
+        owner,
+        1,
+        PrematchAction::Lock { locked: true },
+        now,
+    );
+    rt.tick_prematch(now + Duration::from_millis(u64::from(DRAFT_SELECTION_MS) + 1));
+    assert_eq!(rt.prematch.phase, Some(PrematchPhase::Countdown));
+    assert_eq!(
+        rt.world.players[&owner].hero.identity.hero_class,
+        HeroClass::Warrior
+    );
+    let unique: std::collections::HashSet<_> = rt
+        .world
+        .players
+        .values()
+        .filter(|p| p.joined)
+        .map(|p| {
+            assert!(p.draft.locked);
+            p.hero.identity.hero_class
+        })
+        .collect();
+    assert_eq!(unique.len(), 10);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn draft_expiry_resolves_collisions_and_preserves_a_valid_human_lock() {
     let (mut rt, now) = fixture(MatchMode::Dev, 3);
     for i in 1..=6 {
@@ -1281,7 +1524,10 @@ fn draft_expiry_resolves_collisions_and_preserves_a_valid_human_lock() {
     }
     let fallback = &rt.world.players[&address(5)];
     assert_ne!(fallback.hero.identity.hero_class, HeroClass::Warrior);
-    assert_eq!(fallback.hero.identity.avatar, None);
+    assert_eq!(
+        fallback.hero.identity.avatar.as_deref(),
+        Some(fallback.hero.identity.hero_class.default_avatar_slug())
+    );
     assert!(fallback.hero.identity.handheld.is_default());
     assert_eq!(fallback.draft.error.as_deref(), Some("hero_auto_picked"));
 }
@@ -1356,7 +1602,6 @@ fn bots_yield_their_class_to_the_human_and_keep_development_modifiers_visible() 
     let (mut rt, now) = fixture(MatchMode::Practice, 3);
     join(&mut rt, address(1), "human-first", now, true);
     rt.fill_practice_bots(now);
-    let human_team = rt.world.players[&address(1)].hero.identity.team;
     for p in rt.world.players.values_mut().filter(|p| p.joined) {
         p.hero.identity.hero_class = HeroClass::Warrior;
         p.draft.locked = true;
@@ -1367,7 +1612,10 @@ fn bots_yield_their_class_to_the_human_and_keep_development_modifiers_visible() 
         .unwrap()
         .modifiers
         .god_mode = true;
-    assert!(!rt.prematch_class_taken(address(1), &PrematchAction::Lock { locked: true }));
+    assert!(
+        rt.prematch_class_conflict(address(1), &PrematchAction::Lock { locked: true })
+            .is_none()
+    );
     assert!(rt.finalize_unique_draft(now));
     assert_eq!(
         rt.world.players[&address(1)].hero.identity.hero_class,
@@ -1375,16 +1623,11 @@ fn bots_yield_their_class_to_the_human_and_keep_development_modifiers_visible() 
     );
     assert!(rt.world.players[&address(1)].modifiers.god_mode);
     let mut classes = Vec::new();
-    for p in rt
-        .world
-        .players
-        .values()
-        .filter(|p| p.joined && p.hero.identity.team == human_team)
-    {
+    for p in rt.world.players.values().filter(|p| p.joined) {
         assert!(!classes.contains(&p.hero.identity.hero_class));
         classes.push(p.hero.identity.hero_class);
     }
-    assert_eq!(classes.len(), 3);
+    assert_eq!(classes.len(), 6);
 }
 
 #[test]
@@ -1399,37 +1642,21 @@ fn public_draft_opt_out_is_normalized_before_the_first_durable_roster() {
         p.framed_snapshots = true;
         p.protocol_compatible = true;
     }
-    assert!(rt.prepare_public_unique_loadouts(now));
-    for team in [Team::Green, Team::Blue] {
-        let mut classes = Vec::new();
-        for p in rt
-            .world
+    assert!(rt.prepare_unique_loadouts(now));
+    let unique_classes = |rt: &ServerRuntime| {
+        rt.world
             .players
             .values()
-            .filter(|p| p.joined && p.hero.identity.team == team)
-        {
-            assert!(!classes.contains(&p.hero.identity.hero_class));
-            classes.push(p.hero.identity.hero_class);
-        }
-        assert_eq!(classes.len(), 5);
-    }
+            .filter(|p| p.joined)
+            .map(|p| p.hero.identity.hero_class)
+            .collect::<std::collections::HashSet<_>>()
+    };
+    assert_eq!(unique_classes(&rt).len(), 10);
     // The actual first-allocation boundary invokes the guard, even without draft opt-in.
     for p in rt.world.players.values_mut().filter(|p| p.joined) {
         p.hero.identity.hero_class = HeroClass::Warrior;
     }
     assert!(!rt.begin_career_round(now)); // waits for normal durable ACK
-    for team in [Team::Green, Team::Blue] {
-        let mut classes = Vec::new();
-        for p in rt
-            .world
-            .players
-            .values()
-            .filter(|p| p.joined && p.hero.identity.team == team)
-        {
-            assert!(!classes.contains(&p.hero.identity.hero_class));
-            classes.push(p.hero.identity.hero_class);
-        }
-        assert_eq!(classes.len(), 5);
-    }
+    assert_eq!(unique_classes(&rt).len(), 10);
     std::fs::remove_dir_all(directory).unwrap();
 }

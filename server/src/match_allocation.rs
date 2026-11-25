@@ -712,6 +712,13 @@ pub(crate) mod runtime_tests {
                     ),
                     &human.session_id,
                 );
+                rt.handle_packet(
+                    addr,
+                    ClientPacket::Hello {
+                        protocol_version: shared::protocol::PROTOCOL_VERSION,
+                    },
+                    now,
+                );
                 let join = ClientPacket::Join {
                     handheld: Default::default(),
                     prematch: false,
@@ -1288,15 +1295,9 @@ pub(crate) mod runtime_tests {
         rt.tick_prematch(now);
         assert!(rt.world.players[&addr].joined);
         assert_eq!(
-            crate::prematch::snapshot(
-                &rt.prematch,
-                &rt.world.players,
-                &rt.world.players[&addr],
-                rt.rules,
-                now
-            )
-            .unwrap()
-            .phase,
+            rt.prematch_snapshot(&rt.world.players[&addr], now)
+                .unwrap()
+                .phase,
             shared::prematch::PrematchPhase::Draft
         );
         assert!(rt.career_view(addr, now).last_result.is_none());

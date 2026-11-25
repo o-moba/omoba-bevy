@@ -1,6 +1,6 @@
 {
   "draft.notice.unlock_first": "Сначала отмените подтверждение выбора, чтобы внести изменения.",
-  "draft.notice.avatar_unavailable": "Этот аватар недоступен в вашей библиотеке.",
+  "draft.notice.avatar_incompatible": "Этот аватар недоступен для выбранного класса.",
   "draft.notice.weapon_incompatible": "Это оружие недоступно для выбранного класса.",
   "draft.weapons_for": "Оружие для класса {hero}",
   "draft.notice.verifying": "Проверка аватара…",
@@ -19,11 +19,10 @@
   "draft.roster.picking": "ВЫБОР",
   "draft.title": "Соберите команду",
   "draft.subtitle": "Герой · класс · линия · 30 секунд на выбор",
+  "draft.subtitle.ranked": "Один игрок на класс в рейтинговом матче",
   "draft.your_team": "ВАША КОМАНДА",
   "draft.avatars.included": "ВСТРОЕННЫЕ ГЕРОИ",
   "draft.avatars.studio": "EKZA STUDIO",
-  "draft.button.refresh": "Обновить",
-  "draft.button.connect_ekza": "Подключить Ekza",
   "draft.button.syncing": "Синхронизация…",
   "draft.button.unlock": "Изменить",
   "draft.button.lock_in": "Подтвердить",
@@ -40,5 +39,6 @@
   "draft.error.durable_start_pending": "Сохраняем начало матча. Подождите…",
   "draft.class_taken": "{hero} · Занят",
   "draft.error.hero_taken": "Союзник подтвердил этот класс. Выберите другой или дождитесь отмены выбора.",
+  "draft.error.hero_taken_ranked": "Этот класс уже подтверждён в матче. Выберите свободный класс.",
   "draft.error.hero_auto_picked": "Ваш класс занят. Доступный класс выбран автоматически."
 }

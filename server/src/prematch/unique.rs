@@ -1,28 +1,47 @@
-//! Unique team picks at the existing draft/loadout boundary.
+//! Hero class reservations and final roster assignment.
 use super::*;
 use shared::{HeroClass, map::Team, wire::CharacterChoice};
 
 impl ServerRuntime {
-    pub(super) fn prematch_class_taken(&self, addr: SocketAddr, action: &PrematchAction) -> bool {
+    pub(crate) fn unique_classes_across_teams(&self) -> bool {
+        self.match_service.worker().map_or_else(
+            || self.career_queue_enabled(),
+            |worker| worker.manifest.preference.rated(),
+        )
+    }
+
+    pub(super) fn prematch_class_conflict(
+        &self,
+        addr: SocketAddr,
+        action: &PrematchAction,
+    ) -> Option<&'static str> {
         if self.prematch.phase != Some(PrematchPhase::Draft) {
-            return false;
+            return None;
         }
-        let Some(own) = self.world.players.get(&addr) else {
-            return false;
-        };
+        let own = self.world.players.get(&addr)?;
         let class = match action {
             PrematchAction::Select { hero_class, .. } if !own.draft.locked => *hero_class,
             PrematchAction::Lock { locked: true } => own.hero.identity.hero_class,
-            _ => return false,
+            _ => return None,
         };
-        self.world.players.iter().any(|(other, p)| {
-            *other != addr
-                && p.joined
-                && !p.hero.identity.is_bot
-                && p.draft.locked
-                && p.hero.identity.team == own.hero.identity.team
-                && p.hero.identity.hero_class == class
-        })
+        let match_wide = self.unique_classes_across_teams();
+        self.world
+            .players
+            .iter()
+            .any(|(other, p)| {
+                *other != addr
+                    && p.joined
+                    && !p.hero.identity.is_bot
+                    && p.draft.locked
+                    && shared::prematch::hero_pick_conflicts(
+                        match_wide,
+                        own.hero.identity.team,
+                        class,
+                        p.hero.identity.team,
+                        p.hero.identity.hero_class,
+                    )
+            })
+            .then_some(class_taken_code(match_wide))
     }
 
     /// Valid human locks win; other humans keep their choice when available,
@@ -31,6 +50,7 @@ impl ServerRuntime {
         if self.match_started_at.is_some() || self.career_roster_is_frozen() {
             return true;
         }
+        let match_wide = self.unique_classes_across_teams();
         let mut players: Vec<_> = self
             .world
             .players
@@ -40,11 +60,14 @@ impl ServerRuntime {
                 (
                     (
                         if p.hero.identity.is_bot {
-                            2
+                            3
                         } else if p.draft.locked {
                             0
-                        } else {
+                        } else if match_wide && !supports_standard_classes(p) {
+                            // Fill the restricted legacy slots before flexible picks.
                             1
+                        } else {
+                            2
                         },
                         p.hero.identity.id,
                     ),
@@ -54,37 +77,61 @@ impl ServerRuntime {
             .collect();
         players.sort_unstable_by_key(|(priority, _)| *priority);
         let mut used = [Vec::<HeroClass>::new(), Vec::new()];
+        let mut assignments = Vec::with_capacity(players.len());
         for (_, addr) in players {
-            let p = self.world.players.get_mut(&addr).unwrap();
+            let p = &self.world.players[&addr];
             let team = match p.hero.identity.team {
                 Team::Green => 0,
                 Team::Blue => 1,
             };
             let before = p.hero.identity.hero_class;
-            let class = if !used[team].contains(&before) {
+            let available = |class: &HeroClass| {
+                !used[team].contains(class)
+                    && (!match_wide || !used[1 - team].contains(class))
+                    && (!class.is_standard() || supports_standard_classes(p))
+            };
+            let globally_available =
+                |class: &HeroClass| available(class) && !used[1 - team].contains(class);
+            let class = if p.hero.identity.is_bot {
+                if globally_available(&before) {
+                    Some(before)
+                } else {
+                    HeroClass::ALL
+                        .into_iter()
+                        .find(|class| {
+                            globally_available(class) && class.primary_role() == p.draft.role
+                        })
+                        .or_else(|| HeroClass::ALL.into_iter().find(globally_available))
+                        .or_else(|| available(&before).then_some(before))
+                        .or_else(|| HeroClass::ALL.into_iter().find(available))
+                }
+            } else if available(&before) {
                 Some(before)
             } else {
-                HeroClass::ALL.into_iter().find(|class| {
-                    !used[team].contains(class)
-                        && (!class.is_standard()
-                            || (p.framed_snapshots && p.protocol_compatible)
-                            || p.hero.identity.is_bot)
-                })
+                HeroClass::ALL.into_iter().find(available)
             };
             let Some(class) = class else {
-                p.draft.error = Some("hero_taken".into());
+                self.world.players.get_mut(&addr).unwrap().draft.error =
+                    Some(class_taken_code(match_wide).into());
                 return false;
             };
             used[team].push(class);
+            assignments.push((addr, class));
+        }
+        // A legacy roster can run out of compatible classes. Commit the picks
+        // together so that a failed plan never rewrites accepted human choices.
+        for (addr, class) in assignments {
+            let p = self.world.players.get_mut(&addr).unwrap();
+            let before = p.hero.identity.hero_class;
             if class != before {
-                if p.draft.role == before.primary_role() {
+                if !p.hero.identity.is_bot && p.draft.role == before.primary_role() {
                     p.draft.role = class.primary_role();
                 }
                 p.hero.identity.hero_class = class;
                 // Automatic fallback selects free canonical equipment, never an
                 // unverified avatar/weapon from another pending selection.
                 p.hero.identity.character = CharacterChoice::Ipfs;
-                p.hero.identity.avatar = None;
+                p.hero.identity.avatar = Some(class.default_avatar_slug().to_owned());
                 p.hero.identity.sprite_character =
                     Some(shared::normalize_sprite_character_id(None).to_owned());
                 p.hero.identity.handheld = Default::default();
@@ -105,10 +152,10 @@ impl ServerRuntime {
         true
     }
 
-    /// The public formation path also covers clients that omit draft opt-in.
+    /// Career formation also covers clients that omit draft opt-in.
     /// Already persisted/played allocations are not reinterpreted on recovery.
-    pub(crate) fn prepare_public_unique_loadouts(&mut self, now: Instant) -> bool {
-        if self.match_service.worker().is_none()
+    pub(crate) fn prepare_unique_loadouts(&mut self, now: Instant) -> bool {
+        if (self.match_service.worker().is_none() && !self.career_queue_enabled())
             || self.career_roster_is_frozen()
             || self.match_started_at.is_some()
         {
@@ -124,5 +171,17 @@ impl ServerRuntime {
                 .values()
                 .filter(|p| p.joined && !p.hero.identity.is_bot && p.draft.capable)
                 .all(|p| p.draft.loaded)
+    }
+}
+
+fn supports_standard_classes(player: &ConnectedPlayer) -> bool {
+    player.hero.identity.is_bot || (player.framed_snapshots && player.protocol_compatible)
+}
+
+fn class_taken_code(match_wide: bool) -> &'static str {
+    if match_wide {
+        "hero_taken_ranked"
+    } else {
+        "hero_taken"
     }
 }

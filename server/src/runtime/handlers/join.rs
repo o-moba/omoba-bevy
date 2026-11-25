@@ -69,7 +69,7 @@ impl ServerRuntime {
             }
             // The ordinary admission gate checked this exact requested item.
             // Preserve round state but reconcile cosmetic equipment, otherwise
-            // choosing empty hands could silently restore a revoked old prop.
+            // choosing the class default could silently restore a revoked prop.
             player.hero.identity.handheld = handheld;
             player.join_error = None;
             self.restore_manual_control(addr);

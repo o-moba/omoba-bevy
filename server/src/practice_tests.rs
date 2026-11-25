@@ -120,7 +120,46 @@ fn practice_solo_starts_with_labelled_heroes_without_database_ack_or_ranked_cred
 }
 
 #[test]
-fn bot_models_are_distinct_bundled_free_avatars_with_unchanged_sprite_assignments() {
+fn practice_join_with_empty_equipment_uses_the_class_default() {
+    use shared::handheld::HandheldSelection;
+
+    let (mut rt, clock, transport) = memory_runtime(2);
+    let mut packet = join("old-empty-weapon");
+    let ClientPacket::Join {
+        hero_class,
+        handheld,
+        ..
+    } = &mut packet
+    else {
+        unreachable!()
+    };
+    *hero_class = HeroClass::Warrior;
+    *handheld = HandheldSelection::Unequipped;
+    transport.push_inbound(addr(1), serde_json::to_vec(&packet).unwrap());
+    rt.prepare_tick();
+
+    let player = &rt.world.players[&addr(1)];
+    assert!(player.joined);
+    assert_eq!(
+        player.hero.identity.handheld,
+        HandheldSelection::ClassDefault
+    );
+    assert_eq!(
+        player.hero.identity.handheld.resolve(HeroClass::Warrior),
+        Some("forge-sword")
+    );
+    let others = build_players_snapshot(&rt.world, None, clock.now());
+    assert_eq!(others.iter().filter(|player| player.is_bot).count(), 3);
+    assert!(
+        others
+            .iter()
+            .filter(|player| player.is_bot)
+            .all(|player| player.handheld.is_default())
+    );
+}
+
+#[test]
+fn bot_models_use_their_class_defaults_and_keep_their_sprites() {
     let mut rt = runtime(5);
     let now = Instant::now();
     rt.handle_packet(addr(1), join("visible-bots"), now);
@@ -138,18 +177,13 @@ fn bot_models_are_distinct_bundled_free_avatars_with_unchanged_sprite_assignment
         );
         let avatar = omoba_passport::avatars::avatar_definition(slug).unwrap();
         assert!(avatar.passport.is_none() && !slug.starts_with("ekza-"));
-        assert_eq!(avatar.license, "CC0");
+        assert_eq!(slug, player.hero.identity.hero_class.default_avatar_slug());
         assert_eq!(
             player.hero.identity.sprite_character.as_deref(),
             Some(shared::normalize_sprite_character_id(None))
         );
         slugs.insert(slug.to_owned());
     }
-    assert_eq!(
-        slugs.len(),
-        8,
-        "the nine bots use two appearances per class"
-    );
     for slug in slugs {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../client/assets/avatars")
@@ -632,6 +666,7 @@ fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
         p.hero.x = x;
         p.hero.z = -8.0;
         p.hero.identity.hero_class = HeroClass::Mage;
+        p.hero.skills.loadout = shared::loadout::preset_for_class(HeroClass::Mage);
     }
     now += Duration::from_millis(100);
     rt.simulate_bots(now, 0.1);
@@ -807,6 +842,11 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
         .find(|(_, p)| p.hero.identity.is_bot)
         .unwrap()
         .0;
+    // Keep the movement and siege probe on the original ranged Mage kit.
+    let bot = rt.world.players.get_mut(&bot_addr).unwrap();
+    bot.hero.identity.hero_class = HeroClass::Mage;
+    bot.hero.identity.avatar = Some(HeroClass::Mage.default_avatar_slug().to_owned());
+    common::session::reset_player_round(bot, &rt.world.map_layout, now);
     let nav = shared::navigation::world_navigation();
     let mut damaged_tower = false;
     let mut moved = 0.0;
@@ -987,6 +1027,46 @@ fn read_snapshot(client: &UdpSocket, rt: &mut ServerRuntime) -> ServerPacket {
             }
         }
     }
+}
+
+#[test]
+fn framed_udp_practice_receives_a_diverse_five_on_five_roster() {
+    let mut rt = runtime(5);
+    // The rotated lineup includes an advanced kit on the visible ally side.
+    rt.match_id = 2;
+    let client = UdpSocket::bind("127.0.0.1:0").unwrap();
+    send_udp(
+        &client,
+        &mut rt,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+    );
+    send_udp(&client, &mut rt, join("udp-diverse-roster"));
+    let ServerPacket::Snapshot {
+        game_state: GameState::Running,
+        players,
+        scoreboard: Some(scoreboard),
+        ..
+    } = read_snapshot(&client, &mut rt)
+    else {
+        panic!("practice must send a running match snapshot");
+    };
+    assert_eq!(scoreboard.players.len(), 10);
+    assert!(
+        players
+            .iter()
+            .any(|p| p.is_bot && p.hero_class.is_standard() && p.loadout.is_some())
+    );
+    assert_eq!(
+        rt.world
+            .players
+            .values()
+            .map(|p| p.hero.identity.hero_class)
+            .collect::<HashSet<_>>()
+            .len(),
+        10
+    );
 }
 
 #[test]
@@ -1678,37 +1758,53 @@ fn live_udp_scoreboard_carries_accepted_kills_deaths_assists() {
 }
 
 #[test]
-fn five_bot_teams_fill_every_role_once_around_the_human_pick() {
+fn five_bot_teams_fill_every_role_without_mirrors_around_the_human_pick() {
     let mut rt = runtime(5);
     rt.handle_packet(addr(1), join("role-fill"), Instant::now());
+    let mut used = HashSet::new();
     for team in [Team::Green, Team::Blue] {
-        let mut classes: Vec<_> = rt
+        let mut roles = Vec::new();
+        for player in rt
             .world
             .players
             .values()
             .filter(|p| p.joined && p.hero.identity.team == team)
-            .map(|p| p.hero.identity.hero_class)
-            .collect();
-        classes.sort_by_key(|class| class.id());
-        classes.dedup();
-        assert_eq!(classes.len(), 5, "{team:?} repeats a class");
+        {
+            let class = player.hero.identity.hero_class;
+            assert!(
+                used.insert(class),
+                "{class:?} already has a seat in this match"
+            );
+            let role = class.primary_role();
+            if player.hero.identity.is_bot {
+                assert_eq!(player.draft.role, role, "{class:?} is in the wrong lane");
+            }
+            assert!(!roles.contains(&role), "{team:?} repeats {role:?}");
+            roles.push(role);
+        }
+        assert_eq!(roles.len(), 5);
     }
 }
 
 #[test]
-fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
+fn jungle_bots_with_different_kits_clear_their_own_half_for_rewards() {
+    use shared::prematch::Role;
     let mut rt = runtime(5);
     let mut now = Instant::now();
     rt.handle_packet(addr(1), join("jungle-observer"), now);
     rt.world.minions.clear();
-    let wardens: Vec<_> = rt
+    let junglers: Vec<_> = rt
         .world
         .players
         .iter()
-        .filter(|(_, p)| p.hero.identity.is_bot && p.hero.identity.hero_class == HeroClass::Warden)
+        .filter(|(_, p)| p.hero.identity.is_bot && p.draft.role == Role::Jungle)
         .map(|(a, _)| *a)
         .collect();
-    assert_eq!(wardens.len(), 2, "one jungler per team");
+    assert_eq!(junglers.len(), 2, "one jungler per team");
+    assert_ne!(
+        rt.world.players[&junglers[0]].hero.identity.hero_class,
+        rt.world.players[&junglers[1]].hero.identity.hero_class
+    );
     for _ in 0..(45 * 20) {
         now += Duration::from_millis(50);
         rt.world.minions.clear();
@@ -1717,10 +1813,10 @@ fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
         rt.combat_log.extend(now, receipts);
         simulate_neutrals(&mut rt.world, TickCtx { now, dt: 0.05 });
     }
-    for address in wardens {
-        let warden = &rt.world.players[&address];
-        let own = spawn_position_for_team(&rt.world.map_layout, warden.hero.identity.team);
-        let enemy_team = match warden.hero.identity.team {
+    for address in junglers {
+        let jungler = &rt.world.players[&address];
+        let own = spawn_position_for_team(&rt.world.map_layout, jungler.hero.identity.team);
+        let enemy_team = match jungler.hero.identity.team {
             Team::Green => Team::Blue,
             Team::Blue => Team::Green,
         };
@@ -1734,9 +1830,9 @@ fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
         assert!(
             cleared_own_half,
             "{:?} jungler cleared nothing",
-            warden.hero.identity.team
+            jungler.hero.identity.team
         );
-        assert!(warden.economy.gold > shared::shop::STARTING_GOLD && warden.hero.progress.xp > 0);
+        assert!(jungler.economy.gold > shared::shop::STARTING_GOLD && jungler.hero.progress.xp > 0);
     }
 }
 

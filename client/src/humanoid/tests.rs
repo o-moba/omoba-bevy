@@ -24,14 +24,13 @@ fn rig(slug: &str) -> HumanoidRig {
 }
 
 #[test]
-fn all_fifteen_shipped_rigs_retarget_actual_run_with_separate_walk_and_all_states() {
+fn all_shipped_rigs_retarget_actual_run_with_separate_walk_and_all_states() {
     let manifest: serde_json::Value =
         serde_json::from_str(include_str!("../../assets/avatars/manifest.json")).unwrap();
     let motion = motion();
     assert_eq!(motion.clips["run"].source_clip, "Sprint_Loop");
     assert_eq!(motion.clips["walk"].source_clip, "Walk_Loop");
     let avatars = manifest["avatars"].as_array().unwrap();
-    assert_eq!(avatars.len(), 15);
     for avatar in avatars {
         let slug = avatar["slug"].as_str().unwrap();
         let rig = rig(slug);

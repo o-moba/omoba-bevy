@@ -413,7 +413,7 @@ fn local_and_remote_scene_players_play_one_shots_once_and_respawn() {
 }
 
 #[test]
-fn both_movement_paths_run_and_remote_pauses_keep_locomotion_stable() {
+fn stopping_local_motion_freezes_the_run_pose_even_with_an_active_route() {
     let mut app = App::new();
     let set = animation_set();
     let mut library = PlayerAnimationLibrary::default();
@@ -453,11 +453,13 @@ fn both_movement_paths_run_and_remote_pauses_keep_locomotion_stable() {
     app.world_mut()
         .entity_mut(actors[0].0)
         .insert(MovementTarget { target: Vec3::X });
-    app.world_mut()
-        .get_mut::<Transform>(actors[1].0)
-        .unwrap()
-        .translation
-        .x = 0.1;
+    for (owner, _) in &actors {
+        app.world_mut()
+            .get_mut::<Transform>(*owner)
+            .unwrap()
+            .translation
+            .x = 0.1;
+    }
     app.world_mut()
         .resource_mut::<Time>()
         .advance_by(std::time::Duration::from_secs_f32(0.1));
@@ -476,8 +478,29 @@ fn both_movement_paths_run_and_remote_pauses_keep_locomotion_stable() {
                 .is_playing_animation(set.run_node)
         );
     }
-    // A still interpolation frame must not flash to idle.
+    // The local position is still blocked while the route stays active. Vertical
+    // grounding must not be read as a new step. A remote sample gap keeps Run.
+    app.world_mut()
+        .get_mut::<Transform>(actors[0].0)
+        .unwrap()
+        .translation
+        .y = 0.05;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(16));
     app.update();
+    let local = actors[0].1;
+    assert_eq!(
+        app.world()
+            .get::<PlayerAnimationBinding>(local)
+            .unwrap()
+            .playback
+            .state,
+        HeroAnimationState::Idle
+    );
+    let player = app.world().get::<AnimationPlayer>(local).unwrap();
+    assert!(player.is_playing_animation(set.idle_node));
+    assert_eq!(player.animation(set.run_node).unwrap().speed(), 0.0);
     assert!(
         app.world()
             .get::<PlayerAnimationBinding>(actors[1].1)
@@ -485,9 +508,22 @@ fn both_movement_paths_run_and_remote_pauses_keep_locomotion_stable() {
             .is_running()
     );
     app.world_mut()
-        .entity_mut(actors[0].0)
-        .remove::<MovementTarget>();
-    for _ in 0..4 {
+        .get_mut::<Transform>(actors[0].0)
+        .unwrap()
+        .translation
+        .x += 0.1;
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<AnimationPlayer>(local)
+            .unwrap()
+            .animation(set.run_node)
+            .unwrap()
+            .speed(),
+        1.0
+    );
+
+    for _ in 0..17 {
         app.update();
     }
     for (_, child) in &actors {
