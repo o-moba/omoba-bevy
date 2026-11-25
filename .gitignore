@@ -42,6 +42,7 @@ client/assets/weapons/ekza-manifest.json
 .agent
 .tasks
 AGENTS.md
+!/AGENTS.md
 CLAUDE.md
 # docs/tasks: ignore by default; whitelist canonical markdown so deliverables stay versioned.
 # docs/evidence stays ignored: track only concise docs/verifiers/small summaries;
