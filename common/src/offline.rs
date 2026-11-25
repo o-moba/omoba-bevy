@@ -13,6 +13,7 @@ use shared::{HeroClass, map::Team, prematch::Role};
 use shared::{
     bot_profile::BotDifficulty,
     debug::{DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE},
+    handheld::HandheldSelection,
     protocol::{JoinRejection, SnapshotMeta},
     wire::{ClientPacket, GameState, ServerPacket},
 };
@@ -143,7 +144,11 @@ impl PracticeSession {
                     &self.world.map_layout,
                     self.now,
                 );
-                p.hero.identity.handheld = handheld;
+                p.hero.identity.handheld = if handheld.allowed_in_match() {
+                    handheld
+                } else {
+                    HandheldSelection::ClassDefault
+                };
                 // Explicit practice configuration: all four slots available; authoritative stats/ranks.
                 while p.hero.progress.level < START_LEVEL {
                     let xp = p.hero.progress.next_level_xp;
@@ -482,6 +487,25 @@ mod tests {
     }
 
     #[test]
+    fn offline_join_with_empty_equipment_uses_the_class_default() {
+        for (class, expected) in [
+            (HeroClass::Warrior, Some("forge-sword")),
+            (HeroClass::Stormfist, None),
+        ] {
+            let mut practice = PracticeSession::new(Instant::now());
+            let mut packet = join(class);
+            let ClientPacket::Join { handheld, .. } = &mut packet else {
+                unreachable!()
+            };
+            *handheld = HandheldSelection::Unequipped;
+            practice.command(packet);
+            let equipped = &practice.world.players[&LOCAL_ADDR].hero.identity.handheld;
+            assert_eq!(*equipped, HandheldSelection::ClassDefault);
+            assert_eq!(equipped.resolve(class), expected);
+        }
+    }
+
+    #[test]
     fn terminal_rematch_is_once_only_and_late_retries_do_not_reset_movement() {
         let mut p = PracticeSession::new(Instant::now());
         p.command(ClientPacket::RequestRematch);
@@ -555,9 +579,31 @@ mod tests {
     fn repeated_practice_keeps_roster_separated_and_movable() {
         let mut p = PracticeSession::new(Instant::now());
         p.command(join(HeroClass::Wildspark));
+        let mut previous = Vec::new();
         for _ in 0..3 {
             assert_eq!(p.world.players.values().filter(|p| p.joined).count(), 10);
             let players: Vec<_> = p.world.players.values().filter(|p| p.joined).collect();
+            let mut roster: Vec<_> = players
+                .iter()
+                .map(|p| (p.hero.identity.id, p.hero.identity.hero_class))
+                .collect();
+            roster.sort_unstable_by_key(|(id, _)| *id);
+            let classes: Vec<_> = roster.into_iter().map(|(_, class)| class).collect();
+            assert_eq!(
+                classes
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
+                10
+            );
+            // The selected human keeps the chosen class as bot pools rotate.
+            assert_eq!(
+                p.world.players[&LOCAL_ADDR].hero.identity.hero_class,
+                HeroClass::Wildspark
+            );
+            assert_ne!(classes, previous);
+            previous = classes;
             for (i, a) in players.iter().enumerate() {
                 for b in players.iter().skip(i + 1) {
                     assert!(

@@ -127,6 +127,7 @@ impl ServerRuntime {
             let capable = player.draft.capable;
             player.draft = prematch::DraftState {
                 capable,
+                role: player.hero.identity.hero_class.primary_role(),
                 ..Default::default()
             };
         }

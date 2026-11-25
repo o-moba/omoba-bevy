@@ -152,7 +152,11 @@ class LauncherTests(unittest.TestCase):
 
     def test_look_options_name_a_shipped_rig_and_a_release_time(self):
         slugs = launcher.avatar_slugs(ROOT / "client/assets")
-        self.assertEqual(len(slugs), 15)
+        self.assertEqual(len(slugs), 32)
+        self.assertEqual(
+            {slug for slug in slugs if slug.startswith("set01-")},
+            {f"set01-{hero if hero != 'cleric' else 'healer'}" for hero in launcher.HEROES},
+        )
         self.assertIn("agnes", slugs)
         self.assertEqual([launcher.release_time(value) for value in ("contact", "0", "0.45", "2")],
                          ["contact", "0", "0.45", "2"])

@@ -17,7 +17,8 @@ make practice
 
 This builds the locked native sources, starts one practice server and client,
 and prints the session log directory. Choose a hero and Join. The default is
-5v5: one human and nine server-controlled heroes. Closing the client or pressing
+5v5 with one human and nine server-controlled heroes. The bots fill the open
+lane roles and prefer different classes across both teams. Closing the client or pressing
 Ctrl+C stops the processes owned by this launcher. To use another local port:
 
 ```sh

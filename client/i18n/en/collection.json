@@ -46,7 +46,6 @@
   "collection.weapons_included": "Included",
   "collection.weapons_catalogue": "Ekza catalogue",
   "collection.weapon_default": "Class default",
-  "collection.weapon_empty": "Empty hands",
   "collection.weapon_download_pending": "Downloading selected weapon…",
   "collection.weapon_download_failed": "Weapon could not load. Refresh to retry.",
   "collection.weapon_download_ready": "Selected weapon is ready.",

@@ -105,6 +105,11 @@ impl HandheldSelection {
         *self == Self::ClassDefault
     }
 
+    /// Only Combat Test may explicitly hide a class's usual handheld.
+    pub fn allowed_in_match(&self) -> bool {
+        !matches!(self, Self::Unequipped)
+    }
+
     pub fn compatible(&self, class: HeroClass) -> bool {
         match self {
             Self::ClassDefault | Self::Unequipped => true,

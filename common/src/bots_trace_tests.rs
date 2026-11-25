@@ -2,8 +2,8 @@
 //!
 //! Two human-less 5v5 practice rounds run on an explicit 50 ms clock:
 //!
-//! - `roster`: the standard practice fill (legacy kits, three lanes and a
-//!   jungler);
+//! - `roster`: the original practice lineup (legacy kits, three lanes and a
+//!   jungler), pinned so this AI trace is independent of automatic draft picks;
 //! - `mid`: ten advanced kits on one lane, so point casts, aim points and the
 //!   mobility withholding near towers are exercised as well.
 //!
@@ -146,7 +146,16 @@ fn scripted_match(scenario: Scenario) -> PracticeSession {
         .begin(Vec::new())
         .expect("fresh practice ledger");
     match scenario {
-        Scenario::Roster => practice.host().fill_practice_bots(start),
+        Scenario::Roster => {
+            for team in [Team::Green, Team::Blue] {
+                for (class, ..) in BOT_COMPOSITION {
+                    practice
+                        .host()
+                        .spawn_bot(team, Some(class), BotKind::Lane, start)
+                        .expect("a free bot slot");
+                }
+            }
+        }
         Scenario::Mid => {
             for (team, class) in MID_KITS {
                 practice

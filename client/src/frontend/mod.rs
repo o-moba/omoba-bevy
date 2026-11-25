@@ -987,6 +987,7 @@ mod tests {
         let mut app = driver_app();
         app.world_mut().resource_mut::<GameStateSnapshot>().prematch = Some(PrematchSnapshot {
             join_remaining_ms: None,
+            unique_classes_across_teams: false,
             generation: 1,
             phase: PrematchPhase::Draft,
             remaining_ms: 0,

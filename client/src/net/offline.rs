@@ -55,14 +55,20 @@ pub(super) fn step(practice: Option<ResMut<LocalPractice>>, time: Res<Time>) {
     let Some(mut practice) = practice else {
         return;
     };
-    while let Ok(packet) = practice.commands.try_recv() {
-        if let ClientPacket::Join { avatar, .. } = &packet
-            && !shipped_avatar(avatar.as_deref())
+    while let Ok(mut packet) = practice.commands.try_recv() {
+        if let ClientPacket::Join {
+            hero_class, avatar, ..
+        } = &mut packet
         {
-            practice
-                .simulation
-                .reject_join(JoinRejection::AvatarNotAuthorized);
-            continue;
+            let resolved =
+                omoba_passport::avatars::match_avatar_slug(*hero_class, avatar.as_deref());
+            if !shipped_avatar(Some(resolved)) {
+                practice
+                    .simulation
+                    .reject_join(JoinRejection::AvatarNotAuthorized);
+                continue;
+            }
+            *avatar = Some(resolved.to_owned());
         }
         practice.simulation.command(packet);
     }
@@ -243,7 +249,11 @@ mod tests {
     #[test]
     fn all_classes_join_through_local_channels_and_unbundled_avatar_is_rejected() {
         for class in shared::HeroClass::ALL {
-            for avatar in [None, Some("not-bundled".to_owned())] {
+            for avatar in [
+                None,
+                Some("agnes".to_owned()),
+                Some(format!("ekza-{}", "a".repeat(64))),
+            ] {
                 let mut app = App::new();
                 app.add_plugins(MinimalPlugins);
                 let (commands, incoming) = crossbeam_channel::unbounded();
@@ -274,14 +284,16 @@ mod tests {
                 else {
                     panic!("local snapshot")
                 };
-                if avatar.is_some() {
+                if avatar
+                    .as_deref()
+                    .is_some_and(ekza_bevy_sdk::passport::is_protected_slug)
+                {
                     assert!(players.is_empty());
                     assert_eq!(join_error, Some(JoinRejection::AvatarNotAuthorized));
                 } else {
-                    assert_eq!(
-                        players.iter().find(|p| p.id == your_id).unwrap().hero_class,
-                        class
-                    );
+                    let own = players.iter().find(|p| p.id == your_id).unwrap();
+                    assert_eq!(own.hero_class, class);
+                    assert_eq!(own.avatar.as_deref(), Some(class.default_avatar_slug()));
                     assert_eq!(join_error, None);
                 }
             }

@@ -72,8 +72,8 @@ python3 scripts/convert_vrm_to_glb.py \
 
 ## Current native candidate assets — 0.18.0-rc.2
 
-The current roster is recorded in `client/assets/avatars/manifest.json` (15
-heroes) and `client/assets/bosses/manifest.json` (King Mutatio). These retain
+This candidate's original roster is recorded in `client/assets/avatars/manifest.json`
+(15 imported avatars) and `client/assets/bosses/manifest.json` (King Mutatio). These retain
 creator, collection, source URL and declared CC0 metadata. The reviewed model
 hashes and embedded-license expectations are in
 `client/assets/config/asset_policy.json`; `scripts/validate_candidate_assets.py`
@@ -90,6 +90,20 @@ optional historical import and is not part of the candidate inventory.
 
 Both faction minions and the affected guardian now use original project-authored
 geometry/materials and motion from `client/src/creatures3d.rs`.
+
+## OMOBA Set 01 class avatars
+
+All 17 class avatars and their portraits use Wotori's original OMOBA
+character designs and were made with Codex and Blender. Their `set01-*.glb`
+files under `client/assets/avatars/` are byte-for-byte copies of the game
+exports from the Set 01 Blender sources.
+The JPG portraits are resized single-view Blender renders. The model hashes
+and original author and license records are pinned by `asset_policy.json`.
+
+The models retain the embedded [VRM Public License 1.0](https://vrm.dev/licenses/1.0/)
+URL and their original `onlyAuthor` and `allowModification` settings. This
+notice records the source and embedded terms for Set 01. The legacy avatar
+and project code licenses apply to their respective assets.
 
 ## Original Verdant Confluence environment
 

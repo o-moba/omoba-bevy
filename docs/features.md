@@ -600,7 +600,7 @@ The public lobby offers Casual PvP (30-second bot fallback, never rated), Ranked
 
 ## Shared running and VRM skeletal motion (0.21.0-rc.5)
 
-All 15 shipped playable 3D avatars use the engine's shared Run motion during normal movement. Local intent and remote movement drive the same state machine; Walk stays reserved for future debuffs. Idle and combat actions remain separate. Existing 2D running sprites are unchanged.
+Shipped 3D avatars use the engine's shared Run motion while moving horizontally. The last run pose blends into idle as soon as local movement stops or the buffered remote positions confirm a stop. A short grace period absorbs gaps in remote movement samples. Walk stays reserved for future debuffs.
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
@@ -610,14 +610,14 @@ Canonical version: `0.32.0`
 
 Normal Find match assigns a team and map side automatically. Each assigned team
 can inspect accepted avatar/class choices, choose an intended Solo, Jungle, Mid,
-Carry or Support role, and lock or unlock its choice. A class locked by a human
-teammate is shown as Taken and cannot be selected or locked by another teammate;
-the opposite team may mirror it. Avatar and role composition warnings remain
-advisory. The shared stage displays up to five teammates. At selection expiry,
-valid human locks are preserved, idle collisions receive available free classes,
-and bots fill the remaining classes. The public formation boundary applies this
-rule even when a client opts out of the draft; existing durable/played rosters
-retain their original metadata.
+Carry or Support role, and lock or unlock its choice. In Ranked, a confirmed
+class is taken for both teams. In Casual and Practice, a human confirmation
+reserves the class for that player's team. Avatar and role composition warnings
+remain advisory. The shared stage displays up to five teammates. At selection
+expiry, the server preserves valid confirmations and assigns available classes
+to unconfirmed players who chose an occupied class. Bots prefer different kits
+across both teams. Public formation applies the same rules to players who skip
+the draft, and restored matches retain their recorded rosters.
 
 The shared three-second countdown begins after everyone locks, or after the
 selection deadline expires and pending avatar checks finish. The

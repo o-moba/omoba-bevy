@@ -277,6 +277,29 @@ impl HeroClass {
         Self::ALL.into_iter().find(|class| class.id() == id)
     }
 
+    /// The bundled Set 01 appearance for this class.
+    pub const fn default_avatar_slug(self) -> &'static str {
+        match self {
+            Self::Warrior => "set01-warrior",
+            Self::Mage => "set01-mage",
+            Self::Ranger => "set01-ranger",
+            Self::Cleric => "set01-healer",
+            Self::Warden => "set01-warden",
+            Self::Dawnweaver => "set01-dawnweaver",
+            Self::Wildspark => "set01-wildspark",
+            Self::Cinderforge => "set01-cinderforge",
+            Self::Edgeweaver => "set01-edgeweaver",
+            Self::Stormfist => "set01-stormfist",
+            Self::Veilstalker => "set01-veilstalker",
+            Self::Emberveil => "set01-emberveil",
+            Self::Orbitwright => "set01-orbitwright",
+            Self::Riftshot => "set01-riftshot",
+            Self::Chainkeeper => "set01-chainkeeper",
+            Self::Frostguard => "set01-frostguard",
+            Self::Adventurer => "set01-adventurer",
+        }
+    }
+
     pub fn display_name(self) -> &'static str {
         catalog::hero(self).display_name
     }

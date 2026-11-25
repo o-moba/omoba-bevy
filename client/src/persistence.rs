@@ -11,6 +11,7 @@
 //! older build's server field can never pin a production build that has no
 //! server selection.
 
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::net::SocketAddr;
@@ -23,6 +24,7 @@ use crate::mobile_controls::HudPositionSettings;
 use crate::render_settings::RenderSettings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use shared::{HeroClass, handheld::HandheldSelection};
 
 use crate::camera::CameraSettings;
 use crate::model_scale::{
@@ -30,7 +32,7 @@ use crate::model_scale::{
     ModelScaleSettings,
 };
 use crate::session_config::FALLBACK_GAME_SERVER_ADDR;
-use crate::team::CharacterChoice;
+use crate::team::{CharacterChoice, TeamSelection};
 use crate::ui::living_background::MotionSettings;
 use crate::world::{
     LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE, MAX_LIGHT_PITCH_DEG,
@@ -95,8 +97,12 @@ pub(crate) struct SavedLanguage(Option<crate::i18n::LocaleId>);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClientPreferencesFile {
+    /// Legacy field mirrored for older clients. A saved class map supersedes it.
     #[serde(default)]
-    handheld: shared::handheld::HandheldSelection,
+    handheld: HandheldSelection,
+    /// An empty map records that the legacy preference has been migrated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    handheld_by_class: Option<BTreeMap<String, HandheldSelection>>,
     #[serde(default = "default_schema_version")]
     schema_version: u32,
     /// The last lobby, written for older builds; never read back.
@@ -111,6 +117,8 @@ struct ClientPreferencesFile {
     /// only while the player may still pick it.
     #[serde(default)]
     avatar: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    avatar_class: Option<shared::HeroClass>,
     #[serde(default)]
     model_target_height: Option<f32>,
     #[serde(default)]
@@ -367,7 +375,13 @@ pub(crate) fn load_persistent_client_settings(
     }
     // Startup's save gate outlives Bevy's resource change tick. Explicitly
     // queue the migrated schema so the one-time default migration is persisted.
-    initial_save_pending.0 = disk.schema_version < SCHEMA_VERSION;
+    initial_save_pending.0 =
+        disk.schema_version < SCHEMA_VERSION || disk.handheld_by_class.is_none();
+    let packaged = omoba_passport::weapons::shipped_catalog();
+    team.handheld_by_class =
+        restore_match_handhelds(&disk, crate::account_region::features().ekza, |id| {
+            packaged.items.iter().any(|weapon| weapon.id == id)
+        });
     *audio = disk.audio.sanitized();
     *tips = disk.beginner_tips;
     *render = disk.render.sanitized();
@@ -389,25 +403,25 @@ pub(crate) fn load_persistent_client_settings(
         initial_save_pending.0 = true;
     }
 
-    team.handheld = restorable_handheld(
-        disk.handheld,
-        crate::account_region::features().ekza,
-        |id| {
-            omoba_passport::weapons::catalog()
-                .items
-                .iter()
-                .any(|weapon| weapon.id == id)
-        },
-    );
     if let Some(ch) = disk.character {
         team.character = ch;
     }
     if let Some(slug) = disk.avatar.as_deref() {
         match restorable_avatar(slug) {
-            Some(slug) => team.avatar = Some(slug),
+            Some(slug) => {
+                team.avatar = Some(slug);
+                if let Some(class) = disk.avatar_class {
+                    team.hero_class = class;
+                }
+            }
             None => info!("Saved avatar {slug:?} is not available; keeping the default avatar."),
         }
     }
+    team.handheld = team
+        .handheld_by_class
+        .get(&team.hero_class)
+        .cloned()
+        .unwrap_or_default();
 
     if let Some(h) = disk.model_target_height {
         let resolved = migrate_model_target_height(h, disk.schema_version);
@@ -438,21 +452,43 @@ pub(crate) fn load_persistent_client_settings(
     }
 }
 
-/// A saved handheld a build with `ekza` can still equip. An Ekza build keeps it
-/// as saved (the store checks an item when it is used); a build without Ekza
-/// keeps only packaged props, so a saved Ekza item becomes the class default.
-fn restorable_handheld(
-    saved: shared::handheld::HandheldSelection,
+/// Restore concrete class overrides. The online store still checks a hosted
+/// item when it is used. Builds without Ekza only restore packaged items.
+fn restore_match_handhelds(
+    disk: &ClientPreferencesFile,
     ekza: bool,
     packaged: impl Fn(&str) -> bool,
-) -> shared::handheld::HandheldSelection {
-    match saved {
-        shared::handheld::HandheldSelection::Item(id) if !ekza && !packaged(&id) => {
-            info!("Saved handheld {id:?} is not packaged; equipping the class default.");
-            shared::handheld::HandheldSelection::ClassDefault
-        }
-        saved => saved,
+) -> HashMap<HeroClass, HandheldSelection> {
+    let valid = |choice: &HandheldSelection, class| matches!(choice, HandheldSelection::Item(id) if (ekza || packaged(id)) && choice.compatible(class));
+    if let Some(scoped) = &disk.handheld_by_class {
+        return scoped
+            .iter()
+            .filter_map(|(id, choice)| {
+                let class = HeroClass::from_id(id)?;
+                valid(choice, class).then(|| (class, choice.clone()))
+            })
+            .collect();
     }
+
+    // Old preferences did not record the weapon's class. The avatar class can
+    // identify it when compatible. Otherwise use Warrior (the old startup
+    // class) or the sole compatible class. Never duplicate a legacy choice.
+    let compatible = |class| valid(&disk.handheld, class);
+    let class = disk
+        .avatar_class
+        .filter(|&class| compatible(class))
+        .or_else(|| compatible(HeroClass::Warrior).then_some(HeroClass::Warrior))
+        .or_else(|| {
+            let mut classes = HeroClass::ALL
+                .into_iter()
+                .filter(|&class| compatible(class));
+            let class = classes.next()?;
+            classes.next().is_none().then_some(class)
+        });
+    class
+        .map(|class| (class, disk.handheld.clone()))
+        .into_iter()
+        .collect()
 }
 
 /// A saved avatar slug this player may still pick: shipped, or an Ekza store
@@ -474,11 +510,13 @@ fn build_file_from_state(
 ) -> ClientPreferencesFile {
     ClientPreferencesFile {
         handheld: Default::default(),
+        handheld_by_class: None,
         schema_version: SCHEMA_VERSION,
         game_server_addr: Some(game_server_addr.to_string()),
         client_session_id: Some(client_session_id.to_string()),
         character: Some(character),
         avatar: None,
+        avatar_class: None,
         model_target_height: Some(model.target_height),
         illuminance: Some(lighting.illuminance),
         ambient_brightness: Some(lighting.ambient_brightness),
@@ -508,8 +546,7 @@ pub(crate) fn language_to_save(
 }
 
 /// Writes current resources to disk (graphics + character + active server display string).
-/// `None` for `handheld`, `avatar`, `render`, `hud_position` or `tips` keeps
-/// the stored value; `Some(None)` for `avatar` clears it.
+/// A missing `selection`, `render`, `hud_position` or `tips` keeps the stored value.
 pub(crate) fn save_client_preferences_to_disk(
     lighting: &LightingSettings,
     model: &ModelScaleSettings,
@@ -520,8 +557,7 @@ pub(crate) fn save_client_preferences_to_disk(
     camera: &CameraSettings,
     motion: &MotionSettings,
     language: Option<crate::i18n::LocaleId>,
-    handheld: Option<&shared::handheld::HandheldSelection>,
-    avatar: Option<Option<&str>>,
+    selection: Option<&TeamSelection>,
     render: Option<&RenderSettings>,
     hud_position: Option<&HudPositionSettings>,
     tips: Option<&BeginnerTips>,
@@ -562,14 +598,24 @@ pub(crate) fn save_client_preferences_to_disk(
         .copied()
         .or_else(|| previous.as_ref().map(|p| p.beginner_tips))
         .unwrap_or_default();
-    prefs.avatar = match avatar {
-        Some(avatar) => avatar.map(str::to_owned),
-        None => previous.as_ref().and_then(|p| p.avatar.clone()),
-    };
-    prefs.handheld = handheld
-        .cloned()
-        .or_else(|| previous.map(|p| p.handheld))
-        .unwrap_or_default();
+    if let Some(team) = selection {
+        prefs.avatar.clone_from(&team.avatar);
+        prefs.avatar_class = team.avatar.as_ref().map(|_| team.hero_class);
+        prefs.handheld = team.effective_handheld();
+        prefs.handheld_by_class = Some(
+            team.handheld_by_class
+                .iter()
+                .map(|(&class, choice)| (class.id().to_owned(), choice.clone()))
+                .collect(),
+        );
+    } else if let Some(previous) = &previous {
+        prefs.avatar.clone_from(&previous.avatar);
+        prefs.avatar_class = previous.avatar_class;
+        prefs.handheld.clone_from(&previous.handheld);
+        prefs
+            .handheld_by_class
+            .clone_from(&previous.handheld_by_class);
+    }
     prefs.reduce_motion = motion.reduce;
     prefs.language = language.map(|language| language.code().to_owned());
     write_preferences_file(&path, &prefs)
@@ -628,8 +674,7 @@ fn save_client_preferences_on_change(
         camera.as_ref(),
         motion.as_ref(),
         language_to_save(locale.as_deref(), &saved_language),
-        Some(&team.handheld),
-        Some(team.avatar.as_deref()),
+        Some(&team),
         Some(&render),
         Some(&hud_position),
         Some(&tips),
@@ -671,7 +716,6 @@ pub(crate) fn reset_graphics_to_defaults(
         None,
         None,
         None,
-        None,
     ) {
         warn!("Failed to save preferences after reset: {e}");
     }
@@ -683,36 +727,84 @@ mod tests {
 
     #[test]
     fn a_build_without_ekza_restores_only_packaged_handhelds() {
-        use shared::handheld::HandheldSelection as H;
+        use HandheldSelection as H;
         use shared::market::Market;
         let packaged = |id: &str| id == "forge-sword";
-        let ekza_item = H::Item(format!("ekza-{}", "a".repeat(32)));
+        let ekza_item = H::Item(shared::handheld::REVIEWED_FORGE_HAMMER.into());
+        let disk = ClientPreferencesFile {
+            handheld_by_class: Some(BTreeMap::from([
+                ("warrior".into(), H::Item("forge-sword".into())),
+                ("cinderforge".into(), ekza_item.clone()),
+                ("ranger".into(), H::Unequipped),
+                ("mage".into(), H::Item("forge-sword".into())),
+                ("unknown".into(), H::Item("forge-sword".into())),
+            ])),
+            ..serde_json::from_str("{}").unwrap()
+        };
         let global = Market::Global.default_features().ekza;
         assert_eq!(
-            restorable_handheld(ekza_item.clone(), global, packaged),
-            ekza_item
+            restore_match_handhelds(&disk, global, packaged),
+            HashMap::from([
+                (HeroClass::Warrior, H::Item("forge-sword".into())),
+                (HeroClass::Cinderforge, ekza_item),
+            ])
         );
         for market in [Market::Ru, Market::Cn] {
-            let ekza = market.default_features().ekza;
             assert_eq!(
-                restorable_handheld(ekza_item.clone(), ekza, packaged),
-                H::ClassDefault
+                restore_match_handhelds(&disk, market.default_features().ekza, packaged),
+                HashMap::from([(HeroClass::Warrior, H::Item("forge-sword".into()))])
             );
-            for kept in [
-                H::ClassDefault,
-                H::Unequipped,
-                H::Item("forge-sword".into()),
-            ] {
-                assert_eq!(restorable_handheld(kept.clone(), ekza, packaged), kept);
-            }
         }
         // The real packaged catalogue lists the class defaults' props.
         assert!(
-            omoba_passport::weapons::catalog()
+            omoba_passport::weapons::shipped_catalog()
                 .items
                 .iter()
                 .any(|weapon| weapon.id == "forge-sword")
         );
+    }
+
+    #[test]
+    fn legacy_handheld_migrates_to_at_most_one_class() {
+        use HandheldSelection as H;
+        let mut disk: ClientPreferencesFile = serde_json::from_str("{}").unwrap();
+        for (choice, avatar_class, expected) in [
+            (H::Unequipped, Some(HeroClass::Warrior), None),
+            (
+                H::Item("wild-repeater".into()),
+                None,
+                Some(HeroClass::Riftshot),
+            ),
+            (
+                H::Item("forge-hammer".into()),
+                None,
+                Some(HeroClass::Warrior),
+            ),
+            (
+                H::Item("forge-hammer".into()),
+                Some(HeroClass::Cinderforge),
+                Some(HeroClass::Cinderforge),
+            ),
+            (H::Item("dawn-scepter".into()), None, None),
+            (
+                H::Item("dawn-scepter".into()),
+                Some(HeroClass::Mage),
+                Some(HeroClass::Mage),
+            ),
+        ] {
+            disk.handheld = choice.clone();
+            disk.avatar_class = avatar_class;
+            assert_eq!(
+                restore_match_handhelds(&disk, true, |_| false),
+                expected
+                    .into_iter()
+                    .map(|class| (class, choice.clone()))
+                    .collect::<HashMap<_, _>>()
+            );
+        }
+
+        disk.handheld_by_class = Some(BTreeMap::new());
+        assert!(restore_match_handhelds(&disk, true, |_| false).is_empty());
     }
 
     fn scratch_dir(name: &str) -> PathBuf {
@@ -726,6 +818,72 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn class_handhelds_survive_relaunch_and_graphics_reset() {
+        use HandheldSelection as H;
+        if crate::i18n::testing::isolated(
+            "persistence::tests::class_handhelds_survive_relaunch_and_graphics_reset",
+        ) {
+            return;
+        }
+        let dir = scratch_dir("class-handhelds");
+        // SAFETY: this test is isolated in its own process before changing env.
+        unsafe { std::env::set_var("OMOBA_CLIENT_CONFIG_DIR", &dir) };
+        let launch = || {
+            let mut app = App::new();
+            app.init_resource::<LightingSettings>()
+                .init_resource::<ModelScaleSettings>()
+                .init_resource::<TeamSelection>()
+                .add_plugins(ClientPersistencePlugin);
+            for _ in 0..5 {
+                app.update();
+            }
+            app
+        };
+        let mut app = launch();
+        let hammer = H::Item("forge-hammer".into());
+        let bow = H::Item("verdant-bow".into());
+        let expected = BTreeMap::from([
+            ("warrior".into(), hammer.clone()),
+            ("ranger".into(), bow.clone()),
+        ]);
+        {
+            let mut team = app.world_mut().resource_mut::<TeamSelection>();
+            team.set_match_handheld(hammer.clone());
+            team.pick_class(HeroClass::Ranger);
+            team.set_match_handheld(bow.clone());
+            team.pick_class(HeroClass::Cinderforge);
+            assert_eq!(team.effective_handheld(), H::ClassDefault);
+        }
+        app.update();
+        let saved = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+        assert_eq!(saved.handheld_by_class.as_ref(), Some(&expected));
+        assert_eq!(saved.handheld, H::ClassDefault);
+
+        reset_graphics_to_defaults(
+            &mut LightingSettings::default(),
+            &mut ModelScaleSettings::default(),
+            &mut CameraSettings::default(),
+            &mut ClientPrefsSaveGate::default(),
+            CharacterChoice::Paco,
+            "game.local:4000",
+            "handheld-relaunch",
+            &AudioSettings::default(),
+            &MotionSettings::default(),
+            None,
+        );
+        let preserved = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+        assert_eq!(preserved.handheld_by_class.as_ref(), Some(&expected));
+        let mut relaunched = launch();
+        let mut team = relaunched.world_mut().resource_mut::<TeamSelection>();
+        assert_eq!(team.effective_handheld(), hammer);
+        team.pick_class(HeroClass::Ranger);
+        assert_eq!(team.effective_handheld(), bow);
+        team.pick_class(HeroClass::Cinderforge);
+        assert_eq!(team.effective_handheld(), H::ClassDefault);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -851,9 +1009,11 @@ mod tests {
             for _ in 0..5 {
                 app.update();
             }
-            app.world_mut()
-                .resource_mut::<crate::team::TeamSelection>()
-                .avatar = Some(picked.clone());
+            {
+                let mut team = app.world_mut().resource_mut::<crate::team::TeamSelection>();
+                team.pick_class(shared::HeroClass::Riftshot);
+                team.avatar = Some(picked.clone());
+            }
             app.update();
             assert_eq!(
                 read_preferences_file(&dir.join(PREFS_FILENAME))
@@ -862,7 +1022,15 @@ mod tests {
                     .as_deref(),
                 Some(picked.as_str())
             );
-            assert_eq!(avatar(&launch()), Some(picked));
+            let relaunched = launch();
+            assert_eq!(avatar(&relaunched), Some(picked));
+            assert_eq!(
+                relaunched
+                    .world()
+                    .resource::<crate::team::TeamSelection>()
+                    .hero_class,
+                shared::HeroClass::Riftshot
+            );
         }
         // Withdrawn from the catalogue (unknown here) or never valid: default.
         for stale in [format!("ekza-{}", "e".repeat(64)), "../agnes".into()] {
@@ -1088,6 +1256,8 @@ mod tests {
         let zh = crate::i18n::LocaleId::parse("zh-Hans").unwrap();
         let mut picked = crate::i18n::Locale::detached(crate::i18n::LocaleId::ENGLISH);
         picked.set(zh);
+        let mut team = TeamSelection::default();
+        team.set_match_handheld(HandheldSelection::Item("forge-hammer".into()));
         save_client_preferences_to_disk(
             &LightingSettings::default(),
             &ModelScaleSettings::default(),
@@ -1098,10 +1268,7 @@ mod tests {
             &CameraSettings::default(),
             &MotionSettings { reduce: true },
             language_to_save(Some(&picked), &SavedLanguage::default()),
-            Some(&shared::handheld::HandheldSelection::Item(
-                "forge-hammer".into(),
-            )),
-            None,
+            Some(&team),
             None,
             None,
             None,
@@ -1110,6 +1277,10 @@ mod tests {
         let written: serde_json::Value =
             serde_json::from_slice(&fs::read(dir.join(PREFS_FILENAME)).unwrap()).unwrap();
         assert_eq!(written["handheld"]["id"], "forge-hammer");
+        assert_eq!(
+            written["handheld_by_class"]["warrior"]["id"],
+            "forge-hammer"
+        );
         assert_eq!(written["language"], "zh-Hans");
         assert_eq!(written["reduce_motion"], true);
         assert_eq!(saved_language(), Some(zh));

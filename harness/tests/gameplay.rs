@@ -314,7 +314,7 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
     let mut mage = Bot::connect_framed(server.addr());
     let mut warrior = Bot::connect_framed(server.addr());
 
-    // Two clients join with different class + avatar loadouts (AC2).
+    // Each client should receive the class default, even with an old avatar saved.
     mage.join_with_loadout(Team::Green, Character::Ipfs, HeroClass::Mage, Some("agnes"));
     warrior.join_with_loadout(
         Team::Blue,
@@ -330,20 +330,20 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
     // Once mutually visible, both clients must receive the other loadout.
     mage.wait_for_player(
         mage_id,
-        |p| p.hero_class == HeroClass::Mage && p.avatar.as_deref() == Some("agnes"),
+        |p| p.hero_class == HeroClass::Mage && p.avatar.as_deref() == Some("set01-mage"),
         POLL_TIMEOUT,
     )
     .expect("mage should see its own class + avatar replicated");
     mage.wait_for_player(
         warrior_id,
-        |p| p.hero_class == HeroClass::Warrior && p.avatar.as_deref() == Some("cool-tiger"),
+        |p| p.hero_class == HeroClass::Warrior && p.avatar.as_deref() == Some("set01-warrior"),
         POLL_TIMEOUT,
     )
     .expect("mage should see the warrior's class + avatar");
     warrior
         .wait_for_player(
             mage_id,
-            |p| p.hero_class == HeroClass::Mage && p.avatar.as_deref() == Some("agnes"),
+            |p| p.hero_class == HeroClass::Mage && p.avatar.as_deref() == Some("set01-mage"),
             POLL_TIMEOUT,
         )
         .expect("warrior should see the mage's class + avatar");
@@ -415,7 +415,11 @@ fn malformed_class_and_avatar_fall_back_without_crashing_the_server() {
         HeroClass::Warrior,
         "unknown class must fall back to the default class"
     );
-    assert_eq!(me.avatar, None, "unknown avatar slug must be dropped");
+    assert_eq!(
+        me.avatar.as_deref(),
+        Some("set01-warrior"),
+        "an invalid loadout must render the chosen fallback class"
+    );
 }
 
 #[test]

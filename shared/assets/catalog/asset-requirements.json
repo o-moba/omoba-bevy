@@ -360,7 +360,7 @@
   "sourceEvidence": [
     {
       "sourcePath": "shared/src/handheld.rs",
-      "sha256": "33148c87d5194d93bffc0f4c6bfbc7f211fe4464a5283cf8de2fe1d60dc59fb3"
+      "sha256": "2fe1ac1fab6bb5989beecdf0963bd726c477e16b7cc54ecce9329a37c8b4f913"
     },
     {
       "sourcePath": "client/src/skill_presentation/effects.rs",

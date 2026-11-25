@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Validate the committed avatar roster and its retargeted animation clips.
+"""Validate the committed avatar roster and its animation profiles.
 
-For every avatar in `client/assets/avatars/manifest.json`, checks:
-  * the GLB parses (valid glTF 2.0 binary container, JSON chunk decodes);
+Every avatar in `client/assets/avatars/manifest.json` must parse as a GLB,
+carry complete manifest metadata and include any referenced thumbnail.
+
+For the legacy CC0 avatars, checks:
   * mandatory clips `idle` and `walk` are embedded (missing `attack`, `cast`,
-    or `death` is a warning, per spec these are stretch clips);
+    or `death` is a warning);
   * every animation channel targets a node index present in the GLB node
     tree, and every rotation/translation channel targets a skin joint;
   * every clip has duration > 0;
   * the walk clip shows plausible motion: rotation keys on the hips/leg bones
     (resolved through the VRM humanoid bone map) with nontrivial variance,
-    plus an animated hips translation channel;
-  * manifest fields are complete (slug, display_name, collection,
-    license == CC0, source_url, author) and the referenced thumbnail exists.
+    plus an animated hips translation channel.
 
-Also enforces the roster size window (default 10..20 shipped avatars; override
+The original OMOBA Set 01 avatars use a VRM 1.0 rig and the shared runtime
+motion library. Their humanoid mappings and original metadata are validated
+in place of the embedded animation checks for the CC0 roster.
+
+Also enforces the roster size window (default 10..33 shipped avatars; override
 with --roster-min/--roster-max, e.g. exactly 2 for the raid-boss directory).
 Exits nonzero on any mandatory failure. Run from the repo root:
 
@@ -31,7 +35,7 @@ from pathlib import Path
 AVATARS_DIR = Path("client/assets/avatars")
 MANDATORY_CLIPS = ("idle", "walk")
 STRETCH_CLIPS = ("attack", "cast", "death")
-ROSTER_MIN, ROSTER_MAX = 10, 20
+ROSTER_MIN, ROSTER_MAX = 10, 33
 
 GLB_MAGIC = b"glTF"
 CHUNK_JSON = 0x4E4F534A
@@ -42,6 +46,8 @@ FLOAT = 5126
 WALK_MOTION_BONES = ("leftUpperLeg", "rightUpperLeg", "leftLowerLeg", "rightLowerLeg")
 ROTATION_VARIANCE_MIN = 1e-4
 TRANSLATION_VARIANCE_MIN = 1e-6
+SET01_LICENSE = "VRM Public License 1.0"
+SET01_LICENSE_URL = "https://vrm.dev/licenses/1.0/"
 
 
 def load_glb_json(path: Path) -> dict:
@@ -110,6 +116,35 @@ class Report:
         self.warnings.append(msg)
 
 
+def set01_runtime_errors(gltf, author):
+    """Validate the original VRM terms and the runtime skeleton used by Set 01."""
+    vrm = gltf.get("extensions", {}).get("VRMC_vrm", {})
+    meta = vrm.get("meta", {})
+    errors = []
+    expected = {
+        "authors": [author],
+        "licenseUrl": SET01_LICENSE_URL,
+        "avatarPermission": "onlyAuthor",
+        "modification": "allowModification",
+    }
+    for key, value in expected.items():
+        if meta.get(key) != value:
+            errors.append(f"embedded Set 01 {key} must be {value!r}, got {meta.get(key)!r}")
+    if vrm.get("specVersion") != "1.0":
+        errors.append("Set 01 requires a VRM 1.0 extension")
+    bones = vrm.get("humanoid", {}).get("humanBones", {})
+    mapped = {bone.get("node") for bone in bones.values()}
+    skins = gltf.get("skins", [])
+    if (len(skins) != 1 or len(bones) != 52 or len(mapped) != 52
+            or mapped != set(skins[0].get("joints", []))
+            or any(type(node) is not int or not 0 <= node < len(gltf.get("nodes", []))
+                   for node in mapped)):
+        errors.append("Set 01 needs 52 distinct humanoid nodes in one skin")
+    if gltf.get("animations"):
+        errors.append("Set 01 models use shared runtime motion and carry no embedded clips")
+    return errors
+
+
 def validate_avatar(entry, avatars_dir: Path) -> Report:
     slug = entry.get("slug", "<missing slug>")
     report = Report(slug)
@@ -118,8 +153,10 @@ def validate_avatar(entry, avatars_dir: Path) -> Report:
     for field in ("slug", "display_name", "collection", "license", "source_url", "author"):
         if not entry.get(field):
             report.error(f"manifest field {field!r} missing or empty")
-    if entry.get("license") != "CC0":
-        report.error(f"license is {entry.get('license')!r}, expected 'CC0'")
+    is_set01 = entry.get("collection") == "OMOBA Set 01"
+    expected_license = SET01_LICENSE if is_set01 else "CC0"
+    if entry.get("license") != expected_license:
+        report.error(f"license is {entry.get('license')!r}, expected {expected_license!r}")
     if entry.get("source_url") and not str(entry["source_url"]).startswith("http"):
         report.error(f"source_url does not look like a URL: {entry['source_url']!r}")
     thumb = entry.get("thumbnail")
@@ -137,6 +174,11 @@ def validate_avatar(entry, avatars_dir: Path) -> Report:
         js, binary = load_glb_json(glb_path)
     except (ValueError, json.JSONDecodeError, struct.error) as err:
         report.error(f"GLB parse failed: {err}")
+        return report
+
+    if is_set01:
+        for error in set01_runtime_errors(js, entry.get("author")):
+            report.error(error)
         return report
 
     node_count = len(js.get("nodes", []))

@@ -5,7 +5,7 @@ use crate::{
     humanoid::RuntimeHumanoidPlayer,
     model_scale::{ModelScalePlugin, ModelScaleSettings, ModelScaleSource, NormalizeModelScale},
     net::{NetworkAvatar, NetworkCharacterChoice, PlayerCosmeticAction, RemotePlayer},
-    player::{MovementTarget, Player, PlayerBody},
+    player::{Player, PlayerBody},
     team::CharacterChoice,
     world::AvatarAssetCache,
 };
@@ -206,12 +206,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, qa: Res<Audit>) {
             },
         ));
         if local {
-            hero.insert((
-                Player,
-                MovementTarget {
-                    target: origin + Vec3::Z * 10.0,
-                },
-            ));
+            hero.insert(Player);
         } else {
             hero.insert(RemotePlayer);
         }
@@ -244,11 +239,14 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, qa: Res<Audit>) {
     }
 }
 
-fn move_heroes(qa: Res<Audit>, mut heroes: Query<(&AuditHero, &mut Transform)>) {
-    // The local path uses actual movement intent; remote path uses position deltas,
-    // exactly the two production state-machine inputs. No animation state override.
+fn move_heroes(mut phase: Local<u32>, mut heroes: Query<(&AuditHero, &mut Transform)>) {
+    const FRAMES_PER_LEG: u32 = 24;
+    const CYCLE: u32 = 2 * FRAMES_PER_LEG;
+    // A bounded back-and-forth step keeps both paths moving during screenshot readback.
+    let offset = ((*phase).min(CYCLE - *phase) as f32 - FRAMES_PER_LEG as f32 / 2.0) * 0.006;
+    *phase = (*phase + 1) % CYCLE;
     for (hero, mut transform) in &mut heroes {
-        transform.translation = hero.origin + Vec3::X * ((qa.frame as f32 * 0.045).sin() * 0.08);
+        transform.translation = hero.origin + Vec3::X * offset;
     }
 }
 
@@ -305,6 +303,14 @@ fn capture(
         .filter(|(_, _, r, _, _, _)| r.is_some())
         .count()
         != expected
+    {
+        return;
+    }
+    // Capture steady running after the initial idle-to-run blend has finished.
+    if qa.stage == 0
+        && heroes.iter().any(|(_, _, _, player, binding, _)| {
+            !binding.is_running() || player.playing_animations().count() != 1
+        })
     {
         return;
     }

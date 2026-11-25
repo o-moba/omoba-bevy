@@ -38,9 +38,8 @@ const ROUTE_INTERVAL: Duration = Duration::from_millis(800);
 const ARRIVAL: f32 = 0.2;
 use shared::hero_balance::BOT_ENGAGE_RANGE as VISION;
 use shared::math::hero_yaw_towards;
-/// A five-player team, one class per duty. Bots take the first entry whose
-/// class is not on their team yet (humans pick first); the lane is the fallback
-/// when the Warden has no living camp to clear.
+/// A five-player team, one entry per duty. The class is the original lineup
+/// used for explicit spawns; junglers fall back to the given lane.
 const BOT_COMPOSITION: [(HeroClass, Lane, bool, Role); 5] = [
     (HeroClass::Mage, Lane::Mid, false, Role::Mid),
     (HeroClass::Warrior, Lane::Top, false, Role::Solo),
@@ -1031,21 +1030,6 @@ fn steer_bot_step(
     best
 }
 
-pub fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
-    // Fixed bundled models only; runtime-synced/paid cosmetics are never selected.
-    // Each class alternates two free appearances without changing its sprite kit.
-    let preferred = match class {
-        HeroClass::Warrior => ["good-knight", "bao-samurai"],
-        HeroClass::Ranger | HeroClass::Wildspark => ["megan-the-fox", "cyberpal"],
-        HeroClass::Mage | HeroClass::Dawnweaver => ["agnes", "stitch-witch"],
-        HeroClass::Cleric => ["anna", "mega-angel"],
-        HeroClass::Warden => ["cool-tiger", "lady-koi"],
-        _ => ["good-knight", "agnes"],
-    };
-    let variant = ((slot.saturating_sub(1) / 4) % 2) as usize;
-    Some(preferred[variant])
-}
-
 #[derive(Default)]
 pub struct BotControllers {
     controllers: HashMap<SocketAddr, Controller>,
@@ -1485,6 +1469,85 @@ pub fn place_dummy(player: &mut ConnectedPlayer, anchor: [f32; 2], toward: [f32;
 }
 
 impl CombatHost<'_> {
+    fn next_roster_slot(&self, team: Team) -> (HeroClass, Lane, bool, Role) {
+        let roster: Vec<_> = self
+            .world
+            .players
+            .iter()
+            .filter(|(addr, p)| {
+                p.joined && (!p.hero.identity.is_bot || self.bots.is_lane_bot(**addr))
+            })
+            .map(|(_, p)| p)
+            .collect();
+        let teammates: Vec<_> = roster
+            .iter()
+            .copied()
+            .filter(|p| p.hero.identity.team == team)
+            .collect();
+        let (fallback, lane, jungle, role) = BOT_COMPOSITION
+            .into_iter()
+            .find(|(_, _, _, role)| !teammates.iter().any(|p| p.draft.role == *role))
+            .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
+
+        // A rematch rotates the equally suitable kits. Every fill stays
+        // deterministic and the duty still controls lane and jungle behavior.
+        let rotation = (self.match_id.saturating_sub(1) % HeroClass::ALL.len() as u64) as usize;
+        let class = HeroClass::ALL
+            .into_iter()
+            .cycle()
+            .skip(rotation)
+            .take(HeroClass::ALL.len())
+            .min_by_key(|class| {
+                (
+                    teammates
+                        .iter()
+                        .any(|p| p.hero.identity.hero_class == *class),
+                    roster.iter().any(|p| p.hero.identity.hero_class == *class),
+                    class.primary_role() != role,
+                )
+            })
+            .unwrap_or(fallback);
+        (class, lane, jungle, role)
+    }
+
+    /// Reuse the existing bots when a human takes one of their duties in draft.
+    pub fn refresh_practice_bot_duties(&mut self, now: Instant) {
+        if !self.rules.fills_with_bots || self.bots.sandbox {
+            return;
+        }
+        for team in [Team::Green, Team::Blue] {
+            let mut occupied = Vec::new();
+            let mut roster_bots = Vec::new();
+            for (&addr, player) in &self.world.players {
+                if !player.joined || player.hero.identity.team != team {
+                    continue;
+                }
+                if !player.hero.identity.is_bot {
+                    occupied.push(player.draft.role);
+                } else if self.bots.is_lane_bot(addr) {
+                    roster_bots.push((player.hero.identity.id, addr, player.draft.role));
+                }
+            }
+            roster_bots.sort_unstable_by_key(|(id, _, _)| *id);
+            let mut reassigned = Vec::new();
+            for (_, addr, role) in roster_bots {
+                if occupied.contains(&role) {
+                    reassigned.push(addr);
+                } else {
+                    occupied.push(role);
+                }
+            }
+            let open_duties = BOT_COMPOSITION
+                .into_iter()
+                .filter(|(_, _, _, role)| !occupied.contains(role));
+            for (addr, (_, lane, jungle, role)) in reassigned.into_iter().zip(open_duties) {
+                self.world.players.get_mut(&addr).unwrap().draft.role = role;
+                let controller = self.bots.controllers.get_mut(&addr).unwrap();
+                *controller = Controller::new(BotKind::Lane, lane, jungle, controller.profile, now);
+            }
+        }
+    }
+
     /// Create one joined bot on `team`. `class` defaults to the next roster
     /// composition class; sandbox bots take mid.
     pub fn spawn_bot(
@@ -1494,32 +1557,28 @@ impl CombatHost<'_> {
         kind: BotKind,
         now: Instant,
     ) -> Option<SocketAddr> {
-        // Roster bots complete the Mid/Solo/Carry/Jungle/Support composition;
-        // sandbox bots take the requested class and hold mid without jungling.
-        let teammates: Vec<_> = self
-            .world
-            .players
-            .values()
-            .filter(|p| p.joined && p.hero.identity.team == team)
-            .map(|p| p.hero.identity.hero_class)
-            .collect();
-        let (composition_class, composition_lane, composition_jungle, composition_role) =
-            BOT_COMPOSITION
+        let (class, lane, jungle, role) = if kind == BotKind::Lane && class.is_none() {
+            self.next_roster_slot(team)
+        } else {
+            let teammates: Vec<_> = self
+                .world
+                .players
+                .values()
+                .filter(|p| p.joined && p.hero.identity.team == team)
+                .map(|p| p.hero.identity.hero_class)
+                .collect();
+            let (fallback, lane, jungle, role) = BOT_COMPOSITION
                 .into_iter()
                 .find(|(class, ..)| !teammates.contains(class))
                 .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
-        let assignment = if kind == BotKind::Lane {
-            (composition_lane, composition_jungle, composition_role)
-        } else {
-            (Lane::Mid, false, Role::Mid)
+            let class = class.unwrap_or(fallback);
+            if kind == BotKind::Lane {
+                (class, lane, jungle, role)
+            } else {
+                (class, Lane::Mid, false, Role::Mid)
+            }
         };
-        self.spawn_assigned_bot(
-            team,
-            class.unwrap_or(composition_class),
-            kind,
-            assignment,
-            now,
-        )
+        self.spawn_assigned_bot(team, class, kind, (lane, jungle, role), now)
     }
 
     /// Seat a simulated roster pick according to its explicit draft role.
@@ -1569,7 +1628,7 @@ impl CombatHost<'_> {
             team,
             default_character_choice(),
             class,
-            bot_avatar(class, slot),
+            Some(class.default_avatar_slug()),
             None,
             &self.world.map_layout,
             now,

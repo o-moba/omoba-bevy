@@ -24,7 +24,7 @@ use crate::sim::cast::handle_cast_request;
 use crate::world::{
     build_configured_structures, spawn_minion_wave_for_team_lane, structure_collision_radius,
 };
-use crate::{bots, hero_stats, hero_timers};
+use crate::{hero_stats, hero_timers};
 
 const ENEMY_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 40001);
@@ -123,7 +123,7 @@ impl SandboxRuntime {
             p.hero.identity.avatar = c
                 .avatar
                 .clone()
-                .or_else(|| bots::bot_avatar(c.hero, 1).map(str::to_owned));
+                .or_else(|| Some(c.hero.default_avatar_slug().to_owned()));
             p.hero.identity.sprite_character = None;
         }
         if moved {
@@ -688,7 +688,7 @@ impl ServerRuntime {
                 Team::Blue,
                 default_character_choice(),
                 c.hero,
-                bots::bot_avatar(c.hero, 1),
+                Some(c.hero.default_avatar_slug()),
                 None,
                 &self.world.map_layout,
                 now,

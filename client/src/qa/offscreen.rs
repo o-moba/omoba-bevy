@@ -25,23 +25,25 @@ pub(super) struct Surface {
 fn requested(
     flag: Option<&str>,
     mobile: bool,
-    output_is_set: impl FnMut(&str) -> bool,
+    frontend_flow_enabled: bool,
+    mut output_is_set: impl FnMut(&str) -> bool,
 ) -> Result<bool, &'static str> {
     let Some(flag) = flag else {
         return Ok(false);
     };
     if flag != "1" {
-        return Err("OMOBA_QA_OFFSCREEN must be1 or unset");
+        return Err("OMOBA_QA_OFFSCREEN must be 1 or unset");
     }
-    let outputs = [
+    let supported_harness = [
         "OMOBA_FAIR_PLAY_QA_OUTPUT",
         "OMOBA_CREATOR_LOOP_QA",
         "OMOBA_RECORD_DIR",
-    ];
-    if mobile || !outputs.into_iter().any(output_is_set) {
-        return Err(
-            "Offscreen QA requires a desktop fair-play, Creator Loop or frame recording harness",
-        );
+    ]
+    .into_iter()
+    .any(&mut output_is_set)
+        || (frontend_flow_enabled && output_is_set("OMOBA_FRONTEND_QA_OUTPUT"));
+    if mobile || !supported_harness {
+        return Err("Offscreen QA requires a supported desktop harness");
     }
     Ok(true)
 }
@@ -51,8 +53,9 @@ pub(crate) fn configure(app: &mut App, plugins: PluginGroupBuilder) -> PluginGro
     let set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
     let flag = std::env::var(ENV).ok();
     let mobile = cfg!(any(target_os = "ios", target_os = "android"));
-    let enabled =
-        requested(flag.as_deref(), mobile, set).expect("invalid offscreen QA configuration");
+    let frontend_flow_enabled = std::env::var("OMOBA_FRONTEND_QA_FLOW").as_deref() == Ok("1");
+    let enabled = requested(flag.as_deref(), mobile, frontend_flow_enabled, set)
+        .expect("invalid offscreen QA configuration");
     if !enabled {
         return plugins;
     }
@@ -153,20 +156,24 @@ mod tests {
     #[test]
     fn explicit_supported_desktop_opt_in_is_required() {
         let recorder = |name: &str| name == "OMOBA_RECORD_DIR";
-        assert_eq!(requested(None, false, recorder), Ok(false));
+        assert_eq!(requested(None, false, false, recorder), Ok(false));
         for harness in [
             "OMOBA_FAIR_PLAY_QA_OUTPUT",
             "OMOBA_CREATOR_LOOP_QA",
             "OMOBA_RECORD_DIR",
         ] {
             assert_eq!(
-                requested(Some("1"), false, |name| name == harness),
+                requested(Some("1"), false, false, |name| name == harness),
                 Ok(true)
             );
         }
-        assert!(requested(Some("0"), false, recorder).is_err());
-        assert!(requested(Some("1"), false, |_| false).is_err());
-        assert!(requested(Some("1"), true, recorder).is_err());
+        let frontend_output = |name: &str| name == "OMOBA_FRONTEND_QA_OUTPUT";
+        assert_eq!(requested(Some("1"), false, true, frontend_output), Ok(true));
+        assert!(requested(Some("1"), false, false, frontend_output).is_err());
+        assert!(requested(Some("1"), false, true, |_| false).is_err());
+        assert!(requested(Some("0"), false, false, recorder).is_err());
+        assert!(requested(Some("1"), false, false, |_| false).is_err());
+        assert!(requested(Some("1"), true, false, recorder).is_err());
     }
 
     #[test]

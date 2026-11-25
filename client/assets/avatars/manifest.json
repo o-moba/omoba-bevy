@@ -134,6 +134,159 @@
       "slug": "orion",
       "source_url": "https://gateway.pinata.cloud/ipfs/Qmed8jVF5FvBn6Jerxk8Wm5DwRjuAHRfBXgofTue37orBC/Avatar_Orion.vrm",
       "thumbnail": "orion.png"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Crimson Warrior",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-warrior",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-warrior.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Violet Mage",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-mage",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-mage.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Olive Ranger",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-ranger",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-ranger.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Ivory Healer",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-healer",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-healer.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Warden",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-warden",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-warden.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Dawnweaver",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-dawnweaver",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-dawnweaver.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Wildspark",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-wildspark",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-wildspark.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Cinderforge",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-cinderforge",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-cinderforge.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Edgeweaver",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-edgeweaver",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-edgeweaver.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Stormfist",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-stormfist",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-stormfist.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Veilstalker",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-veilstalker",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-veilstalker.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Emberveil",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-emberveil",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-emberveil.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Orbitwright",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-orbitwright",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-orbitwright.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Riftshot",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-riftshot",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-riftshot.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Chainkeeper",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-chainkeeper",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-chainkeeper.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Frostguard",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-frostguard",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-frostguard.jpg"
+    },
+    {
+      "author": "Wotori",
+      "collection": "OMOBA Set 01",
+      "display_name": "Adventurer",
+      "license": "VRM Public License 1.0",
+      "slug": "set01-adventurer",
+      "source_url": "https://github.com/o-moba/omoba-bevy",
+      "thumbnail": "set01-adventurer.jpg"
     }
   ]
 }

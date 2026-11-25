@@ -46,7 +46,6 @@
   "collection.weapons_included": "内置",
   "collection.weapons_catalogue": "Ekza 目录",
   "collection.weapon_default": "职业默认",
-  "collection.weapon_empty": "空手",
   "collection.weapon_download_pending": "正在下载所选手持装备…",
   "collection.weapon_download_failed": "无法加载手持装备。请刷新后重试。",
   "collection.weapon_download_ready": "所选手持装备已就绪。",

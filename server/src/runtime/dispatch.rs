@@ -51,6 +51,31 @@ impl ServerRuntime {
             })
     }
 
+    fn resolve_join_avatar(&self, packet: &mut ClientPacket) {
+        let ClientPacket::Join {
+            hero_class,
+            avatar,
+            session_id,
+            ..
+        } = packet
+        else {
+            return;
+        };
+        // The private Combat Test accepts explicit models for art and rig QA.
+        if self.sandbox_allowed() && avatar.is_some() {
+            return;
+        }
+        let class = normalize_session_id(session_id.clone())
+            .as_deref()
+            .and_then(|session| self.retained_join_player(session))
+            .filter(|player| player.joined)
+            .map_or(*hero_class, |player| player.hero.identity.hero_class);
+        let effective = omoba_passport::avatars::match_avatar_slug(class, avatar.as_deref());
+        if Some(effective) != avatar.as_deref() {
+            *avatar = Some(effective.to_owned());
+        }
+    }
+
     pub(crate) fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
             passport_admission::log_ekza_decision(
@@ -163,7 +188,12 @@ impl ServerRuntime {
         }
     }
 
-    pub(crate) fn handle_packet(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
+    pub(crate) fn handle_packet(
+        &mut self,
+        addr: SocketAddr,
+        mut packet: ClientPacket,
+        now: Instant,
+    ) {
         // Internal bot actor addresses never accept network commands or identity claims.
         if bots::is_bot_address(addr) {
             return;
@@ -200,6 +230,7 @@ impl ServerRuntime {
                 .get(&addr)
                 .is_some_and(|player| player.joined)
         {
+            self.resolve_join_avatar(&mut packet);
             self.world.ensure_connected(addr, now);
             // A reconnect may restore an old paid loadout. A client must not
             // bypass ticket verification by requesting a free avatar while
@@ -267,6 +298,13 @@ impl ServerRuntime {
         // Expire retained seats and settle an empty worker before deciding
         // whether this join may reclaim its frozen roster identity.
         self.maintain_roster(now);
+        self.resolve_join_avatar(&mut packet);
+        if !self.sandbox_allowed()
+            && let ClientPacket::Join { handheld, .. } = &mut packet
+            && !handheld.allowed_in_match()
+        {
+            *handheld = HandheldSelection::ClassDefault;
+        }
         if matches!(packet, ClientPacket::Join { .. })
             && !self.authorize_allocated_join(addr, &packet)
         {
