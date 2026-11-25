@@ -1268,6 +1268,12 @@ fn copy_place(slot: &PartSlot, index: u8, seen: &Seen) -> Option<(Vec3, f32)> {
             let strip = seen.strip()?;
             let half = footprint(slot, extent);
             let middle = strip.length * 0.5;
+            // Fog can clip an open lane to less than the length of one copy.
+            if matches!(seen.shape, GeoShape::Lane { .. })
+                && (half.y > middle || half.x > strip.radius)
+            {
+                return None;
+            }
             let along = ((f32::from(index) + 0.5) / f32::from(count.max(1)) * strip.length)
                 .clamp(half.y.min(middle), (strip.length - half.y).max(middle));
             let side = if layout == SatelliteLayout::Stagger {
