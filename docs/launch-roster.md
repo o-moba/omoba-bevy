@@ -63,8 +63,33 @@ the class that wins more of its two games, and a pair with equal wins is tied.
 The 95% Wilson bands describe the first class's share of decisive pairs, once
 using base wins alone and once including the results at the cap. Keep the
 number of tied pairs, actual base wins and the structure score beside the
-bands. The bots clear ordinary camps and gank opportunistically. Use their
-results to prioritize human scenarios, including deliberate boss rotations.
+bands. The bands describe the tested lineups and tick schedules. The bots
+clear ordinary camps and gank opportunistically. Use their results to
+prioritize human scenarios, including deliberate boss rotations.
+
+### First two runs
+
+Each run used the full 16 paired lineups per duty and a 45-minute cap. Seeds 1
+and 2 produced 320 games in total. Seven ended with a base destroyed and 313
+reached the cap. Both runs favored Green in the raw counts, which makes the
+side swap material. The table counts only decided pairs, in class order.
+
+| Pair | Seed 1 | Seed 2 | Base wins across both runs |
+| --- | ---: | ---: | ---: |
+| Warrior / Cinderforge | 1–6 | 2–4 | 1–1 |
+| Warden / Stormfist | 2–3 | 3–4 | 2–0 |
+| Mage / Orbitwright | 8–1 | 0–2 | 1–1 |
+| Ranger / Wildspark | 3–7 | 2–3 | 0–0 |
+| Chainkeeper / Frostguard | 0–5 | 4–3 | 1–0 |
+
+Cinderforge and Wildspark led on structure pressure in both runs. Compare
+their lane pressure and the defender's response in the first human matches.
+Decided pairs for mid and support reversed across schedules. Mage can damage
+exposed structures with targeted spells, while coordinating Orbitwright's orb
+and using Chainkeeper's lantern rely on decisions the current bots exercise
+only partly. Test those decisions with human teammates before using those
+comparisons to tune damage or shields. The Warden's repeatable camp gold lead
+is a separate early-game question from the whole-match comparison.
 
 ## Scenarios to record
 
@@ -74,9 +99,9 @@ paired matches. Use nonmirror results when comparing class win rates.
 
 | Scenario | Capture | Review question |
 | --- | --- | --- |
-| Warden vs Stormfist jungle start | First comparable clear time, HP, gold, XP and first opportunity to enter a lane | Can Stormfist find a useful early gank while Warden farms? |
-| Ranger and Wildspark vs both supports, with sides exchanged | First damaging cast, response opportunity, saves, pressure after missed abilities | Can an opponent dodge Last Spark, change the angle around Northwall, and respond to or use the lantern? |
-| Rotate both solos and mids through an objective fight | Position before the fight, pillar and orb placement, longest forced control sequence, time until the target can act | Can players see the contested space and change their route, or does the first hit effectively decide the whole exchange? |
+| Warden vs Stormfist jungle start | First comparable clear time, HP, gold, XP, first purchase after the starter and first opportunity to enter a lane | Can Stormfist find a useful early gank while Warden farms? |
+| Ranger and Wildspark vs both supports, with sides exchanged | First damaging cast, response opportunity, saves, ally interaction with Guiding Lantern and pressure after missed abilities | Can an opponent dodge Last Spark or change the angle around Northwall, and can a threatened ally recognize and use the lantern in time? |
+| Rotate both solos and mids through an objective fight | Position before the fight, pillar and orb placement, time from orb arrival to W or R, longest forced control sequence and time until the target can act | Can players coordinate around the orb and change their route through contested space after the first hit? |
 | Cleric with each carry | Useful healing and barrier saves, failed casts, visibility of casts and recipients | Can players deliberately reach allies to protect them and understand the resulting heal or barrier? |
 | Adventurer and Riftshot in Combat Test | Front versus rear hit, visible sealed target versus empty escape | Do earned position and a prepared mark change the outcome predictably? |
 
