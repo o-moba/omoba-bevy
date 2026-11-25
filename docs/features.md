@@ -303,9 +303,10 @@ falling fragments and delayed embers, regardless of victim count. Damage numbers
 remain per victim; a shielded detonation never prints invented damage. Fog hides
 unseen blast centres, and a vanished projectile alone produces no explosion.
 
-Protocol 11 remains additive-compatible; gameplay revision
-`wildspark-2026-10-09-reference` and catalog `standard-kits-7` require matching
-client and server. See [implementation and verification](progress/2026-10-09-wildspark-reference.md).
+The timing and targeting in the launch iteration ship under gameplay revision
+`launch-roster-balance-1`. Client and server use the same revision. See
+[the launch playtest](launch-roster.md) and
+[the original implementation](progress/2026-10-09-wildspark-reference.md).
 
 ## Creator asset catalogue (first iteration)
 

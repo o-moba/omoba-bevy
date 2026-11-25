@@ -1798,7 +1798,7 @@ fn target_bodies_fit_the_part_and_material_budgets() {
             bodies_seen += 1;
         }
     }
-    assert_eq!(bodies_seen, 33);
+    assert_eq!(bodies_seen, 34);
     // Only skills on a long cooldown spend more than twelve parts.
     assert_eq!(
         long_cooldown,

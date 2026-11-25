@@ -441,8 +441,8 @@ fn the_archetype_table_counts_the_engine_parts_of_every_shape() {
 #[test]
 fn every_target_body_lists_the_parts_its_row_counts() {
     let bodies = target_bodies();
-    // 26 rows with a body (two kinds for the ray) and six auxiliary bodies.
-    assert_eq!(bodies.len(), 33);
+    // 26 rows with a body (two kinds for the ray) and seven auxiliary bodies.
+    assert_eq!(bodies.len(), 34);
     for (skill, kind, body) in bodies {
         let e = effect(skill, kind);
         let seen = first(&e, 0.0);

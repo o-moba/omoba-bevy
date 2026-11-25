@@ -848,8 +848,8 @@ fn target_contact_rule_holds() {
             }
         }
     }
-    // 63 instant releases, 8 recast clips, 22 basic-attack clips.
-    assert_eq!(edges.len(), 93);
+    // 62 instant releases, 8 recast clips, 22 basic-attack clips.
+    assert_eq!(edges.len(), 92);
 
     let mut past_contact = Vec::new();
     for (user, clip, rate, start) in &edges {

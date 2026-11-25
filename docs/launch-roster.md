@@ -32,6 +32,11 @@ and kits accessible in Combat Test throughout the iteration.
 - Riftshot can blink away freely. The follow-up shot requires a visible enemy
   already carrying Riftshot's own mark.
 
+In the repeatable live-camp opening probe, Warden cleared the same three camps
+0.90 s faster than Stormfist on both sides. Both ended at level 2 with 195 XP
+and full health. Warden earned 171 camp gold and Stormfist earned 122. This
+route leaves out enemy pressure and passive income.
+
 ## Scenarios to record
 
 Record the build, side, player count, actual roles, input device and whether
