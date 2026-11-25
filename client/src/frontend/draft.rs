@@ -201,7 +201,11 @@ impl DraftClient {
     }
 }
 
-fn sync_draft(game: Res<GameStateSnapshot>, mut state: ResMut<DraftClient>) {
+fn sync_draft(
+    game: Res<GameStateSnapshot>,
+    mut state: ResMut<DraftClient>,
+    mut selection: Option<ResMut<crate::team::TeamSelection>>,
+) {
     let Some(draft) = &game.prematch else {
         state.reset();
         return;
@@ -219,18 +223,35 @@ fn sync_draft(game: Res<GameStateSnapshot>, mut state: ResMut<DraftClient>) {
         .pending
         .take_if(|pending| draft.last_request_id >= pending.request.request_id)
     {
-        if let Some(error) = &draft.error {
-            state.choice = local.map(Choice::from);
-            state.desired_lock = None;
-            state.notice = Some(error_text(error));
-        } else if state
+        let submitted = &pending.request.action;
+        let matches_choice = state
             .choice
             .as_ref()
-            .is_some_and(|choice| choice.matches_select(&pending.request.action))
-        {
-            // Reconcile an accepted selection while retaining newer input sent
-            // during the round trip as the next requested selection.
-            state.choice = local.map(Choice::from);
+            .is_some_and(|choice| choice.matches_select(submitted));
+        if let Some(error) = &draft.error {
+            if matches_choice || !matches!(submitted, PrematchAction::Select { .. }) {
+                state.choice = local.map(Choice::from);
+            }
+            state.desired_lock = None;
+            state.notice = Some(error_text(error));
+        } else {
+            // Save the player's confirmed weapon, even if the draft advanced to
+            // countdown. Automatic match loadouts do not change the preference.
+            if let PrematchAction::Select {
+                hero_class,
+                handheld,
+                ..
+            } = submitted
+                && local.is_some_and(|p| p.hero_class == *hero_class && p.handheld == *handheld)
+                && let Some(selection) = &mut selection
+                && selection.hero_class == *hero_class
+                && selection.effective_handheld() != *handheld
+            {
+                selection.set_match_handheld(handheld.clone());
+            }
+            if matches_choice {
+                state.choice = local.map(Choice::from);
+            }
         }
     }
     state.next_request_id = state.next_request_id.max(draft.last_request_id);
@@ -1878,6 +1899,93 @@ mod tests {
             state.choice.as_ref().unwrap().avatar.as_deref(),
             Some(HeroClass::Ranger.default_avatar_slug())
         );
+    }
+
+    #[test]
+    fn ranked_rejection_of_an_older_pick_keeps_the_newer_free_pick() {
+        let mut app = request_app();
+        app.add_message::<Activated<DraftAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(
+                Update,
+                draft_actions.after(sync_draft).before(send_requests),
+            );
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.unique_classes_across_teams = true;
+            draft.players.push(DraftPlayer {
+                player_id: 8,
+                hero_class: HeroClass::Mage,
+                team: shared::map::Team::Blue,
+                ..draft.players[0].clone()
+            });
+        }
+        let pick = |app: &mut App, class| {
+            app.world_mut().write_message(Activated {
+                action: DraftAction::Class(class),
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            drain_requests(app)
+        };
+        let mage = pick(&mut app, HeroClass::Mage);
+        assert_eq!(mage.len(), 1);
+        assert!(pick(&mut app, HeroClass::Ranger).is_empty());
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.last_request_id = mage[0].request_id;
+            draft.error = Some("hero_taken_ranked".into());
+            draft.players[1].locked = true;
+        }
+        app.update();
+        assert!(matches!(
+            drain_requests(&mut app).as_slice(),
+            [PrematchRequest {
+                action: PrematchAction::Select {
+                    hero_class: HeroClass::Ranger,
+                    ..
+                },
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn countdown_ack_saves_only_a_weapon_confirmed_by_the_server() {
+        use shared::handheld::HandheldSelection;
+        let sword = HandheldSelection::Item("forge-sword".into());
+        for confirmed in [HandheldSelection::ClassDefault, sword.clone()] {
+            let mut app = request_app();
+            app.insert_resource(crate::team::TeamSelection {
+                hero_class: HeroClass::Warrior,
+                ..default()
+            });
+            app.world_mut()
+                .resource_mut::<DraftClient>()
+                .choice
+                .as_mut()
+                .unwrap()
+                .handheld = sword.clone();
+            app.update();
+            let requests = drain_requests(&mut app);
+            assert_eq!(requests.len(), 1);
+            {
+                let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+                let draft = game.prematch.as_mut().unwrap();
+                draft.last_request_id = requests[0].request_id;
+                draft.players[0].handheld = confirmed.clone();
+                draft.phase = PrematchPhase::Countdown;
+            }
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<crate::team::TeamSelection>()
+                    .effective_handheld(),
+                confirmed
+            );
+        }
     }
 
     /// A prematch reset code shows its text in the player's language; a

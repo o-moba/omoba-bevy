@@ -79,6 +79,69 @@ fn view(rt: &ServerRuntime, addr: SocketAddr, now: Instant) -> PrematchSnapshot 
 }
 
 #[test]
+fn practice_draft_reassigns_the_bot_in_a_humans_new_role() {
+    let (mut rt, now) = fixture(MatchMode::Practice, 5);
+    let owner = address(1);
+    hello(&mut rt, owner, now);
+    join(&mut rt, owner, "practice-duty", now, true);
+    let owner_id = rt.world.players[&owner].hero.identity.id;
+    let team = rt.world.players[&owner].hero.identity.team;
+    let initial = view(&rt, owner, now);
+    let local = initial
+        .players
+        .iter()
+        .find(|p| p.player_id == owner_id)
+        .unwrap();
+    assert_eq!(local.role, Role::Solo);
+    let jungler = initial
+        .players
+        .iter()
+        .find(|p| p.team == team && p.role == Role::Jungle)
+        .unwrap();
+    assert!(jungler.is_bot);
+
+    send(
+        &mut rt,
+        owner,
+        1,
+        select(Role::Jungle, HeroClass::Ranger),
+        now,
+    );
+    send(
+        &mut rt,
+        owner,
+        2,
+        PrematchAction::Lock { locked: true },
+        now,
+    );
+    let locked = view(&rt, owner, now);
+    assert_eq!(locked.phase, PrematchPhase::Countdown);
+    assert_eq!(rt.world.players[&owner].draft.role, Role::Jungle);
+    let moved_bot = locked
+        .players
+        .iter()
+        .find(|p| p.player_id == jungler.player_id)
+        .unwrap();
+    assert_eq!(moved_bot.role, Role::Solo);
+    assert_eq!(moved_bot.hero_class.primary_role(), Role::Solo);
+    for role in Role::ALL {
+        assert_eq!(
+            locked
+                .players
+                .iter()
+                .filter(|p| p.team == team && p.role == role)
+                .count(),
+            1
+        );
+    }
+
+    rt.restart_round(now + Duration::from_secs(1));
+    let owner = &rt.world.players[&owner];
+    assert_eq!(owner.hero.identity.hero_class, HeroClass::Ranger);
+    assert_eq!(owner.draft.role, Role::Carry);
+}
+
+#[test]
 fn join_and_draft_resolve_the_default_avatar_for_every_class() {
     let (mut rt, now) = fixture(MatchMode::Release, 1);
     let owner = address(1);
@@ -523,7 +586,7 @@ fn selection_expiry_waits_for_pending_avatar_admission_before_freezing() {
         );
         assert_eq!(
             rt.world.players[&address(1)].draft.role,
-            if allowed { Role::Support } else { Role::Mid }
+            if allowed { Role::Support } else { Role::Solo }
         );
         assert_eq!(state.error.is_some(), !allowed);
         assert!(rt.match_started_at.is_none());

@@ -93,7 +93,12 @@ impl ServerRuntime {
             let globally_available =
                 |class: &HeroClass| available(class) && !used[1 - team].contains(class);
             let class = if p.hero.identity.is_bot {
-                if globally_available(&before) {
+                let practice_duty = self.rules.fills_with_bots
+                    && !self.bots.sandbox
+                    && self.bots.kind(addr) == Some(crate::bots::BotKind::Lane);
+                if globally_available(&before)
+                    && (!practice_duty || before.primary_role() == p.draft.role)
+                {
                     Some(before)
                 } else {
                     HeroClass::ALL
@@ -101,6 +106,7 @@ impl ServerRuntime {
                         .find(|class| {
                             globally_available(class) && class.primary_role() == p.draft.role
                         })
+                        .or_else(|| globally_available(&before).then_some(before))
                         .or_else(|| HeroClass::ALL.into_iter().find(globally_available))
                         .or_else(|| available(&before).then_some(before))
                         .or_else(|| HeroClass::ALL.into_iter().find(available))
@@ -149,6 +155,7 @@ impl ServerRuntime {
             }
             p.draft.locked = true;
         }
+        self.combat_host().refresh_practice_bot_duties(now);
         true
     }
 

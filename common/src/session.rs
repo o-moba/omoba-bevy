@@ -230,6 +230,9 @@ pub fn handle_join_request_with_sprite(
     player.hero.identity.team = team;
     player.hero.identity.character = character;
     player.hero.identity.hero_class = hero_class;
+    if !player.hero.identity.is_bot {
+        player.draft.role = hero_class.primary_role();
+    }
     player.hero.identity.avatar = normalized_avatar.map(str::to_owned);
     player.hero.identity.sprite_character = Some(normalized_sprite.to_owned());
     reset_player_round(player, map_layout, now);

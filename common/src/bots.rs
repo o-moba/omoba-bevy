@@ -1480,16 +1480,7 @@ impl CombatHost<'_> {
             .collect();
         let (fallback, lane, jungle, role) = BOT_COMPOSITION
             .into_iter()
-            .find(|(_, _, _, role)| {
-                !teammates.iter().any(|p| {
-                    let assigned = if p.hero.identity.is_bot {
-                        p.draft.role
-                    } else {
-                        p.hero.identity.hero_class.primary_role()
-                    };
-                    assigned == *role
-                })
-            })
+            .find(|(_, _, _, role)| !teammates.iter().any(|p| p.draft.role == *role))
             .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
 
         // A rematch rotates the equally suitable kits. Every fill stays
@@ -1511,6 +1502,44 @@ impl CombatHost<'_> {
             })
             .unwrap_or(fallback);
         (class, lane, jungle, role)
+    }
+
+    /// Reuse the existing bots when a human takes one of their duties in draft.
+    pub fn refresh_practice_bot_duties(&mut self, now: Instant) {
+        if !self.rules.fills_with_bots || self.bots.sandbox {
+            return;
+        }
+        for team in [Team::Green, Team::Blue] {
+            let mut occupied = Vec::new();
+            let mut roster_bots = Vec::new();
+            for (&addr, player) in &self.world.players {
+                if !player.joined || player.hero.identity.team != team {
+                    continue;
+                }
+                if !player.hero.identity.is_bot {
+                    occupied.push(player.draft.role);
+                } else if self.bots.is_lane_bot(addr) {
+                    roster_bots.push((player.hero.identity.id, addr, player.draft.role));
+                }
+            }
+            roster_bots.sort_unstable_by_key(|(id, _, _)| *id);
+            let mut reassigned = Vec::new();
+            for (_, addr, role) in roster_bots {
+                if occupied.contains(&role) {
+                    reassigned.push(addr);
+                } else {
+                    occupied.push(role);
+                }
+            }
+            let open_duties = BOT_COMPOSITION
+                .into_iter()
+                .filter(|(_, _, _, role)| !occupied.contains(role));
+            for (addr, (_, lane, jungle, role)) in reassigned.into_iter().zip(open_duties) {
+                self.world.players.get_mut(&addr).unwrap().draft.role = role;
+                let controller = self.bots.controllers.get_mut(&addr).unwrap();
+                *controller = Controller::new(BotKind::Lane, lane, jungle, controller.profile, now);
+            }
+        }
     }
 
     /// Create one joined bot on `team`. `class` defaults to the next roster

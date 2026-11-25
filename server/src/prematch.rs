@@ -467,6 +467,7 @@ impl ServerRuntime {
                 player.draft.role = role;
                 player.draft.loaded = false;
                 reset_player_round(player, &self.world.map_layout, now);
+                self.combat_host().refresh_practice_bot_duties(now);
             }
             PrematchAction::Lock { locked }
                 if self.prematch.phase == Some(PrematchPhase::Draft) =>
