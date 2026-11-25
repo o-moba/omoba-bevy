@@ -515,8 +515,10 @@ mod tests {
         assert!(scaled_cast_range(def, 3) > scaled_cast_range(def, 1));
         let heal = ability_for_class_slot(HeroClass::Cleric, SkillSlot::W);
         assert_eq!(scaled_cast_range(heal, 3), 0.0);
-        let scaled_heal = heal.self_heal.unwrap() * rank_effect_scale(3);
-        assert!(scaled_heal > heal.self_heal.unwrap());
+        let Some(AllyEffect::HealLowest { amount, .. }) = heal.ally_effect else {
+            panic!("Renew must heal an ally");
+        };
+        assert!(amount * rank_effect_scale(3) > amount);
     }
 
     #[test]
