@@ -6,13 +6,13 @@
     "id": "omoba",
     "name": "OMOBA"
   },
-  "revision": "sha256-b289629e0de27ebd1bfec1d3b6f6a9ebd02f49270d2fb2ece287935e59e539e6",
+  "revision": "sha256-0076c2e3acfe9ee74d6b80b3c72667d4aac5ed2746f9436f8a332ee22918e3e2",
   "previousRevision": "sha256-a8f3ffaf95b4f57bab3f56ce0aed8d44d713c5d10ae47ed576ceb7bfbf8101b4",
   "license": "CC0-1.0",
   "source": {
-    "commit": "1d3dfcd6d9f80486a8d49ad5471180d16aed5e26",
+    "commit": "666ab99a1b4d20c43d63a9b3e230d66b5a2936b7",
     "exporter": "scripts/export_game_contract.py",
-    "inputsSha256": "773b7a46fc641c363f6cab31664290ac158084e0f920a5d85bc440f8624423d9"
+    "inputsSha256": "32b075e4b184de2290389b8896aac96f6e8922f447b1431fa2e47c8857711691"
   },
   "profiles": {
     "required": [],
@@ -10139,7 +10139,7 @@
         "schemaVersion": 1,
         "sha256": "2af1a6a0332bee5a840554efd7f4efdbf85941efe744c4b03df7fad382879a9a"
       },
-      "presentationSha256": "1799acfee27febb30c3e2938db9d97dc739f3fde3098046cd14745453ae5c92b",
+      "presentationSha256": "ed3cea8c368b73b67cea1fb456a40221b98776c72d47949721dcf4f99c7eeabe",
       "protocolVersion": 16,
       "timing": {
         "blendSecs": 0.12,
